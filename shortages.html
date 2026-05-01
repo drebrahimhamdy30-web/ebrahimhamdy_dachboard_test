@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>متابعة النواقص - نظام الصيدلية</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root { --warn-orange: #f39c12; --success-green: #27ae60; --primary-blue: #3498db; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #f1f5f9; margin: 0; }
+        .container { padding: 20px; max-width: 1300px; margin: auto; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th { background: #fffaf0; padding: 12px; border-bottom: 2px solid var(--warn-orange); color: #7f8c8d; font-size: 0.85rem; text-align: center; }
+        td { padding: 12px; text-align: center; border-bottom: 1px solid #f1f5f9; font-size: 0.9rem; }
+        .completed-tag { background: #d4edda; color: #155724; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; border: 1px solid #c3e6cb; }
+        .shortage-tag { background: #fff3cd; color: #856404; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.75rem; border: 1px solid #ffeeba; }
+        .btn-update { background: var(--success-green); color: white; border: none; padding: 8px 15px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        .btn-refresh { background: var(--primary-blue); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        .filter-wrapper { display: flex; align-items: center; gap: 8px; background: #f8fafc; padding: 8px 12px; border-radius: 20px; border: 1px solid #e2e8f0; cursor: pointer; font-size: 0.85rem; }
+        .row-completed { background-color: #f9fafb; opacity: 0.8; }
+    </style>
+</head>
+<body>
+    <div class="nav-bar"></div>
+    <div class="container">
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
+                <h3 style="margin: 0; color: #2c3e50;">متابعة النواقص: <span id="current-branch-name" style="color: var(--primary-blue);">...</span></h3>
+                
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <!-- تم الإبقاء على Checkbox واحد فقط لإظهار الأرشيف المكتمل -->
+                    <label class="filter-wrapper">
+                        <input type="checkbox" id="show-all-completed" onchange="applyFilters()">
+                        إظهار كل المكتمل بالجدول
+                    </label>
+                    <button onclick="loadShortages(true)" class="btn-refresh"><i class="fas fa-sync-alt"></i> تحديث</button>
+                </div>
+            </div>
+
+            <div style="overflow-x: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>تاريخ الطلب</th>
+                            <th>الصنف</th>
+                            <th>الفرع</th>
+                            <th>العميل</th>
+                            <th>كود العميل</th>
+                            <th>الحالة</th>
+                            <th>إجراء</th>
+                        </tr>
+                    </thead>
+                    <tbody id="shortage-list"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="api.js"></script>
+    <script src="nav.js"></script>
+    <script>
+        let cachedData = []; 
+        const userBranch = (localStorage.getItem('userBranch') || "عام").trim();
+        document.getElementById('current-branch-name').innerText = userBranch;
+        
+        window.onload = () => loadShortages();
+
+        async function loadShortages(forceRefresh = false) {
+            const tbody = document.getElementById('shortage-list');
+            if (cachedData.length === 0 || forceRefresh) {
+                tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;">⏳ جاري جلب البيانات...</td></tr>';
+                try {
+                    const response = await fetchOrders(); 
+                    cachedData = (response[0]?.data) ? response[0].data : (response.data || response);
+                } catch (e) {
+                    tbody.innerHTML = '<tr><td colspan="7" style="color:red;">❌ فشل الاتصال</td></tr>';
+                    return;
+                }
+            }
+            applyFilters(); 
+        }
+
+        function applyFilters() {
+            const showAllCompleted = document.getElementById('show-all-completed').checked;
+
+            const filtered = cachedData.filter(item => {
+                const currentState = String(item.cust_state || "").trim();
+                const itemBranch = String(item.user || item.branch || "").trim();
+
+                const isMyBranch = (userBranch === "عام" || userBranch === "Admin" || itemBranch === userBranch);
+                if (!isMyBranch) return false;
+
+                const isDone = (currentState === "متوفر وتم ابلاغ العميل");
+
+                // إذا كان الصح مفعل، اعرض المكتمل وغير المكتمل
+                if (showAllCompleted) return true;
+                
+                // الوضع الطبيعي: اعرض فقط غير المكتمل
+                return !isDone;
+            });
+
+            renderTable(filtered);
+        }
+
+        function renderTable(items) {
+            const tbody = document.getElementById('shortage-list');
+            if (items.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" style="padding:50px; color:gray;">لا توجد بيانات للعرض حالياً</td></tr>`;
+                return;
+            }
+
+            // ترتيب: المكتمل ينزل للأسفل
+            items.sort((a, b) => (String(a.cust_state).includes("ابلاغ") ? 1 : -1));
+
+            tbody.innerHTML = items.map(item => {
+                const isDone = String(item.cust_state || "").includes("ابلاغ");
+                let displayDate = item.createdAt ? new Date(item.createdAt).toLocaleDateString('ar-EG') : '---';
+
+                return `
+                    <tr class="${isDone ? 'row-completed' : ''}">
+                        <td>${displayDate}</td>
+                        <td style="text-align:right;"><b>${item.item_name}</b></td>
+                        <td><span class="branch-tag">${item.user}</span></td>
+                        <td>${item.cust_name || '---'}</td>
+                        <td><code>${item.cust_code}</code></td>
+                        <td>${isDone ? '<span class="completed-tag">مكتمل ✅</span>' : '<span class="shortage-tag">متابعة 🔍</span>'}</td>
+                        <td>
+                            ${isDone ? '<i class="fas fa-check-double" style="color:var(--success-green)"></i>' : 
+                            `<button onclick="markAsAvailable(event, ${item.id})" class="btn-update">تم الإبلاغ</button>`}
+                        </td>
+                    </tr>`;
+            }).join('');
+        }
+
+        async function markAsAvailable(event, id) {
+            const btn = event.target.closest('button');
+            if(!confirm("تأكيد إبلاغ العميل؟")) return;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+            const success = await updateData({
+                id: id,
+                type: "cs_action",
+                cust_state: "متوفر وتم ابلاغ العميل",
+                updatedAt: new Date().toISOString()
+            });
+
+            if (success) {
+                // تحديث الكاش محلياً لضمان الاختفاء الفوري من القائمة
+                const idx = cachedData.findIndex(x => x.id == id);
+                if(idx !== -1) cachedData[idx].cust_state = "متوفر وتم ابلاغ العميل";
+                applyFilters();
+            } else {
+                alert("فشل التحديث، يرجى المحاولة مرة أخرى");
+                btn.disabled = false;
+                btn.innerHTML = "تم الإبلاغ";
+            }
+        }
+    </script>
+</body>
+</html>

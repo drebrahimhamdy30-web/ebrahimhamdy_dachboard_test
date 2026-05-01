@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>إدارة التحويلات - نظام الصيدلية</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem; background: white; }
+        th, td { padding: 12px 8px; text-align: center; border-bottom: 1px solid #edf2f7; vertical-align: middle; }
+        th { background-color: #f8fafc; color: #4a5568; font-weight: 700; border-top: 2px solid #3498db; }
+        tr:hover { background-color: #f7fafc; }
+
+        .filter-box { display: flex; gap: 15px; padding: 15px; background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 15px; flex-wrap: wrap; }
+        .filter-control { padding: 6px; border-radius: 4px; border: 1px solid #cbd5e0; font-size: 0.85rem; min-width: 130px; background: white; }
+
+        .status-select { padding: 5px; border-radius: 4px; font-size: 0.8rem; border: 1px solid #cbd5e0; width: 105px; cursor: pointer; }
+        .note-input { width: 95%; padding: 6px; border-radius: 4px; border: 1px solid #cbd5e0; font-size: 0.8rem; }
+
+        .btn-action { background: #27ae60; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; transition: 0.3s; font-weight: bold; }
+        .btn-action:hover { background: #219150; }
+        
+        .badge { padding: 4px 8px; border-radius: 12px; font-size: 0.7rem; font-weight: bold; display: block; margin-top: 4px; }
+        .inbound { background: #e3f2fd; color: #1976d2; border: 1px solid #bbdefb; }
+        .outbound { background: #fff3e0; color: #f57c00; border: 1px solid #ffe0b2; }
+        
+        .code-text { font-family: monospace; color: #7f8c8d; font-size: 0.75rem; }
+        .name-text { font-weight: 600; color: #2c3e50; }
+        .date-text { font-size: 0.75rem; color: #64748b; font-weight: bold; }
+        .time-text { font-size: 0.7rem; color: #94a3b8; display: block; }
+    </style>
+</head>
+<body>
+    <div class="nav-bar">
+        <div class="nav-links">
+            <a href="main.html"><i class="fas fa-plus"></i> مدخلات</a>
+            <a href="purchases.html"><i class="fas fa-shopping-cart"></i> مشتريات</a>
+            <a href="transfers.html" class="active"><i class="fas fa-exchange-alt"></i> تحويلات</a>
+            <a href="inventory.html"><i class="fas fa-list"></i> جرد</a> 
+            <a href="notifications.html"><i class="fas fa-bell"></i> إشعارات</a> 
+        </div>
+        <div class="user-info" style="color: white; font-size: 0.8rem;">
+            <span id="nav-user"></span>
+            <button onclick="logout()" style="background:transparent; border:1px solid #fff; color:white; border-radius:4px; padding: 2px 8px; margin-right: 10px; cursor: pointer;">خروج</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h3 style="margin: 0; color: #2c3e50;"><i class="fas fa-exchange-alt" style="color: #3498db;"></i> إدارة تحويلات الفروع</h3>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <span id="branch-tag" style="font-weight: bold; color: #3498db; font-size: 0.9rem;"></span>
+                    <button onclick="loadTransfers()" style="background: #3498db; color: white; border: none; padding: 8px 20px; border-radius: 6px; cursor: pointer; font-weight: bold;">
+                        <i class="fas fa-sync-alt"></i> تحديث
+                    </button>
+                </div>
+            </div>
+
+            <div class="filter-box">
+                <div>
+                    <label style="font-size: 0.75rem; display: block; margin-bottom: 4px; color: #64748b;">📦 نوع العملية:</label>
+                    <select id="direction-filter" class="filter-control" onchange="applyFilters()">
+                        <option value="inbound" selected>واردة إلينا 📥</option>
+                        <option value="outbound">مرسلة منا 📤</option>
+                        <option value="all">كل التحويلات</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size: 0.75rem; display: block; margin-bottom: 4px; color: #64748b;">⚙️ الحالة:</label>
+                    <select id="status-filter" class="filter-control" onchange="applyFilters()">
+                        <option value="pending" selected>قيد الانتظار ⏳</option>
+                        <option value="transferred">تم التحويل ✅</option>
+                        <option value="unavailable">غير متوفر ❌</option>
+                        <option value="all">الكل</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size: 0.75rem; display: block; margin-bottom: 4px; color: #64748b;">🏢 فلترة بفرع معين:</label>
+                    <select id="branch-select-filter" class="filter-control" onchange="applyFilters()">
+                        <option value="all">كل الفروع</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="overflow-x: auto;">
+                <table id="transfers-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 10%;">التاريخ</th>
+                            <th style="width: 12%;">طلب وارد من فرع</th> <!-- التعديل الوحيد هنا -->
+                            <th style="width: 20%;">الصنف</th>
+                            <th style="width: 10%;">كود الصنف</th>
+                            <th style="width: 15%;">العميل</th>
+                            <th style="width: 7%;">الكمية</th>
+                            <th style="width: 15%;">ملاحظة / رد</th>
+                            <th style="width: 12%;">الحالة</th>
+                            <th style="width: 9%;">إجراء</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body">
+                        <tr><td colspan="9" style="text-align:center; padding: 40px; color: #94a3b8;">جاري تحميل التحويلات...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="api.js"></script>
+    <script src="nav.js"></script>
+    <script>
+        let rawData = [];
+        const activeUser = checkAuth();
+        const userBranchName = localStorage.getItem('userBranch') || "المعمورة";
+
+        if (activeUser) {
+            document.getElementById('nav-user').innerText = activeUser;
+            document.getElementById('branch-tag').innerText = "📍 " + userBranchName;
+            window.onload = loadTransfers;
+        }
+
+        async function loadTransfers() {
+            const tbody = document.getElementById('table-body');
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding: 30px;">⏳ جاري جلب البيانات...</td></tr>';
+            try {
+                const response = await fetchOrders(); 
+                let items = (response && response[0]?.data) ? response[0].data : (response.data || response);
+                
+                if (Array.isArray(items)) {
+                    rawData = items.filter(item => item.type === "تحويل");
+                    populateBranchFilter(rawData);
+                    applyFilters(); 
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding: 30px;">لا توجد بيانات متاحة حالياً</td></tr>';
+                }
+            } catch (error) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color:red; padding: 30px;">❌ خطأ في الاتصال بالسيرفر</td></tr>';
+            }
+        }
+
+        function populateBranchFilter(data) {
+            const branchSelect = document.getElementById('branch-select-filter');
+            const branches = new Set();
+            data.forEach(item => {
+                if (item.user && item.user !== userBranchName) branches.add(item.user);
+                if (item.branch && item.branch !== userBranchName) branches.add(item.branch);
+            });
+            branchSelect.innerHTML = '<option value="all">كل الفروع</option>';
+            branches.forEach(br => {
+                const opt = document.createElement('option');
+                opt.value = br; opt.innerText = br;
+                branchSelect.appendChild(opt);
+            });
+        }
+
+        function applyFilters() {
+            const directionVal = document.getElementById('direction-filter').value;
+            const statusVal = document.getElementById('status-filter').value;
+            const selectedBranch = document.getElementById('branch-select-filter').value;
+
+            const filtered = rawData.filter(item => {
+                const isTarget = (item.branch === userBranchName);
+                const isSource = (item.user === userBranchName);
+                let dirMatch = (directionVal === 'all') || (directionVal === 'inbound' && isTarget) || (directionVal === 'outbound' && isSource);
+                let statMatch = (statusVal === 'all') || ((item.status || item.state || 'pending') === statusVal);
+                let branchMatch = (selectedBranch === 'all') || (item.user === selectedBranch || item.branch === selectedBranch);
+                return dirMatch && statMatch && branchMatch;
+            });
+            renderTable(filtered);
+        }
+
+        function renderTable(items) {
+            const tbody = document.getElementById('table-body');
+            tbody.innerHTML = '';
+
+            if (items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding: 40px; color: #94a3b8;">لا توجد طلبات تحويل مطابقة للاختيار</td></tr>';
+                return;
+            }
+
+            items.forEach((item) => {
+                const isRequestForMe = (item.branch === userBranchName);
+                const currentState = item.status || item.state || 'pending';
+                
+                const dateObj = item.createdAt ? new Date(item.createdAt) : null;
+                const dateStr = dateObj ? `${dateObj.getDate()}/${dateObj.getMonth() + 1}` : '-';
+                const timeStr = dateObj ? dateObj.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : '';
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>
+                        <span class="date-text">${dateStr}</span>
+                        <span class="time-text">${timeStr}</span>
+                    </td>
+                    <td>
+                        <div class="name-text">${isRequestForMe ? item.user : item.branch}</div>
+                        <!-- أبقيت الـ Badge كما في كودك الأصلي لضمان عدم حدوث أخطاء -->
+                        <span class="badge ${isRequestForMe ? 'inbound' : 'outbound'}">
+                            ${isRequestForMe ? 'وارد' : 'صادر'}
+                        </span>
+                    </td>
+                    <td class="name-text" style="text-align:right;">${item.item_name || item.item || '-'}</td>
+                    <td class="code-text">${item.item_code || '-'}</td>
+                    <td style="text-align:right;">
+                        <div class="name-text" style="font-size:0.8rem;">${item.cust_name || 'بدون اسم'}</div>
+                        <div class="code-text">${item.cust_code || '---'}</div>
+                    </td>
+                    <td style="font-weight:bold; color:#2c3e50;">${item.qty || '1'}</td>
+                    <td>
+                        <input type="text" id="note-${item.id}" class="note-input" placeholder="رد أو ملاحظة..." value="${item.company || ''}" ${!isRequestForMe ? 'disabled' : ''}>
+                    </td>
+                    <td>
+                        <select id="stat-${item.id}" class="status-select" ${!isRequestForMe ? 'disabled' : ''}>
+                            <option value="pending" ${currentState === 'pending'?'selected':''}>⏳ انتظار</option>
+                            <option value="transferred" ${currentState === 'transferred'?'selected':''}>✅ تم</option>
+                            <option value="unavailable" ${currentState === 'unavailable'?'selected':''}>❌ نقص</option>
+                        </select>
+                    </td>
+                    <td>
+                        ${isRequestForMe ? 
+                            `<button class="btn-action" onclick="saveTransfer('${item.id}', this)"><i class="fas fa-save"></i> حفظ</button>` : 
+                            '<span style="color:#94a3b8; font-size:0.8rem;"><i class="fas fa-clock"></i> بانتظار الرد</span>'}
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function saveTransfer(id, btn) {
+            const statusValue = document.getElementById(`stat-${id}`).value;
+            const notes = document.getElementById(`note-${id}`).value;
+            const originalContent = btn.innerHTML;
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+            const success = await updateData({ 
+                id: id, 
+                status: statusValue, 
+                company: notes, 
+                type: "تحويل", 
+                action: "update_status" 
+            });
+
+            if (success) {
+                btn.style.background = "#27ae60";
+                btn.innerHTML = '<i class="fas fa-check"></i> تم';
+                setTimeout(() => loadTransfers(), 1000);
+            } else {
+                btn.disabled = false;
+                btn.innerHTML = originalContent;
+                alert("⚠️ حدث خطأ أثناء التحديث");
+            }
+        }
+    </script>
+</body>
+</html>

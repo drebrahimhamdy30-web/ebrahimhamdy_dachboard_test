@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>سجل الجرد - صيدلية د. إبراهيم</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="nav-bar">
+        <div class="nav-links">
+            <a href="main.html">➕ مدخلات جديدة</a>
+            <a href="purchases.html">🛒 المشتريات</a>
+            <a href="transfers.html">🔄 التحويلات</a>
+            <a href="inventory.html" class="active">📋 الجرد</a> 
+            <a href="notifications.html">🔔 الإشعارات</a> 
+        </div>
+        <div class="user-info">
+            <span id="nav-user"></span>
+            <button onclick="logout()" class="logout-btn">خروج</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <h2 style="text-align: center; margin-bottom: 20px;">📋 سجل جرد الفروع</h2>
+            
+            <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
+                <button onclick="loadInventory()" class="btn-success" style="width: auto; padding: 8px 15px;">تحديث 🔄</button>
+                <div id="branch-tag" style="font-weight: bold; color: #1565c0;"></div>
+            </div>
+
+            <div style="overflow-x: auto;">
+                <table id="inventory-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>الفرع</th>
+                            <th>الصنف</th>
+                            <th>الكمية الفعلية</th>
+                            <th>ملاحظة الجرد</th>
+                            <th>الحالة</th>
+                            <th>حفظ</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body">
+                        <tr><td colspan="7" style="text-align:center;">جاري تحميل بيانات الجرد...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="api.js"></script>
+    <script>
+        const activeUser = checkAuth();
+        let rawData = [];
+
+        if (activeUser) {
+            document.getElementById('nav-user').innerText = activeUser;
+            window.onload = loadInventory;
+        }
+
+        async function loadInventory() {
+            const tbody = document.getElementById('table-body');
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">جاري جلب البيانات...</td></tr>';
+            
+            try {
+                const response = await fetchData(); 
+                if (response && response[0] && response[0].data) {
+                    // فلترة البيانات لتشمل فقط نوع "جرد"
+                    rawData = response[0].data.filter(item => item.type === "جرد");
+                    renderTable(rawData);
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">لا توجد عمليات جرد مسجلة</td></tr>';
+                }
+            } catch (error) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:red;">خطأ في الاتصال بالسيرفر</td></tr>';
+            }
+        }
+
+        function renderTable(items) {
+            const tbody = document.getElementById('table-body');
+            tbody.innerHTML = '';
+
+            items.forEach((item) => {
+                const row = document.createElement('tr');
+                const currentState = item.state || 'pending';
+
+                row.innerHTML = `
+                    <td>${item.id}</td>
+                    <td>${item.branch || '-'}</td>
+                    <td>${item.item_name || item.item || '-'}</td>
+                    <td>${item.qty || '0'}</td>
+                    <td>
+                        <input type="text" class="note-in" value="${item.company || ''}" 
+                               style="width:120px; padding:4px;" placeholder="ملاحظة...">
+                    </td>
+                    <td>
+                        <select class="form-select">
+                            <option value="pending" ${currentState === 'pending' ? 'selected' : ''}>قيد المعالجة ⏳</option>
+                            <option value="completed" ${currentState === 'completed' ? 'selected' : ''}>تم الجرد ✅</option>
+                        </select>
+                    </td>
+                    <td>
+                        <button class="btn-success" onclick="saveInventory('${item.id}', this)" style="padding:4px 10px;">حفظ</button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        async function saveInventory(id, btn) {
+            const row = btn.closest('tr');
+            const status = row.querySelector('select').value;
+            const note = row.querySelector('.note-in').value;
+            
+            btn.disabled = true;
+            btn.innerText = "⏳";
+
+            const success = await updateData({ 
+                id: id, 
+                status: status, 
+                company: note, 
+                type: "جرد", // مهم جداً للـ Switch في n8n
+                action: "update_status" 
+            });
+
+            if (success) {
+                alert("تم تحديث الجرد ✅");
+                loadInventory(); 
+            } else {
+                alert("فشل التحديث ❌");
+                btn.disabled = false;
+                btn.innerText = "حفظ";
+            }
+        }
+    </script>
+</body>
+</html>

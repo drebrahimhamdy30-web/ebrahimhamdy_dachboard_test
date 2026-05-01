@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>خدمة العملاء - الإجراءات السريعة</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root { --primary-blue: #3498db; --success-green: #27ae60; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #f1f5f9; margin: 0; }
+        .container { padding: 20px; max-width: 1300px; margin: auto; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th { background: #f8fafc; padding: 12px; border-bottom: 2px solid var(--success-green); color: #64748b; font-size: 0.85rem; }
+        td { padding: 12px; text-align: center; border-bottom: 1px solid #f1f5f9; font-size: 0.85rem; }
+        
+        .row-done { background-color: #f8fafc; opacity: 0.7; }
+        .status-pill { padding: 4px 10px; border-radius: 20px; font-weight: bold; font-size: 0.75rem; }
+        .ordered { background: #dcfce7; color: #166534; }
+        .unavailable { background: #fee2e2; color: #991b1b; }
+        
+        /* تنسيق قائمة الاختيارات */
+        select.cs-select { 
+            width: 100%; 
+            padding: 8px; 
+            border: 1px solid #e2e8f0; 
+            border-radius: 6px; 
+            font-family: inherit; 
+            font-size: 0.85rem;
+            background-color: #fff;
+            cursor: pointer;
+        }
+
+        .btn-done { 
+            background: var(--success-green); 
+            color: white; 
+            border: none; 
+            padding: 8px 18px; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-weight: bold; 
+        }
+        .btn-done:disabled { background: #cbd5e0; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <div class="nav-bar"></div>
+
+    <div class="container">
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h3 style="margin: 0; font-size: 1.1rem; color: #2d3748;">
+                    <i class="fas fa-headset"></i> معالجة طلبات <span id="display-branch" style="color: var(--success-green);">...</span>
+                </h3>
+                <button onclick="loadCSData()" class="btn-done" style="background: var(--primary-blue);">
+                    <i class="fas fa-sync-alt"></i> تحديث
+                </button>
+            </div>
+
+            <div style="background: #f1f5f9; padding: 10px; border-radius: 8px; margin-bottom: 15px; font-size: 0.85rem;">
+                <label><input type="checkbox" id="hideDone" checked onchange="renderItems()"> إخفاء ما تم تنفيذه</label>
+            </div>
+
+            <div style="overflow-x: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 25%;">الصنف</th>
+                            <th style="width: 15%;">العميل</th>
+                            <th style="width: 15%;">رد المشتريات</th>
+                            <th style="width: 10%;">الحالة</th>
+                            <th style="width: 25%;">إجراء خدمة العملاء</th>
+                            <th style="width: 10%;">حفظ</th>
+                        </tr>
+                    </thead>
+                    <tbody id="data-list">
+                        <tr><td colspan="6">جاري التحميل...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="api.js"></script>
+    <script src="nav.js"></script>
+    <script>
+        const activeUser = checkAuth();
+        const userBranch = localStorage.getItem('userBranch') || activeUser || '';
+        document.getElementById('display-branch').innerText = userBranch;
+        
+        let allItems = [];
+
+        if (activeUser) { window.onload = loadCSData; }
+
+        async function loadCSData() {
+            const tbody = document.getElementById('data-list');
+            try {
+                const response = await fetchOrders(); 
+                allItems = (response[0]?.data) ? response[0].data : (response.data || response);
+                renderItems();
+            } catch (e) {
+                tbody.innerHTML = '<tr><td colspan="6" style="color:red;">❌ فشل الاتصال بالسيرفر</td></tr>';
+            }
+        }
+
+function renderItems() {
+            const tbody = document.getElementById('data-list');
+            // فلتر "إخفاء ما تم تنفيذه" سيعتمد على وجود قيمة في cust_state
+            const hideDone = document.getElementById('hideDone').checked;
+            
+            const filtered = allItems.filter(item => {
+                const isMyBranch = (String(item.user).trim() === String(userBranch).trim());
+                
+                // الحالات التي ردت عليها المشتريات فقط
+                const validStates = ['ordered', 'unavailable', 'transferred'];
+                const isResponded = validStates.includes(String(item.state || "").trim().toLowerCase());
+                
+                // نعتبر الطلب "منفذ" إذا كانت خانة cust_state في الجدول تحتوي على بيانات
+                const hasAction = (item.cust_state && item.cust_state !== "" && item.cust_state !== "null");
+
+                // إذا كان المستخدم معلم على "إخفاء المنفذ" وكان الطلب له إجراء سابق -> استبعده
+                if (hideDone && hasAction) return false;
+
+                return isMyBranch && isResponded;
+            });
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" style="padding:30px; color:#94a3b8;">لا توجد طلبات معلقة لفرع ${userBranch}</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = filtered.map(item => {
+                // استرجاع القيمة الحالية من الجدول (cust_state)
+                const currentAction = (item.cust_state && item.cust_state !== "null") ? item.cust_state : "";
+                const isDone = (currentAction !== ""); // لو فيه قيمة يبقى مكتمل
+                
+                const s = String(item.state || "").trim().toLowerCase();
+
+                return `
+                    <tr class="${isDone ? 'row-done' : ''}">
+                        <td style="text-align:right;"><b>${item.item_name || item.item || 'صنف غير مسمى'}</b></td>
+                        <td>${item.cust_name || '---'}</td>
+                        <td><small>${item.company || '---'}</small></td>
+                        <td><span class="status-pill ${s === 'ordered' ? 'ordered' : 'unavailable'}">
+                            ${s === 'ordered' ? 'تم الطلب' : (s === 'transferred' ? 'محول' : 'غير متوفر')}
+                        </span></td>
+                        <td>
+                            <select id="select-${item.id}" class="cs-select" ${isDone ? 'disabled' : ''}>
+                                <option value="" disabled ${currentAction === "" ? 'selected' : ''}>اختر إجراء...</option>
+                                <option value="متوفر وتم ابلاغ العميل" ${currentAction === 'متوفر وتم ابلاغ العميل' ? 'selected' : ''}>متوفر وتم ابلاغ العميل ✅</option>
+                                <option value="غير متوفر يحتاج متابعة" ${currentAction === 'غير متوفر يحتاج متابعة' ? 'selected' : ''}>غير متوفر يحتاج متابعة 🔍</option>
+                                <option value="إلغاء لعدم التوفر" ${currentAction === 'إلغاء لعدم التوفر' ? 'selected' : ''}>إلغاء لعدم التوفر ❌</option>
+                            </select>
+                        </td>
+                        <td>
+                            ${!isDone ? 
+                                `<button onclick="submitCSAction(event, '${item.id}')" class="btn-done">تم</button>` : 
+                                `<span style="color:var(--success-green); font-weight:bold;"><i class="fas fa-check-circle"></i> مكتمل</span>`
+                            }
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+        async function submitCSAction(event, id) {
+            const btn = event.target;
+            const decision = document.getElementById(`select-${id}`).value;
+            
+            if (!decision) { alert("برجاء اختيار إجراء من القائمة"); return; }
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+            // إرسال التحديث لـ n8n بنفس أسلوب صفحة الإشعارات
+            const success = await updateData({
+                id: id,
+                type: "cs_action", 
+                decision: decision, // القرار المختار من القائمة
+                done: "تم",
+                updatedAt: new Date().toISOString()
+            });
+
+            if (success) {
+                loadCSData(); 
+            } else {
+                alert("⚠️ فشل التحديث");
+                btn.disabled = false;
+                btn.innerText = "تم";
+            }
+        }
+    </script>
+</body>
+</html>
