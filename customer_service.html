@@ -7,7 +7,6 @@
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        /* التنسيقات الخاصة بصفحة خدمة العملاء */
         .cs-select { 
             width: 100%; padding: 8px; border-radius: 6px; 
             border: 1px solid #ddd; font-family: inherit;
@@ -15,7 +14,10 @@
         .btn-done { 
             background: #27ae60; color: white; border: none; 
             padding: 10px 20px; border-radius: 8px; cursor: pointer; width: 100%;
+            font-weight: bold;
         }
+        .row-done { background-color: #f8fafc; opacity: 0.8; }
+        
         @media (max-width: 768px) {
             table, thead, tbody, th, td, tr { display: block; }
             thead tr { position: absolute; top: -9999px; left: -9999px; }
@@ -27,6 +29,7 @@
             td { 
                 border: none; position: relative; padding-right: 45%; 
                 text-align: left; margin-bottom: 10px; font-size: 0.9rem;
+                min-height: 30px;
             }
             td:before {
                 position: absolute; right: 10px; width: 40%; 
@@ -38,24 +41,24 @@
 </head>
 <body>
 
-    <!-- تم استبدال القائمة اليدوية بهذا السطر فقط ليتم حقن القائمة الموحدة -->
-    <nav class="sidebar"></nav>
+    <!-- تم تعديل الكلاس ليتوافق مع ملف nav.js الموحد -->
+    <div class="nav-bar"></div>
 
     <main class="content">
-        <header style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <header style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 20px;">
             <div>
                 <h1>معالجة طلبات فرع <span id="display-branch" style="color: var(--accent-color);">...</span></h1>
                 <p>مراجعة ردود المشتريات وإبلاغ العملاء</p>
             </div>
-            <button onclick="loadCSData()" class="stat-card" style="padding: 10px 20px; cursor: pointer; border: none;">
-                <i class="fas fa-sync-alt" style="font-size: 1rem; margin-left: 8px;"></i> تحديث البيانات
+            <button onclick="loadCSData()" class="stat-card" style="padding: 10px 20px; cursor: pointer; border: none; background: white; border-radius: 10px;">
+                <i class="fas fa-sync-alt" style="margin-left: 8px;"></i> تحديث البيانات
             </button>
         </header>
 
-        <div class="stat-card" style="margin-bottom: 20px; border-right: 5px solid var(--warning);">
+        <div class="stat-card" style="margin-bottom: 20px; border-right: 5px solid #f39c12; background: white; padding: 15px; border-radius: 12px;">
             <label style="cursor: pointer; display: flex; align-items: center; gap: 10px;">
                 <input type="checkbox" id="hideDone" checked onchange="renderItems()" style="width: 20px; height: 20px;"> 
-                <b>إخفاء الطلبات المنتهية (التي تم إبلاغها)</b>
+                <b>إخفاء الطلبات التي تم إبلاغها مسبقاً</b>
             </label>
         </div>
 
@@ -72,18 +75,18 @@
                     </tr>
                 </thead>
                 <tbody id="data-list">
-                    <tr><td colspan="6" style="padding: 40px;">جاري جلب البيانات...</td></tr>
+                    <tr><td colspan="6" style="padding: 40px; text-align: center;">⏳ جاري جلب البيانات...</td></tr>
                 </tbody>
             </table>
         </div>
     </main>
 
-    <!-- الترتيب الصحيح لاستدعاء الملفات في الأسفل -->
     <script src="api.js"></script>
-    <script src="nav.js"></script> <!-- أضفنا استدعاء ملف القائمة هنا -->
+    <script src="nav.js"></script>
     <script>
         const activeUser = checkAuth();
-        const userBranch = localStorage.getItem('userBranch') || activeUser || '';
+        // الحصول على الفرع من التخزين المحلي لضمان دقة البيانات
+        const userBranch = localStorage.getItem('userBranch') || "المعمورة";
         document.getElementById('display-branch').innerText = userBranch;
         
         let allItems = [];
@@ -94,10 +97,11 @@
             const tbody = document.getElementById('data-list');
             try {
                 const response = await fetchOrders(); 
+                // معالجة هيكل البيانات القادم من n8n
                 allItems = (response[0]?.data) ? response[0].data : (response.data || response);
                 renderItems();
             } catch (e) {
-                tbody.innerHTML = '<tr><td colspan="6" style="color:red; padding:20px;">❌ فشل الاتصال بالسيرفر</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" style="color:red; padding:20px; text-align: center;">❌ فشل الاتصال بالسيرفر</td></tr>';
             }
         }
 
@@ -106,9 +110,14 @@
             const hideDone = document.getElementById('hideDone').checked;
             
             const filtered = allItems.filter(item => {
-                const isMyBranch = (String(item.user).trim() === String(userBranch).trim());
+                const itemUser = String(item.user || "").trim();
+                const isMyBranch = (itemUser === String(userBranch).trim());
+                
+                // الحالات التي تظهر لخدمة العملاء (تم طلبها، غير متوفرة، أو محولة)
                 const validStates = ['ordered', 'unavailable', 'transferred'];
                 const isResponded = validStates.includes(String(item.state || "").trim().toLowerCase());
+                
+                // التحقق هل تم اتخاذ إجراء سابق
                 const hasAction = (item.cust_state && item.cust_state !== "" && item.cust_state !== "null");
 
                 if (hideDone && hasAction) return false;
@@ -116,23 +125,28 @@
             });
 
             if (filtered.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6" style="padding:50px; color:#94a3b8;">🎉 لا توجد طلبات معلقة حالياً لفرع ${userBranch}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="6" style="padding:50px; color:#94a3b8; text-align: center;">🎉 لا توجد طلبات معلقة حالياً لفرع ${userBranch}</td></tr>`;
                 return;
             }
 
             tbody.innerHTML = filtered.map(item => {
                 const currentAction = (item.cust_state && item.cust_state !== "null") ? item.cust_state : "";
                 const isDone = (currentAction !== "");
-                const s = String(item.state || "").trim().toLowerCase();
+                const stateText = String(item.state || "").trim().toLowerCase();
+
+                // تحديد لون الـ Pill بناءً على الحالة
+                const statusColor = stateText === 'ordered' ? '#dcfce7' : (stateText === 'transferred' ? '#e0f2fe' : '#fee2e2');
+                const textColor = stateText === 'ordered' ? '#166534' : (stateText === 'transferred' ? '#0369a1' : '#991b1b');
+                const label = stateText === 'ordered' ? 'تم الطلب' : (stateText === 'transferred' ? 'محول' : 'غير متوفر');
 
                 return `
                     <tr class="${isDone ? 'row-done' : ''}">
                         <td data-label="الصنف" style="text-align:right;"><b>${item.item_name || item.item || 'صنف غير مسمى'}</b></td>
                         <td data-label="العميل">${item.cust_name || '---'}</td>
-                        <td data-label="رد المشتريات"><small>${item.company || '---'}</small></td>
+                        <td data-label="رد المشتريات"><small>${item.company || 'لا توجد ملاحظات'}</small></td>
                         <td data-label="الحالة">
-                            <span class="status-pill" style="padding: 5px 10px; border-radius: 12px; font-size: 0.8rem; background: ${s === 'ordered' ? '#dcfce7' : '#fee2e2'}; color: ${s === 'ordered' ? '#166534' : '#991b1b'};">
-                                ${s === 'ordered' ? 'تم الطلب' : (s === 'transferred' ? 'محول' : 'غير متوفر')}
+                            <span class="status-pill" style="padding: 5px 10px; border-radius: 12px; font-size: 0.8rem; background: ${statusColor}; color: ${textColor}; font-weight: bold;">
+                                ${label}
                             </span>
                         </td>
                         <td data-label="الإجراء">
@@ -160,7 +174,7 @@
             if (!decision) { alert("برجاء اختيار إجراء أولاً"); return; }
 
             btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
 
             const success = await updateData({
                 id: id,
@@ -170,9 +184,10 @@
             });
 
             if (success) {
+                // إعادة جلب البيانات لتحديث القائمة فوراً
                 loadCSData(); 
             } else {
-                alert("⚠️ فشل الاتصال");
+                alert("⚠️ فشل الاتصال بالسيرفر، حاول مرة أخرى");
                 btn.disabled = false;
                 btn.innerText = "حفظ الإجراء";
             }
