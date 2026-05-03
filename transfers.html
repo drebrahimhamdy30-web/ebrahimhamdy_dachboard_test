@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        /* تنسيق كروت التحويلات */
+        /* تنسيق كروت التحويلات المحسن */
         .transfer-card {
             background: white;
             border-radius: 15px;
@@ -16,6 +16,7 @@
             box-shadow: 0 4px 6px rgba(0,0,0,0.05);
             border-right: 5px solid #3498db;
             position: relative;
+            transition: transform 0.2s;
         }
         
         .transfer-header {
@@ -33,8 +34,8 @@
             font-size: 0.8rem;
             font-weight: bold;
         }
-        .inbound { background: #e3f2fd; color: #1976d2; } /* وارد */
-        .outbound { background: #fff3e0; color: #f57c00; } /* صادر */
+        .inbound { background: #e3f2fd; color: #1976d2; }
+        .outbound { background: #fff3e0; color: #f57c00; }
 
         .item-info { margin-bottom: 12px; }
         .item-name { font-weight: bold; color: #2c3e50; font-size: 1.1rem; display: block; }
@@ -89,7 +90,6 @@
             font-weight: bold;
         }
 
-        /* تحسين الفلاتر */
         .filter-container {
             background: white;
             padding: 15px;
@@ -116,7 +116,8 @@
 </head>
 <body>
 
-    <nav class="sidebar"></nav>
+    <!-- تم تعديل هذا السطر ليتوافق مع nav.js -->
+    <div class="nav-bar"></div>
 
     <main class="content">
         <header style="margin-bottom: 20px;">
@@ -125,13 +126,12 @@
                     <h1>إدارة التحويلات</h1>
                     <p id="branch-display" style="color: #3498db; font-weight: bold;">جاري التحميل...</p>
                 </div>
-                <button onclick="loadTransfers()" class="stat-card" style="padding: 12px; border: none; cursor: pointer;">
+                <button onclick="loadTransfers()" class="stat-card" style="padding: 12px; border: none; cursor: pointer; background: white; border-radius: 10px;">
                     <i class="fas fa-sync-alt"></i>
                 </button>
             </div>
         </header>
 
-        <!-- قسم الفلاتر -->
         <div class="filter-container">
             <div class="filter-row">
                 <select id="direction-filter" class="filter-control" onchange="applyFilters()">
@@ -151,7 +151,6 @@
             </select>
         </div>
 
-        <!-- حاوية كروت التحويلات -->
         <div id="transfers-container">
             <p style="text-align: center; padding: 40px; color: #94a3b8;">جاري تحميل التحويلات...</p>
         </div>
@@ -162,6 +161,7 @@
     <script>
         let rawData = [];
         const activeUser = checkAuth();
+        // جلب اسم الفرع من التخزين المحلي لضمان الفلترة الصحيحة
         const userBranchName = localStorage.getItem('userBranch') || "المعمورة";
 
         if (activeUser) {
@@ -173,10 +173,10 @@
             const container = document.getElementById('transfers-container');
             container.innerHTML = '<p style="text-align: center; padding: 40px;">⏳ جاري جلب البيانات...</p>';
             try {
-                const response = await fetchOrders(); 
-                let items = (response && response[0]?.data) ? response[0].data : (response.data || response);
+                const items = await fetchOrders();
                 
                 if (Array.isArray(items)) {
+                    // تصفية البيانات لتشمل التحويلات فقط
                     rawData = items.filter(item => item.type === "تحويل");
                     populateBranchFilter(rawData);
                     applyFilters(); 
@@ -236,7 +236,11 @@
 
                 const card = document.createElement('div');
                 card.className = 'transfer-card';
-                card.style.borderRightColor = isRequestForMe ? '#3498db' : '#f39c12';
+                
+                // تغيير لون الحافة بناءً على الحالة
+                if (currentState === 'unavailable') card.style.borderRightColor = '#e74c3c';
+                else if (currentState === 'transferred') card.style.borderRightColor = '#2ecc71';
+                else card.style.borderRightColor = isRequestForMe ? '#3498db' : '#f39c12';
 
                 card.innerHTML = `
                     <div class="transfer-header">
@@ -257,22 +261,16 @@
                     </div>
 
                     <div class="action-area">
-                        <input type="text" id="note-${item.id}" class="note-input" placeholder="اكتب ردك أو ملاحظتك هنا..." value="${item.company || ''}" ${!isRequestForMe ? 'disabled' : ''}>
-                        
+                        <input type="text" id="note-${item.id}" class="note-input" placeholder="اكتب ملاحظة..." value="${item.company || ''}" ${!isRequestForMe ? 'disabled' : ''}>
                         <div class="controls-row">
                             <select id="stat-${item.id}" class="status-select" ${!isRequestForMe ? 'disabled' : ''}>
                                 <option value="pending" ${currentState === 'pending'?'selected':''}>⏳ انتظار</option>
                                 <option value="transferred" ${currentState === 'transferred'?'selected':''}>✅ تم التحويل</option>
-                                <option value="unavailable" ${currentState === 'unavailable'?'selected':''}>❌ غير متوفر</option>
+                                <option value="unavailable" ${currentState === 'unavailable'?'selected':''}>❌ نقص</option>
                             </select>
-                            
-                            ${isRequestForMe ? 
-                                `<button class="btn-save-mobile" onclick="saveTransfer('${item.id}', this)">حفظ</button>` : 
-                                `<div style="flex:1; text-align:center; padding:10px; color:#94a3b8; font-size:0.8rem; border:1px dashed #ddd; border-radius:10px;">بانتظار رد الطرف الآخر</div>`
-                            }
+                            ${isRequestForMe ? `<button class="btn-save-mobile" onclick="saveTransfer('${item.id}', this)">حفظ</button>` : `<div style="flex:1; text-align:center; padding:10px; color:#94a3b8; font-size:0.8rem; border:1px dashed #ddd; border-radius:10px;">بانتظار الرد</div>`}
                         </div>
-                    </div>
-                `;
+                    </div>`;
                 container.appendChild(card);
             });
         }
