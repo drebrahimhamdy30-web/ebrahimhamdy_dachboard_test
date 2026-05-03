@@ -1,210 +1,173 @@
-<!-- الكود المحدث بالكامل لسجل المشتريات -->
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>سجل المشتريات - نظام الصيدلية</title>
-    <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <style>
-        .order-card {
-            background: white; border-radius: 15px; padding: 15px;
-            margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-            border-right: 5px solid #f39c12; position: relative;
-        }
-        .order-header { display: flex; justify-content: space-between; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px; margin-bottom: 10px; }
-        .order-date { font-size: 0.75rem; color: #94a3b8; }
-        .branch-tag { background: #f1f5f9; padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: bold; color: var(--primary-color); }
-        .item-name { font-weight: bold; color: var(--primary-color); display: block; font-size: 1.1rem; margin-bottom: 4px; }
-        .item-code { font-size: 0.85rem; color: #64748b; background: #f8fafc; padding: 2px 6px; border-radius: 4px; }
-        .customer-info { background: #f0f9ff; padding: 10px; border-radius: 10px; font-size: 0.9rem; margin: 12px 0; display: flex; justify-content: space-between; align-items: center; }
-        .action-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
-        .company-input { flex: 1; min-width: 140px; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; }
-        .status-select { padding: 9px; border-radius: 8px; border: 1px solid #e2e8f0; background: #fff; font-size: 0.9rem; }
-        .btn-save-mobile { background: var(--accent-color); color: white; border: none; padding: 10px 18px; border-radius: 8px; cursor: pointer; transition: 0.3s; }
-        
-        .branch-filter-list { display: flex; gap: 10px; overflow-x: auto; padding: 10px 0; scrollbar-width: none; }
-        .branch-filter-list::-webkit-scrollbar { display: none; }
-        .filter-chip { 
-            background: white; color: #64748b; padding: 8px 16px; border-radius: 25px; 
-            border: 1px solid #e2e8f0; font-size: 0.85rem; cursor: pointer; white-space: nowrap; transition: 0.3s;
-        }
-        .filter-chip.active { background: var(--primary-color); color: white; border-color: var(--primary-color); font-weight: bold; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>سجل المشتريات - صيدليات د. إبراهيم</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+      <div class="page-header">
+        <div class="page-title"><i class="fas fa-shopping-cart"></i> سجل المشتريات والطلبيات</div>
+        <button class="btn btn-primary" onclick="loadOrders()"><i class="fas fa-sync-alt"></i> تحديث</button>
+      </div>
 
-    <div class="nav-bar"></div>
+      <div class="filter-bar">
+        <span class="filter-label"><i class="fas fa-filter"></i> الحالة:</span>
+        <select id="statusFilter" class="form-select" style="width:auto;" onchange="applyFilter()">
+          <option value="all">الكل</option>
+          <option value="pending" selected>قيد الانتظار ⏳</option>
+          <option value="ordered">تم الطلب ✅</option>
+          <option value="unavailable">غير متوفر ❌</option>
+        </select>
+        <div id="branchList" style="display:flex; gap:8px; flex-wrap:wrap; margin-right:4px;"></div>
+      </div>
 
-    <main class="content">
-        <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <div>
-                <h1>سجل المشتريات</h1>
-                <p id="results-count">جاري التحميل...</p>
-            </div>
-            <button onclick="loadOrders()" class="stat-card" style="padding: 12px; border: none; cursor: pointer; background: white; border-radius: 50%;">
-                <i class="fas fa-sync-alt" style="color: var(--accent-color);"></i>
-            </button>
-        </header>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>التاريخ</th>
+              <th>الفرع</th>
+              <th>الصنف</th>
+              <th>العميل</th>
+              <th>الكمية</th>
+              <th>المورد</th>
+              <th>الحالة</th>
+              <th>حفظ</th>
+            </tr>
+          </thead>
+          <tbody id="table-body">
+            <tr class="loading-row"><td colspan="8">⏳ جاري تحميل البيانات...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 
-        <div style="background: white; padding: 15px; border-radius: 15px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
-                <i class="fas fa-sort-amount-down" style="color: #94a3b8;"></i>
-                <!-- تم تغيير id الفلتر ليكون أوضح -->
-                <select id="stateFilter" onchange="applyFilter()" class="status-select" style="flex: 1; border-color: #f1f5f9;">
-                    <option value="all">كل الطلبات</option>
-                    <option value="pending" selected>⏳ قيد الانتظار</option>
-                    <option value="ordered">✅ تم الطلب</option>
-                    <option value="unavailable">❌ نواقص</option>
-                </select>
-            </div>
-            <div id="branchList" class="branch-filter-list"></div>
-        </div>
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    const activeUser = checkAuth();
+    let rawData = [];
+    if (activeUser) window.onload = loadOrders;
 
-        <div id="orders-container">
-            <div style="text-align: center; padding: 50px;">
-                <i class="fas fa-circle-notch fa-spin fa-2x" style="color: var(--accent-color);"></i>
-            </div>
-        </div>
-    </main>
-
-    <script src="api.js"></script>
-    <script src="nav.js"></script>
-    <script>
-        const activeUser = checkAuth();
-        let rawData = [];
-        let selectedBranches = [];
-
-        if (activeUser) { window.onload = loadOrders; }
-
-        async function loadOrders() {
-            try {
-                const response = await fetchOrders();
-                let items = (response && response[0]?.data) ? response[0].data : (response.data || response);
-
-                if (Array.isArray(items)) {
-                    // تصفية طلبات الشراء فقط[cite: 4]
-                    rawData = items.filter(i => String(i.type || "").includes("شراء"));
-                    
-                    if (selectedBranches.length === 0) {
-                        const branches = [...new Set(rawData.map(i => i.branch))].filter(b => b && b !== '-');
-                        selectedBranches = branches;
-                        renderBranchChips(branches);
-                    }
-                    applyFilter();
-                }
-            } catch (e) {
-                document.getElementById('orders-container').innerHTML = '<p style="text-align: center; color: red;">❌ خطأ في الاتصال</p>';
-            }
+    async function loadOrders() {
+      const tbody = document.getElementById('table-body');
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="8">⏳ جاري جلب البيانات...</td></tr>';
+      try {
+        const response = await fetchOrders();
+        let items = (response && response[0]?.data) ? response[0].data : (response.data || response);
+        if (Array.isArray(items) && items.length > 0) {
+          rawData = items.map(item => ({
+            id: item.id || item.row_id || item.ID,
+            branch: item.branch || '-',
+            item_code: item.item_code || 'بدون كود',
+            item_name: item.item || item.item_name || 'صنف غير مسمى',
+            customer_code: item.cust_code || '---',
+            customer_name: item.cust_name || 'عميل عام',
+            qty: item.qty || 0,
+            company: (item.company && item.company !== 'null') ? item.company : '',
+            status: (item.status === '-' || !item.status) ? (item.state || 'pending') : item.status,
+            type: item.type || '',
+            createdAt: item.createdAt
+          })).filter(i => String(i.type).includes("شراء"));
+          generateBranches(rawData);
+          applyFilter();
+        } else {
+          tbody.innerHTML = '<tr><td colspan="8" class="empty-state">لا توجد طلبات شراء</td></tr>';
         }
+      } catch(e) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ خطأ في تحميل البيانات</td></tr>';
+      }
+    }
 
-        function renderBranchChips(branches) {
-            const container = document.getElementById('branchList');
-            container.innerHTML = branches.map(b => `
-                <div class="filter-chip active" onclick="toggleBranch(this, '${b}')">${b}</div>
-            `).join('');
+    function generateBranches(data) {
+      const container = document.getElementById('branchList');
+      const branches = [...new Set(data.map(i => i.branch))].filter(b => b !== '-').sort();
+      container.innerHTML = branches.map(b => `
+        <label class="check-label" style="background:var(--surface-3);padding:5px 10px;border-radius:20px;border:1px solid var(--border);">
+          <input type="checkbox" class="branch-cb" value="${b}" checked onchange="applyFilter()"> ${b}
+        </label>
+      `).join('');
+    }
+
+    function applyFilter() {
+      const statusVal = document.getElementById('statusFilter').value;
+      const selectedBranches = Array.from(document.querySelectorAll('.branch-cb:checked')).map(c => c.value);
+      const filtered = rawData.filter(i => {
+        const sMatch = (statusVal === 'all' || i.status === statusVal);
+        const bMatch = selectedBranches.includes(i.branch);
+        return sMatch && bMatch;
+      });
+      renderTable(filtered);
+    }
+
+    function renderTable(items) {
+      const tbody = document.getElementById('table-body');
+      if (items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج تطابق التصفية</td></tr>';
+        return;
+      }
+      tbody.innerHTML = items.map(i => {
+        let displayDate = "---", displayTime = "";
+        if (i.createdAt) {
+          const d = new Date(i.createdAt);
+          displayDate = d.toLocaleDateString('ar-EG', {month:'numeric', day:'numeric'});
+          displayTime = d.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit', hour12:true});
         }
+        return `
+          <tr>
+            <td style="font-size:0.75rem;line-height:1.4;">${displayDate}<br><span style="color:var(--text-muted);font-size:0.7rem;">${displayTime}</span></td>
+            <td><span class="branch-tag">${i.branch}</span></td>
+            <td style="text-align:right;">
+              <div style="font-weight:700;font-size:0.85rem;">${i.item_name}</div>
+              <div style="font-size:0.72rem;color:var(--text-muted);"><i class="fas fa-barcode"></i> ${i.item_code}</div>
+            </td>
+            <td style="text-align:right;">
+              <div style="font-weight:600;font-size:0.82rem;">${i.customer_name}</div>
+              <div style="font-size:0.72rem;color:var(--text-muted);"><i class="fas fa-phone-alt"></i> ${i.customer_code}</div>
+            </td>
+            <td><b style="font-size:1.1rem;color:var(--warning);">${i.qty}</b></td>
+            <td><input type="text" value="${i.company}" id="comp-${i.id}" class="table-input" placeholder="المورد..."></td>
+            <td>
+              <select id="stat-${i.id}" class="table-select">
+                <option value="pending" ${i.status==='pending'?'selected':''}>⏳ انتظار</option>
+                <option value="ordered" ${i.status==='ordered'?'selected':''}>✅ تم الطلب</option>
+                <option value="unavailable" ${i.status==='unavailable'?'selected':''}>❌ نقص</option>
+              </select>
+            </td>
+            <td>
+              <button class="btn btn-success btn-sm btn-icon" onclick="saveRow('${i.id}', this)">
+                <i class="fas fa-save"></i>
+              </button>
+            </td>
+          </tr>`;
+      }).join('');
+    }
 
-        function toggleBranch(el, branchName) {
-            el.classList.toggle('active');
-            if (el.classList.contains('active')) {
-                selectedBranches.push(branchName);
-            } else {
-                selectedBranches = selectedBranches.filter(b => b !== branchName);
-            }
-            applyFilter();
-        }
-
-        function applyFilter() {
-            const stateVal = document.getElementById('stateFilter').value;
-            
-            const filtered = rawData.filter(i => {
-                // استخدام state بدلاً من status ليتوافق مع الإرسال
-                const sMatch = (stateVal === 'all' || (i.state || 'pending') === stateVal);
-                const bMatch = selectedBranches.includes(i.branch);
-                return sMatch && bMatch;
-            });
-
-            document.getElementById('results-count').innerText = `عرض ${filtered.length} طلب شراء`;
-            renderCards(filtered);
-        }
-
-        function renderCards(items) {
-            const container = document.getElementById('orders-container');
-            if (items.length === 0) {
-                container.innerHTML = '<div style="text-align:center; padding:50px; opacity:0.5;"><i class="fas fa-box-open fa-3x"></i><p>لا توجد نتائج حالياً</p></div>';
-                return;
-            }
-
-            container.innerHTML = items.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)).map(i => {
-                const currentState = i.state || 'pending'; // تغيير هنا أيضاً[cite: 4]
-                const borderColor = currentState === 'ordered' ? '#27ae60' : (currentState === 'unavailable' ? '#e74c3c' : '#f39c12');
-                const time = i.createdAt ? new Date(i.createdAt).toLocaleDateString('ar-EG') : '---';
-
-                return `
-                    <div class="order-card" style="border-right-color: ${borderColor}">
-                        <div class="order-header">
-                            <span class="branch-tag">${i.branch}</span>
-                            <span class="order-date">${time}</span>
-                        </div>
-                        
-                        <span class="item-name">${i.item || i.item_name}</span>
-                        <span class="item-code"><i class="fas fa-barcode"></i> ${i.item_code || '---'}</span>
-
-                        <div class="customer-info">
-                            <span><i class="fas fa-user-circle"></i> ${i.customer_name || i.cust_name || 'عميل عام'}</span>
-                            <span style="font-weight:bold; color:var(--primary-color)">الكمية: ${i.qty || 1}</span>
-                        </div>
-
-                        <div class="action-row">
-                            <input type="text" value="${(i.company && i.company !== 'null') ? i.company : ''}" 
-                                   id="comp-${i.id}" class="company-input" placeholder="المورد / ملاحظة">
-                            <select id="stat-${i.id}" class="status-select">
-                                <option value="pending" ${currentState==='pending'?'selected':''}>⏳ انتظار</option>
-                                <option value="ordered" ${currentState==='ordered'?'selected':''}>✅ تم الطلب</option>
-                                <option value="unavailable" ${currentState==='unavailable'?'selected':''}>❌ نقص</option>
-                            </select>
-                            <button class="btn-save-mobile" onclick="saveRow('${i.id}', this)">
-                                <i class="fas fa-save"></i>
-                            </button>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        async function saveRow(id, btn) {
-            const stateValue = document.getElementById(`stat-${id}`).value;
-            const companyValue = document.getElementById(`comp-${id}`).value;
-            
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-
-            // إرسال state بدلاً من status ليتوافق مع n8n
-            const success = await updateData({ 
-                id: id, 
-                state: stateValue, 
-                company: companyValue, 
-                type: "شراء", 
-                action: "update_status" 
-            });
-
-            if (success) {
-                btn.style.background = "#27ae60";
-                btn.innerHTML = '<i class="fas fa-check"></i>';
-                const idx = rawData.findIndex(x => x.id == id);
-                if(idx !== -1) { 
-                    rawData[idx].state = stateValue; 
-                    rawData[idx].company = companyValue; 
-                }
-                setTimeout(applyFilter, 800);
-            } else {
-                alert("⚠️ فشل الاتصال بالسيرفر - تأكد من تفعيل Workflow n8n");
-                btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-save"></i>';
-            }
-        }
-    </script>
+    async function saveRow(id, btn) {
+      const currentStatus = document.getElementById(`stat-${id}`).value;
+      const currentCompany = document.getElementById(`comp-${id}`).value;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+      const success = await updateData({ id, status: currentStatus, company: currentCompany, type: "شراء", action: "update_status" });
+      if (success) {
+        btn.style.background = "#16a34a";
+        btn.innerHTML = '<i class="fas fa-check"></i>';
+        const item = rawData.find(x => x.id == id);
+        if (item) { item.status = currentStatus; item.company = currentCompany; }
+        setTimeout(() => applyFilter(), 1000);
+      } else {
+        alert("⚠️ فشل في الحفظ");
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-save"></i>';
+      }
+    }
+  </script>
 </body>
 </html>
