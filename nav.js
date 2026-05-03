@@ -1,5 +1,5 @@
 function injectNavbar() {
-    const currentPage = window.location.pathname.split("/").pop() || 'main.html';
+    const currentPage = window.location.pathname.split("/").pop().toLowerCase() || 'main.html';
     
     const navContent = `
         <div class="logo">
