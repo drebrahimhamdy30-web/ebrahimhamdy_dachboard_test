@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>إضافة طلب جديد - صيدلية إبراهيم حمدي</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .hidden { display: none !important; }
+        .form-group { margin-bottom: 15px; text-align: right; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9rem; color: #4a5568; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #cbd5e0; box-sizing: border-box; font-family: inherit;
+        }
+        .form-group input:focus { border-color: var(--accent-color); outline: none; box-shadow: 0 0 0 3px rgba(52,152,219,0.1); }
+        .flex-row { display: flex; gap: 15px; margin-bottom: 10px; flex-wrap: wrap; }
+        .flex-row > div { flex: 1; min-width: 200px; }
+        .btn-submit { 
+            width: 100%; background: #27ae60; color: white; border: none; padding: 15px; 
+            border-radius: 8px; font-size: 1.1rem; cursor: pointer; font-weight: bold; transition: 0.3s;
+        }
+        .btn-submit:hover { background: #219150; }
+        .btn-submit:disabled { background: #94a3b8; cursor: not-allowed; }
+        
+        /* تحسين مظهر الكارت في التصميم الجديد */
+        .card {
+            background: var(--white);
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            max-width: 800px;
+            margin: 20px auto;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- القائمة الجانبية يتم حقنها تلقائياً هنا -->
+    <div class="nav-bar"></div>
+
+    <main class="content">
+        <header>
+            <h1>إضافة طلب جديد</h1>
+            <p>سجل النواقص، التحويلات، أو طلبات الجرد لفرعك</p>
+        </header>
+
+        <div class="card">
+            <h2 style="text-align: center; margin-bottom: 25px; color: var(--primary-color);">📝 بيانات الطلب</h2>
+            
+            <form id="orderForm">
+                <div class="flex-row">
+                    <div class="form-group">
+                        <label>نوع العملية</label>
+                        <select id="type" onchange="handleTypeChange()">
+                            <option value="شراء">طلب شراء (نقص) 🛒</option>
+                            <option value="تحويل">تحويل بين الفروع 🔄</option>
+                            <option value="جرد">جرد صنف 📋</option>
+                            <option value="إشعار">إرسال إشعار 🔔</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" id="branch-div">
+                        <label id="branch-label">توجيه إلى فرع</label>
+                        <select id="branch">
+                            <option value="المعمورة">المعمورة</option>
+                            <option value="سان ستيفانو">سان ستيفانو</option>
+                            <option value="سيدى بشر">سيدى بشر</option>
+                        </select>
+                    </div>
+                </div>
+
+                <hr style="border: 0; border-top: 1px solid #edf2f7; margin: 20px 0;">
+
+                <div id="item-section">
+                    <div class="flex-row">
+                        <div class="form-group">
+                            <label>كود الصنف</label>
+                            <input type="text" id="item_code" placeholder="مثال: 102030">
+                        </div>
+                        <div class="form-group" id="item-name-div">
+                            <label>اسم الصنف</label>
+                            <input type="text" id="item_name" placeholder="اسم الدواء أو المنتج">
+                        </div>
+                    </div>
+                </div>
+
+                <div id="extra-section">
+                    <div class="flex-row">
+                        <div class="form-group">
+                            <label>كود العميل</label>
+                            <input type="text" id="customer_code" placeholder="رقم الموبايل أو الكود">
+                        </div>
+                        <div class="form-group">
+                            <label>اسم العميل</label>
+                            <input type="text" id="customer_name" placeholder="اسم العميل (اختياري)">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>الكمية المطلوبة</label>
+                        <input type="number" id="qty" value="1" min="1">
+                    </div>
+                </div>
+
+                <div id="note-section" class="hidden">
+                    <div class="form-group">
+                        <label>نص الإشعار / التفاصيل</label>
+                        <textarea id="note_text" rows="4" placeholder="اكتب التفاصيل هنا..."></textarea>
+                    </div>
+                </div>
+
+                <button type="button" id="submitBtn" class="btn-submit" onclick="submitOrder()">
+                    <i class="fas fa-paper-plane"></i> إرسال الطلب الآن
+                </button>
+            </form>
+        </div>
+    </main>
+
+    <script src="api.js"></script>
+    <script src="nav.js"></script>
+
+    <script>
+        // دمج المنطق القديم مع النظام الجديد
+        const activeUser = checkAuth(); 
+        const userBranch = (localStorage.getItem('userBranch') || "المعمورة").trim();
+
+        if (activeUser) {
+            document.getElementById('branch').value = userBranch;
+            handleTypeChange();
+        }
+
+        function handleTypeChange() {
+            const type = document.getElementById('type').value;
+            const branchSelect = document.getElementById('branch');
+            const branchDiv = document.getElementById('branch-div');
+            const branchLabel = document.getElementById('branch-label');
+            const itemSection = document.getElementById('item-section');
+            const itemNameDiv = document.getElementById('item-name-div');
+            const extraSection = document.getElementById('extra-section');
+            const noteSection = document.getElementById('note-section');
+
+            branchDiv.classList.remove('hidden');
+            itemSection.classList.remove('hidden');
+            itemNameDiv.classList.remove('hidden');
+            extraSection.classList.remove('hidden');
+            noteSection.classList.add('hidden');
+            branchSelect.disabled = false;
+            branchLabel.innerText = "توجيه إلى فرع";
+
+            if (type === "جرد") {
+                itemNameDiv.classList.add('hidden');
+                extraSection.classList.add('hidden');
+            } else if (type === "إشعار") {
+                itemSection.classList.add('hidden');
+                extraSection.classList.add('hidden');
+                noteSection.classList.remove('hidden');
+            } else if (type === "شراء") {
+                branchSelect.value = userBranch;
+                branchSelect.disabled = true;
+                branchLabel.innerText = "فرع الطلب (ثابت)";
+            } else if (type === "تحويل") {
+                branchLabel.innerText = "طلب تحويل من فرع:";
+            }
+        }
+
+        async function submitOrder() {
+            const btn = document.getElementById('submitBtn');
+            const type = document.getElementById('type').value;
+            const branchVal = document.getElementById('branch').value;
+            const itemCode = document.getElementById('item_code').value.trim();
+            const itemName = document.getElementById('item_name').value.trim();
+
+            if (type !== "إشعار" && !itemCode && !itemName) {
+                alert("برجاء إدخال كود أو اسم الصنف");
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الإرسال...';
+
+            const payload = {
+                action: "insert_order",
+                type: type,
+                user: activeUser,
+                branch: userBranch, 
+                target_branch: branchVal,
+                item_code: itemCode,
+                item: itemName,
+                customer_code: document.getElementById('customer_code').value.trim(),
+                customer_name: document.getElementById('customer_name').value.trim(),
+                qty: document.getElementById('qty').value || 1,
+                note: document.getElementById('note_text').value.trim(),
+                state: 'pending',
+                createdAt: new Date().toISOString()
+            };
+
+            try {
+                const success = await updateData(payload);
+                if (success) {
+                    alert("تم الإرسال بنجاح ✅");
+                    document.getElementById('orderForm').reset();
+                    handleTypeChange();
+                } else {
+                    alert("فشل الإرسال ❌");
+                }
+            } catch (error) {
+                alert("خطأ في الاتصال بالسيرفر");
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-paper-plane"></i> إرسال الطلب الآن';
+            }
+        }
+    </script>
+</body>
+</html>
