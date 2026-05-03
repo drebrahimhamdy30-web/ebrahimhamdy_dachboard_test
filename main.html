@@ -16,7 +16,7 @@
 
     <main class="content">
         <header>
-            <h1>مرحباً، د. إبراهيم 👋</h1>
+            <h1 id="welcome-msg">مرحباً، د. إبراهيم 👋</h1>
             <p id="current-date"></p>
         </header>
 
@@ -25,22 +25,22 @@
             <div class="stat-card">
                 <div class="info">
                     <h3>نواقص اليوم</h3>
-                    <p id="shortage-count">0</p>
+                    <p id="shortage-count"><i class="fas fa-spinner fa-spin"></i></p>
                 </div>
                 <i class="fas fa-clipboards"></i>
             </div>
             <div class="stat-card warning">
                 <div class="info">
                     <h3>طلبات معلقة</h3>
-                    <p id="pending-count">0</p>
+                    <p id="pending-count"><i class="fas fa-spinner fa-spin"></i></p>
                 </div>
                 <i class="fas fa-clock"></i>
             </div>
         </div>
 
-        <!-- قسم الرسم البياني -->
-        <div class="chart-container">
-            <h3>معدل النواقص خلال الأسبوع</h3>
+        <!-- قسم الرسم البياني مع حاوية محددة الارتفاع -->
+        <div class="chart-container" style="position: relative; height:40vh; width:100%; background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
+            <h3 style="margin-bottom: 15px;">معدل النواقص خلال الأسبوع</h3>
             <canvas id="myChart"></canvas>
         </div>
     </main>
@@ -49,19 +49,29 @@
     <script src="api.js"></script>
     <script src="nav.js"></script>
     <script>
-        // تحديث التاريخ
+        // 1. تأمين الصفحة وتحديث التاريخ
+        const user = checkAuth(); // التأكد من هوية المستخدم
+        if(user) {
+            document.getElementById('welcome-msg').innerText = `مرحباً، ${user} 👋`;
+        }
+
         document.getElementById('current-date').innerText = new Date().toLocaleDateString('ar-EG', { 
             weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
         });
 
         async function initDashboard() {
             try {
-                // استخدام الدوال من api.js
+                // 2. جلب البيانات الحقيقية
                 const orders = await fetchOrders(); 
-                document.getElementById('shortage-count').innerText = orders.length;
-                document.getElementById('pending-count').innerText = orders.filter(o => o.state === 'pending').length;
+                
+                if (orders && Array.isArray(orders)) {
+                    document.getElementById('shortage-count').innerText = orders.length;
+                    // تأكد أن الحالة في الشيت مكتوبة 'pending'
+                    const pendingOrders = orders.filter(o => o.state === 'pending' || o.state === 'معلق');
+                    document.getElementById('pending-count').innerText = pendingOrders.length;
+                }
 
-                // إعداد الرسم البياني
+                // 3. إعداد الرسم البياني
                 const ctx = document.getElementById('myChart').getContext('2d');
                 new Chart(ctx, {
                     type: 'line',
@@ -69,20 +79,25 @@
                         labels: ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'],
                         datasets: [{
                             label: 'عدد النواقص',
-                            data: [12, 19, 3, 5, 2, 15, 10], // يمكن ربطها ببيانات حقيقية لاحقاً
-                            borderColor: '#2c3e50',
-                            backgroundColor: 'rgba(44, 62, 80, 0.1)',
+                            data: [12, 19, 3, 5, 2, 15, 10], 
+                            borderColor: '#3498db',
+                            backgroundColor: 'rgba(52, 152, 219, 0.1)',
                             fill: true,
                             tension: 0.4
                         }]
                     },
                     options: {
                         responsive: true,
-                        maintainAspectRatio: false
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'bottom' }
+                        }
                     }
                 });
             } catch (e) {
                 console.error("Dashboard Load Error:", e);
+                document.getElementById('shortage-count').innerText = "!";
+                document.getElementById('pending-count').innerText = "!";
             }
         }
 
