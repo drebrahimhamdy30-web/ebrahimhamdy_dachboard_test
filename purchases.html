@@ -1,3 +1,4 @@
+<!-- الكود المحدث بالكامل لسجل المشتريات -->
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -23,7 +24,6 @@
         .status-select { padding: 9px; border-radius: 8px; border: 1px solid #e2e8f0; background: #fff; font-size: 0.9rem; }
         .btn-save-mobile { background: var(--accent-color); color: white; border: none; padding: 10px 18px; border-radius: 8px; cursor: pointer; transition: 0.3s; }
         
-        /* تجميل فلاتر الفروع */
         .branch-filter-list { display: flex; gap: 10px; overflow-x: auto; padding: 10px 0; scrollbar-width: none; }
         .branch-filter-list::-webkit-scrollbar { display: none; }
         .filter-chip { 
@@ -35,7 +35,6 @@
 </head>
 <body>
 
-    <!-- القائمة الجانبية الموحدة -->
     <div class="nav-bar"></div>
 
     <main class="content">
@@ -49,23 +48,20 @@
             </button>
         </header>
 
-        <!-- قسم التصفية -->
         <div style="background: white; padding: 15px; border-radius: 15px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
             <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
                 <i class="fas fa-sort-amount-down" style="color: #94a3b8;"></i>
-                <select id="statusFilter" onchange="applyFilter()" class="status-select" style="flex: 1; border-color: #f1f5f9;">
+                <!-- تم تغيير id الفلتر ليكون أوضح -->
+                <select id="stateFilter" onchange="applyFilter()" class="status-select" style="flex: 1; border-color: #f1f5f9;">
                     <option value="all">كل الطلبات</option>
                     <option value="pending" selected>⏳ قيد الانتظار</option>
                     <option value="ordered">✅ تم الطلب</option>
                     <option value="unavailable">❌ نواقص</option>
                 </select>
             </div>
-            <div id="branchList" class="branch-filter-list">
-                <!-- الفروع سيتم حقنها هنا -->
-            </div>
+            <div id="branchList" class="branch-filter-list"></div>
         </div>
 
-        <!-- حاوية الكروت -->
         <div id="orders-container">
             <div style="text-align: center; padding: 50px;">
                 <i class="fas fa-circle-notch fa-spin fa-2x" style="color: var(--accent-color);"></i>
@@ -80,9 +76,7 @@
         let rawData = [];
         let selectedBranches = [];
 
-        if (activeUser) {
-            window.onload = loadOrders;
-        }
+        if (activeUser) { window.onload = loadOrders; }
 
         async function loadOrders() {
             try {
@@ -90,15 +84,14 @@
                 let items = (response && response[0]?.data) ? response[0].data : (response.data || response);
 
                 if (Array.isArray(items)) {
+                    // تصفية طلبات الشراء فقط[cite: 4]
                     rawData = items.filter(i => String(i.type || "").includes("شراء"));
                     
-                    // استخراج الفروع الفريدة لأول مرة
                     if (selectedBranches.length === 0) {
                         const branches = [...new Set(rawData.map(i => i.branch))].filter(b => b && b !== '-');
                         selectedBranches = branches;
                         renderBranchChips(branches);
                     }
-                    
                     applyFilter();
                 }
             } catch (e) {
@@ -124,10 +117,11 @@
         }
 
         function applyFilter() {
-            const statusVal = document.getElementById('statusFilter').value;
+            const stateVal = document.getElementById('stateFilter').value;
             
             const filtered = rawData.filter(i => {
-                const sMatch = (statusVal === 'all' || (i.status || 'pending') === statusVal);
+                // استخدام state بدلاً من status ليتوافق مع الإرسال
+                const sMatch = (stateVal === 'all' || (i.state || 'pending') === stateVal);
                 const bMatch = selectedBranches.includes(i.branch);
                 return sMatch && bMatch;
             });
@@ -144,8 +138,8 @@
             }
 
             container.innerHTML = items.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)).map(i => {
-                const status = i.status || 'pending';
-                const borderColor = status === 'ordered' ? '#27ae60' : (status === 'unavailable' ? '#e74c3c' : '#f39c12');
+                const currentState = i.state || 'pending'; // تغيير هنا أيضاً[cite: 4]
+                const borderColor = currentState === 'ordered' ? '#27ae60' : (currentState === 'unavailable' ? '#e74c3c' : '#f39c12');
                 const time = i.createdAt ? new Date(i.createdAt).toLocaleDateString('ar-EG') : '---';
 
                 return `
@@ -159,7 +153,7 @@
                         <span class="item-code"><i class="fas fa-barcode"></i> ${i.item_code || '---'}</span>
 
                         <div class="customer-info">
-                            <span><i class="fas fa-user-circle"></i> ${i.cust_name || 'عميل عام'}</span>
+                            <span><i class="fas fa-user-circle"></i> ${i.customer_name || i.cust_name || 'عميل عام'}</span>
                             <span style="font-weight:bold; color:var(--primary-color)">الكمية: ${i.qty || 1}</span>
                         </div>
 
@@ -167,9 +161,9 @@
                             <input type="text" value="${(i.company && i.company !== 'null') ? i.company : ''}" 
                                    id="comp-${i.id}" class="company-input" placeholder="المورد / ملاحظة">
                             <select id="stat-${i.id}" class="status-select">
-                                <option value="pending" ${status==='pending'?'selected':''}>⏳ انتظار</option>
-                                <option value="ordered" ${status==='ordered'?'selected':''}>✅ تم الطلب</option>
-                                <option value="unavailable" ${status==='unavailable'?'selected':''}>❌ نقص</option>
+                                <option value="pending" ${currentState==='pending'?'selected':''}>⏳ انتظار</option>
+                                <option value="ordered" ${currentState==='ordered'?'selected':''}>✅ تم الطلب</option>
+                                <option value="unavailable" ${currentState==='unavailable'?'selected':''}>❌ نقص</option>
                             </select>
                             <button class="btn-save-mobile" onclick="saveRow('${i.id}', this)">
                                 <i class="fas fa-save"></i>
@@ -181,23 +175,32 @@
         }
 
         async function saveRow(id, btn) {
-            const status = document.getElementById(`stat-${id}`).value;
-            const company = document.getElementById(`comp-${id}`).value;
+            const stateValue = document.getElementById(`stat-${id}`).value;
+            const companyValue = document.getElementById(`comp-${id}`).value;
             
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
-            const success = await updateData({ id, status, company, type: "شراء", action: "update_status" });
+            // إرسال state بدلاً من status ليتوافق مع n8n
+            const success = await updateData({ 
+                id: id, 
+                state: stateValue, 
+                company: companyValue, 
+                type: "شراء", 
+                action: "update_status" 
+            });
 
             if (success) {
                 btn.style.background = "#27ae60";
                 btn.innerHTML = '<i class="fas fa-check"></i>';
-                // تحديث البيانات محلياً
                 const idx = rawData.findIndex(x => x.id == id);
-                if(idx !== -1) { rawData[idx].status = status; rawData[idx].company = company; }
+                if(idx !== -1) { 
+                    rawData[idx].state = stateValue; 
+                    rawData[idx].company = companyValue; 
+                }
                 setTimeout(applyFilter, 800);
             } else {
-                alert("⚠️ فشل الاتصال بالسيرفر");
+                alert("⚠️ فشل الاتصال بالسيرفر - تأكد من تفعيل Workflow n8n");
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fas fa-save"></i>';
             }
