@@ -1,178 +1,123 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>الإشعارات - نظام الصيدلية</title>
-    <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <style>
-        .notif-card {
-            background: white; border-radius: 15px; padding: 15px;
-            margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-            border-right: 5px solid var(--accent-color); transition: transform 0.2s;
-        }
-        .notif-card.completed { border-right-color: #27ae60; opacity: 0.8; }
-        .notif-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
-        .branch-badge { background: #f1f5f9; padding: 4px 10px; border-radius: 8px; font-size: 0.8rem; font-weight: bold; color: var(--primary-color); }
-        .notif-time { font-size: 0.75rem; color: #94a3b8; }
-        .notif-body { font-size: 0.95rem; color: #1e293b; margin-bottom: 15px; line-height: 1.4; }
-        .notif-actions { display: flex; gap: 10px; align-items: center; }
-        .comment-input { flex-grow: 1; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; }
-        .btn-confirm { background: #27ae60; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; }
-        .filter-container { display: flex; gap: 10px; overflow-x: auto; padding: 10px 0; margin-bottom: 20px; white-space: nowrap; -webkit-overflow-scrolling: touch; }
-        .filter-chip { background: white; padding: 8px 15px; border-radius: 20px; border: 1px solid #ddd; font-size: 0.85rem; cursor: pointer; }
-        .filter-chip input { display: none; }
-        .filter-chip:has(input:checked) { background: var(--primary-color); color: white; border-color: var(--primary-color); }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>الإشعارات - صيدليات د. إبراهيم</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+      <div class="page-header">
+        <div class="page-title"><i class="fas fa-bell"></i> إشعارات وتنبيهات الفروع</div>
+        <button class="btn btn-primary" onclick="loadNotifications()"><i class="fas fa-sync-alt"></i> تحديث</button>
+      </div>
 
-    <!-- التعديل هنا ليتوافق مع nav.js -->
-    <div class="nav-bar"></div>
+      <div class="filter-bar">
+        <label class="check-label"><input type="checkbox" id="showReceived" checked onchange="applyFilter()"> واردة 📥</label>
+        <label class="check-label"><input type="checkbox" id="showSent" onchange="applyFilter()"> مرسلة 📤</label>
+        <label class="check-label" style="border-right:2px solid var(--border);padding-right:14px;margin-right:6px;">
+          <input type="checkbox" id="hideDone" checked onchange="applyFilter()"> قيد الانتظار فقط
+        </label>
+      </div>
 
-    <main class="content">
-        <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <div>
-                <h1>تنبيهات فرع <span id="current-branch-name" style="color:var(--accent-color)">...</span></h1>
-                <p>متابعة التنسيق والطلبات العاجلة</p>
+      <div id="notif-container">
+        <p style="text-align:center;padding:30px;color:var(--text-muted);">جاري التحميل...</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    const activeUser = checkAuth();
+    const userBranch = localStorage.getItem('userBranch') || activeUser || '';
+    let allItems = [];
+    if (activeUser) window.onload = loadNotifications;
+
+    async function loadNotifications() {
+      const container = document.getElementById('notif-container');
+      container.innerHTML = '<p style="text-align:center;padding:20px;color:var(--text-muted);">⏳ جاري تحديث التنبيهات...</p>';
+      try {
+        const response = await fetchFromN8N('notifications');
+        allItems = (response[0]?.data) ? response[0].data : (response.data || response);
+        applyFilter();
+      } catch(e) {
+        container.innerHTML = '<p style="text-align:center;color:var(--danger);padding:20px;">❌ خطأ في الاتصال</p>';
+      }
+    }
+
+    function applyFilter() {
+      const container = document.getElementById('notif-container');
+      const current = String(userBranch).trim();
+      const filtered = allItems.filter(item => {
+        const isDone = (item.done === "تم" || item.done === true || item.done === "true");
+        if (document.getElementById('hideDone').checked && isDone) return false;
+        const isSent = (String(item.branch).trim() === current);
+        const isReceived = (String(item.target_branch).trim() === current);
+        const showSent = document.getElementById('showSent').checked;
+        const showReceived = document.getElementById('showReceived').checked;
+        return (showSent && isSent) || (showReceived && isReceived);
+      });
+      renderNotifications(filtered);
+    }
+
+    function renderNotifications(items) {
+      const container = document.getElementById('notif-container');
+      if (items.length === 0) {
+        container.innerHTML = '<div style="text-align:center;padding:50px;color:var(--text-muted);"><i class="fas fa-inbox" style="font-size:2rem;display:block;margin-bottom:10px;opacity:0.3;"></i>لا توجد تنبيهات تطابق الفلتر</div>';
+        return;
+      }
+      container.innerHTML = '';
+      items.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+      items.forEach(item => {
+        const isDone = (item.done === "تم" || item.done === true || item.done === "true");
+        const dateStr = item.createdAt ? new Date(item.createdAt).toLocaleString('ar-EG', {hour:'2-digit', minute:'2-digit', day:'numeric', month:'numeric'}) : '؟';
+        const div = document.createElement('div');
+        div.className = `notif-card ${isDone ? 'done' : ''}`;
+        div.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
+            <span style="font-weight:700;color:var(--text-primary);font-size:0.95rem;">📌 ${item.note || 'إشعار'}</span>
+            <span style="color:var(--text-muted);font-size:0.72rem;white-space:nowrap;margin-right:10px;">${dateStr}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+            <div style="font-size:0.82rem;display:flex;align-items:center;gap:6px;">
+              <span class="branch-tag">${item.branch}</span>
+              <i class="fas fa-arrow-left" style="color:var(--text-muted);font-size:0.75rem;"></i>
+              <span class="branch-tag">${item.target_branch}</span>
             </div>
-            <button onclick="loadNotifications()" class="stat-card" style="padding: 12px; cursor: pointer; border: none; background: white; border-radius: 50%;">
-                <i class="fas fa-sync-alt"></i>
-            </button>
-        </header>
-
-        <div class="filter-container">
-            <label class="filter-chip">
-                <input type="checkbox" id="showReceived" checked onchange="applyFilter()"> واردة 📥
-            </label>
-            <label class="filter-chip">
-                <input type="checkbox" id="showSent" onchange="applyFilter()"> مرسلة 📤
-            </label>
-            <label class="filter-chip">
-                <input type="checkbox" id="hideDone" checked onchange="applyFilter()"> الانتظار فقط ⏳
-            </label>
-        </div>
-
-        <div id="notif-container">
-            <div style="text-align:center; padding: 50px;">
-                <i class="fas fa-spinner fa-spin fa-2x" style="color: var(--accent-color);"></i>
-                <p>جاري جلب التنبيهات...</p>
+            <div style="display:flex;gap:8px;align-items:center;flex:1;justify-content:flex-end;">
+              <input type="text" id="comm-${item.id}"
+                style="padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:0.82rem;font-family:var(--font);flex:1;max-width:220px;outline:none;"
+                placeholder="تعليق أو رد..."
+                value="${item.comment !== 'null' ? (item.comment || '') : ''}">
+              ${!isDone
+                ? `<button onclick="handleDone(event, '${item.id}')" class="btn btn-success btn-sm">تم</button>`
+                : `<span style="color:var(--success);font-weight:700;font-size:0.82rem;"><i class="fas fa-check-circle"></i> مكتمل</span>`}
             </div>
-        </div>
-    </main>
+          </div>`;
+        container.appendChild(div);
+      });
+    }
 
-    <script src="api.js"></script>
-    <script src="nav.js"></script>
-    <script>
-        const activeUser = checkAuth();
-        const userBranch = localStorage.getItem('userBranch') || "المعمورة";
-        document.getElementById('current-branch-name').innerText = userBranch;
-        
-        let allItems = [];
-
-        if (activeUser) {
-            window.onload = loadNotifications;
-        }
-
-        async function loadNotifications() {
-            try {
-                // استخدام الدالة الموحدة fetchOrders من api.js لجلب التنبيهات
-                const response = await fetchOrders(); 
-                allItems = (response[0]?.data) ? response[0].data : (response.data || response);
-                applyFilter();
-            } catch (e) {
-                document.getElementById('notif-container').innerHTML = 
-                    '<div style="text-align:center; padding:20px; color:red;">❌ تعذر الاتصال بالسيرفر</div>';
-            }
-        }
-
-        function applyFilter() {
-            const current = String(userBranch).trim();
-            
-            const filtered = allItems.filter(item => {
-                // معالجة البيانات فقط إذا كانت من نوع "إشعار" أو "تنبيه"
-                if(item.type !== "إشعار" && item.type !== "تنبيه") return false;
-
-                const isDone = (item.done === "تم" || item.done === true || item.done === "true");
-                if (document.getElementById('hideDone').checked && isDone) return false;
-                
-                const isSent = (String(item.branch || "").trim() === current);
-                const isReceived = (String(item.target_branch || "").trim() === current);
-                
-                return (document.getElementById('showSent').checked && isSent) || 
-                       (document.getElementById('showReceived').checked && isReceived);
-            });
-
-            renderNotifications(filtered);
-        }
-
-        function renderNotifications(items) {
-            const container = document.getElementById('notif-container');
-            if (items.length === 0) {
-                container.innerHTML = '<div style="text-align:center; padding:80px; color:#94a3b8;"><i class="fas fa-bell-slash fa-3x" style="margin-bottom:15px; opacity:0.3;"></i><p>لا توجد تنبيهات تطابق الفلتر</p></div>';
-                return;
-            }
-
-            container.innerHTML = items.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)).map(item => {
-                const isDone = (item.done === "تم" || item.done === true || item.done === "true");
-                const timeStr = item.createdAt ? new Date(item.createdAt).toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'}) : '--:--';
-                const isIncoming = (String(item.target_branch).trim() === String(userBranch).trim());
-
-                return `
-                    <div class="notif-card ${isDone ? 'completed' : ''}">
-                        <div class="notif-header">
-                            <div class="notif-time"><i class="far fa-clock"></i> ${timeStr}</div>
-                            <div style="display:flex; gap:5px; align-items:center;">
-                                <span class="branch-badge">${item.branch}</span>
-                                <i class="fas fa-long-arrow-alt-left" style="color:#cbd5e0"></i>
-                                <span class="branch-badge" style="background:#e0f2fe">${item.target_branch}</span>
-                            </div>
-                        </div>
-                        <div class="notif-body">
-                            <span style="color: ${isIncoming ? '#e67e22' : '#3498db'}; font-weight: bold;">
-                                ${isIncoming ? '📥 وارد: ' : '📤 صادر: '}
-                            </span>
-                            <b>${item.note || 'تنبيه جديد'}</b>
-                        </div>
-                        <div class="notif-actions">
-                            <input type="text" id="comm-${item.id}" class="comment-input" 
-                                   placeholder="أضف رد أو ملاحظة..." 
-                                   value="${(item.comment && item.comment !== 'null') ? item.comment : ''}" 
-                                   ${isDone ? 'disabled' : ''}>
-                            ${!isDone ? 
-                                `<button onclick="handleDone(event, '${item.id}')" class="btn-confirm">تم</button>` : 
-                                `<span style="color:#27ae60; font-weight:bold; font-size:0.9rem;"><i class="fas fa-check-circle"></i> تم التنفيذ</span>`
-                            }
-                        </div>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        async function handleDone(event, id) {
-            const btn = event.currentTarget;
-            const comment = document.getElementById(`comm-${id}`).value;
-            
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-
-            const success = await updateData({ 
-                id: id, 
-                type: "إشعار", 
-                comment: comment, 
-                done: "تم", 
-                updatedAt: new Date().toISOString() 
-            });
-
-            if (success) {
-                loadNotifications();
-            } else {
-                alert("⚠️ تعذر تحديث الحالة، تأكد من اتصال الإنترنت");
-                btn.disabled = false;
-                btn.innerText = "تم";
-            }
-        }
-    </script>
+    async function handleDone(event, id) {
+      const btn = event.target;
+      const comment = document.getElementById(`comm-${id}`).value;
+      const orig = btn.textContent;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+      const success = await updateData({ id, type: "إشعار", action: "update_status", comment, done: "تم", updatedAt: new Date().toISOString() });
+      if (success) {
+        loadNotifications();
+      } else {
+        alert("⚠️ فشل في تحديث الحالة");
+        btn.disabled = false;
+        btn.textContent = orig;
+      }
+    }
+  </script>
 </body>
 </html>
