@@ -1,107 +1,310 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>لوحة تحكم صيدلية إبراهيم حمدي</title>
-    <!-- استيراد المكتبات -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>إضافة طلب - صيدليات د. إبراهيم</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    .form-card { max-width: 620px; margin: 0 auto; }
+    .type-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .type-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 14px 10px;
+      border: 2px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface-2);
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: var(--font);
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+    .type-btn i { font-size: 1.3rem; }
+    .type-btn.active {
+      border-color: var(--accent);
+      background: #e0f2fe;
+      color: var(--accent-dark);
+    }
+    .type-btn:hover { border-color: var(--accent); }
+
+    .form-section { display: none; }
+    .form-section.visible { display: block; }
+
+    .field-group { margin-bottom: 16px; }
+    .field-group label {
+      display: block;
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+    .field-icon-wrap { position: relative; }
+    .field-icon-wrap i {
+      position: absolute;
+      right: 11px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      pointer-events: none;
+    }
+    .field-icon-wrap input, .field-icon-wrap select {
+      padding-right: 34px;
+    }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media(max-width:480px){ .grid-2 { grid-template-columns: 1fr; } }
+
+    .btn-submit-full {
+      width: 100%;
+      padding: 15px;
+      background: var(--success);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-md);
+      font-family: var(--font);
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s;
+      margin-top: 8px;
+    }
+    .btn-submit-full:hover:not(:disabled) { background: #16a34a; transform: translateY(-1px); }
+    .btn-submit-full:disabled { background: var(--text-muted); cursor: not-allowed; }
+
+    .success-toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: #166534;
+      color: #dcfce7;
+      padding: 12px 24px;
+      border-radius: 30px;
+      font-weight: 700;
+      font-size: 0.9rem;
+      opacity: 0;
+      transition: all 0.3s;
+      z-index: 9999;
+      white-space: nowrap;
+    }
+    .success-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  </style>
 </head>
 <body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card form-card">
+      <div class="page-header">
+        <div class="page-title"><i class="fas fa-plus-circle"></i> طلب جديد</div>
+      </div>
 
-    <!-- القائمة الجانبية يتم حقنها هنا بواسطة nav.js -->
-    <div class="nav-bar"></div>
+      <!-- Type Selector -->
+      <div class="type-grid">
+        <button class="type-btn active" onclick="setType('شراء', this)">
+          <i class="fas fa-shopping-cart" style="color:#f59e0b;"></i> طلب شراء
+        </button>
+        <button class="type-btn" onclick="setType('تحويل', this)">
+          <i class="fas fa-exchange-alt" style="color:#38bdf8;"></i> تحويل
+        </button>
+        <button class="type-btn" onclick="setType('جرد', this)">
+          <i class="fas fa-clipboard-list" style="color:#22c55e;"></i> جرد
+        </button>
+        <button class="type-btn" onclick="setType('إشعار', this)">
+          <i class="fas fa-bell" style="color:#a855f7;"></i> إشعار
+        </button>
+      </div>
 
-    <main class="content">
-        <header>
-            <h1 id="welcome-msg">مرحباً، د. إبراهيم 👋</h1>
-            <p id="current-date"></p>
-        </header>
-
-        <!-- كروت الإحصائيات -->
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="info">
-                    <h3>نواقص اليوم</h3>
-                    <p id="shortage-count"><i class="fas fa-spinner fa-spin"></i></p>
-                </div>
-                <i class="fas fa-clipboards"></i>
-            </div>
-            <div class="stat-card warning">
-                <div class="info">
-                    <h3>طلبات معلقة</h3>
-                    <p id="pending-count"><i class="fas fa-spinner fa-spin"></i></p>
-                </div>
-                <i class="fas fa-clock"></i>
-            </div>
+      <!-- Branch (hidden for شراء) -->
+      <div class="field-group" id="branch-div">
+        <label id="branch-label">توجيه إلى فرع</label>
+        <div class="field-icon-wrap">
+          <i class="fas fa-store"></i>
+          <select id="branch" class="form-select">
+            <option value="المعمورة">المعمورة</option>
+            <option value="سان ستيفانو">سان ستيفانو</option>
+            <option value="سيدى بشر">سيدى بشر</option>
+          </select>
         </div>
+      </div>
 
-        <!-- قسم الرسم البياني مع حاوية محددة الارتفاع -->
-        <div class="chart-container" style="position: relative; height:40vh; width:100%; background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
-            <h3 style="margin-bottom: 15px;">معدل النواقص خلال الأسبوع</h3>
-            <canvas id="myChart"></canvas>
+      <!-- Item Section -->
+      <div class="form-section visible" id="item-section">
+        <div class="grid-2">
+          <div class="field-group">
+            <label>كود الصنف</label>
+            <div class="field-icon-wrap">
+              <i class="fas fa-barcode"></i>
+              <input type="text" id="item_code" class="form-input" placeholder="مثال: 102030">
+            </div>
+          </div>
+          <div class="field-group" id="item-name-div">
+            <label>اسم الصنف</label>
+            <div class="field-icon-wrap">
+              <i class="fas fa-capsules"></i>
+              <input type="text" id="item_name" class="form-input" placeholder="اسم الدواء أو المنتج">
+            </div>
+          </div>
         </div>
-    </main>
+      </div>
 
-    <!-- الملفات البرمجية -->
-    <script src="api.js"></script>
-    <script src="nav.js"></script>
-    <script>
-        // 1. تأمين الصفحة وتحديث التاريخ
-        const user = checkAuth(); // التأكد من هوية المستخدم
-        if(user) {
-            document.getElementById('welcome-msg').innerText = `مرحباً، ${user} 👋`;
+      <!-- Customer + Qty -->
+      <div class="form-section visible" id="extra-section">
+        <div class="grid-2">
+          <div class="field-group">
+            <label>كود العميل</label>
+            <div class="field-icon-wrap">
+              <i class="fas fa-phone-alt"></i>
+              <input type="text" id="customer_code" class="form-input" placeholder="رقم الموبايل">
+            </div>
+          </div>
+          <div class="field-group">
+            <label>اسم العميل</label>
+            <div class="field-icon-wrap">
+              <i class="fas fa-user"></i>
+              <input type="text" id="customer_name" class="form-input" placeholder="اختياري">
+            </div>
+          </div>
+        </div>
+        <div class="field-group" style="max-width:200px;">
+          <label>الكمية المطلوبة</label>
+          <div class="field-icon-wrap">
+            <i class="fas fa-sort-numeric-up"></i>
+            <input type="number" id="qty" class="form-input" value="1" min="1">
+          </div>
+        </div>
+      </div>
+
+      <!-- Note Section -->
+      <div class="form-section" id="note-section">
+        <div class="field-group">
+          <label>نص الإشعار / التفاصيل</label>
+          <textarea id="note_text" class="form-input" rows="4" placeholder="اكتب التفاصيل هنا..." style="resize:vertical;"></textarea>
+        </div>
+      </div>
+
+      <button class="btn-submit-full" id="submitBtn" onclick="submitOrder()">
+        <i class="fas fa-paper-plane"></i> إرسال الطلب
+      </button>
+    </div>
+  </div>
+
+  <div class="success-toast" id="toast">✅ تم الإرسال بنجاح!</div>
+
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    const activeUser = checkAuth();
+    const userBranch = (localStorage.getItem('userBranch') || "المعمورة").trim();
+    let currentType = 'شراء';
+
+    if (activeUser) { handleTypeInit(); }
+
+    function setType(type, btn) {
+      currentType = type;
+      document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      handleTypeInit();
+    }
+
+    function handleTypeInit() {
+      const branchEl = document.getElementById('branch');
+      const branchDiv = document.getElementById('branch-div');
+      const branchLabel = document.getElementById('branch-label');
+      const itemSection = document.getElementById('item-section');
+      const itemNameDiv = document.getElementById('item-name-div');
+      const extraSection = document.getElementById('extra-section');
+      const noteSection = document.getElementById('note-section');
+
+      // Reset
+      [itemSection, extraSection, itemNameDiv, branchDiv].forEach(el => el.classList.add('visible'));
+      noteSection.classList.remove('visible');
+      branchEl.disabled = false;
+      branchLabel.textContent = "توجيه إلى فرع";
+
+      if (currentType === "شراء") {
+        branchEl.value = userBranch;
+        branchEl.disabled = true;
+        branchLabel.textContent = "فرع الطلب (ثابت)";
+      } else if (currentType === "جرد") {
+        itemNameDiv.classList.remove('visible');
+        extraSection.classList.remove('visible');
+      } else if (currentType === "إشعار") {
+        itemSection.classList.remove('visible');
+        extraSection.classList.remove('visible');
+        branchLabel.textContent = "إرسال إلى فرع";
+        noteSection.classList.add('visible');
+      } else if (currentType === "تحويل") {
+        branchLabel.textContent = "طلب تحويل من فرع";
+      }
+    }
+
+    async function submitOrder() {
+      const btn = document.getElementById('submitBtn');
+      const itemCode = document.getElementById('item_code').value.trim();
+      const itemName = document.getElementById('item_name').value.trim();
+
+      if (currentType !== "إشعار" && !itemCode && !itemName) {
+        alert("برجاء إدخال كود أو اسم الصنف");
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الإرسال...';
+
+      const payload = {
+        action: "insert_order",
+        type: currentType,
+        user: activeUser,
+        branch: userBranch,
+        target_branch: document.getElementById('branch').value,
+        item_code: itemCode,
+        item: itemName,
+        customer_code: document.getElementById('customer_code').value.trim(),
+        customer_name: document.getElementById('customer_name').value.trim(),
+        qty: document.getElementById('qty').value || 1,
+        note: document.getElementById('note_text').value.trim(),
+        state: 'pending',
+        createdAt: new Date().toISOString()
+      };
+
+      try {
+        const success = await updateData(payload);
+        if (success) {
+          showToast();
+          document.querySelectorAll('input:not([disabled]), textarea').forEach(el => el.value = '');
+          document.getElementById('qty').value = '1';
+        } else {
+          alert("فشل الإرسال ❌ تأكد من تشغيل الـ Workflow");
         }
+      } catch(e) {
+        alert("خطأ في الاتصال بالسيرفر");
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-paper-plane"></i> إرسال الطلب';
+      }
+    }
 
-        document.getElementById('current-date').innerText = new Date().toLocaleDateString('ar-EG', { 
-            weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
-        });
-
-        async function initDashboard() {
-            try {
-                // 2. جلب البيانات الحقيقية
-                const orders = await fetchOrders(); 
-                
-                if (orders && Array.isArray(orders)) {
-                    document.getElementById('shortage-count').innerText = orders.length;
-                    // تأكد أن الحالة في الشيت مكتوبة 'pending'
-                    const pendingOrders = orders.filter(o => o.state === 'pending' || o.state === 'معلق');
-                    document.getElementById('pending-count').innerText = pendingOrders.length;
-                }
-
-                // 3. إعداد الرسم البياني
-                const ctx = document.getElementById('myChart').getContext('2d');
-                new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'],
-                        datasets: [{
-                            label: 'عدد النواقص',
-                            data: [12, 19, 3, 5, 2, 15, 10], 
-                            borderColor: '#3498db',
-                            backgroundColor: 'rgba(52, 152, 219, 0.1)',
-                            fill: true,
-                            tension: 0.4
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: { position: 'bottom' }
-                        }
-                    }
-                });
-            } catch (e) {
-                console.error("Dashboard Load Error:", e);
-                document.getElementById('shortage-count').innerText = "!";
-                document.getElementById('pending-count').innerText = "!";
-            }
-        }
-
-        document.addEventListener('DOMContentLoaded', initDashboard);
-    </script>
+    function showToast() {
+      const t = document.getElementById('toast');
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2800);
+    }
+  </script>
 </body>
 </html>
