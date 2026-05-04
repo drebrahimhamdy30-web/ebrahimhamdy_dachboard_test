@@ -69,18 +69,29 @@ async function verifyToken() {
 }
 
 async function checkAuth() {
-  const user  = localStorage.getItem('activeUser');
-  const token = localStorage.getItem('authToken');
+  const user      = localStorage.getItem('activeUser');
+  const token     = localStorage.getItem('authToken');
+  const lastCheck = localStorage.getItem('lastVerify');
+  const now       = Date.now();
+
   if (!user || !token) {
     window.location.replace('index.html');
     return null;
   }
+
+  const tenMinutes = 10 * 60 * 1000;
+  if (lastCheck && (now - parseInt(lastCheck)) < tenMinutes) {
+    return user;
+  }
+
   const valid = await verifyToken();
   if (!valid) {
     localStorage.clear();
     window.location.replace('index.html');
     return null;
   }
+
+  localStorage.setItem('lastVerify', now);
   return user;
 }
 
