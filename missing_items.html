@@ -22,7 +22,6 @@
         </button>
       </div>
 
-      <!-- فلتر -->
       <div class="filter-bar">
         <label class="check-label">
           <input type="checkbox" id="showDeducted" onchange="applyFilter()">
@@ -30,10 +29,8 @@
         </label>
       </div>
 
-      <!-- إحصائيات -->
       <div class="stats-row" id="stats-row" style="margin-bottom:16px;"></div>
 
-      <!-- جدول -->
       <div class="table-wrap">
         <table>
           <thead>
@@ -74,7 +71,6 @@
         const all = Array.isArray(response) ? response :
                     (response[0]?.data || response.data || []);
 
-        // فلترة حسب فرع المستخدم
         rawData = all.filter(i => String(i.branch || '').trim() === userBranch);
 
         renderStats();
@@ -86,8 +82,8 @@
 
     function renderStats() {
       const total    = rawData.length;
-      const pending  = rawData.filter(i => i.status !== 'true' && i.status !== true).length;
-      const deducted = rawData.filter(i => i.status === 'true' || i.status === true).length;
+      const pending  = rawData.filter(i => !i.state || i.state === false || i.state === 'false').length;
+      const deducted = rawData.filter(i => i.state === true || i.state === 'true').length;
 
       document.getElementById('stats-row').innerHTML = `
         <div class="stat-card">
@@ -108,7 +104,7 @@
     function applyFilter() {
       const showDeducted = document.getElementById('showDeducted').checked;
       const filtered = rawData.filter(i => {
-        const isDeducted = (i.status === 'true' || i.status === true);
+        const isDeducted = (i.state === true || i.state === 'true');
         if (!showDeducted && isDeducted) return false;
         return true;
       });
@@ -122,15 +118,14 @@
         return;
       }
 
-      // ترتيب: غير المخصوم أولاً
       items.sort((a, b) => {
-        const aD = (a.status === 'true' || a.status === true);
-        const bD = (b.status === 'true' || b.status === true);
+        const aD = (a.state === true || a.state === 'true');
+        const bD = (b.state === true || b.state === 'true');
         return aD - bD;
       });
 
       tbody.innerHTML = items.map(item => {
-        const isDeducted = (item.status === 'true' || item.status === true);
+        const isDeducted = (item.state === true || item.state === 'true');
         const dateStr = item.createdAt ? new Date(item.createdAt).toLocaleDateString('ar-EG') : '---';
 
         return `
@@ -162,15 +157,13 @@
 
       const success = await updateData({
         id: id,
-        type: "عدم_وصول",
-        action: "update_status",
-        status: "true",
+        type: "عدم_وصول_تحديث",
         updatedAt: new Date().toISOString()
       });
 
       if (success) {
         const idx = rawData.findIndex(x => x.id == id);
-        if (idx !== -1) rawData[idx].status = 'true';
+        if (idx !== -1) rawData[idx].state = true;
         renderStats();
         applyFilter();
       } else {
