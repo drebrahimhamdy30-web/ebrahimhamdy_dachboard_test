@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>لم يصل من الشركات - صيدليات د. إبراهيم</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+
+      <div class="page-header">
+        <div class="page-title">
+          <i class="fas fa-truck"></i> لم يصل من الشركات
+          <span class="highlight" id="branch-display"></span>
+        </div>
+        <button class="btn btn-primary" onclick="loadMissing()">
+          <i class="fas fa-sync-alt"></i> تحديث
+        </button>
+      </div>
+
+      <!-- فلتر -->
+      <div class="filter-bar">
+        <label class="check-label">
+          <input type="checkbox" id="showDeducted" onchange="applyFilter()">
+          إظهار المخصوم من المطالبة
+        </label>
+      </div>
+
+      <!-- إحصائيات -->
+      <div class="stats-row" id="stats-row" style="margin-bottom:16px;"></div>
+
+      <!-- جدول -->
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>التاريخ</th>
+              <th>رقم الفاتورة</th>
+              <th>اسم الصنف</th>
+              <th>العدد</th>
+              <th>الحالة</th>
+              <th>إجراء</th>
+            </tr>
+          </thead>
+          <tbody id="table-body">
+            <tr class="loading-row"><td colspan="6">⏳ جاري تحميل البيانات...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    const activeUser = checkAuth();
+    const userBranch = (localStorage.getItem('userBranch') || '').trim();
+    let rawData = [];
+
+    document.getElementById('branch-display').textContent = userBranch;
+
+    if (activeUser) window.onload = loadMissing;
+
+    async function loadMissing() {
+      const tbody = document.getElementById('table-body');
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="6">⏳ جاري جلب البيانات...</td></tr>';
+      try {
+        const response = await fetchMissing();
+        const all = Array.isArray(response) ? response :
+                    (response[0]?.data || response.data || []);
+
+        // فلترة حسب فرع المستخدم
+        rawData = all.filter(i => String(i.branch || '').trim() === userBranch);
+
+        renderStats();
+        applyFilter();
+      } catch(e) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--danger);padding:30px;">❌ خطأ في الاتصال</td></tr>';
+      }
+    }
+
+    function renderStats() {
+      const total    = rawData.length;
+      const pending  = rawData.filter(i => i.status !== 'true' && i.status !== true).length;
+      const deducted = rawData.filter(i => i.status === 'true' || i.status === true).length;
+
+      document.getElementById('stats-row').innerHTML = `
+        <div class="stat-card">
+          <div class="stat-num">${total}</div>
+          <div class="stat-lbl">إجمالي الأصناف</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" style="color:var(--warning);">${pending}</div>
+          <div class="stat-lbl">لم يُخصم بعد</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" style="color:var(--success);">${deducted}</div>
+          <div class="stat-lbl">تم التخصيم</div>
+        </div>
+      `;
+    }
+
+    function applyFilter() {
+      const showDeducted = document.getElementById('showDeducted').checked;
+      const filtered = rawData.filter(i => {
+        const isDeducted = (i.status === 'true' || i.status === true);
+        if (!showDeducted && isDeducted) return false;
+        return true;
+      });
+      renderTable(filtered);
+    }
+
+    function renderTable(items) {
+      const tbody = document.getElementById('table-body');
+      if (items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-muted);">✅ لا توجد أصناف معلقة</td></tr>';
+        return;
+      }
+
+      // ترتيب: غير المخصوم أولاً
+      items.sort((a, b) => {
+        const aD = (a.status === 'true' || a.status === true);
+        const bD = (b.status === 'true' || b.status === true);
+        return aD - bD;
+      });
+
+      tbody.innerHTML = items.map(item => {
+        const isDeducted = (item.status === 'true' || item.status === true);
+        const dateStr = item.createdAt ? new Date(item.createdAt).toLocaleDateString('ar-EG') : '---';
+
+        return `
+          <tr class="${isDeducted ? 'row-done' : ''}">
+            <td style="font-size:0.78rem;">${dateStr}</td>
+            <td><code style="font-size:0.82rem;color:var(--text-secondary);">${item.invoice_no || '---'}</code></td>
+            <td style="text-align:right;font-weight:700;">${item.item_name || '---'}</td>
+            <td><b style="color:var(--warning);">${item.qty || '---'}</b></td>
+            <td>
+              ${isDeducted
+                ? '<span class="badge badge-green">تم التخصيم ✅</span>'
+                : '<span class="badge badge-red">لم يُخصم بعد ❌</span>'}
+            </td>
+            <td>
+              ${!isDeducted
+                ? `<button class="btn btn-success btn-sm" onclick="markDeducted('${item.id}', this)">
+                     <i class="fas fa-check"></i> تم التخصيم
+                   </button>`
+                : `<i class="fas fa-check-double" style="color:var(--success);"></i>`}
+            </td>
+          </tr>`;
+      }).join('');
+    }
+
+    async function markDeducted(id, btn) {
+      if (!confirm("تأكيد التخصيم من المطالبة؟")) return;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+      const success = await updateData({
+        id: id,
+        type: "عدم_وصول",
+        action: "update_status",
+        status: "true",
+        updatedAt: new Date().toISOString()
+      });
+
+      if (success) {
+        const idx = rawData.findIndex(x => x.id == id);
+        if (idx !== -1) rawData[idx].status = 'true';
+        renderStats();
+        applyFilter();
+      } else {
+        alert("فشل التحديث ❌");
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-check"></i> تم التخصيم';
+      }
+    }
+  </script>
+</body>
+</html>
