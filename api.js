@@ -1,9 +1,7 @@
-// ===== API Configuration =====
 const FETCH_URL = "https://agent.ebrahimhamdy.com/webhook/get_order";
 const POST_URL  = "https://agent.ebrahimhamdy.com/webhook/taskmanagement";
 const LOGIN_URL = "https://agent.ebrahimhamdy.com/webhook/login";
 
-// ===== Fetch Data from n8n =====
 async function fetchFromN8N(category) {
   try {
     const response = await fetch(`${FETCH_URL}?type=${category}`);
@@ -19,10 +17,11 @@ async function fetchFromN8N(category) {
   }
 }
 
-async function fetchOrders() { return await fetchFromN8N('orders'); }
-async function fetchData()   { return await fetchFromN8N('orders'); }
+async function fetchOrders()    { return await fetchFromN8N('orders'); }
+async function fetchData()      { return await fetchFromN8N('orders'); }
+async function fetchContracts() { return await fetchFromN8N('contracts'); }
+async function fetchMissing()   { return await fetchFromN8N('missing'); }
 
-// ===== Login =====
 async function login(username, password) {
   try {
     const response = await fetch(LOGIN_URL, {
@@ -37,7 +36,6 @@ async function login(username, password) {
   }
 }
 
-// ===== Update / Insert Data =====
 async function updateData(data) {
   try {
     const response = await fetch(POST_URL, {
@@ -51,7 +49,6 @@ async function updateData(data) {
   }
 }
 
-// ===== Auth Guard =====
 function checkAuth() {
   const user = localStorage.getItem('activeUser');
   if (!user && !window.location.href.includes('index.html')) {
