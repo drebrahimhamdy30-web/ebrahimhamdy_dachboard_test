@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>فواتير التعاقد - صيدليات د. إبراهيم</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+
+      <div class="page-header">
+        <div class="page-title">
+          <i class="fas fa-file-contract"></i> فواتير التعاقد
+        </div>
+        <button class="btn btn-primary" onclick="loadContracts()">
+          <i class="fas fa-sync-alt"></i> تحديث
+        </button>
+      </div>
+
+      <!-- فلتر -->
+      <div class="filter-bar">
+        <span class="filter-label"><i class="fas fa-filter"></i> الحالة:</span>
+        <select id="statusFilter" class="form-select" style="width:auto;" onchange="applyFilter()">
+          <option value="unpaid" selected>غير مستلمة ⏳</option>
+          <option value="paid">مستلمة ✅</option>
+          <option value="all">الكل</option>
+        </select>
+        <span class="filter-label" style="margin-right:8px;"><i class="fas fa-store"></i> الفرع:</span>
+        <select id="branchFilter" class="form-select" style="width:auto;" onchange="applyFilter()">
+          <option value="all">كل الفروع</option>
+          <option value="المعمورة">المعمورة</option>
+          <option value="سان ستيفانو">سان ستيفانو</option>
+          <option value="سيدى بشر">سيدى بشر</option>
+        </select>
+      </div>
+
+      <!-- إحصائيات -->
+      <div class="stats-row" id="stats-row" style="margin-bottom:16px;"></div>
+
+      <!-- جدول -->
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>التاريخ</th>
+              <th>الفرع</th>
+              <th>رقم القيد</th>
+              <th>إجمالي الفاتورة</th>
+              <th>ملاحظات</th>
+              <th>الحالة</th>
+              <th>إجراء</th>
+            </tr>
+          </thead>
+          <tbody id="table-body">
+            <tr class="loading-row"><td colspan="7">⏳ جاري تحميل البيانات...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    const activeUser = checkAuth();
+    let rawData = [];
+
+    if (activeUser) window.onload = loadContracts;
+
+    async function loadContracts() {
+      const tbody = document.getElementById('table-body');
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="7">⏳ جاري جلب البيانات...</td></tr>';
+      try {
+        const response = await fetchContracts();
+        rawData = Array.isArray(response) ? response :
+                  (response[0]?.data || response.data || []);
+        renderStats();
+        applyFilter();
+      } catch(e) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:30px;">❌ خطأ في الاتصال</td></tr>';
+      }
+    }
+
+    function renderStats() {
+      const total   = rawData.length;
+      const unpaid  = rawData.filter(i => i.status === 'unpaid').length;
+      const paid    = rawData.filter(i => i.status === 'paid').length;
+      const amount  = rawData.reduce((s, i) => s + (parseFloat(i.total_amount) || 0), 0);
+
+      document.getElementById('stats-row').innerHTML = `
+        <div class="stat-card">
+          <div class="stat-num">${total}</div>
+          <div class="stat-lbl">إجمالي الفواتير</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" style="color:var(--warning);">${unpaid}</div>
+          <div class="stat-lbl">غير مستلمة</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" style="color:var(--success);">${paid}</div>
+          <div class="stat-lbl">مستلمة</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" style="color:var(--accent-dark);font-size:1.2rem;">${amount.toLocaleString('ar-EG')} ج</div>
+          <div class="stat-lbl">إجمالي القيمة</div>
+        </div>
+      `;
+    }
+
+    function applyFilter() {
+      const statusVal = document.getElementById('statusFilter').value;
+      const branchVal = document.getElementById('branchFilter').value;
+
+      const filtered = rawData.filter(i => {
+        const sMatch = (statusVal === 'all' || i.status === statusVal);
+        const bMatch = (branchVal === 'all' || i.branch === branchVal);
+        return sMatch && bMatch;
+      });
+      renderTable(filtered);
+    }
+
+    function renderTable(items) {
+      const tbody = document.getElementById('table-body');
+      if (items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد فواتير تطابق الفلتر</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = items.map(item => {
+        const isPaid = (item.status === 'paid');
+        const dateStr = item.createdAt ? new Date(item.createdAt).toLocaleDateString('ar-EG') : '---';
+        const amount  = parseFloat(item.total_amount || 0).toLocaleString('ar-EG');
+
+        return `
+          <tr class="${isPaid ? 'row-done' : ''}">
+            <td style="font-size:0.78rem;">${dateStr}</td>
+            <td><span class="branch-tag">${item.branch || '---'}</span></td>
+            <td><code style="font-size:0.82rem;color:var(--text-secondary);">${item.cust_code || '---'}</code></td>
+            <td><b style="color:var(--accent-dark);">${amount} ج</b></td>
+            <td style="font-size:0.82rem;color:var(--text-secondary);text-align:right;max-width:180px;">
+              ${item.notes || '---'}
+            </td>
+            <td>
+              ${isPaid
+                ? '<span class="badge badge-green">مستلمة ✅</span>'
+                : '<span class="badge badge-yellow">غير مستلمة ⏳</span>'}
+            </td>
+            <td>
+              ${!isPaid
+                ? `<button class="btn btn-success btn-sm" onclick="markPaid('${item.id}', this)">
+                     <i class="fas fa-check"></i> تم الاستلام
+                   </button>`
+                : `<i class="fas fa-check-double" style="color:var(--success);"></i>`}
+            </td>
+          </tr>`;
+      }).join('');
+    }
+
+    async function markPaid(id, btn) {
+      if (!confirm("تأكيد استلام الفاتورة؟")) return;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+      const success = await updateData({
+        id: id,
+        type: "تعاقد",
+        action: "update_status",
+        status: "paid",
+        updatedAt: new Date().toISOString()
+      });
+
+      if (success) {
+        const idx = rawData.findIndex(x => x.id == id);
+        if (idx !== -1) rawData[idx].status = 'paid';
+        renderStats();
+        applyFilter();
+      } else {
+        alert("فشل التحديث ❌");
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-check"></i> تم الاستلام';
+      }
+    }
+  </script>
+</body>
+</html>
