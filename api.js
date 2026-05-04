@@ -7,10 +7,12 @@ async function fetchFromN8N(category) {
     const response = await fetch(`${FETCH_URL}?type=${category}`);
     if (!response.ok) throw new Error('Network error');
     const data = await response.json();
-    if (Array.isArray(data)) return data;
+    if (Array.isArray(data) && data[0]?.data) return data[0].data;
+    if (Array.isArray(data) && data[0]?.branch) return data;
+    if (Array.isArray(data) && data[0]?.invoice_no) return data;
+    if (Array.isArray(data) && data[0]?.cust_code) return data;
     if (data.data && Array.isArray(data.data)) return data.data;
-    if (data[0] && data[0].data) return data[0].data;
-    return [];
+    return Array.isArray(data) ? data : [];
   } catch (error) {
     console.error(`Error fetching ${category}:`, error);
     return [];
