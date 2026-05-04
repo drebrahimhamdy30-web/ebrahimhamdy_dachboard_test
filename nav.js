@@ -27,6 +27,12 @@ function injectNavbar() {
       <a href="notifications.html" class="${currentPage === 'notifications.html' ? 'active' : ''}">
         <i class="fas fa-bell"></i> إشعارات
       </a>
+      <a href="contracts.html" class="${currentPage === 'contracts.html' ? 'active' : ''}">
+        <i class="fas fa-file-contract"></i> تعاقدات
+      </a>
+      <a href="missing_items.html" class="${currentPage === 'missing_items.html' ? 'active' : ''}">
+        <i class="fas fa-truck"></i> لم يصل
+      </a>
     </nav>
     <div class="user-info">
       <span id="nav-user">${localStorage.getItem('activeUser') || ''}</span>
