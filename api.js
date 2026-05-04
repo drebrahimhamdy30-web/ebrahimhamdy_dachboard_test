@@ -1,62 +1,37 @@
-const FETCH_URL = "https://agent.ebrahimhamdy.com/webhook/get_order";
-const POST_URL  = "https://agent.ebrahimhamdy.com/webhook/taskmanagement";
-const LOGIN_URL = "https://agent.ebrahimhamdy.com/webhook/login";
+const VERIFY_URL = "https://agent.ebrahimhamdy.com/webhook/verify_token";
 
-async function fetchFromN8N(category) {
+async function verifyToken() {
+  const token = localStorage.getItem('authToken');
+  if (!token) return false;
   try {
-    const response = await fetch(`${FETCH_URL}?type=${category}`);
-    if (!response.ok) throw new Error('Network error');
-    const data = await response.json();
-    if (Array.isArray(data) && data[0]?.data) return data[0].data;
-    if (Array.isArray(data) && data[0]?.branch) return data;
-    if (Array.isArray(data) && data[0]?.invoice_no) return data;
-    if (Array.isArray(data) && data[0]?.cust_code) return data;
-    if (data.data && Array.isArray(data.data)) return data.data;
-    return Array.isArray(data) ? data : [];
-  } catch (error) {
-    console.error(`Error fetching ${category}:`, error);
-    return [];
-  }
-}
-
-async function fetchOrders()    { return await fetchFromN8N('orders'); }
-async function fetchData()      { return await fetchFromN8N('orders'); }
-async function fetchContracts() { return await fetchFromN8N('contracts'); }
-async function fetchMissing()   { return await fetchFromN8N('missing'); }
-
-async function login(username, password) {
-  try {
-    const response = await fetch(LOGIN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ user: username, pass: password })
-    });
-    if (!response.ok) return { success: false, message: "السيرفر لا يستجيب" };
-    return await response.json();
-  } catch(e) {
-    return { success: false, message: "فشل الاتصال بالإنترنت أو السيرفر" };
-  }
-}
-
-async function updateData(data) {
-  try {
-    const response = await fetch(POST_URL, {
+    const response = await fetch(VERIFY_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
+      body: JSON.stringify({ token: token })
     });
-    return response.ok;
+    const data = await response.json();
+    return data.valid === true;
   } catch(e) {
     return false;
   }
 }
 
-function checkAuth() {
-  const user = localStorage.getItem('activeUser');
-  if (!user && !window.location.href.includes('index.html')) {
+async function checkAuth() {
+  const user  = localStorage.getItem('activeUser');
+  const token = localStorage.getItem('authToken');
+
+  if (!user || !token) {
     window.location.replace('index.html');
     return null;
   }
+
+  const valid = await verifyToken();
+  if (!valid) {
+    localStorage.clear();
+    window.location.replace('index.html');
+    return null;
+  }
+
   return user;
 }
 
