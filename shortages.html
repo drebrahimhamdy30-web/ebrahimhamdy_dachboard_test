@@ -27,7 +27,6 @@
         </div>
       </div>
 
-      <!-- إحصائيات -->
       <div class="stats-row" id="stats-row" style="margin-bottom:16px;"></div>
 
       <div class="table-wrap">
@@ -36,6 +35,7 @@
             <tr>
               <th>التاريخ</th>
               <th>الصنف</th>
+              <th>الرصيد</th>
               <th>الفرع</th>
               <th>العميل</th>
               <th>كود العميل</th>
@@ -44,7 +44,7 @@
             </tr>
           </thead>
           <tbody id="shortage-list">
-            <tr class="loading-row"><td colspan="7">⏳ جاري جلب البيانات...</td></tr>
+            <tr class="loading-row"><td colspan="8">⏳ جاري جلب البيانات...</td></tr>
           </tbody>
         </table>
       </div>
@@ -68,12 +68,12 @@
     async function loadShortages(forceRefresh = false) {
       const tbody = document.getElementById('shortage-list');
       if (cachedData.length === 0 || forceRefresh) {
-        tbody.innerHTML = '<tr class="loading-row"><td colspan="7">⏳ جاري جلب البيانات...</td></tr>';
+        tbody.innerHTML = '<tr class="loading-row"><td colspan="8">⏳ جاري جلب البيانات...</td></tr>';
         try {
           const response = await fetchOrders();
           cachedData = (response[0]?.data) ? response[0].data : (response.data || response);
         } catch(e) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
           return;
         }
       }
@@ -82,21 +82,37 @@
     }
 
     function renderStats() {
-      const myItems    = cachedData.filter(item => {
+      const myItems = cachedData.filter(item => {
         const itemBranch = String(item.user || item.branch || "").trim();
         return (userBranch === "عام" || userBranch === "Admin" || itemBranch === userBranch);
       });
-      const needFollow = myItems.filter(i => String(i.cust_state || "").trim() === "غير متوفر يحتاج متابعة").length;
-      const done       = myItems.filter(i => String(i.cust_state || "").trim() === "متوفر وتم ابلاغ العميل").length;
+
+      const needFollow = myItems.filter(i =>
+        String(i.cust_state || "").trim() === "غير متوفر يحتاج متابعة" &&
+        parseFloat(i.stq || 0) > 0
+      ).length;
+
+      const done = myItems.filter(i =>
+        String(i.cust_state || "").trim() === "متوفر وتم ابلاغ العميل"
+      ).length;
+
+      const waitingStock = myItems.filter(i =>
+        String(i.cust_state || "").trim() === "غير متوفر يحتاج متابعة" &&
+        parseFloat(i.stq || 0) <= 0
+      ).length;
 
       document.getElementById('stats-row').innerHTML = `
         <div class="stat-card">
           <div class="stat-num" style="color:var(--warning);">${needFollow}</div>
-          <div class="stat-lbl">يحتاج متابعة</div>
+          <div class="stat-lbl">متاح للإبلاغ 🔔</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" style="color:var(--text-muted);">${waitingStock}</div>
+          <div class="stat-lbl">في انتظار الرصيد ⏳</div>
         </div>
         <div class="stat-card">
           <div class="stat-num" style="color:var(--success);">${done}</div>
-          <div class="stat-lbl">تم الإبلاغ</div>
+          <div class="stat-lbl">تم الإبلاغ ✅</div>
         </div>
       `;
     }
@@ -110,12 +126,13 @@
         const isMyBranch   = (userBranch === "عام" || userBranch === "Admin" || itemBranch === userBranch);
         const isNeedFollow = (currentState === "غير متوفر يحتاج متابعة");
         const isDone       = (currentState === "متوفر وتم ابلاغ العميل");
+        const hasStock     = (parseFloat(item.stq || 0) > 0);
 
         if (!isMyBranch) return false;
 
-        if (!showAllCompleted) return isNeedFollow;
+        if (!showAllCompleted) return isNeedFollow && hasStock;
 
-        return isNeedFollow || isDone;
+        return (isNeedFollow && hasStock) || isDone;
       });
 
       renderTable(filtered);
@@ -126,7 +143,7 @@
       if (items.length === 0) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="7" style="text-align:center;padding:50px;color:var(--text-muted);">
+            <td colspan="8" style="text-align:center;padding:50px;color:var(--text-muted);">
               ✅ لا توجد نواقص تحتاج متابعة حالياً
             </td>
           </tr>`;
@@ -144,13 +161,23 @@
         const displayDate = item.createdAt
           ? new Date(item.createdAt).toLocaleDateString('ar-EG')
           : '---';
+        const stq = parseFloat(item.stq || 0);
 
         return `
           <tr class="${isDone ? 'row-done' : ''}">
             <td style="font-size:0.78rem;">${displayDate}</td>
             <td style="text-align:right;">
               <b>${item.item_name || '---'}</b>
-              ${item.item_code ? `<div style="font-size:0.72rem;color:var(--text-muted);"><i class="fas fa-barcode"></i> ${item.item_code}</div>` : ''}
+              ${item.item_code
+                ? `<div style="font-size:0.72rem;color:var(--text-muted);">
+                     <i class="fas fa-barcode"></i> ${item.item_code}
+                   </div>`
+                : ''}
+            </td>
+            <td>
+              <b style="color:${stq > 0 ? 'var(--success)' : 'var(--danger)'};">
+                ${stq}
+              </b>
             </td>
             <td><span class="branch-tag">${item.user || '---'}</span></td>
             <td style="font-size:0.82rem;">${item.cust_name || '---'}</td>
