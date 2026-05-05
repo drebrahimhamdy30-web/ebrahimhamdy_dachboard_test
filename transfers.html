@@ -12,8 +12,13 @@
   <div class="container">
     <div class="card">
       <div class="page-header">
-        <div class="page-title"><i class="fas fa-exchange-alt"></i> تحويلات الفروع <span class="highlight" id="branch-tag"></span></div>
-        <button class="btn btn-primary" onclick="loadTransfers()"><i class="fas fa-sync-alt"></i> تحديث</button>
+        <div class="page-title">
+          <i class="fas fa-exchange-alt"></i> تحويلات الفروع
+          <span class="highlight" id="branch-tag"></span>
+        </div>
+        <button class="btn btn-primary" onclick="loadTransfers()">
+          <i class="fas fa-sync-alt"></i> تحديث
+        </button>
       </div>
 
       <div class="filter-bar">
@@ -48,7 +53,9 @@
             <tr>
               <th>التاريخ</th>
               <th>المسار</th>
-              <th>الصنف</th>
+              <th>اسم الصنف</th>
+              <th>كود الصنف</th>
+              <th>العميل</th>
               <th>الكمية</th>
               <th>ملاحظة</th>
               <th>الحالة</th>
@@ -56,7 +63,7 @@
             </tr>
           </thead>
           <tbody id="table-body">
-            <tr class="loading-row"><td colspan="7">⏳ جاري التحميل...</td></tr>
+            <tr class="loading-row"><td colspan="9">⏳ جاري التحميل...</td></tr>
           </tbody>
         </table>
       </div>
@@ -66,35 +73,37 @@
   <script src="api.js"></script>
   <script src="nav.js"></script>
   <script>
-// بعد ✅
-let rawData = [];
-let activeUser = null;
-let userBranchName = '';
+    let rawData = [];
+    let activeUser = null;
+    let userBranchName = '';
 
-checkAuth().then(user => {
-  activeUser = user;
-  if (user) {
-    userBranchName = (localStorage.getItem('userBranch') || "المعمورة").trim();
-    document.getElementById('branch-tag').textContent = userBranchName;
-    window.onload = loadTransfers;
-  }
-});
+    checkAuth().then(user => {
+      activeUser = user;
+      if (user) {
+        userBranchName = (localStorage.getItem('userBranch') || "المعمورة").trim();
+        document.getElementById('branch-tag').textContent = userBranchName;
+        window.onload = loadTransfers;
+      }
+    });
 
     async function loadTransfers() {
       const tbody = document.getElementById('table-body');
-      tbody.innerHTML = '<tr class="loading-row"><td colspan="7">⏳ جاري جلب البيانات...</td></tr>';
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="9">⏳ جاري جلب البيانات...</td></tr>';
       try {
         const response = await fetchOrders();
-  let items = (response && response[0]?.data) ? response[0].data : (response.data || response || []);
+        let items = (response && response[0]?.data)
+          ? response[0].data
+          : (response.data || response || []);
+
         if (items.length > 0) {
           rawData = items.filter(item => item.type === "تحويل");
           populateBranchFilter(rawData);
           applyFilters();
         } else {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد بيانات متاحة</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد بيانات متاحة</td></tr>';
         }
       } catch(e) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:30px;">❌ خطأ في الاتصال</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--danger);padding:30px;">❌ خطأ في الاتصال</td></tr>';
       }
     }
 
@@ -102,13 +111,14 @@ checkAuth().then(user => {
       const branchSelect = document.getElementById('branch-select-filter');
       const branches = new Set();
       data.forEach(item => {
-        if (item.user && item.user !== userBranchName) branches.add(item.user);
+        if (item.user   && item.user   !== userBranchName) branches.add(item.user);
         if (item.branch && item.branch !== userBranchName) branches.add(item.branch);
       });
       branchSelect.innerHTML = '<option value="all">كل الفروع</option>';
       branches.forEach(br => {
         const opt = document.createElement('option');
-        opt.value = br; opt.textContent = br;
+        opt.value = br;
+        opt.textContent = br;
         branchSelect.appendChild(opt);
       });
     }
@@ -117,56 +127,77 @@ checkAuth().then(user => {
       const dv = document.getElementById('direction-filter').value;
       const sv = document.getElementById('status-filter').value;
       const bv = document.getElementById('branch-select-filter').value;
+
       const filtered = rawData.filter(item => {
-        const isTarget = (item.branch === userBranchName);
-        const isSource = (item.user === userBranchName);
-        let dirMatch = (dv === 'all') || (dv === 'inbound' && isTarget) || (dv === 'outbound' && isSource);
-        let statMatch = (sv === 'all') || ((item.state || 'pending') === sv);
-        let branchMatch = (bv === 'all') || (item.user === bv || item.branch === bv);
+        const isTarget   = (item.branch === userBranchName);
+        const isSource   = (item.user   === userBranchName);
+        const dirMatch   = (dv === 'all') || (dv === 'inbound' && isTarget) || (dv === 'outbound' && isSource);
+        const statMatch  = (sv === 'all') || ((item.state || 'pending') === sv);
+        const branchMatch = (bv === 'all') || (item.user === bv || item.branch === bv);
         return dirMatch && statMatch && branchMatch;
       });
+
       renderTable(filtered);
     }
 
     function renderTable(items) {
       const tbody = document.getElementById('table-body');
       if (items.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد تحويلات مطابقة</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد تحويلات مطابقة</td></tr>';
         return;
       }
+
       tbody.innerHTML = '';
       items.forEach(item => {
-        const canReply = (item.branch === userBranchName);
+        const canReply     = (item.branch === userBranchName);
         const currentState = item.state || 'pending';
-        const dateObj = item.createdAt ? new Date(item.createdAt) : null;
-        const dateStr = dateObj ? `${dateObj.getDate()}/${dateObj.getMonth()+1}` : '-';
-        const timeStr = dateObj ? dateObj.toLocaleTimeString('ar-EG', {hour:'2-digit',minute:'2-digit'}) : '';
+        const dateObj      = item.createdAt ? new Date(item.createdAt) : null;
+        const dateStr      = dateObj ? `${dateObj.getDate()}/${dateObj.getMonth()+1}` : '-';
+        const timeStr      = dateObj ? dateObj.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'}) : '';
+
         const tr = document.createElement('tr');
         tr.innerHTML = `
-          <td style="font-size:0.75rem;line-height:1.4;">${dateStr}<br><span style="color:var(--text-muted);font-size:0.7rem;">${timeStr}</span></td>
+          <td style="font-size:0.75rem;line-height:1.4;">
+            ${dateStr}
+            <br>
+            <span style="color:var(--text-muted);font-size:0.7rem;">${timeStr}</span>
+          </td>
           <td>
             <div style="font-size:0.75rem;">${item.user} ⬅️ ${item.branch}</div>
-            <span class="badge ${canReply ? 'badge-blue' : 'badge-orange'}" style="margin-top:4px;">${canReply ? 'وارد 📥' : 'صادر 📤'}</span>
+            <span class="badge ${canReply ? 'badge-blue' : 'badge-orange'}" style="margin-top:4px;">
+              ${canReply ? 'وارد 📥' : 'صادر 📤'}
+            </span>
           </td>
-          <td style="text-align:right;">
-<div style="font-weight:700;font-size:0.85rem;">${item.item_name || item.item || '-'}</div>
-<div style="font-size:0.72rem;color:var(--text-muted);">
-  ${item.item_code ? `<i class="fas fa-barcode"></i> ${item.item_code}` : ''}
-</div>
-<div style="font-size:0.72rem;color:var(--text-muted);">${item.cust_name || ''}</div>
+          <td style="text-align:right;font-weight:700;font-size:0.85rem;">
+            ${item.item_name || item.item || '-'}
           </td>
-          <td><b style="color:var(--warning);">${item.qty || '1'}</b></td>
-          <td><input type="text" id="note-${item.id}" class="table-input" value="${item.company||''}" ${!canReply?'disabled':''}></td>
           <td>
-            <select id="stat-${item.id}" class="table-select" ${!canReply?'disabled':''}>
-              <option value="pending" ${currentState==='pending'?'selected':''}>⏳ انتظار</option>
-              <option value="transferred" ${currentState==='transferred'?'selected':''}>✅ تم</option>
-              <option value="unavailable" ${currentState==='unavailable'?'selected':''}>❌ نقص</option>
+            <code style="font-size:0.82rem;color:var(--text-secondary);">
+              ${item.item_code || '---'}
+            </code>
+          </td>
+          <td style="font-size:0.82rem;">
+            ${item.cust_name || '---'}
+          </td>
+          <td>
+            <b style="color:var(--warning);">${item.qty || '1'}</b>
+          </td>
+          <td>
+            <input type="text" id="note-${item.id}" class="table-input"
+              value="${item.company || ''}" ${!canReply ? 'disabled' : ''}>
+          </td>
+          <td>
+            <select id="stat-${item.id}" class="table-select" ${!canReply ? 'disabled' : ''}>
+              <option value="pending"     ${currentState==='pending'     ? 'selected' : ''}>⏳ انتظار</option>
+              <option value="transferred" ${currentState==='transferred' ? 'selected' : ''}>✅ تم</option>
+              <option value="unavailable" ${currentState==='unavailable' ? 'selected' : ''}>❌ نقص</option>
             </select>
           </td>
           <td>
             ${canReply
-              ? `<button class="btn btn-success btn-sm btn-icon" onclick="saveTransfer('${item.id}', this)"><i class="fas fa-save"></i></button>`
+              ? `<button class="btn btn-success btn-sm btn-icon" onclick="saveTransfer('${item.id}', this)">
+                   <i class="fas fa-save"></i>
+                 </button>`
               : `<i class="fas fa-clock" style="color:var(--text-muted);"></i>`}
           </td>`;
         tbody.appendChild(tr);
@@ -175,11 +206,19 @@ checkAuth().then(user => {
 
     async function saveTransfer(id, btn) {
       const status = document.getElementById(`stat-${id}`).value;
-      const notes = document.getElementById(`note-${id}`).value;
+      const notes  = document.getElementById(`note-${id}`).value;
       btn.disabled = true;
-      const orig = btn.innerHTML;
+      const orig   = btn.innerHTML;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-      const success = await updateData({ id, state: status, company: notes, type: "تحويل", action: "update_status" });
+
+      const success = await updateData({
+        id,
+        state:   status,
+        company: notes,
+        type:    "تحويل",
+        action:  "update_status"
+      });
+
       if (success) {
         btn.style.background = "#16a34a";
         btn.innerHTML = '<i class="fas fa-check"></i>';
