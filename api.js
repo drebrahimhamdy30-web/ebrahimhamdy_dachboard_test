@@ -61,13 +61,26 @@ async function verifyToken() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: token })
     });
-    const data = await response.json();
-    return data.valid === true;
-  } catch(e) {
+
+    // لو السيرفر مش شغال أو في خطأ — متخرجش
+    if (!response.ok) return true;
+
+    const raw  = await response.json();
+    const data = Array.isArray(raw) ? (raw[0] || {}) : raw;
+
+    // لو الرد فيه valid بشكل صريح
+    if (data.valid === true)  return true;
+    if (data.valid === false) return false;
+
+    // لو الرد فيه user — يعني التحقق نجح
+    if (data.user) return true;
+
     return false;
+  } catch(e) {
+    // لو في خطأ في الاتصال — متخرجش
+    return true;
   }
 }
-
 async function checkAuth() {
   const user      = localStorage.getItem('activeUser');
   const token     = localStorage.getItem('authToken');
@@ -79,10 +92,10 @@ async function checkAuth() {
     return null;
   }
 
-  const tenMinutes = 10 * 60 * 1000;
-  if (lastCheck && (now - parseInt(lastCheck)) < tenMinutes) {
-    return user;
-  }
+const thirtyMinutes = 30 * 60 * 1000;
+if (lastCheck && (now - parseInt(lastCheck)) < thirtyMinutes) {
+  return user;
+}
 
   const valid = await verifyToken();
   if (!valid) {
