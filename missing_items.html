@@ -27,6 +27,10 @@
           <input type="checkbox" id="showDeducted" onchange="applyFilter()">
           إظهار المخصوم من المطالبة
         </label>
+        <span class="filter-label" style="margin-right:8px;">كود المورد:</span>
+        <select id="supplierFilter" class="form-select" style="width:auto;" onchange="applyFilter()">
+          <option value="all">كل الموردين</option>
+        </select>
       </div>
 
       <div class="stats-row" id="stats-row" style="margin-bottom:16px;"></div>
@@ -36,6 +40,7 @@
           <thead>
             <tr>
               <th>التاريخ</th>
+              <th>كود المورد</th>
               <th>رقم الفاتورة</th>
               <th>اسم الصنف</th>
               <th>العدد</th>
@@ -44,7 +49,7 @@
             </tr>
           </thead>
           <tbody id="table-body">
-            <tr class="loading-row"><td colspan="6">⏳ جاري تحميل البيانات...</td></tr>
+            <tr class="loading-row"><td colspan="7">⏳ جاري تحميل البيانات...</td></tr>
           </tbody>
         </table>
       </div>
@@ -55,34 +60,44 @@
   <script src="api.js"></script>
   <script src="nav.js"></script>
   <script>
-// بعد ✅
-let activeUser = null;
-let userBranch = '';
-let rawData = [];
+    let activeUser = null;
+    let userBranch = '';
+    let rawData = [];
 
-checkAuth().then(user => {
-  activeUser = user;
-  if (user) {
-    userBranch = (localStorage.getItem('userBranch') || '').trim();
-    document.getElementById('branch-display').textContent = userBranch;
-    window.onload = loadMissing;
-  }
-});
+    checkAuth().then(user => {
+      activeUser = user;
+      if (user) {
+        userBranch = (localStorage.getItem('userBranch') || '').trim();
+        document.getElementById('branch-display').textContent = userBranch;
+        window.onload = loadMissing;
+      }
+    });
 
     async function loadMissing() {
       const tbody = document.getElementById('table-body');
-      tbody.innerHTML = '<tr class="loading-row"><td colspan="6">⏳ جاري جلب البيانات...</td></tr>';
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="7">⏳ جاري جلب البيانات...</td></tr>';
       try {
         const response = await fetchMissing();
-const all = response;
-
+        const all = response;
         rawData = all.filter(i => String(i.branch || '').trim() === userBranch);
-
+        populateSupplierFilter(rawData);
         renderStats();
         applyFilter();
       } catch(e) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--danger);padding:30px;">❌ خطأ في الاتصال</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:30px;">❌ خطأ في الاتصال</td></tr>';
       }
+    }
+
+    function populateSupplierFilter(data) {
+      const select = document.getElementById('supplierFilter');
+      const suppliers = [...new Set(data.map(i => i.supplier_code).filter(s => s))].sort();
+      select.innerHTML = '<option value="all">كل الموردين</option>';
+      suppliers.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s;
+        opt.textContent = s;
+        select.appendChild(opt);
+      });
     }
 
     function renderStats() {
@@ -108,9 +123,12 @@ const all = response;
 
     function applyFilter() {
       const showDeducted = document.getElementById('showDeducted').checked;
+      const supplierVal  = document.getElementById('supplierFilter').value;
+
       const filtered = rawData.filter(i => {
         const isDeducted = (i.state === true || i.state === 'true');
         if (!showDeducted && isDeducted) return false;
+        if (supplierVal !== 'all' && String(i.supplier_code) !== supplierVal) return false;
         return true;
       });
       renderTable(filtered);
@@ -119,7 +137,7 @@ const all = response;
     function renderTable(items) {
       const tbody = document.getElementById('table-body');
       if (items.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-muted);">✅ لا توجد أصناف معلقة</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">✅ لا توجد أصناف معلقة</td></tr>';
         return;
       }
 
@@ -136,6 +154,7 @@ const all = response;
         return `
           <tr class="${isDeducted ? 'row-done' : ''}">
             <td style="font-size:0.78rem;">${dateStr}</td>
+            <td><span class="badge badge-blue">${item.supplier_code || '---'}</span></td>
             <td><code style="font-size:0.82rem;color:var(--text-secondary);">${item.invoice_no || '---'}</code></td>
             <td style="text-align:right;font-weight:700;">${item.item_name || '---'}</td>
             <td><b style="color:var(--warning);">${item.qty || '---'}</b></td>
