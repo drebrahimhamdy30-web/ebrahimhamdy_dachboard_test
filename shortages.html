@@ -18,11 +18,17 @@
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <label class="check-label">
-            <input type="checkbox" id="show-all-completed" onchange="applyFilters()"> عرض المكتمل
+            <input type="checkbox" id="show-all-completed" onchange="applyFilters()">
+            إظهار المكتمل أيضاً
           </label>
-          <button class="btn btn-primary" onclick="loadShortages(true)"><i class="fas fa-sync-alt"></i> تحديث</button>
+          <button class="btn btn-primary" onclick="loadShortages(true)">
+            <i class="fas fa-sync-alt"></i> تحديث
+          </button>
         </div>
       </div>
+
+      <!-- إحصائيات -->
+      <div class="stats-row" id="stats-row" style="margin-bottom:16px;"></div>
 
       <div class="table-wrap">
         <table>
@@ -48,17 +54,16 @@
   <script src="api.js"></script>
   <script src="nav.js"></script>
   <script>
-// بعد ✅
-let cachedData = [];
-let userBranch = '';
+    let cachedData = [];
+    let userBranch = '';
 
-checkAuth().then(user => {
-  if (user) {
-    userBranch = (localStorage.getItem('userBranch') || "عام").trim();
-    document.getElementById('current-branch-name').textContent = userBranch;
-    window.onload = () => loadShortages();
-  }
-});
+    checkAuth().then(user => {
+      if (user) {
+        userBranch = (localStorage.getItem('userBranch') || "عام").trim();
+        document.getElementById('current-branch-name').textContent = userBranch;
+        window.onload = () => loadShortages();
+      }
+    });
 
     async function loadShortages(forceRefresh = false) {
       const tbody = document.getElementById('shortage-list');
@@ -72,49 +77,99 @@ checkAuth().then(user => {
           return;
         }
       }
+      renderStats();
       applyFilters();
+    }
+
+    function renderStats() {
+      const myItems    = cachedData.filter(item => {
+        const itemBranch = String(item.user || item.branch || "").trim();
+        return (userBranch === "عام" || userBranch === "Admin" || itemBranch === userBranch);
+      });
+      const needFollow = myItems.filter(i => String(i.cust_state || "").trim() === "غير متوفر يحتاج متابعة").length;
+      const done       = myItems.filter(i => String(i.cust_state || "").trim() === "متوفر وتم ابلاغ العميل").length;
+
+      document.getElementById('stats-row').innerHTML = `
+        <div class="stat-card">
+          <div class="stat-num" style="color:var(--warning);">${needFollow}</div>
+          <div class="stat-lbl">يحتاج متابعة</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" style="color:var(--success);">${done}</div>
+          <div class="stat-lbl">تم الإبلاغ</div>
+        </div>
+      `;
     }
 
     function applyFilters() {
       const showAllCompleted = document.getElementById('show-all-completed').checked;
+
       const filtered = cachedData.filter(item => {
         const currentState = String(item.cust_state || "").trim();
-        const itemBranch = String(item.user || item.branch || "").trim();
-        const isMyBranch = (userBranch === "عام" || userBranch === "Admin" || itemBranch === userBranch);
+        const itemBranch   = String(item.user || item.branch || "").trim();
+        const isMyBranch   = (userBranch === "عام" || userBranch === "Admin" || itemBranch === userBranch);
+        const isNeedFollow = (currentState === "غير متوفر يحتاج متابعة");
+        const isDone       = (currentState === "متوفر وتم ابلاغ العميل");
+
         if (!isMyBranch) return false;
-        const isDone = (currentState === "متوفر وتم ابلاغ العميل");
-        if (showAllCompleted) return true;
-        return !isDone;
+
+        if (!showAllCompleted) return isNeedFollow;
+
+        return isNeedFollow || isDone;
       });
+
       renderTable(filtered);
     }
 
     function renderTable(items) {
       const tbody = document.getElementById('shortage-list');
       if (items.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:50px;color:var(--text-muted);">✅ لا توجد نواقص حالياً</td></tr>`;
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="7" style="text-align:center;padding:50px;color:var(--text-muted);">
+              ✅ لا توجد نواقص تحتاج متابعة حالياً
+            </td>
+          </tr>`;
         return;
       }
-      items.sort((a, b) => (String(a.cust_state).includes("ابلاغ") ? 1 : -1));
+
+      items.sort((a, b) => {
+        const aD = String(a.cust_state || "").includes("ابلاغ");
+        const bD = String(b.cust_state || "").includes("ابلاغ");
+        return aD - bD;
+      });
+
       tbody.innerHTML = items.map(item => {
-        const isDone = String(item.cust_state || "").includes("ابلاغ");
-        const displayDate = item.createdAt ? new Date(item.createdAt).toLocaleDateString('ar-EG') : '---';
+        const isDone      = String(item.cust_state || "").includes("ابلاغ");
+        const displayDate = item.createdAt
+          ? new Date(item.createdAt).toLocaleDateString('ar-EG')
+          : '---';
+
         return `
           <tr class="${isDone ? 'row-done' : ''}">
             <td style="font-size:0.78rem;">${displayDate}</td>
-            <td style="text-align:right;"><b>${item.item_name}</b></td>
-            <td><span class="branch-tag">${item.user}</span></td>
+            <td style="text-align:right;">
+              <b>${item.item_name || '---'}</b>
+              ${item.item_code ? `<div style="font-size:0.72rem;color:var(--text-muted);"><i class="fas fa-barcode"></i> ${item.item_code}</div>` : ''}
+            </td>
+            <td><span class="branch-tag">${item.user || '---'}</span></td>
             <td style="font-size:0.82rem;">${item.cust_name || '---'}</td>
-            <td><code style="font-size:0.78rem;color:var(--text-secondary);">${item.cust_code}</code></td>
+            <td>
+              <code style="font-size:0.78rem;color:var(--text-secondary);">
+                ${item.cust_code || '---'}
+              </code>
+            </td>
             <td>
               ${isDone
-                ? '<span class="badge badge-green">مكتمل ✅</span>'
-                : '<span class="badge badge-yellow">متابعة 🔍</span>'}
+                ? '<span class="badge badge-green">تم الإبلاغ ✅</span>'
+                : '<span class="badge badge-yellow">يحتاج متابعة 🔍</span>'}
             </td>
             <td>
               ${isDone
                 ? '<i class="fas fa-check-double" style="color:var(--success);"></i>'
-                : `<button class="btn btn-success btn-sm" onclick="markAsAvailable(event, ${item.id})">تم الإبلاغ</button>`}
+                : `<button class="btn btn-success btn-sm" onclick="markAsAvailable(event, ${item.id})">
+                     <i class="fas fa-phone-alt"></i> تم التواصل
+                   </button>`}
             </td>
           </tr>`;
       }).join('');
@@ -122,18 +177,26 @@ checkAuth().then(user => {
 
     async function markAsAvailable(event, id) {
       const btn = event.target.closest('button');
-      if (!confirm("تأكيد إبلاغ العميل؟")) return;
+      if (!confirm("تأكيد إبلاغ العميل بتوفر الصنف؟")) return;
       btn.disabled = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-      const success = await updateData({ id, type: "cs_action", cust_state: "متوفر وتم ابلاغ العميل", updatedAt: new Date().toISOString() });
+
+      const success = await updateData({
+        id,
+        type:       "cs_action",
+        cust_state: "متوفر وتم ابلاغ العميل",
+        updatedAt:  new Date().toISOString()
+      });
+
       if (success) {
         const idx = cachedData.findIndex(x => x.id == id);
         if (idx !== -1) cachedData[idx].cust_state = "متوفر وتم ابلاغ العميل";
+        renderStats();
         applyFilters();
       } else {
         alert("فشل التحديث، يرجى المحاولة مرة أخرى");
         btn.disabled = false;
-        btn.innerHTML = "تم الإبلاغ";
+        btn.innerHTML = '<i class="fas fa-phone-alt"></i> تم التواصل';
       }
     }
   </script>
