@@ -12,8 +12,12 @@
   <div class="container">
     <div class="card">
       <div class="page-header">
-        <div class="page-title"><i class="fas fa-shopping-cart"></i> سجل المشتريات والطلبيات</div>
-        <button class="btn btn-primary" onclick="loadOrders()"><i class="fas fa-sync-alt"></i> تحديث</button>
+        <div class="page-title">
+          <i class="fas fa-shopping-cart"></i> سجل المشتريات والطلبيات
+        </div>
+        <button class="btn btn-primary" onclick="loadOrders()">
+          <i class="fas fa-sync-alt"></i> تحديث
+        </button>
       </div>
 
       <div class="filter-bar">
@@ -24,7 +28,14 @@
           <option value="ordered">تم الطلب ✅</option>
           <option value="unavailable">غير متوفر ❌</option>
         </select>
-        <div id="branchList" style="display:flex; gap:8px; flex-wrap:wrap; margin-right:4px;"></div>
+        <span class="filter-label" style="margin-right:4px;">نوع الطلب:</span>
+        <select id="orderTypeFilter" class="form-select" style="width:auto;" onchange="applyFilter()">
+          <option value="all">الكل</option>
+          <option value="دواء">💊 دواء</option>
+          <option value="كوزمو">💄 كوزمو</option>
+          <option value="تركيبات">⚗️ تركيبات</option>
+        </select>
+        <div id="branchList" style="display:flex;gap:8px;flex-wrap:wrap;margin-right:4px;"></div>
       </div>
 
       <div class="table-wrap">
@@ -33,6 +44,7 @@
             <tr>
               <th>التاريخ</th>
               <th>الفرع</th>
+              <th>نوع الطلب</th>
               <th>الصنف</th>
               <th>العميل</th>
               <th>الكمية</th>
@@ -42,7 +54,7 @@
             </tr>
           </thead>
           <tbody id="table-body">
-            <tr class="loading-row"><td colspan="8">⏳ جاري تحميل البيانات...</td></tr>
+            <tr class="loading-row"><td colspan="9">⏳ جاري تحميل البيانات...</td></tr>
           </tbody>
         </table>
       </div>
@@ -52,47 +64,52 @@
   <script src="api.js"></script>
   <script src="nav.js"></script>
   <script>
-// بعد ✅
-let activeUser = null;
-let rawData = [];
-checkAuth().then(user => {
-  activeUser = user;
-  if (user) window.onload = loadOrders;
-});
+    let activeUser = null;
+    let rawData    = [];
+
+    checkAuth().then(user => {
+      activeUser = user;
+      if (user) window.onload = loadOrders;
+    });
 
     async function loadOrders() {
       const tbody = document.getElementById('table-body');
-      tbody.innerHTML = '<tr class="loading-row"><td colspan="8">⏳ جاري جلب البيانات...</td></tr>';
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="9">⏳ جاري جلب البيانات...</td></tr>';
       try {
         const response = await fetchOrders();
-        let items = (response && response[0]?.data) ? response[0].data : (response.data || response);
+        let items = (response && response[0]?.data)
+          ? response[0].data
+          : (response.data || response);
+
         if (Array.isArray(items) && items.length > 0) {
           rawData = items.map(item => ({
-            id: item.id || item.row_id || item.ID,
-            branch: item.branch || '-',
-            item_code: item.item_code || 'بدون كود',
-            item_name: item.item || item.item_name || 'صنف غير مسمى',
+            id:            item.id || item.row_id || item.ID,
+            branch:        item.branch || '-',
+            item_code:     item.item_code || 'بدون كود',
+            item_name:     item.item || item.item_name || 'صنف غير مسمى',
             customer_code: item.cust_code || '---',
             customer_name: item.cust_name || 'عميل عام',
-            qty: item.qty || 0,
-            company: (item.company && item.company !== 'null') ? item.company : '',
-            status: (item.status === '-' || !item.status) ? (item.state || 'pending') : item.status,
-            type: item.type || '',
-            createdAt: item.createdAt
+            qty:           item.qty || 0,
+            company:       (item.company && item.company !== 'null') ? item.company : '',
+            status:        (item.status === '-' || !item.status) ? (item.state || 'pending') : item.status,
+            order_type:    item.order_type || '',
+            type:          item.type || '',
+            createdAt:     item.createdAt
           })).filter(i => String(i.type).includes("شراء"));
+
           generateBranches(rawData);
           applyFilter();
         } else {
-          tbody.innerHTML = '<tr><td colspan="8" class="empty-state">لا توجد طلبات شراء</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted);">لا توجد طلبات شراء</td></tr>';
         }
       } catch(e) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ خطأ في تحميل البيانات</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--danger);padding:30px;">❌ خطأ في تحميل البيانات</td></tr>';
       }
     }
 
     function generateBranches(data) {
       const container = document.getElementById('branchList');
-      const branches = [...new Set(data.map(i => i.branch))].filter(b => b !== '-').sort();
+      const branches  = [...new Set(data.map(i => i.branch))].filter(b => b !== '-').sort();
       container.innerHTML = branches.map(b => `
         <label class="check-label" style="background:var(--surface-3);padding:5px 10px;border-radius:20px;border:1px solid var(--border);">
           <input type="checkbox" class="branch-cb" value="${b}" checked onchange="applyFilter()"> ${b}
@@ -101,22 +118,27 @@ checkAuth().then(user => {
     }
 
     function applyFilter() {
-      const statusVal = document.getElementById('statusFilter').value;
+      const statusVal    = document.getElementById('statusFilter').value;
+      const orderTypeVal = document.getElementById('orderTypeFilter').value;
       const selectedBranches = Array.from(document.querySelectorAll('.branch-cb:checked')).map(c => c.value);
+
       const filtered = rawData.filter(i => {
         const sMatch = (statusVal === 'all' || i.status === statusVal);
         const bMatch = selectedBranches.includes(i.branch);
-        return sMatch && bMatch;
+        const tMatch = (orderTypeVal === 'all' || String(i.order_type).includes(orderTypeVal));
+        return sMatch && bMatch && tMatch;
       });
+
       renderTable(filtered);
     }
 
     function renderTable(items) {
       const tbody = document.getElementById('table-body');
       if (items.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج تطابق التصفية</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج تطابق التصفية</td></tr>';
         return;
       }
+
       tbody.innerHTML = items.map(i => {
         let displayDate = "---", displayTime = "";
         if (i.createdAt) {
@@ -124,25 +146,41 @@ checkAuth().then(user => {
           displayDate = d.toLocaleDateString('ar-EG', {month:'numeric', day:'numeric'});
           displayTime = d.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit', hour12:true});
         }
+
+        const orderTypeBadge = i.order_type
+          ? `<span class="badge badge-blue" style="font-size:0.72rem;">${i.order_type}</span>`
+          : '<span style="color:var(--text-muted);font-size:0.78rem;">---</span>';
+
         return `
           <tr>
-            <td style="font-size:0.75rem;line-height:1.4;">${displayDate}<br><span style="color:var(--text-muted);font-size:0.7rem;">${displayTime}</span></td>
+            <td style="font-size:0.75rem;line-height:1.4;">
+              ${displayDate}<br>
+              <span style="color:var(--text-muted);font-size:0.7rem;">${displayTime}</span>
+            </td>
             <td><span class="branch-tag">${i.branch}</span></td>
+            <td>${orderTypeBadge}</td>
             <td style="text-align:right;">
               <div style="font-weight:700;font-size:0.85rem;">${i.item_name}</div>
-              <div style="font-size:0.72rem;color:var(--text-muted);"><i class="fas fa-barcode"></i> ${i.item_code}</div>
+              <div style="font-size:0.72rem;color:var(--text-muted);">
+                <i class="fas fa-barcode"></i> ${i.item_code}
+              </div>
             </td>
             <td style="text-align:right;">
               <div style="font-weight:600;font-size:0.82rem;">${i.customer_name}</div>
-              <div style="font-size:0.72rem;color:var(--text-muted);"><i class="fas fa-phone-alt"></i> ${i.customer_code}</div>
+              <div style="font-size:0.72rem;color:var(--text-muted);">
+                <i class="fas fa-phone-alt"></i> ${i.customer_code}
+              </div>
             </td>
             <td><b style="font-size:1.1rem;color:var(--warning);">${i.qty}</b></td>
-            <td><input type="text" value="${i.company}" id="comp-${i.id}" class="table-input" placeholder="المورد..."></td>
+            <td>
+              <input type="text" value="${i.company}" id="comp-${i.id}"
+                class="table-input" placeholder="المورد...">
+            </td>
             <td>
               <select id="stat-${i.id}" class="table-select">
-                <option value="pending" ${i.status==='pending'?'selected':''}>⏳ انتظار</option>
-                <option value="ordered" ${i.status==='ordered'?'selected':''}>✅ تم الطلب</option>
-                <option value="unavailable" ${i.status==='unavailable'?'selected':''}>❌ نقص</option>
+                <option value="pending"     ${i.status==='pending'     ?'selected':''}>⏳ انتظار</option>
+                <option value="ordered"     ${i.status==='ordered'     ?'selected':''}>✅ تم الطلب</option>
+                <option value="unavailable" ${i.status==='unavailable' ?'selected':''}>❌ نقص</option>
               </select>
             </td>
             <td>
@@ -155,11 +193,19 @@ checkAuth().then(user => {
     }
 
     async function saveRow(id, btn) {
-      const currentStatus = document.getElementById(`stat-${id}`).value;
+      const currentStatus  = document.getElementById(`stat-${id}`).value;
       const currentCompany = document.getElementById(`comp-${id}`).value;
       btn.disabled = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-      const success = await updateData({ id, status: currentStatus, company: currentCompany, type: "شراء", action: "update_status" });
+
+      const success = await updateData({
+        id,
+        status:  currentStatus,
+        company: currentCompany,
+        type:    "شراء",
+        action:  "update_status"
+      });
+
       if (success) {
         btn.style.background = "#16a34a";
         btn.innerHTML = '<i class="fas fa-check"></i>';
