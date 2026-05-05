@@ -140,6 +140,7 @@
       gap: 20px;
       flex-wrap: wrap;
     }
+    .order-type-box.error { border-color: var(--danger); }
   </style>
 </head>
 <body>
@@ -186,10 +187,10 @@
           </div>
         </div>
 
-        <!-- نوع الطلب — يظهر فقط للشراء -->
-        <div class="field-group" id="order-type-div" style="display:none;">
+        <!-- نوع الطلب — يظهر فقط للشراء — مخفي بـ visibility مش display -->
+        <div class="field-group" id="order-type-div" style="visibility:hidden;height:0;overflow:hidden;margin:0;">
           <label>نوع الطلب <span class="required-star">*</span></label>
-          <div class="order-type-box">
+          <div class="order-type-box" id="order-type-box">
             <label class="check-label">
               <input type="checkbox" class="order-type-cb" value="دواء"> 💊 دواء
             </label>
@@ -253,6 +254,7 @@
           </div>
         </div>
 
+        <!-- قسم الإشعار -->
         <div class="form-section" id="note-section">
           <div class="grid-2" style="margin-bottom:4px;">
             <div class="field-group">
@@ -283,7 +285,8 @@
               <label>اسم الفرد <span class="required-star">*</span></label>
               <div class="field-icon-wrap">
                 <i class="fas fa-user field-icon"></i>
-                <input type="text" id="note-person" class="form-input" placeholder="أدخل اسم الشخص">
+                <input type="text" id="note-person" class="form-input"
+                  placeholder="أدخل اسم الشخص">
               </div>
             </div>
           </div>
@@ -319,7 +322,8 @@
           <label><i class="fas fa-id-card" style="margin-left:5px;"></i> رقم قيد العميل</label>
           <div class="field-icon-wrap">
             <i class="fas fa-hashtag field-icon"></i>
-            <input type="text" id="contract-cust-code" class="form-input" placeholder="أدخل رقم القيد">
+            <input type="text" id="contract-cust-code" class="form-input"
+              placeholder="أدخل رقم القيد">
           </div>
         </div>
         <div class="field-group">
@@ -408,10 +412,10 @@
   <script src="api.js"></script>
   <script src="nav.js"></script>
   <script>
-    let activeUser = null;
-    let userBranch = '';
+    let activeUser  = null;
+    let userBranch  = '';
     let currentType = 'شراء';
-    let rowCount = 0;
+    let rowCount    = 0;
 
     checkAuth().then(user => {
       activeUser = user;
@@ -424,8 +428,8 @@
     });
 
     function initDates() {
-      const now = new Date();
-      const opts = { year: 'numeric', month: 'long', day: 'numeric' };
+      const now     = new Date();
+      const opts    = { year: 'numeric', month: 'long', day: 'numeric' };
       const dateStr = now.toLocaleDateString('ar-EG', opts);
       document.getElementById('contract-date').textContent = dateStr;
       document.getElementById('missing-date').textContent  = dateStr;
@@ -444,6 +448,22 @@
       const type = document.getElementById('note-target-type').value;
       document.getElementById('dept-div').style.display   = (type === 'قسم') ? '' : 'none';
       document.getElementById('person-div').style.display = (type === 'فرد') ? '' : 'none';
+    }
+
+    function showOrderTypeDiv(show) {
+      const div = document.getElementById('order-type-div');
+      if (show) {
+        div.style.visibility = 'visible';
+        div.style.height     = 'auto';
+        div.style.overflow   = 'visible';
+        div.style.margin     = '';
+      } else {
+        div.style.visibility = 'hidden';
+        div.style.height     = '0';
+        div.style.overflow   = 'hidden';
+        div.style.margin     = '0';
+        document.querySelectorAll('.order-type-cb').forEach(cb => cb.checked = false);
+      }
     }
 
     function handleTypeInit() {
@@ -470,7 +490,6 @@
       const itemNameDiv  = document.getElementById('item-name-div');
       const extraSection = document.getElementById('extra-section');
       const noteSection  = document.getElementById('note-section');
-      const orderTypeDiv = document.getElementById('order-type-div');
 
       [itemSection, extraSection, itemNameDiv, branchDiv].forEach(el => {
         el.classList.remove('form-section');
@@ -479,16 +498,13 @@
       noteSection.classList.remove('visible');
       branchEl.disabled = false;
       branchLabel.textContent = "توجيه إلى فرع";
-
-      // إخفاء نوع الطلب افتراضياً
-      orderTypeDiv.style.display = 'none';
-      document.querySelectorAll('.order-type-cb').forEach(cb => cb.checked = false);
+      showOrderTypeDiv(false);
 
       if (currentType === "شراء") {
         branchEl.value = userBranch;
         branchEl.disabled = true;
         branchLabel.textContent = "فرع الطلب (ثابت)";
-        orderTypeDiv.style.display = ''; // ←── إظهار نوع الطلب
+        showOrderTypeDiv(true); // ←── إظهار نوع الطلب
       } else if (currentType === "جرد") {
         itemNameDiv.style.display  = 'none';
         extraSection.style.display = 'none';
@@ -521,18 +537,21 @@
         if (!itemCode && !itemName) { alert("برجاء إدخال كود أو اسم الصنف"); return; }
       }
 
-      // validation نوع الطلب
+      // ===== جمع نوع الطلب بطريقة مضمونة =====
       let orderType = '';
       if (currentType === "شراء") {
-const allCbs = document.querySelectorAll('.order-type-cb');
-const selectedTypes = [];
-allCbs.forEach(cb => { if (cb.checked) selectedTypes.push(cb.value); });
-
-if (currentType === "شراء" && selectedTypes.length === 0) {
-  alert("برجاء اختيار نوع الطلب (دواء / كوزمو / تركيبات)");
-  return;
-}
-orderType = selectedTypes.join(' - ');
+        const selectedTypes = [];
+        document.querySelectorAll('.order-type-cb').forEach(cb => {
+          if (cb.checked) selectedTypes.push(cb.value);
+        });
+        if (selectedTypes.length === 0) {
+          document.getElementById('order-type-box').classList.add('error');
+          alert("برجاء اختيار نوع الطلب (دواء / كوزمو / تركيبات)");
+          return;
+        }
+        document.getElementById('order-type-box').classList.remove('error');
+        orderType = selectedTypes.join(' - ');
+      }
 
       btn.disabled = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الإرسال...';
@@ -714,6 +733,7 @@ orderType = selectedTypes.join(' - ');
       document.querySelectorAll('#section-original input:not([disabled]), #section-original textarea').forEach(el => el.value = '');
       document.getElementById('qty').value = '1';
       document.querySelectorAll('.order-type-cb').forEach(cb => cb.checked = false);
+      document.getElementById('order-type-box').classList.remove('error');
       document.getElementById('note-target-type').value   = '';
       document.getElementById('dept-div').style.display   = 'none';
       document.getElementById('person-div').style.display = 'none';
