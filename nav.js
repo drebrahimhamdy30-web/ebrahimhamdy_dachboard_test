@@ -77,7 +77,7 @@ function startNotifWatcher() {
   const token = localStorage.getItem('authToken');
   if (!token) return; // مش logged in — مش هيشتغل
  checkNotifications();
-notifInterval = setInterval(checkNotifications, 2 * 60 * 1000);
+notifInterval = setInterval(checkNotifications, 60 * 60 * 1000);
 }
 
 async function checkNotifications() {
