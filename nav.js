@@ -227,7 +227,7 @@ function playNotifSound() {
       osc.frequency.value = freq;
       osc.type = 'sine';
       const t = ctx.currentTime + i * 0.18;
-      gain.gain.setValueAtTime(0.3, t);
+      gain.gain.setValueAtTime(1.0, t);
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
       osc.start(t);
       osc.stop(t + 0.15);
