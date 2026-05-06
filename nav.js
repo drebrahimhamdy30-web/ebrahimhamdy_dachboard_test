@@ -75,9 +75,20 @@ let notifInterval  = null;
 
 function startNotifWatcher() {
   const token = localStorage.getItem('authToken');
-  if (!token) return; // مش logged in — مش هيشتغل
- checkNotifications();
-notifInterval = setInterval(checkNotifications, 60 * 60 * 1000);
+  if (!token) return;
+
+  // مش بيتحقق فوراً — بس بيبدأ العداد من الساعة اللي فاتت
+  const lastCheck = parseInt(localStorage.getItem('lastNotifCheck') || '0');
+  const now       = Date.now();
+  const oneHour   = 60 * 60 * 1000;
+
+  // لو فات أكتر من ساعة من آخر تحقق — اتحقق دلوقتي
+  if (now - lastCheck >= oneHour) {
+    checkNotifications();
+  }
+
+  // كل ساعة اتحقق
+  notifInterval = setInterval(checkNotifications, oneHour);
 }
 
 async function checkNotifications() {
@@ -89,6 +100,8 @@ async function checkNotifications() {
     const pending = items.filter(item => {
       const isReceived = String(item.target_branch || '').trim() === userBranch;
       const isDone     = (item.done === "تم" || item.done === true || item.done === "true");
+      // احفظ وقت آخر تحقق
+localStorage.setItem('lastNotifCheck', Date.now().toString());
       return isReceived && !isDone;
     });
 
