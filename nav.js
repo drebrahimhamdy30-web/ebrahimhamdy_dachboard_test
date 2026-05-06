@@ -100,16 +100,15 @@ async function checkNotifications() {
     const pending = items.filter(item => {
       const isReceived = String(item.target_branch || '').trim() === userBranch;
       const isDone     = (item.done === "تم" || item.done === true || item.done === "true");
-      // احفظ وقت آخر تحقق
-localStorage.setItem('lastNotifCheck', Date.now().toString());
       return isReceived && !isDone;
     });
 
-    const count = pending.length;
+    // ←── هنا صح — بره الـ filter
+    localStorage.setItem('lastNotifCheck', Date.now().toString());
 
+    const count = pending.length;
     updateNotifBadge(count);
 
-    // نبّه بس لو الرقم اتغير وأكبر من صفر
     if (count > 0 && count !== lastNotifCount) {
       showNotifPopup(count);
       playNotifSound();
