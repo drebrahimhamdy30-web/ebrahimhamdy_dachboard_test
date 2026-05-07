@@ -15,15 +15,6 @@
         <div class="page-title">
           <i class="fas fa-headset"></i> معالجة طلبات
           <span class="highlight" id="display-branch">...</span>
-          <div style="padding:12px 0 4px;">
-  <div class="field-icon-wrap" style="max-width:400px;">
-    <i class="fas fa-search field-icon"></i>
-    <input type="text" id="searchInput" class="form-input"
-      placeholder="بحث في كل الأعمدة..."
-      oninput="applyFilter()"
-      style="padding-right:34px;">
-  </div>
-</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <label class="check-label">
@@ -33,22 +24,33 @@
         </div>
       </div>
 
+      <!-- خانة البحث -->
+      <div style="padding:8px 0 12px;">
+        <div class="field-icon-wrap" style="max-width:400px;">
+          <i class="fas fa-search field-icon"></i>
+          <input type="text" id="searchInput" class="form-input"
+            placeholder="بحث في كل الأعمدة..."
+            oninput="renderItems()"
+            style="padding-right:34px;">
+        </div>
+      </div>
+
       <div class="table-wrap">
         <table>
-<thead>
-  <tr>
-    <th>اسم الصنف</th>
-    <th>كود الصنف</th>
-    <th>اسم العميل</th>
-    <th>كود العميل</th>
-    <th>رد المشتريات</th>
-    <th>الحالة</th>
-    <th>إجراء خدمة العملاء</th>
-    <th>حفظ</th>
-  </tr>
-</thead>
+          <thead>
+            <tr>
+              <th>اسم الصنف</th>
+              <th>كود الصنف</th>
+              <th>اسم العميل</th>
+              <th>كود العميل</th>
+              <th>رد المشتريات</th>
+              <th>الحالة</th>
+              <th>إجراء خدمة العملاء</th>
+              <th>حفظ</th>
+            </tr>
+          </thead>
           <tbody id="data-list">
-            <tr class="loading-row"><td colspan="6">جاري التحميل...</td></tr>
+            <tr class="loading-row"><td colspan="8">جاري التحميل...</td></tr>
           </tbody>
         </table>
       </div>
@@ -58,19 +60,18 @@
   <script src="api.js"></script>
   <script src="nav.js"></script>
   <script>
-// بعد ✅
-let activeUser = null;
-let userBranch = '';
-let allItems = [];
+    let activeUser = null;
+    let userBranch = '';
+    let allItems   = [];
 
-checkAuth().then(user => {
-  activeUser = user;
-  if (user) {
-    userBranch = (localStorage.getItem('userBranch') || '').trim();
-    document.getElementById('display-branch').textContent = userBranch;
-    window.onload = loadCSData;
-  }
-});
+    checkAuth().then(user => {
+      activeUser = user;
+      if (user) {
+        userBranch = (localStorage.getItem('userBranch') || '').trim();
+        document.getElementById('display-branch').textContent = userBranch;
+        window.onload = loadCSData;
+      }
+    });
 
     async function loadCSData() {
       try {
@@ -83,107 +84,93 @@ checkAuth().then(user => {
     }
 
     function renderItems() {
-      const tbody = document.getElementById('data-list');
-      const hideDone = document.getElementById('hideDone').checked;
-const filtered = allItems.filter(item => {
-  const isMyBranch  = (String(item.user).trim() === String(userBranch).trim());
-  const validStates = ['ordered', 'unavailable', 'transferred'];
-  const isResponded = validStates.includes(String(item.state || "").trim().toLowerCase());
-  const hasAction   = (item.cust_state && item.cust_state !== "" && item.cust_state !== "null");
+      const tbody     = document.getElementById('data-list');
+      const hideDone  = document.getElementById('hideDone').checked;
+      const searchVal = document.getElementById('searchInput').value.trim().toLowerCase();
 
-  // ←── الشرط الجديد: لازم يكون له عميل
-  const hasCustomer = (
-    (item.cust_name && item.cust_name.trim() !== "" && item.cust_name !== "null") ||
-    (item.cust_code && item.cust_code.trim() !== "" && item.cust_code !== "null")
-  );
+      const filtered = allItems.filter(item => {
+        const isMyBranch  = (String(item.user).trim() === String(userBranch).trim());
+        const validStates = ['ordered', 'unavailable', 'transferred'];
+        const isResponded = validStates.includes(String(item.state || "").trim().toLowerCase());
+        const hasAction   = (item.cust_state && item.cust_state !== "" && item.cust_state !== "null");
+        const hasCustomer = (
+          (item.cust_name && item.cust_name.trim() !== "" && item.cust_name !== "null") ||
+          (item.cust_code && item.cust_code.trim() !== "" && item.cust_code !== "null")
+        );
 
-  if (!hasCustomer) return false;
-  if (hideDone && hasAction) return false;
-  return isMyBranch && isResponded;
-});
+        if (!hasCustomer)              return false;
+        if (hideDone && hasAction)     return false;
+        if (!isMyBranch || !isResponded) return false;
+
+        const searchMatch = !searchVal || [
+          item.item_name, item.item_code,
+          item.cust_name, item.cust_code,
+          item.company,   item.cust_state
+        ].some(val => String(val || '').toLowerCase().includes(searchVal));
+
+        return searchMatch;
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج</td></tr>`;
+        return;
+      }
 
       tbody.innerHTML = filtered.map(item => {
         const currentAction = (item.cust_state && item.cust_state !== "null") ? item.cust_state : "";
-        const isDone = (currentAction !== "");
-        const s = String(item.state || "").trim().toLowerCase();
-return `
-  <tr class="${isDone ? 'row-done' : ''}">
-    <td style="text-align:right;font-weight:700;">${item.item_name || item.item || '---'}</td>
-<td><code style="font-size:0.82rem;color:var(--text-secondary);">${(item.item_code && item.item_code !== 'null') ? item.item_code : ''}</code></td>
-<td style="font-size:0.82rem;">${(item.cust_name && item.cust_name !== 'null') ? item.cust_name : ''}</td>
-<td><code style="font-size:0.82rem;color:var(--text-secondary);">${(item.cust_code && item.cust_code !== 'null') ? item.cust_code : ''}</code></td>
-<td><small style="color:var(--text-secondary);">${(item.company && item.company !== 'null') ? item.company : ''}</small></td>
-    <td>
-      <span class="badge ${s === 'ordered' ? 'badge-green' : 'badge-red'}">
-        ${s === 'ordered' ? 'تم الطلب' : (s === 'transferred' ? 'محول' : 'غير متوفر')}
-      </span>
-    </td>
-    <td>
-      <select id="select-${item.id}" class="table-select" ${isDone ? 'disabled' : ''}>
-        <option value="" disabled ${currentAction === "" ? 'selected' : ''}>اختر إجراء...</option>
-        <option value="متوفر وتم ابلاغ العميل" ${currentAction === 'متوفر وتم ابلاغ العميل' ? 'selected' : ''}>متوفر وتم ابلاغ العميل ✅</option>
-        <option value="غير متوفر يحتاج متابعة" ${currentAction === 'غير متوفر يحتاج متابعة' ? 'selected' : ''}>غير متوفر يحتاج متابعة 🔍</option>
-        <option value="حاولنا التواصل مع العميل" ${currentAction === 'حاولنا التواصل مع العميل' ? 'selected' : ''}>حاولنا التواصل مع العميل 📞</option>
-        <option value="العميل الغى الطلب" ${currentAction === 'العميل الغى الطلب' ? 'selected' : ''}>العميل الغى الطلب 🚫</option>
-      </select>
-    </td>
-    <td>
-      ${!isDone
-        ? `<button class="btn btn-success btn-sm" onclick="submitCSAction(event, '${item.id}')">تم</button>`
-        : `<span style="color:var(--success);font-weight:bold;"><i class="fas fa-check-circle"></i></span>`}
-    </td>
-  </tr>`;
+        const isDone        = (currentAction !== "");
+        const s             = String(item.state || "").trim().toLowerCase();
+
+        return `
+          <tr class="${isDone ? 'row-done' : ''}">
+            <td style="text-align:right;font-weight:700;">${item.item_name || item.item || '---'}</td>
+            <td><code style="font-size:0.82rem;color:var(--text-secondary);">${(item.item_code && item.item_code !== 'null') ? item.item_code : ''}</code></td>
+            <td style="font-size:0.82rem;">${(item.cust_name && item.cust_name !== 'null') ? item.cust_name : ''}</td>
+            <td><code style="font-size:0.82rem;color:var(--text-secondary);">${(item.cust_code && item.cust_code !== 'null') ? item.cust_code : ''}</code></td>
+            <td><small style="color:var(--text-secondary);">${(item.company && item.company !== 'null') ? item.company : ''}</small></td>
+            <td>
+              <span class="badge ${s === 'ordered' ? 'badge-green' : 'badge-red'}">
+                ${s === 'ordered' ? 'تم الطلب' : (s === 'transferred' ? 'محول' : 'غير متوفر')}
+              </span>
+            </td>
+            <td>
+              <select id="select-${item.id}" class="table-select" ${isDone ? 'disabled' : ''}>
+                <option value="" disabled ${currentAction === "" ? 'selected' : ''}>اختر إجراء...</option>
+                <option value="متوفر وتم ابلاغ العميل"    ${currentAction === 'متوفر وتم ابلاغ العميل'    ? 'selected' : ''}>متوفر وتم ابلاغ العميل ✅</option>
+                <option value="غير متوفر يحتاج متابعة"    ${currentAction === 'غير متوفر يحتاج متابعة'    ? 'selected' : ''}>غير متوفر يحتاج متابعة 🔍</option>
+                <option value="حاولنا التواصل مع العميل"  ${currentAction === 'حاولنا التواصل مع العميل'  ? 'selected' : ''}>حاولنا التواصل مع العميل 📞</option>
+                <option value="العميل الغى الطلب"         ${currentAction === 'العميل الغى الطلب'         ? 'selected' : ''}>العميل الغى الطلب 🚫</option>
+              </select>
+            </td>
+            <td>
+              ${!isDone
+                ? `<button class="btn btn-success btn-sm" onclick="submitCSAction(event, '${item.id}')">تم</button>`
+                : `<span style="color:var(--success);font-weight:bold;"><i class="fas fa-check-circle"></i></span>`}
+            </td>
+          </tr>`;
       }).join('');
     }
-    function renderItems() {
-  const tbody    = document.getElementById('data-list');
-  const hideDone = document.getElementById('hideDone').checked;
-  const searchVal = document.getElementById('searchInput').value.trim().toLowerCase();
-
-  const filtered = allItems.filter(item => {
-    const isMyBranch  = (String(item.user).trim() === String(userBranch).trim());
-    const validStates = ['ordered', 'unavailable', 'transferred'];
-    const isResponded = validStates.includes(String(item.state || "").trim().toLowerCase());
-    const hasAction   = (item.cust_state && item.cust_state !== "" && item.cust_state !== "null");
-    const hasCustomer = (
-      (item.cust_name && item.cust_name.trim() !== "" && item.cust_name !== "null") ||
-      (item.cust_code && item.cust_code.trim() !== "" && item.cust_code !== "null")
-    );
-
-    if (!hasCustomer) return false;
-    if (hideDone && hasAction) return false;
-    if (!isMyBranch || !isResponded) return false;
-
-    // ←── البحث في كل الأعمدة
-    const searchMatch = !searchVal || [
-      item.item_name, item.item_code,
-      item.cust_name, item.cust_code,
-      item.company,   item.cust_state
-    ].some(val => String(val || '').toLowerCase().includes(searchVal));
-
-    return searchMatch;
-  });
-
-  if (filtered.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج</td></tr>`;
-    return;
-  }
-
-  tbody.innerHTML = filtered.map(item => { /* باقي الكود زي ما هو */ }).join('');
-}
 
     async function submitCSAction(event, id) {
-      const btn = event.target;
+      const btn      = event.target;
       const decision = document.getElementById(`select-${id}`).value;
       if (!decision) { alert("برجاء اختيار إجراء من القائمة"); return; }
-      btn.disabled = true;
+      btn.disabled  = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-      const success = await updateData({ id, type: "cs_action", decision, done: "تم", updatedAt: new Date().toISOString() });
+
+      const success = await updateData({
+        id,
+        type:      "cs_action",
+        decision,
+        done:      "تم",
+        updatedAt: new Date().toISOString()
+      });
+
       if (success) {
         loadCSData();
       } else {
         alert("⚠️ فشل التحديث");
-        btn.disabled = false;
+        btn.disabled    = false;
         btn.textContent = "تم";
       }
     }
