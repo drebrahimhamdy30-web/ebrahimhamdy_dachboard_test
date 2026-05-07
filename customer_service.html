@@ -15,6 +15,15 @@
         <div class="page-title">
           <i class="fas fa-headset"></i> معالجة طلبات
           <span class="highlight" id="display-branch">...</span>
+          <div style="padding:12px 0 4px;">
+  <div class="field-icon-wrap" style="max-width:400px;">
+    <i class="fas fa-search field-icon"></i>
+    <input type="text" id="searchInput" class="form-input"
+      placeholder="بحث في كل الأعمدة..."
+      oninput="applyFilter()"
+      style="padding-right:34px;">
+  </div>
+</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <label class="check-label">
@@ -126,6 +135,42 @@ return `
   </tr>`;
       }).join('');
     }
+    function renderItems() {
+  const tbody    = document.getElementById('data-list');
+  const hideDone = document.getElementById('hideDone').checked;
+  const searchVal = document.getElementById('searchInput').value.trim().toLowerCase();
+
+  const filtered = allItems.filter(item => {
+    const isMyBranch  = (String(item.user).trim() === String(userBranch).trim());
+    const validStates = ['ordered', 'unavailable', 'transferred'];
+    const isResponded = validStates.includes(String(item.state || "").trim().toLowerCase());
+    const hasAction   = (item.cust_state && item.cust_state !== "" && item.cust_state !== "null");
+    const hasCustomer = (
+      (item.cust_name && item.cust_name.trim() !== "" && item.cust_name !== "null") ||
+      (item.cust_code && item.cust_code.trim() !== "" && item.cust_code !== "null")
+    );
+
+    if (!hasCustomer) return false;
+    if (hideDone && hasAction) return false;
+    if (!isMyBranch || !isResponded) return false;
+
+    // ←── البحث في كل الأعمدة
+    const searchMatch = !searchVal || [
+      item.item_name, item.item_code,
+      item.cust_name, item.cust_code,
+      item.company,   item.cust_state
+    ].some(val => String(val || '').toLowerCase().includes(searchVal));
+
+    return searchMatch;
+  });
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtered.map(item => { /* باقي الكود زي ما هو */ }).join('');
+}
 
     async function submitCSAction(event, id) {
       const btn = event.target;
