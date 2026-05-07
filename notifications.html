@@ -16,35 +16,23 @@
         <button class="btn btn-primary" onclick="loadNotifications()"><i class="fas fa-sync-alt"></i> تحديث</button>
       </div>
 
-      <div class="filter-bar">
-        <label class="check-label"><input type="checkbox" id="showReceived" checked onchange="applyFilter()"> واردة 📥</label>
-        <label class="check-label"><input type="checkbox" id="showSent" onchange="applyFilter()"> مرسلة 📤</label>
-        <label class="check-label" style="border-right:2px solid var(--border);padding-right:14px;margin-right:6px;">
-          <input type="checkbox" id="hideDone" checked onchange="applyFilter()"> قيد الانتظار فقط
-        </label>
-      </div>
-
-      <div id="notif-container">
-        <p style="text-align:center;padding:30px;color:var(--text-muted);">جاري التحميل...</p>
-      </div>
-    </div>
-  </div>
-
-  <script src="api.js"></script>
-  <script src="nav.js"></script>
-  <script>
-// بعد ✅
-let activeUser = null;
-let userBranch = '';
-let allItems = [];
-
-checkAuth().then(user => {
-  activeUser = user;
-  if (user) {
-    userBranch = (localStorage.getItem('userBranch') || '').trim();
-    window.onload = loadNotifications;
-  }
-});
+<div class="filter-bar">
+  <label class="check-label"><input type="checkbox" id="showReceived" checked onchange="applyFilter()"> واردة 📥</label>
+  <label class="check-label"><input type="checkbox" id="showSent" onchange="applyFilter()"> مرسلة 📤</label>
+  <label class="check-label" style="border-right:2px solid var(--border);padding-right:14px;margin-right:6px;">
+    <input type="checkbox" id="hideDone" checked onchange="applyFilter()"> قيد الانتظار فقط
+  </label>
+  <span class="filter-label">موجه إلى:</span>
+  <select id="assignedFilter" class="form-select" style="width:auto;" onchange="applyFilter()">
+    <option value="all">الكل</option>
+    <option value="مبيعات">مبيعات</option>
+    <option value="مشتريات">مشتريات</option>
+    <option value="حسابات">حسابات</option>
+    <option value="مدخل بيانات">مدخل بيانات</option>
+    <option value="ادارة الفرع">ادارة الفرع</option>
+    <option value="فرد">فرد</option>
+  </select>
+</div>
 
     async function loadNotifications() {
       const container = document.getElementById('notif-container');
@@ -58,20 +46,33 @@ checkAuth().then(user => {
       }
     }
 
-    function applyFilter() {
-      const container = document.getElementById('notif-container');
-      const current = String(userBranch).trim();
-      const filtered = allItems.filter(item => {
-        const isDone = (item.done === "تم" || item.done === true || item.done === "true");
-        if (document.getElementById('hideDone').checked && isDone) return false;
-        const isSent = (String(item.branch).trim() === current);
-        const isReceived = (String(item.target_branch).trim() === current);
-        const showSent = document.getElementById('showSent').checked;
-        const showReceived = document.getElementById('showReceived').checked;
-        return (showSent && isSent) || (showReceived && isReceived);
-      });
-      renderNotifications(filtered);
+function applyFilter() {
+  const current     = String(userBranch).trim();
+  const assignedVal = document.getElementById('assignedFilter').value;
+
+  const filtered = allItems.filter(item => {
+    const isDone      = (item.done === "تم" || item.done === true || item.done === "true");
+    if (document.getElementById('hideDone').checked && isDone) return false;
+    const isSent      = (String(item.branch).trim() === current);
+    const isReceived  = (String(item.target_branch).trim() === current);
+    const showSent     = document.getElementById('showSent').checked;
+    const showReceived = document.getElementById('showReceived').checked;
+    const dirMatch     = (showSent && isSent) || (showReceived && isReceived);
+    if (!dirMatch) return false;
+
+    if (assignedVal !== 'all') {
+      if (assignedVal === 'فرد') {
+        if (String(item.target_type || '').trim() !== 'فرد') return false;
+      } else {
+        if (String(item.assigned_to || '').trim() !== assignedVal) return false;
+      }
     }
+
+    return true;
+  });
+
+  renderNotifications(filtered);
+}
 
     function renderNotifications(items) {
       const container = document.getElementById('notif-container');
