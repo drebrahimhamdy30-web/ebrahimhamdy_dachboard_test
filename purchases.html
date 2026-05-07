@@ -38,6 +38,17 @@
         <div id="branchList" style="display:flex;gap:8px;flex-wrap:wrap;margin-right:4px;"></div>
       </div>
 
+      <!-- خانة البحث -->
+      <div style="padding:8px 0 12px;">
+        <div class="field-icon-wrap" style="max-width:400px;">
+          <i class="fas fa-search field-icon"></i>
+          <input type="text" id="searchInput" class="form-input"
+            placeholder="بحث في كل الأعمدة..."
+            oninput="applyFilter()"
+            style="padding-right:34px;">
+        </div>
+      </div>
+
       <div class="table-wrap">
         <table>
           <thead>
@@ -118,15 +129,23 @@
     }
 
     function applyFilter() {
-      const statusVal    = document.getElementById('statusFilter').value;
-      const orderTypeVal = document.getElementById('orderTypeFilter').value;
+      const statusVal        = document.getElementById('statusFilter').value;
+      const orderTypeVal     = document.getElementById('orderTypeFilter').value;
+      const searchVal        = document.getElementById('searchInput').value.trim().toLowerCase();
       const selectedBranches = Array.from(document.querySelectorAll('.branch-cb:checked')).map(c => c.value);
 
       const filtered = rawData.filter(i => {
         const sMatch = (statusVal === 'all' || i.status === statusVal);
         const bMatch = selectedBranches.includes(i.branch);
         const tMatch = (orderTypeVal === 'all' || String(i.order_type).includes(orderTypeVal));
-        return sMatch && bMatch && tMatch;
+
+        const searchMatch = !searchVal || [
+          i.item_name, i.item_code,
+          i.customer_name, i.customer_code,
+          i.branch, i.company, i.order_type
+        ].some(val => String(val || '').toLowerCase().includes(searchVal));
+
+        return sMatch && bMatch && tMatch && searchMatch;
       });
 
       renderTable(filtered);
@@ -142,7 +161,7 @@
       tbody.innerHTML = items.map(i => {
         let displayDate = "---", displayTime = "";
         if (i.createdAt) {
-          const d = new Date(i.createdAt);
+          const d    = new Date(i.createdAt);
           displayDate = d.toLocaleDateString('ar-EG', {month:'numeric', day:'numeric'});
           displayTime = d.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit', hour12:true});
         }
@@ -195,7 +214,7 @@
     async function saveRow(id, btn) {
       const currentStatus  = document.getElementById(`stat-${id}`).value;
       const currentCompany = document.getElementById(`comp-${id}`).value;
-      btn.disabled = true;
+      btn.disabled  = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
       const success = await updateData({
@@ -208,13 +227,13 @@
 
       if (success) {
         btn.style.background = "#16a34a";
-        btn.innerHTML = '<i class="fas fa-check"></i>';
+        btn.innerHTML        = '<i class="fas fa-check"></i>';
         const item = rawData.find(x => x.id == id);
         if (item) { item.status = currentStatus; item.company = currentCompany; }
         setTimeout(() => applyFilter(), 1000);
       } else {
         alert("⚠️ فشل في الحفظ");
-        btn.disabled = false;
+        btn.disabled  = false;
         btn.innerHTML = '<i class="fas fa-save"></i>';
       }
     }
