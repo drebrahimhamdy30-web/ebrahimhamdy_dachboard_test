@@ -59,7 +59,7 @@
               <th>الكمية</th>
               <th>المورد</th>
               <th>الحالة</th>
-              <th>حفظ</th>
+              <th>حالة الحفظ</th>
             </tr>
           </thead>
           <tbody id="table-body">
@@ -191,48 +191,56 @@
             <td><b style="font-size:1.1rem;color:var(--warning);">${i.qty}</b></td>
             <td>
               <input type="text" value="${i.company}" id="comp-${i.id}"
-                class="table-input" placeholder="المورد...">
+                class="table-input" placeholder="المورد..."
+                onchange="autoSave('${i.id}')">
             </td>
             <td>
-              <select id="stat-${i.id}" class="table-select">
+              <select id="stat-${i.id}" class="table-select"
+                onchange="autoSave('${i.id}', this)">
                 <option value="pending"     ${i.status==='pending'     ?'selected':''}>⏳ انتظار</option>
                 <option value="ordered"     ${i.status==='ordered'     ?'selected':''}>✅ تم الطلب</option>
                 <option value="unavailable" ${i.status==='unavailable' ?'selected':''}>❌ نقص</option>
               </select>
             </td>
-            <td>
-              <button class="btn btn-success btn-sm btn-icon" onclick="saveRow('${i.id}', this)">
-                <i class="fas fa-save"></i>
-              </button>
+            <td id="action-${i.id}">
+              <i class="fas fa-check-circle" style="color:var(--text-muted);font-size:1.1rem;" title="يتم الحفظ تلقائياً"></i>
             </td>
           </tr>`;
       }).join('');
     }
 
-    async function saveRow(id, btn) {
-      const currentStatus  = document.getElementById(`stat-${id}`).value;
-      const currentCompany = document.getElementById(`comp-${id}`).value;
-      btn.disabled  = true;
-      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    async function autoSave(id, triggerEl) {
+      const statusEl  = document.getElementById(`stat-${id}`);
+      const compEl    = document.getElementById(`comp-${id}`);
+      const actionEl  = document.getElementById(`action-${id}`);
+
+      if (!statusEl) return;
+
+      actionEl.innerHTML = '<i class="fas fa-spinner fa-spin" style="color:var(--text-muted);"></i>';
 
       const success = await updateData({
         id,
-        status:  currentStatus,
-        company: currentCompany,
+        status:  statusEl.value,
+        company: compEl ? compEl.value : '',
         type:    "شراء",
         action:  "update_status"
       });
 
       if (success) {
-        btn.style.background = "#16a34a";
-        btn.innerHTML        = '<i class="fas fa-check"></i>';
+        actionEl.innerHTML = '<i class="fas fa-check-circle" style="color:var(--success);font-size:1.1rem;"></i>';
         const item = rawData.find(x => x.id == id);
-        if (item) { item.status = currentStatus; item.company = currentCompany; }
-        setTimeout(() => applyFilter(), 1000);
+        if (item) {
+          item.status  = statusEl.value;
+          item.company = compEl ? compEl.value : '';
+        }
+        setTimeout(() => {
+          if (actionEl) {
+            actionEl.innerHTML = '<i class="fas fa-check-circle" style="color:var(--text-muted);font-size:1.1rem;" title="يتم الحفظ تلقائياً"></i>';
+          }
+        }, 2000);
       } else {
-        alert("⚠️ فشل في الحفظ");
-        btn.disabled  = false;
-        btn.innerHTML = '<i class="fas fa-save"></i>';
+        actionEl.innerHTML = '<i class="fas fa-exclamation-circle" style="color:var(--danger);font-size:1.1rem;" title="فشل الحفظ"></i>';
+        if (triggerEl) alert("⚠️ فشل في الحفظ، يرجى المحاولة مجدداً");
       }
     }
   </script>
