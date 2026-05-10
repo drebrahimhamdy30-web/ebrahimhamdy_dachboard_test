@@ -45,6 +45,27 @@
             <option value="all">كل الفروع</option>
           </select>
         </div>
+        <div>
+          <label class="filter-label" style="display:block;margin-bottom:4px;">بحث في الجدول</label>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <div style="position:relative;display:flex;align-items:center;">
+              <i class="fas fa-search" style="position:absolute;right:9px;font-size:13px;color:var(--text-muted);pointer-events:none;"></i>
+              <input type="text" id="search-input" placeholder="اسم صنف، كود، عميل..."
+                oninput="applyFilters()"
+                style="padding:6px 30px 6px 10px;width:190px;font-size:13px;border-radius:8px;
+                       border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary);">
+            </div>
+            <select id="search-col" onchange="applyFilters()"
+              class="form-select"
+              style="font-size:13px;width:120px;">
+              <option value="all">كل الأعمدة</option>
+              <option value="item_name">اسم الصنف</option>
+              <option value="item_code">كود الصنف</option>
+              <option value="cust_name">العميل</option>
+              <option value="user">المسار</option>
+            </select>
+          </div>
+        </div>
       </div>
 
       <div class="table-wrap">
@@ -127,14 +148,27 @@
       const dv = document.getElementById('direction-filter').value;
       const sv = document.getElementById('status-filter').value;
       const bv = document.getElementById('branch-select-filter').value;
+      const searchVal = document.getElementById('search-input').value.trim().toLowerCase();
+      const searchCol = document.getElementById('search-col').value;
 
       const filtered = rawData.filter(item => {
-        const isTarget   = (item.branch === userBranchName);
-        const isSource   = (item.user   === userBranchName);
-        const dirMatch   = (dv === 'all') || (dv === 'inbound' && isTarget) || (dv === 'outbound' && isSource);
-        const statMatch  = (sv === 'all') || ((item.state || 'pending') === sv);
+        const isTarget    = (item.branch === userBranchName);
+        const isSource    = (item.user   === userBranchName);
+        const dirMatch    = (dv === 'all') || (dv === 'inbound' && isTarget) || (dv === 'outbound' && isSource);
+        const statMatch   = (sv === 'all') || ((item.state || 'pending') === sv);
         const branchMatch = (bv === 'all') || (item.user === bv || item.branch === bv);
-        return dirMatch && statMatch && branchMatch;
+
+        let searchMatch = true;
+        if (searchVal) {
+          if (searchCol === 'all') {
+            searchMatch = ['item_name','item','item_code','cust_name','user','branch']
+              .some(k => (item[k] || '').toLowerCase().includes(searchVal));
+          } else {
+            searchMatch = (item[searchCol] || '').toLowerCase().includes(searchVal);
+          }
+        }
+
+        return dirMatch && statMatch && branchMatch && searchMatch;
       });
 
       renderTable(filtered);
@@ -156,6 +190,7 @@
         const timeStr      = dateObj ? dateObj.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'}) : '';
 
         const tr = document.createElement('tr');
+        tr.id = `row-${item.id}`;
         tr.innerHTML = `
           <td style="font-size:0.75rem;line-height:1.4;">
             ${dateStr}
@@ -184,49 +219,60 @@
           </td>
           <td>
             <input type="text" id="note-${item.id}" class="table-input"
-              value="${item.company || ''}" ${!canReply ? 'disabled' : ''}>
+              value="${item.company || ''}"
+              ${!canReply ? 'disabled' : ''}
+              onchange="autoSave('${item.id}')">
           </td>
           <td>
-            <select id="stat-${item.id}" class="table-select" ${!canReply ? 'disabled' : ''}>
+            <select id="stat-${item.id}" class="table-select"
+              ${!canReply ? 'disabled' : ''}
+              onchange="autoSave('${item.id}', this)">
               <option value="pending"     ${currentState==='pending'     ? 'selected' : ''}>⏳ انتظار</option>
               <option value="transferred" ${currentState==='transferred' ? 'selected' : ''}>✅ تم</option>
               <option value="unavailable" ${currentState==='unavailable' ? 'selected' : ''}>❌ نقص</option>
             </select>
           </td>
-          <td>
+          <td id="action-${item.id}">
             ${canReply
-              ? `<button class="btn btn-success btn-sm btn-icon" onclick="saveTransfer('${item.id}', this)">
-                   <i class="fas fa-save"></i>
-                 </button>`
+              ? `<i class="fas fa-check-circle" style="color:var(--text-muted);font-size:1.1rem;" title="يتم الحفظ تلقائياً"></i>`
               : `<i class="fas fa-clock" style="color:var(--text-muted);"></i>`}
           </td>`;
         tbody.appendChild(tr);
       });
     }
 
-    async function saveTransfer(id, btn) {
-      const status = document.getElementById(`stat-${id}`).value;
-      const notes  = document.getElementById(`note-${id}`).value;
-      btn.disabled = true;
-      const orig   = btn.innerHTML;
-      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    async function autoSave(id, triggerEl) {
+      const statusEl = document.getElementById(`stat-${id}`);
+      const noteEl   = document.getElementById(`note-${id}`);
+      const actionEl = document.getElementById(`action-${id}`);
 
-const success = await updateData({
-  id,
-  status:  status,
-  company: notes,
-  type:    "تحويل",
-  action:  "update_status"
-});
+      if (!statusEl) return;
+
+      // أظهر مؤشر الحفظ
+      actionEl.innerHTML = '<i class="fas fa-spinner fa-spin" style="color:var(--text-muted);"></i>';
+
+      const success = await updateData({
+        id,
+        status:  statusEl.value,
+        company: noteEl ? noteEl.value : '',
+        type:    "تحويل",
+        action:  "update_status"
+      });
 
       if (success) {
-        btn.style.background = "#16a34a";
-        btn.innerHTML = '<i class="fas fa-check"></i>';
-        setTimeout(() => loadTransfers(), 800);
+        actionEl.innerHTML = '<i class="fas fa-check-circle" style="color:var(--success);font-size:1.1rem;"></i>';
+        // بعد ثانيتين يرجع للأيقونة الرمادية الهادية
+        setTimeout(() => {
+          if (actionEl) {
+            actionEl.innerHTML = '<i class="fas fa-check-circle" style="color:var(--text-muted);font-size:1.1rem;" title="يتم الحفظ تلقائياً"></i>';
+          }
+        }, 2000);
       } else {
-        alert("فشل التحديث");
-        btn.disabled = false;
-        btn.innerHTML = orig;
+        actionEl.innerHTML = '<i class="fas fa-exclamation-circle" style="color:var(--danger);font-size:1.1rem;" title="فشل الحفظ"></i>';
+        // أعد قيمة السيليكت للقيمة السابقة لو فشل
+        if (triggerEl) {
+          alert("فشل الحفظ، يرجى المحاولة مجدداً");
+        }
       }
     }
   </script>
