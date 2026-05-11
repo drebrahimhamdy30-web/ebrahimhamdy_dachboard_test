@@ -24,6 +24,7 @@ async function fetchOrders()    { return await fetchFromN8N('orders'); }
 async function fetchData()      { return await fetchFromN8N('orders'); }
 async function fetchContracts() { return await fetchFromN8N('contracts'); }
 async function fetchMissing()   { return await fetchFromN8N('missing'); }
+async function fetchInventory() { return await fetchFromN8N('inventory'); }  // ← الإضافة الوحيدة
 
 async function login(username, password) {
   try {
@@ -61,49 +62,37 @@ async function verifyToken() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: token })
     });
-
-    // لو السيرفر مش شغال أو في خطأ — متخرجش
     if (!response.ok) return true;
-
     const raw  = await response.json();
     const data = Array.isArray(raw) ? (raw[0] || {}) : raw;
-
-    // لو الرد فيه valid بشكل صريح
     if (data.valid === true)  return true;
     if (data.valid === false) return false;
-
-    // لو الرد فيه user — يعني التحقق نجح
     if (data.user) return true;
-
     return false;
   } catch(e) {
-    // لو في خطأ في الاتصال — متخرجش
     return true;
   }
 }
+
 async function checkAuth() {
   const user      = localStorage.getItem('activeUser');
   const token     = localStorage.getItem('authToken');
   const lastCheck = localStorage.getItem('lastVerify');
   const now       = Date.now();
-
   if (!user || !token) {
     window.location.replace('index.html');
     return null;
   }
-
-const thirtyMinutes = 30 * 60 * 1000;
-if (lastCheck && (now - parseInt(lastCheck)) < thirtyMinutes) {
-  return user;
-}
-
+  const thirtyMinutes = 30 * 60 * 1000;
+  if (lastCheck && (now - parseInt(lastCheck)) < thirtyMinutes) {
+    return user;
+  }
   const valid = await verifyToken();
   if (!valid) {
     localStorage.clear();
     window.location.replace('index.html');
     return null;
   }
-
   localStorage.setItem('lastVerify', now);
   return user;
 }
