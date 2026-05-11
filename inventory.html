@@ -33,9 +33,7 @@
     }
     .btn-balance:hover { background:var(--primary); color:#fff; border-color:var(--primary); }
     .balance-val { font-weight:700; font-size:1rem; color:var(--success,#16a34a); }
-    .top-bar {
-      display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px;
-    }
+    .top-bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
     .summary-inline {
       display:flex; gap:10px; align-items:center; flex-wrap:wrap;
       font-size:0.8rem; padding:6px 12px;
@@ -48,7 +46,6 @@
       color:var(--text-secondary); cursor:pointer; transition:all 0.2s; font-size:0.8rem;
     }
     .page-btn:hover { background:var(--primary); color:#fff; border-color:var(--primary); }
-    .page-btn.active { background:var(--primary); color:#fff; border-color:var(--primary); font-weight:700; }
     .page-btn:disabled { opacity:0.4; cursor:not-allowed; }
     .filter-toggle {
       padding:6px 12px; border-radius:20px; font-size:0.8rem; cursor:pointer;
@@ -81,7 +78,6 @@
       </div>
 
       <div class="top-bar">
-        <!-- بحث -->
         <div class="field-icon-wrap" style="min-width:180px;flex:1;max-width:240px;">
           <i class="fas fa-search field-icon"></i>
           <input type="text" id="searchInput" class="form-input"
@@ -90,12 +86,10 @@
             style="padding-right:34px;">
         </div>
 
-        <!-- فلتر -->
         <button id="filter-btn" class="filter-toggle" onclick="toggleFilter()">
           ⏳ غير مجروده
         </button>
 
-        <!-- الإجماليات -->
         <div class="summary-inline">
           <span>📦 <b id="sum-total">0</b></span>
           <span style="color:var(--success,#16a34a);">✅ <b id="sum-done">0</b></span>
@@ -103,7 +97,6 @@
           <span style="color:var(--warning);">⏳ <b id="sum-pending">0</b></span>
         </div>
 
-        <!-- الصفحات -->
         <div class="pagination">
           <button class="page-btn" id="btn-prev" onclick="changePage(-1)">
             <i class="fas fa-chevron-right"></i>
@@ -155,6 +148,7 @@
     let filteredData = [];
     let currentTab   = 'تلاجه';
     let userBranch   = '';
+    let userRole     = '';
     let currentPage  = 1;
     let showPending  = true;
 
@@ -162,7 +156,15 @@
       activeUser = user;
       if (user) {
         userBranch = (localStorage.getItem('userBranch') || '').trim();
+        userRole   = (localStorage.getItem('userRole')   || 'employee').trim();
         document.getElementById('branch-tag').textContent = userBranch;
+
+        // الموظف العادي مش يقدر يدخل صفحة الجرد
+        if (userRole === 'employee') {
+          window.location.replace('main.html');
+          return;
+        }
+
         loadCurrentTab();
       }
     });
@@ -204,7 +206,7 @@
       try {
         const items = await fetchInventory();
         rawData = items.filter(item => {
-          const typeMatch   = (item.type || '').toLowerCase() === currentTab.toLowerCase();
+          const typeMatch   = (item.type   || '').toLowerCase() === currentTab.toLowerCase();
           const branchMatch = (item.branch || '') === userBranch;
           return typeMatch && branchMatch;
         });
@@ -216,12 +218,13 @@
     }
 
     function buildTableHeader() {
-      const cols = TAB_COLS[currentTab] || ['code', 'itm_name_ar'];
+      const cols    = TAB_COLS[currentTab] || ['code', 'itm_name_ar'];
+      const canEdit = (userRole === 'inventory' || userRole === 'admin');
       document.getElementById('inv-thead').innerHTML = `
         <tr>
           ${cols.map(c => `<th>${COL_LABELS[c] || c}</th>`).join('')}
           <th>الرصيد الحالي</th>
-          <th>إجراء</th>
+          ${canEdit ? '<th>إجراء</th>' : '<th>الحالة</th>'}
         </tr>`;
     }
 
@@ -277,8 +280,9 @@
     }
 
     function renderTable(items) {
-      const tbody = document.getElementById('table-body');
-      const cols  = TAB_COLS[currentTab] || ['code', 'itm_name_ar'];
+      const tbody   = document.getElementById('table-body');
+      const cols    = TAB_COLS[currentTab] || ['code', 'itm_name_ar'];
+      const canEdit = (userRole === 'inventory' || userRole === 'admin');
 
       if (items.length === 0) {
         tbody.innerHTML = `<tr><td colspan="${cols.length + 2}" style="text-align:center;padding:40px;color:var(--text-muted);">
@@ -303,23 +307,31 @@
           return `<td style="font-size:0.82rem;" id="col-${c}-${id}">${val}</td>`;
         }).join('');
 
+        const actionCell = canEdit
+          ? `<td>
+               <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                 <button class="btn-done ${isDone ? 'active' : ''}" id="done-btn-${id}"
+                   onclick="handleAction('${id}', 'done')">✅ تم الجرد</button>
+                 <button class="btn-skip ${isSkip ? 'active' : ''}" id="skip-btn-${id}"
+                   onclick="handleAction('${id}', 'skip')">⏭️ تجاهل</button>
+               </div>
+             </td>`
+          : `<td>
+               <span style="font-size:0.78rem;color:var(--text-muted);">
+                 ${isDone ? '✅ تم الجرد' : isSkip ? '⏭️ تجاهل' : '⏳ لم يُجرد'}
+               </span>
+             </td>`;
+
         const tr = document.createElement('tr');
         tr.id = `row-${id}`;
         tr.innerHTML = `
           ${colCells}
           <td id="bal-cell-${id}">
-            <button class="btn-balance" onclick="fetchBalance('${id}', '${(item.code || '').replace(/'/g,"\\'")}', this)">
+            <button class="btn-balance" onclick="fetchBalance('${id}', '${(item.code||'').replace(/'/g,"\\'")}', this)">
               <i class="fas fa-database"></i> جلب الرصيد
             </button>
           </td>
-          <td>
-            <div style="display:flex;gap:6px;flex-wrap:wrap;">
-              <button class="btn-done ${isDone ? 'active' : ''}" id="done-btn-${id}"
-                onclick="handleAction('${id}', 'done')">✅ تم الجرد</button>
-              <button class="btn-skip ${isSkip ? 'active' : ''}" id="skip-btn-${id}"
-                onclick="handleAction('${id}', 'skip')">⏭️ تجاهل</button>
-            </div>
-          </td>`;
+          ${actionCell}`;
         tbody.appendChild(tr);
       });
     }
@@ -348,6 +360,9 @@
     }
 
     async function handleAction(id, action) {
+      // تأكد إن المستخدم عنده صلاحية
+      if (userRole !== 'inventory' && userRole !== 'admin') return;
+
       const doneBtn = document.getElementById(`done-btn-${id}`);
       const skipBtn = document.getElementById(`skip-btn-${id}`);
       const isDone  = action === 'done';
@@ -376,7 +391,6 @@
         if (fItem) { fItem.done = isDone; fItem.skip = isSkip; }
         updateSummary();
 
-        // لو showPending نشيل الصنف من الجدول بعد ثانية
         if (showPending) {
           setTimeout(() => {
             filteredData = filteredData.filter(x => x.id != id);
