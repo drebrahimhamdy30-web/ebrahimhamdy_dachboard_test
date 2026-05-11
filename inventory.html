@@ -34,26 +34,28 @@
     .btn-balance:hover { background:var(--primary); color:#fff; border-color:var(--primary); }
     .balance-val { font-weight:700; font-size:1rem; color:var(--success,#16a34a); }
     .top-bar {
-      display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:12px;
+      display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px;
     }
     .summary-inline {
-      display:flex; gap:12px; align-items:center; flex-wrap:wrap;
+      display:flex; gap:10px; align-items:center; flex-wrap:wrap;
       font-size:0.8rem; padding:6px 12px;
       background:var(--surface-3); border-radius:20px;
     }
-    .pagination {
-      display:flex; gap:6px; align-items:center;
-      font-size:0.82rem;
-    }
+    .pagination { display:flex; gap:6px; align-items:center; }
     .page-btn {
       padding:4px 10px; border-radius:8px;
       border:1px solid var(--border); background:var(--surface-3);
-      color:var(--text-secondary); cursor:pointer; transition:all 0.2s;
-      font-size:0.8rem;
+      color:var(--text-secondary); cursor:pointer; transition:all 0.2s; font-size:0.8rem;
     }
     .page-btn:hover { background:var(--primary); color:#fff; border-color:var(--primary); }
     .page-btn.active { background:var(--primary); color:#fff; border-color:var(--primary); font-weight:700; }
     .page-btn:disabled { opacity:0.4; cursor:not-allowed; }
+    .filter-toggle {
+      padding:6px 12px; border-radius:20px; font-size:0.8rem; cursor:pointer;
+      border:1px solid var(--border); background:var(--surface-3);
+      color:var(--text-secondary); white-space:nowrap; transition:all 0.2s;
+    }
+    .filter-toggle.all { background:var(--primary); color:#fff; border-color:var(--primary); }
   </style>
 </head>
 <body>
@@ -78,15 +80,20 @@
         <button class="tab-btn" onclick="switchTab('erp', this)">🖥️ ERP</button>
       </div>
 
-      <!-- شريط البحث + الإجماليات + الصفحات -->
       <div class="top-bar">
-        <div class="field-icon-wrap" style="min-width:200px;flex:1;max-width:260px;">
+        <!-- بحث -->
+        <div class="field-icon-wrap" style="min-width:180px;flex:1;max-width:240px;">
           <i class="fas fa-search field-icon"></i>
           <input type="text" id="searchInput" class="form-input"
             placeholder="بحث بالكود أو الاسم..."
             oninput="onSearch()"
             style="padding-right:34px;">
         </div>
+
+        <!-- فلتر -->
+        <button id="filter-btn" class="filter-toggle" onclick="toggleFilter()">
+          ⏳ غير مجروده
+        </button>
 
         <!-- الإجماليات -->
         <div class="summary-inline">
@@ -124,8 +131,8 @@
   <script src="api.js"></script>
   <script src="nav.js"></script>
   <script>
-    const BALANCE_URL  = "https://agent.ebrahimhamdy.com/webhook/get_balance";
-    const PAGE_SIZE    = 20;
+    const BALANCE_URL = "https://agent.ebrahimhamdy.com/webhook/get_balance";
+    const PAGE_SIZE   = 20;
 
     const TAB_COLS = {
       'تلاجه':    ['code', 'itm_name_ar'],
@@ -149,6 +156,7 @@
     let currentTab   = 'تلاجه';
     let userBranch   = '';
     let currentPage  = 1;
+    let showPending  = true;
 
     checkAuth().then(user => {
       activeUser = user;
@@ -162,10 +170,30 @@
     function switchTab(tabName, btn) {
       currentTab  = tabName;
       currentPage = 1;
+      showPending = true;
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById('searchInput').value = '';
+      updateFilterBtn();
       loadCurrentTab();
+    }
+
+    function toggleFilter() {
+      showPending = !showPending;
+      currentPage = 1;
+      updateFilterBtn();
+      applyFilter();
+    }
+
+    function updateFilterBtn() {
+      const btn = document.getElementById('filter-btn');
+      if (showPending) {
+        btn.textContent = '⏳ غير مجروده';
+        btn.classList.remove('all');
+      } else {
+        btn.textContent = '📦 الكل';
+        btn.classList.add('all');
+      }
     }
 
     async function loadCurrentTab() {
@@ -204,12 +232,24 @@
 
     function applyFilter() {
       const search = document.getElementById('searchInput').value.trim().toLowerCase();
+
+      let data = rawData;
+
+      if (showPending) {
+        data = data.filter(item => {
+          const done = item.done === true || item.done === 'true';
+          const skip = item.skip === true || item.skip === 'true';
+          return !done && !skip;
+        });
+      }
+
       filteredData = !search
-        ? rawData
-        : rawData.filter(item =>
+        ? data
+        : data.filter(item =>
             ['code','itm_name_ar','itm_name_en','bill_no']
               .some(k => (item[k] || '').toLowerCase().includes(search))
           );
+
       updateSummary();
       updatePagination();
       renderPage();
@@ -241,7 +281,9 @@
       const cols  = TAB_COLS[currentTab] || ['code', 'itm_name_ar'];
 
       if (items.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="${cols.length + 2}" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد أصناف</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${cols.length + 2}" style="text-align:center;padding:40px;color:var(--text-muted);">
+          ${showPending ? 'تم جرد كل الأصناف ✅' : 'لا توجد أصناف'}
+        </td></tr>`;
         return;
       }
 
@@ -258,7 +300,7 @@
 
         const colCells = cols.map(c => {
           const val = c === 'time' ? timeVal : (item[c] || '---');
-          return `<td style="font-size:0.82rem;">${val}</td>`;
+          return `<td style="font-size:0.82rem;" id="col-${c}-${id}">${val}</td>`;
         }).join('');
 
         const tr = document.createElement('tr');
@@ -266,7 +308,7 @@
         tr.innerHTML = `
           ${colCells}
           <td id="bal-cell-${id}">
-            <button class="btn-balance" onclick="fetchBalance('${id}', '${item.code || ''}', this)">
+            <button class="btn-balance" onclick="fetchBalance('${id}', '${(item.code || '').replace(/'/g,"\\'")}', this)">
               <i class="fas fa-database"></i> جلب الرصيد
             </button>
           </td>
@@ -282,40 +324,34 @@
       });
     }
 
-async function fetchBalance(id, code, btn) {
-  const cell    = document.getElementById(`bal-cell-${id}`);
-  const nameCell = document.querySelector(`#row-${id} td:nth-child(2)`);
-  btn.disabled  = true;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-  try {
-    const res  = await fetch(`${BALANCE_URL}?code=${encodeURIComponent(code)}&branch=${encodeURIComponent(userBranch)}`);
-    const raw  = await res.json();
-    const data = Array.isArray(raw) ? raw[0] : raw;
+    async function fetchBalance(id, code, btn) {
+      const cell     = document.getElementById(`bal-cell-${id}`);
+      const nameCell = document.getElementById(`col-itm_name_ar-${id}`);
+      btn.disabled   = true;
+      btn.innerHTML  = '<i class="fas fa-spinner fa-spin"></i>';
+      try {
+        const res  = await fetch(`${BALANCE_URL}?code=${encodeURIComponent(code)}&branch=${encodeURIComponent(userBranch)}`);
+        const raw  = await res.json();
+        const data = Array.isArray(raw) ? raw[0] : raw;
 
-    if (data && data.found) {
-      cell.innerHTML = `
-        <div style="line-height:1.4;">
-          <span class="balance-val">${data.balance}</span>
-        </div>`;
-
-      // عبّي الاسم لو الخلية فاضية
-      if (nameCell && (!nameCell.textContent.trim() || nameCell.textContent.trim() === '---')) {
-        nameCell.innerHTML = `
-          <span style="font-size:0.82rem;">${data.itm_name_ar || '---'}</span>`;
+        if (data && data.found) {
+          cell.innerHTML = `<span class="balance-val">${data.balance}</span>`;
+          if (nameCell && (!nameCell.textContent.trim() || nameCell.textContent.trim() === '---')) {
+            nameCell.textContent = data.itm_name_ar || '---';
+          }
+        } else {
+          cell.innerHTML = `<span style="color:var(--warning);font-size:0.78rem;">⚠️ غير موجود</span>`;
+        }
+      } catch(e) {
+        cell.innerHTML = `<span style="color:var(--danger);font-size:0.78rem;">❌ فشل</span>`;
       }
-    } else {
-      cell.innerHTML = `<span style="color:var(--warning);font-size:0.78rem;">⚠️ غير موجود</span>`;
     }
-  } catch(e) {
-    cell.innerHTML = `<span style="color:var(--danger);font-size:0.78rem;">❌ فشل</span>`;
-  }
-}
 
     async function handleAction(id, action) {
-      const doneBtn  = document.getElementById(`done-btn-${id}`);
-      const skipBtn  = document.getElementById(`skip-btn-${id}`);
-      const isDone   = action === 'done';
-      const isSkip   = action === 'skip';
+      const doneBtn = document.getElementById(`done-btn-${id}`);
+      const skipBtn = document.getElementById(`skip-btn-${id}`);
+      const isDone  = action === 'done';
+      const isSkip  = action === 'skip';
 
       doneBtn.disabled = true;
       skipBtn.disabled = true;
@@ -334,14 +370,21 @@ async function fetchBalance(id, code, btn) {
       skipBtn.disabled = false;
 
       if (success) {
-        const item = rawData.find(x => x.id == id);
-        if (item) { item.done = isDone; item.skip = isSkip; }
-        // أيضاً حدّث في filteredData
+        const item  = rawData.find(x => x.id == id);
         const fItem = filteredData.find(x => x.id == id);
+        if (item)  { item.done  = isDone; item.skip  = isSkip; }
         if (fItem) { fItem.done = isDone; fItem.skip = isSkip; }
         updateSummary();
+
+        // لو showPending نشيل الصنف من الجدول بعد ثانية
+        if (showPending) {
+          setTimeout(() => {
+            filteredData = filteredData.filter(x => x.id != id);
+            updatePagination();
+            renderPage();
+          }, 800);
+        }
       } else {
-        // رجّع الزرارين للحالة القديمة
         const oldItem = rawData.find(x => x.id == id);
         if (oldItem) {
           doneBtn.classList.toggle('active', oldItem.done === true || oldItem.done === 'true');
@@ -352,7 +395,6 @@ async function fetchBalance(id, code, btn) {
     }
 
     function updateSummary() {
-      const total   = filteredData.length;
       const done    = rawData.filter(i => i.done === true || i.done === 'true').length;
       const skipped = rawData.filter(i => i.skip === true || i.skip === 'true').length;
       const pending = rawData.length - done - skipped;
