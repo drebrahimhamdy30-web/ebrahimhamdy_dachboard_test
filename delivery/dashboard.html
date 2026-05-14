@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>داشبورد — نظام التوصيل</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --primary:#1a56db;--primary-dark:#1344b0;--primary-light:#e8f0fe;
+  --success:#16a34a;--success-light:#f0fdf4;
+  --warning:#d97706;--warning-light:#fffbeb;
+  --danger:#dc2626;--danger-light:#fef2f2;
+  --info:#0891b2;--info-light:#ecfeff;
+  --text:#111827;--text-muted:#6b7280;--text-light:#9ca3af;
+  --border:#e5e7eb;--bg:#f3f4f6;--white:#fff;
+  --sidebar:220px;--header:60px;
+}
+body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex}
+
+/* Sidebar */
+.sidebar{width:var(--sidebar);background:var(--white);border-left:1px solid var(--border);display:flex;flex-direction:column;position:fixed;top:0;right:0;height:100vh;z-index:100}
+.sidebar-logo{padding:1rem 1.25rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:.75rem}
+.sidebar-logo .icon{width:36px;height:36px;background:var(--primary);border-radius:10px;display:flex;align-items:center;justify-content:center}
+.sidebar-logo .icon svg{fill:white;width:20px;height:20px}
+.sidebar-logo span{font-weight:700;font-size:.9rem;color:var(--text)}
+.sidebar-nav{flex:1;padding:.75rem 0;overflow-y:auto}
+.nav-section{padding:.5rem 1rem .25rem;font-size:.7rem;color:var(--text-light);font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.nav-item{display:flex;align-items:center;gap:.625rem;padding:.6rem 1.25rem;cursor:pointer;transition:background .15s;font-size:.875rem;color:var(--text-muted);border:none;background:none;width:100%;text-align:right}
+.nav-item:hover{background:var(--bg);color:var(--text)}
+.nav-item.active{background:var(--primary-light);color:var(--primary);font-weight:600}
+.nav-item svg{width:18px;height:18px;flex-shrink:0}
+.sidebar-footer{padding:1rem 1.25rem;border-top:1px solid var(--border)}
+.user-info{display:flex;align-items:center;gap:.625rem}
+.user-avatar{width:34px;height:34px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:.8rem;flex-shrink:0}
+.user-name{font-size:.8rem;font-weight:600;color:var(--text)}
+.user-role{font-size:.7rem;color:var(--text-muted)}
+.logout-btn{margin-top:.75rem;width:100%;padding:.5rem;border:1px solid var(--border);background:none;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.8rem;color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:.4rem;transition:all .15s}
+.logout-btn:hover{border-color:var(--danger);color:var(--danger)}
+
+/* Main */
+.main{margin-right:var(--sidebar);flex:1;display:flex;flex-direction:column;min-height:100vh}
+.header{height:var(--header);background:var(--white);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 1.5rem;position:sticky;top:0;z-index:50}
+.header-title{font-weight:700;font-size:1rem}
+.header-actions{display:flex;align-items:center;gap:.75rem}
+.btn{display:inline-flex;align-items:center;gap:.4rem;padding:.5rem 1rem;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.8rem;font-weight:600;cursor:pointer;transition:all .15s;border:none}
+.btn-primary{background:var(--primary);color:white}.btn-primary:hover{background:var(--primary-dark)}
+.btn-outline{background:white;color:var(--text);border:1px solid var(--border)}.btn-outline:hover{background:var(--bg)}
+.btn-sm{padding:.35rem .75rem;font-size:.75rem}
+.btn-danger{background:var(--danger);color:white}
+.btn-success{background:var(--success);color:white}
+.content{padding:1.5rem;flex:1}
+
+/* Pages */
+.page{display:none}.page.active{display:block}
+
+/* Stats */
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1.5rem}
+.stat-card{background:var(--white);border-radius:12px;padding:1.25rem;border:1px solid var(--border)}
+.stat-label{font-size:.75rem;color:var(--text-muted);font-weight:500;margin-bottom:.5rem}
+.stat-value{font-size:1.75rem;font-weight:700;color:var(--text)}
+.stat-sub{font-size:.75rem;color:var(--text-muted);margin-top:.25rem}
+.stat-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:.75rem}
+
+/* Table */
+.card{background:var(--white);border-radius:12px;border:1px solid var(--border);overflow:hidden}
+.card-header{padding:1rem 1.25rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card-title{font-weight:700;font-size:.9rem}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.8rem}
+th{padding:.75rem 1rem;text-align:right;font-weight:600;color:var(--text-muted);background:var(--bg);border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:.75rem 1rem;border-bottom:1px solid var(--border);color:var(--text);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#fafafa}
+
+/* Badges */
+.badge{display:inline-flex;align-items:center;gap:.25rem;padding:.2rem .6rem;border-radius:20px;font-size:.7rem;font-weight:600}
+.badge-pending{background:#fef3c7;color:#92400e}
+.badge-picked{background:#dbeafe;color:#1e40af}
+.badge-delivered{background:#d1fae5;color:#065f46}
+.badge-completed{background:#f3f4f6;color:#374151}
+.badge-cancelled{background:#fee2e2;color:#991b1b}
+.badge-admin{background:#ede9fe;color:#5b21b6}
+.badge-supervisor{background:#dbeafe;color:#1e40af}
+.badge-driver{background:#d1fae5;color:#065f46}
+.badge-cashier{background:#fef3c7;color:#92400e}
+.badge-pharmacist{background:#fce7f3;color:#9d174d}
+
+/* Filters */
+.filters{display:flex;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap;align-items:center}
+.filter-input{height:36px;padding:0 .875rem;border:1px solid var(--border);border-radius:8px;font-family:'Cairo',sans-serif;font-size:.8rem;color:var(--text);outline:none;background:white}
+.filter-input:focus{border-color:var(--primary)}
+select.filter-input{padding-left:.5rem}
+
+/* Modal */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:200;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:var(--white);border-radius:16px;width:90%;max-width:520px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.15)}
+.modal-header{padding:1.25rem 1.5rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.modal-title{font-weight:700;font-size:.95rem}
+.modal-close{background:none;border:none;cursor:pointer;color:var(--text-muted);padding:.25rem;border-radius:6px}
+.modal-close:hover{background:var(--bg)}
+.modal-body{padding:1.5rem}
+.modal-footer{padding:1rem 1.5rem;border-top:1px solid var(--border);display:flex;gap:.75rem;justify-content:flex-end}
+.form-group{margin-bottom:1rem}
+.form-group label{display:block;font-size:.8rem;font-weight:600;margin-bottom:.4rem;color:var(--text)}
+.form-control{width:100%;height:38px;padding:0 .875rem;border:1px solid var(--border);border-radius:8px;font-family:'Cairo',sans-serif;font-size:.85rem;color:var(--text);outline:none}
+.form-control:focus{border-color:var(--primary)}
+textarea.form-control{height:80px;padding:.5rem .875rem;resize:vertical}
+
+/* Empty state */
+.empty-state{text-align:center;padding:3rem 1rem;color:var(--text-muted)}
+.empty-state svg{width:48px;height:48px;margin:0 auto 1rem;opacity:.3}
+
+/* Spinner */
+.loading-row td{text-align:center;padding:2rem;color:var(--text-muted)}
+
+/* Refresh btn */
+.spin{animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Responsive */
+@media(max-width:768px){
+  .stats-grid{grid-template-columns:repeat(2,1fr)}
+  .sidebar{transform:translateX(100%);transition:transform .3s}
+  .sidebar.open{transform:translateX(0)}
+  .main{margin-right:0}
+}
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="icon">
+      <svg viewBox="0 0 24 24"><path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4z"/></svg>
+    </div>
+    <span>نظام التوصيل</span>
+  </div>
+
+  <nav class="sidebar-nav">
+    <div class="nav-section">الرئيسية</div>
+    <button class="nav-item active" onclick="showPage('overview')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      نظرة عامة
+    </button>
+    <button class="nav-item" onclick="showPage('orders')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="2"/></svg>
+      الطلبات
+    </button>
+    <button class="nav-item" onclick="showPage('trips')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+      الرحلات
+    </button>
+
+    <div class="nav-section" id="nav-mgmt-section">إدارة</div>
+    <button class="nav-item" id="nav-users" onclick="showPage('users')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      المستخدمون
+    </button>
+    <button class="nav-item" id="nav-permissions" onclick="showPage('permissions')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      الصلاحيات
+    </button>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="user-info">
+      <div class="user-avatar" id="userAvatar">A</div>
+      <div>
+        <div class="user-name" id="userName">...</div>
+        <div class="user-role" id="userRole">...</div>
+      </div>
+    </div>
+    <button class="logout-btn" onclick="logout()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      تسجيل الخروج
+    </button>
+  </div>
+</aside>
+
+<!-- Main -->
+<main class="main">
+  <header class="header">
+    <div class="header-title" id="pageTitle">نظرة عامة</div>
+    <div class="header-actions">
+      <button class="btn btn-outline btn-sm" onclick="refreshData()">
+        <svg id="refreshIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        تحديث
+      </button>
+    </div>
+  </header>
+
+  <div class="content">
+
+    <!-- Overview Page -->
+    <div class="page active" id="page-overview">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon" style="background:#dbeafe">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1a56db" stroke-width="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="2"/></svg>
+          </div>
+          <div class="stat-label">إجمالي الطلبات اليوم</div>
+          <div class="stat-value" id="stat-total">—</div>
+          <div class="stat-sub">طلب</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:#fef3c7">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <div class="stat-label">قيد التنفيذ</div>
+          <div class="stat-value" id="stat-pending">—</div>
+          <div class="stat-sub">pending + picked</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:#d1fae5">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <div class="stat-label">تم التوصيل</div>
+          <div class="stat-value" id="stat-delivered">—</div>
+          <div class="stat-sub">delivered</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:#ede9fe">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2"><path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4z"/></svg>
+          </div>
+          <div class="stat-label">رحلات نشطة</div>
+          <div class="stat-value" id="stat-trips">—</div>
+          <div class="stat-sub">رحلة</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">آخر الطلبات</span>
+          <button class="btn btn-outline btn-sm" onclick="showPage('orders')">عرض الكل</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>رقم الطلب</th>
+                <th>العميل</th>
+                <th>المنطقة</th>
+                <th>المبلغ</th>
+                <th>الحالة</th>
+                <th>التاريخ</th>
+              </tr>
+            </thead>
+            <tbody id="recent-orders-body">
+              <tr class="loading-row"><td colspan="6">جاري التحميل...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Orders Page -->
+    <div class="page" id="page-orders">
+      <div class="filters">
+        <input type="text" class="filter-input" id="searchOrder" placeholder="بحث برقم الطلب أو العميل..." style="flex:1;min-width:200px" oninput="filterOrders()">
+        <select class="filter-input" id="filterStatus" onchange="filterOrders()">
+          <option value="">كل الحالات</option>
+          <option value="pending">Pending</option>
+          <option value="picked">Picked</option>
+          <option value="delivered">Delivered</option>
+          <option value="completed">Completed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="openAssignModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          تعيين رحلة
+        </button>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">الطلبات</span>
+          <span class="stat-sub" id="orders-count">—</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)"></th>
+                <th>رقم الفاتورة</th>
+                <th>العميل</th>
+                <th>المنطقة</th>
+                <th>المبلغ</th>
+                <th>نوع الدفع</th>
+                <th>الحالة</th>
+                <th>الطيار</th>
+                <th>إجراءات</th>
+              </tr>
+            </thead>
+            <tbody id="orders-body">
+              <tr class="loading-row"><td colspan="9">جاري التحميل...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trips Page -->
+    <div class="page" id="page-trips">
+      <div class="filters">
+        <select class="filter-input" id="filterTripStatus" onchange="loadTrips()">
+          <option value="">كل الرحلات</option>
+          <option value="pending">Pending</option>
+          <option value="active">Active</option>
+          <option value="completed">Completed</option>
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="openNewTripModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          رحلة جديدة
+        </button>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">الرحلات</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>رقم الرحلة</th>
+                <th>الطيار</th>
+                <th>عدد الطلبات</th>
+                <th>الحالة</th>
+                <th>وقت الإنشاء</th>
+                <th>إجراءات</th>
+              </tr>
+            </thead>
+            <tbody id="trips-body">
+              <tr class="loading-row"><td colspan="6">جاري التحميل...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Users Page -->
+    <div class="page" id="page-users">
+      <div class="filters">
+        <button class="btn btn-primary btn-sm" onclick="openUserModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          إضافة مستخدم
+        </button>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">المستخدمون</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>الاسم</th><th>اسم المستخدم</th><th>الدور</th><th>الفرع</th><th>الحالة</th><th>إجراءات</th></tr>
+            </thead>
+            <tbody id="users-body">
+              <tr class="loading-row"><td colspan="6">جاري التحميل...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Permissions Page -->
+    <div class="page" id="page-permissions">
+      <div class="card">
+        <div class="card-header"><span class="card-title">جدول الصلاحيات</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>الصلاحية</th><th>Admin</th><th>مشرف</th><th>كاشير</th><th>صيدلي</th><th>طيار</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>عرض الطلبات</td><td>✅</td><td>✅</td><td>✅</td><td>✅</td><td>رحلاته فقط</td></tr>
+              <tr><td>توزيع الطيارين</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
+              <tr><td>تغيير حالة طلب</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td><td>picked/delivered</td></tr>
+              <tr><td>إدارة الرحلات</td><td>✅</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td></tr>
+              <tr><td>التقارير</td><td>✅</td><td>✅</td><td>مالية فقط</td><td>❌</td><td>❌</td></tr>
+              <tr><td>إدارة المستخدمين</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
+              <tr><td>شاشة الصلاحيات</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- Modal: Add/Edit User -->
+<div class="modal-overlay" id="userModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="userModalTitle">إضافة مستخدم</span>
+      <button class="modal-close" onclick="closeModal('userModal')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="editUserId">
+      <div class="form-group">
+        <label>الاسم الكامل</label>
+        <input type="text" class="form-control" id="userFullName" placeholder="أدخل الاسم الكامل">
+      </div>
+      <div class="form-group">
+        <label>اسم المستخدم</label>
+        <input type="text" class="form-control" id="userUsername" placeholder="أدخل اسم المستخدم">
+      </div>
+      <div class="form-group">
+        <label>كلمة المرور</label>
+        <input type="password" class="form-control" id="userPassword" placeholder="أدخل كلمة المرور">
+      </div>
+      <div class="form-group">
+        <label>الدور</label>
+        <select class="form-control" id="userRole">
+          <option value="supervisor">مشرف</option>
+          <option value="cashier">كاشير</option>
+          <option value="pharmacist">صيدلي</option>
+          <option value="driver">طيار</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>الفرع</label>
+        <select class="form-control" id="userBranch">
+          <option value="">بدون فرع</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('userModal')">إلغاء</button>
+      <button class="btn btn-primary" onclick="saveUser()">حفظ</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Assign Trip -->
+<div class="modal-overlay" id="assignModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">تعيين طلبات لطيار</span>
+      <button class="modal-close" onclick="closeModal('assignModal')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>اختر الطيار</label>
+        <select class="form-control" id="assignDriver"></select>
+      </div>
+      <div class="form-group">
+        <label>الطلبات المختارة</label>
+        <div id="selectedOrdersList" style="font-size:.8rem;color:var(--text-muted);padding:.5rem;background:var(--bg);border-radius:8px;min-height:40px"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('assignModal')">إلغاء</button>
+      <button class="btn btn-primary" onclick="createTrip()">إنشاء رحلة</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Change Status -->
+<div class="modal-overlay" id="statusModal">
+  <div class="modal" style="max-width:360px">
+    <div class="modal-header">
+      <span class="modal-title">تغيير حالة الطلب</span>
+      <button class="modal-close" onclick="closeModal('statusModal')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="statusOrderId">
+      <div class="form-group">
+        <label>الحالة الجديدة</label>
+        <select class="form-control" id="newStatus">
+          <option value="pending">Pending</option>
+          <option value="picked">Picked</option>
+          <option value="delivered">Delivered</option>
+          <option value="completed">Completed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('statusModal')">إلغاء</button>
+      <button class="btn btn-primary" onclick="updateOrderStatus()">تحديث</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = 'https://rxtjoqulmgkkcohmgzgi.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let currentUser = null;
+let allOrders = [];
+let allUsers = [];
+let branches = [];
+let selectedOrderIds = new Set();
+
+const ROLE_LABELS = {admin:'Admin',supervisor:'مشرف',cashier:'كاشير',pharmacist:'صيدلي',driver:'طيار'};
+const PERMISSIONS = {
+  admin:{canManageUsers:true,canViewPermissions:true,canAssignDrivers:true,canManageTrips:true,canViewReports:true},
+  supervisor:{canManageUsers:false,canViewPermissions:false,canAssignDrivers:true,canManageTrips:true,canViewReports:true},
+  cashier:{canManageUsers:false,canViewPermissions:false,canAssignDrivers:false,canManageTrips:false,canViewReports:true},
+  pharmacist:{canManageUsers:false,canViewPermissions:false,canAssignDrivers:false,canManageTrips:false,canViewReports:false},
+  driver:{canManageUsers:false,canViewPermissions:false,canAssignDrivers:false,canManageTrips:false,canViewReports:false},
+};
+
+function can(permission){ return PERMISSIONS[currentUser?.role]?.[permission] === true; }
+
+// Init
+window.addEventListener('DOMContentLoaded', async () => {
+  const stored = sessionStorage.getItem('delivery_user');
+  if (!stored) { window.location.href = 'auth.html'; return; }
+  currentUser = JSON.parse(stored);
+
+  document.getElementById('userName').textContent = currentUser.full_name;
+  document.getElementById('userRole').textContent = ROLE_LABELS[currentUser.role] || currentUser.role;
+  document.getElementById('userAvatar').textContent = currentUser.full_name?.charAt(0) || 'U';
+
+  // Hide nav items based on role
+  if (!can('canManageUsers')) document.getElementById('nav-users').style.display = 'none';
+  if (!can('canViewPermissions')) document.getElementById('nav-permissions').style.display = 'none';
+
+  await loadBranches();
+  await loadOverview();
+  await loadOrders();
+});
+
+// Navigation
+function showPage(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('active');
+  event?.currentTarget?.classList.add('active');
+  const titles = {overview:'نظرة عامة',orders:'الطلبات',trips:'الرحلات',users:'المستخدمون',permissions:'الصلاحيات'};
+  document.getElementById('pageTitle').textContent = titles[page] || '';
+  if (page === 'trips') loadTrips();
+  if (page === 'users') loadUsers();
+}
+
+// Refresh
+async function refreshData() {
+  const icon = document.getElementById('refreshIcon');
+  icon.classList.add('spin');
+  await loadOverview();
+  await loadOrders();
+  icon.classList.remove('spin');
+}
+
+// Load branches
+async function loadBranches() {
+  const { data } = await db.from('branches').select('*');
+  branches = data || [];
+  const sel = document.getElementById('userBranch');
+  branches.forEach(b => {
+    const opt = document.createElement('option');
+    opt.value = b.id; opt.textContent = b.name;
+    sel.appendChild(opt);
+  });
+}
+
+// Load overview stats
+async function loadOverview() {
+  const today = new Date().toISOString().split('T')[0];
+  const { data: orders } = await db.from('orders').select('status,created_at');
+  const { data: trips } = await db.from('trips').select('status');
+  const todayOrders = (orders||[]).filter(o => o.created_at?.startsWith(today));
+  document.getElementById('stat-total').textContent = todayOrders.length;
+  document.getElementById('stat-pending').textContent = (orders||[]).filter(o=>['pending','picked'].includes(o.status)).length;
+  document.getElementById('stat-delivered').textContent = (orders||[]).filter(o=>o.status==='delivered').length;
+  document.getElementById('stat-trips').textContent = (trips||[]).filter(t=>t.status==='active').length;
+  await loadRecentOrders();
+}
+
+// Load recent orders
+async function loadRecentOrders() {
+  const { data } = await db.from('orders').select('*').order('created_at',{ascending:false}).limit(10);
+  const tbody = document.getElementById('recent-orders-body');
+  if (!data?.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--text-muted)">لا توجد طلبات</td></tr>'; return; }
+  tbody.innerHTML = data.map(o => `
+    <tr>
+      <td><strong>${o.bill_no || o.order_number}</strong></td>
+      <td>${o.customer_name || o.cust_name || '—'}</td>
+      <td>${o.cust_region || '—'}</td>
+      <td>${(o.total_bill_net || o.amount || 0).toLocaleString()} ج.م</td>
+      <td>${statusBadge(o.status)}</td>
+      <td>${formatDate(o.created_at)}</td>
+    </tr>`).join('');
+}
+
+// Load all orders
+async function loadOrders() {
+  const { data } = await db.from('orders').select('*').order('created_at',{ascending:false});
+  allOrders = data || [];
+  document.getElementById('orders-count').textContent = allOrders.length + ' طلب';
+  renderOrders(allOrders);
+}
+
+function renderOrders(orders) {
+  const tbody = document.getElementById('orders-body');
+  if (!orders.length) { tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:2rem;color:var(--text-muted)">لا توجد طلبات</td></tr>'; return; }
+  tbody.innerHTML = orders.map(o => `
+    <tr>
+      <td><input type="checkbox" class="order-check" value="${o.id}" onchange="toggleOrderSelect('${o.id}',this.checked)" ${selectedOrderIds.has(o.id)?'checked':''}></td>
+      <td><strong>${o.bill_no || o.order_number}</strong></td>
+      <td>${o.customer_name || o.cust_name || '—'}</td>
+      <td>${o.cust_region || '—'}</td>
+      <td>${(o.total_bill_net || o.amount || 0).toLocaleString()} ج.م</td>
+      <td>${o.bill_type || '—'}</td>
+      <td>${statusBadge(o.status)}</td>
+      <td>${o.deliveryman || '—'}</td>
+      <td>
+        <button class="btn btn-outline btn-sm" onclick="openStatusModal('${o.id}','${o.status}')">تغيير الحالة</button>
+      </td>
+    </tr>`).join('');
+}
+
+function filterOrders() {
+  const search = document.getElementById('searchOrder').value.toLowerCase();
+  const status = document.getElementById('filterStatus').value;
+  const filtered = allOrders.filter(o => {
+    const matchSearch = !search || (o.bill_no||'').toLowerCase().includes(search) || (o.order_number||'').toLowerCase().includes(search) || (o.customer_name||'').toLowerCase().includes(search) || (o.cust_name||'').toLowerCase().includes(search);
+    const matchStatus = !status || o.status === status;
+    return matchSearch && matchStatus;
+  });
+  document.getElementById('orders-count').textContent = filtered.length + ' طلب';
+  renderOrders(filtered);
+}
+
+// Trips
+async function loadTrips() {
+  const status = document.getElementById('filterTripStatus').value;
+  let query = db.from('trips').select('*, driver:users(full_name), trip_orders(count)').order('created_at',{ascending:false});
+  if (status) query = query.eq('status', status);
+  const { data } = await query;
+  const tbody = document.getElementById('trips-body');
+  if (!data?.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--text-muted)">لا توجد رحلات</td></tr>'; return; }
+  tbody.innerHTML = data.map(t => `
+    <tr>
+      <td><strong>${t.trip_number}</strong></td>
+      <td>${t.driver?.full_name || '—'}</td>
+      <td>${t.trip_orders?.[0]?.count || 0} طلب</td>
+      <td>${tripStatusBadge(t.status)}</td>
+      <td>${formatDate(t.created_at)}</td>
+      <td>
+        ${t.status==='pending'?`<button class="btn btn-success btn-sm" onclick="updateTripStatus('${t.id}','active')">بدء الرحلة</button>`:''}
+        ${t.status==='active'?`<button class="btn btn-outline btn-sm" onclick="updateTripStatus('${t.id}','completed')">إنهاء</button>`:''}
+      </td>
+    </tr>`).join('');
+}
+
+async function updateTripStatus(id, status) {
+  await db.from('trips').update({status, ...(status==='active'?{started_at:new Date().toISOString()}:{completed_at:new Date().toISOString()})}).eq('id',id);
+  loadTrips();
+}
+
+// Users
+async function loadUsers() {
+  const { data } = await db.from('users').select('*, branch:branches(name)').order('created_at',{ascending:false});
+  allUsers = data || [];
+  const tbody = document.getElementById('users-body');
+  if (!data?.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--text-muted)">لا يوجد مستخدمون</td></tr>'; return; }
+  tbody.innerHTML = data.map(u => `
+    <tr>
+      <td><strong>${u.full_name}</strong></td>
+      <td>${u.username}</td>
+      <td><span class="badge badge-${u.role}">${ROLE_LABELS[u.role]||u.role}</span></td>
+      <td>${u.branch?.name || '—'}</td>
+      <td><span class="badge" style="background:${u.is_active?'#d1fae5':'#fee2e2'};color:${u.is_active?'#065f46':'#991b1b'}">${u.is_active?'نشط':'غير نشط'}</span></td>
+      <td>
+        <button class="btn btn-outline btn-sm" onclick="editUser('${u.id}')">تعديل</button>
+        <button class="btn btn-outline btn-sm" style="color:var(--danger)" onclick="toggleUserActive('${u.id}',${u.is_active})">${u.is_active?'تعطيل':'تفعيل'}</button>
+      </td>
+    </tr>`).join('');
+}
+
+// Modals
+function openUserModal(userId) {
+  document.getElementById('editUserId').value = '';
+  document.getElementById('userFullName').value = '';
+  document.getElementById('userUsername').value = '';
+  document.getElementById('userPassword').value = '';
+  document.getElementById('userRole').value = 'driver';
+  document.getElementById('userBranch').value = '';
+  document.getElementById('userModalTitle').textContent = 'إضافة مستخدم';
+  document.getElementById('userModal').classList.add('open');
+}
+
+function editUser(id) {
+  const u = allUsers.find(u => u.id === id);
+  if (!u) return;
+  document.getElementById('editUserId').value = u.id;
+  document.getElementById('userFullName').value = u.full_name;
+  document.getElementById('userUsername').value = u.username;
+  document.getElementById('userPassword').value = '';
+  document.getElementById('userRole').value = u.role;
+  document.getElementById('userBranch').value = u.branch_id || '';
+  document.getElementById('userModalTitle').textContent = 'تعديل مستخدم';
+  document.getElementById('userModal').classList.add('open');
+}
+
+async function saveUser() {
+  const id = document.getElementById('editUserId').value;
+  const full_name = document.getElementById('userFullName').value.trim();
+  const username = document.getElementById('userUsername').value.trim();
+  const password = document.getElementById('userPassword').value.trim();
+  const role = document.getElementById('userRole').value;
+  const branch_id = document.getElementById('userBranch').value || null;
+  if (!full_name || !username) { alert('من فضلك أدخل الاسم واسم المستخدم'); return; }
+  const payload = {full_name, username, role, branch_id};
+  if (password) payload.password_hash = password;
+  if (id) {
+    await db.from('users').update(payload).eq('id', id);
+  } else {
+    if (!password) { alert('كلمة المرور مطلوبة'); return; }
+    await db.from('users').insert({...payload, password_hash: password});
+  }
+  closeModal('userModal');
+  loadUsers();
+}
+
+async function toggleUserActive(id, current) {
+  await db.from('users').update({is_active: !current}).eq('id', id);
+  loadUsers();
+}
+
+function openAssignModal() {
+  if (selectedOrderIds.size === 0) { alert('من فضلك اختر طلباً واحداً على الأقل'); return; }
+  const sel = document.getElementById('assignDriver');
+  sel.innerHTML = '';
+  const drivers = allUsers.filter(u => u.role === 'driver' && u.is_active);
+  if (!drivers.length) { alert('لا يوجد طيارين نشطين'); return; }
+  drivers.forEach(d => { const o = document.createElement('option'); o.value = d.id; o.textContent = d.full_name; sel.appendChild(o); });
+  document.getElementById('selectedOrdersList').textContent = selectedOrderIds.size + ' طلب محدد';
+  document.getElementById('assignModal').classList.add('open');
+}
+
+async function createTrip() {
+  const driverId = document.getElementById('assignDriver').value;
+  const tripNumber = 'TRIP-' + Date.now();
+  const { data: trip, error } = await db.from('trips').insert({trip_number: tripNumber, driver_id: driverId, status: 'pending'}).select().single();
+  if (error || !trip) { alert('حدث خطأ'); return; }
+  const rows = [...selectedOrderIds].map((oid, i) => ({trip_id: trip.id, order_id: oid, sort_order: i}));
+  await db.from('trip_orders').insert(rows);
+  await db.from('orders').update({status:'picked'}).in('id',[...selectedOrderIds]);
+  selectedOrderIds.clear();
+  closeModal('assignModal');
+  await loadOrders();
+  await loadOverview();
+  alert('تم إنشاء الرحلة بنجاح: ' + tripNumber);
+}
+
+function openNewTripModal() { showPage('orders'); setTimeout(()=>alert('اختر الطلبات المطلوبة ثم اضغط "تعيين رحلة"'),100); }
+
+function openStatusModal(id, currentStatus) {
+  document.getElementById('statusOrderId').value = id;
+  document.getElementById('newStatus').value = currentStatus;
+  document.getElementById('statusModal').classList.add('open');
+}
+
+async function updateOrderStatus() {
+  const id = document.getElementById('statusOrderId').value;
+  const status = document.getElementById('newStatus').value;
+  await db.from('orders').update({status, updated_at: new Date().toISOString()}).eq('id', id);
+  closeModal('statusModal');
+  await loadOrders();
+  await loadOverview();
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(m => m.addEventListener('click', e => { if(e.target===m) m.classList.remove('open'); }));
+
+// Selection
+function toggleSelectAll(cb) { document.querySelectorAll('.order-check').forEach(c => { c.checked = cb.checked; toggleOrderSelect(c.value, cb.checked); }); }
+function toggleOrderSelect(id, checked) { checked ? selectedOrderIds.add(id) : selectedOrderIds.delete(id); }
+
+// Helpers
+function statusBadge(s) {
+  const map = {pending:'badge-pending',picked:'badge-picked',delivered:'badge-delivered',completed:'badge-completed',cancelled:'badge-cancelled'};
+  const labels = {pending:'Pending',picked:'Picked',delivered:'Delivered',completed:'Completed',cancelled:'Cancelled'};
+  return `<span class="badge ${map[s]||''}">${labels[s]||s}</span>`;
+}
+function tripStatusBadge(s) {
+  const map = {pending:'badge-pending',active:'badge-picked',completed:'badge-delivered'};
+  const labels = {pending:'Pending',active:'نشطة',completed:'منتهية'};
+  return `<span class="badge ${map[s]||''}">${labels[s]||s}</span>`;
+}
+function formatDate(d) { if(!d) return '—'; return new Date(d).toLocaleDateString('ar-EG',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
+function logout() { sessionStorage.removeItem('delivery_user'); window.location.href = 'auth.html'; }
+</script>
+</body>
+</html>
