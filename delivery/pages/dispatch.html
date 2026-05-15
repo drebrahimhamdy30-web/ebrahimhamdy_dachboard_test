@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>شاشة التوزيع</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --primary: #1a56db;
+  --primary-dark: #1344b0;
+  --primary-light: #e8f0fe;
+  --green: #16a34a; --green-light: #dcfce7;
+  --yellow: #ca8a04; --yellow-light: #fef9c3;
+  --purple: #7c3aed; --purple-light: #ede9fe;
+  --red: #dc2626; --red-light: #fee2e2;
+  --blue: #0891b2; --blue-light: #ecfeff;
+  --orange: #ea580c; --orange-light: #fff7ed;
+  --text: #111827; --text-muted: #6b7280; --text-light: #9ca3af;
+  --border: #e5e7eb; --bg: #f0f4f8; --white: #fff;
+  --header-h: 52px;
+  --drivers-h: 130px;
+  --trips-h: 42vh;
+}
+
+body {
+  font-family: 'Cairo', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ===== HEADER ===== */
+.dispatch-header {
+  height: var(--header-h);
+  background: #0f172a;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1.25rem;
+  flex-shrink: 0;
+  gap: 1rem;
+}
+.dh-title {
+  color: white;
+  font-size: .9rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+.dh-title span { color: #60a5fa; }
+.dh-stats { display: flex; gap: .5rem; align-items: center; }
+.dh-stat {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .25rem .65rem;
+  border-radius: 20px;
+  font-size: .7rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.dhs-pending  { background: rgba(22,163,74,.2); color: #4ade80; }
+.dhs-picked   { background: rgba(8,145,178,.2); color: #67e8f9; }
+.dhs-late     { background: rgba(220,38,38,.2); color: #fca5a5; }
+.dhs-drivers  { background: rgba(124,58,237,.2); color: #c4b5fd; }
+.dh-refresh { display: flex; align-items: center; gap: .5rem; }
+.refresh-dot { width: 7px; height: 7px; border-radius: 50%; background: #4ade80; animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+.dh-time { font-size: .7rem; color: #94a3b8; }
+.auto-refresh-btn {
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.12);
+  color: #94a3b8;
+  padding: .3rem .75rem;
+  border-radius: 8px;
+  font-family: 'Cairo', sans-serif;
+  font-size: .72rem;
+  cursor: pointer;
+  transition: all .15s;
+}
+.auto-refresh-btn:hover { background: rgba(255,255,255,.15); color: white; }
+
+/* ===== SECTION LABELS ===== */
+.section-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .35rem 1rem;
+  background: #1e293b;
+  border-bottom: 1px solid #334155;
+  flex-shrink: 0;
+}
+.sl-title {
+  font-size: .7rem;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+}
+.sl-badge {
+  font-size: .62rem;
+  font-weight: 700;
+  padding: .1rem .4rem;
+  border-radius: 10px;
+}
+
+/* ===== SECTION 1: DRIVERS ===== */
+.drivers-section {
+  height: var(--drivers-h);
+  background: #1e293b;
+  flex-shrink: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.drivers-scroll {
+  flex: 1;
+  display: flex;
+  gap: .5rem;
+  overflow-x: auto;
+  padding: .5rem 1rem;
+  align-items: flex-start;
+}
+.drivers-scroll::-webkit-scrollbar { height: 4px; }
+.drivers-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+
+.driver-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .3rem;
+  flex-shrink: 0;
+  width: 76px;
+  cursor: pointer;
+  padding: .4rem .3rem;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  transition: all .15s;
+}
+.driver-chip:hover { background: rgba(255,255,255,.06); }
+.driver-chip.selected { border-color: #60a5fa; background: rgba(96,165,250,.1); }
+
+.driver-avatar-wrap { position: relative; }
+.driver-avatar {
+  width: 46px; height: 46px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: .9rem; color: white;
+  border: 2.5px solid transparent;
+  transition: all .15s;
+  position: relative;
+}
+.driver-chip.status-free .driver-avatar   { border-color: #4ade80; }
+.driver-chip.status-busy .driver-avatar   { border-color: #a78bfa; }
+.driver-chip.status-done .driver-avatar   { border-color: #fbbf24; }
+
+.driver-orders-badge {
+  position: absolute;
+  top: -4px; left: -4px;
+  width: 19px; height: 19px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: white;
+  font-size: .58rem;
+  font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid #1e293b;
+}
+.driver-chip-name {
+  font-size: .62rem;
+  color: #cbd5e1;
+  font-weight: 600;
+  text-align: center;
+  max-width: 70px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.driver-chip-status {
+  font-size: .58rem;
+  font-weight: 700;
+  padding: .1rem .35rem;
+  border-radius: 6px;
+}
+.st-free  { background: rgba(74,222,128,.15); color: #4ade80; }
+.st-busy  { background: rgba(167,139,250,.15); color: #a78bfa; }
+.st-done  { background: rgba(251,191,36,.15); color: #fbbf24; }
+
+/* ===== SECTION 2: TRIPS ===== */
+.trips-section {
+  height: var(--trips-h);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-bottom: 2px solid #334155;
+}
+.trips-scroll {
+  flex: 1;
+  display: flex;
+  gap: .625rem;
+  overflow-x: auto;
+  padding: .625rem 1rem;
+  align-items: flex-start;
+}
+.trips-scroll::-webkit-scrollbar { height: 4px; }
+.trips-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+
+/* Trip card */
+.trip-card {
+  width: 210px;
+  flex-shrink: 0;
+  background: white;
+  border-radius: 12px;
+  border: 1.5px solid var(--border);
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,.06);
+  transition: all .15s;
+}
+.trip-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,.1); transform: translateY(-1px); }
+.trip-card.highlighted { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(26,86,219,.2); }
+
+.tc-header {
+  padding: .55rem .75rem;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  border-bottom: 1px solid var(--border);
+}
+.tc-avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: .75rem; color: white;
+  flex-shrink: 0;
+}
+.tc-driver-info { flex: 1; min-width: 0; }
+.tc-driver-name {
+  font-size: .75rem; font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tc-driver-meta { font-size: .62rem; color: var(--text-muted); }
+.tc-status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tc-orders { padding: .4rem .5rem; display: flex; flex-direction: column; gap: .3rem; max-height: 160px; overflow-y: auto; }
+.tc-orders::-webkit-scrollbar { width: 3px; }
+.tc-orders::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.tc-order-row {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .3rem .4rem;
+  border-radius: 7px;
+  background: var(--bg);
+  font-size: .68rem;
+  cursor: pointer;
+  transition: background .1s;
+}
+.tc-order-row:hover { background: var(--primary-light); }
+.tc-order-row.late { background: var(--red-light); }
+.tc-order-no { font-weight: 700; color: var(--primary); flex-shrink: 0; min-width: 52px; }
+.tc-order-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.tc-order-status {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tc-order-amount { font-weight: 700; color: var(--text); flex-shrink: 0; font-size: .65rem; }
+
+.tc-footer {
+  padding: .4rem .75rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #fafafa;
+}
+.tc-total { font-size: .72rem; font-weight: 700; color: var(--text); }
+.tc-action-btn {
+  font-size: .6rem;
+  font-weight: 700;
+  padding: .2rem .5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid;
+  font-family: 'Cairo', sans-serif;
+  transition: all .15s;
+}
+.tcb-complete { background: var(--green-light); color: #15803d; border-color: #bbf7d0; }
+.tcb-complete:hover { background: #bbf7d0; }
+
+/* ===== SECTION 3: UNASSIGNED ORDERS ===== */
+.orders-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+.orders-toolbar {
+  padding: .4rem 1rem;
+  background: white;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.toolbar-search {
+  height: 30px;
+  padding: 0 .75rem 0 2rem;
+  border: 1.5px solid var(--border);
+  border-radius: 20px;
+  font-family: 'Cairo', sans-serif;
+  font-size: .75rem;
+  outline: none;
+  background: var(--bg);
+  width: 180px;
+}
+.toolbar-search:focus { border-color: var(--primary); }
+.search-wrap { position: relative; }
+.search-icon { position: absolute; left: .6rem; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
+.filter-tab {
+  padding: .25rem .65rem;
+  border-radius: 20px;
+  font-size: .7rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1.5px solid var(--border);
+  background: white;
+  color: var(--text-muted);
+  font-family: 'Cairo', sans-serif;
+  transition: all .12s;
+}
+.filter-tab.active { background: var(--primary); color: white; border-color: var(--primary); }
+.filter-tab .cnt { font-size: .62rem; opacity: .8; }
+.select-info {
+  margin-right: auto;
+  font-size: .72rem;
+  font-weight: 600;
+  color: var(--primary);
+  display: none;
+}
+.select-info.show { display: block; }
+.assign-batch-btn {
+  padding: .3rem .875rem;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-family: 'Cairo', sans-serif;
+  font-size: .75rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  gap: .35rem;
+  transition: all .15s;
+}
+.assign-batch-btn.show { display: flex; }
+.assign-batch-btn:hover { background: var(--primary-dark); }
+
+/* Orders grid */
+.orders-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(185px, 1fr));
+  gap: .5rem;
+  padding: .625rem 1rem;
+  overflow-y: auto;
+  align-content: start;
+}
+.orders-grid::-webkit-scrollbar { width: 5px; }
+.orders-grid::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; }
+
+/* Order card */
+.order-card {
+  background: white;
+  border-radius: 10px;
+  border: 1.5px solid var(--border);
+  padding: .55rem .65rem;
+  cursor: pointer;
+  transition: all .15s;
+  position: relative;
+  user-select: none;
+}
+.order-card:hover { border-color: var(--primary); box-shadow: 0 2px 10px rgba(26,86,219,.08); }
+.order-card.selected { border-color: var(--primary); background: var(--primary-light); box-shadow: 0 0 0 2px rgba(26,86,219,.25); }
+.order-card.late { border-right: 3px solid var(--red); background: #fff8f8; }
+.order-card.urgent { animation: urgentPulse 1.5s ease-in-out infinite; }
+@keyframes urgentPulse { 0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.3)} 50%{box-shadow:0 0 0 5px rgba(220,38,38,0)} }
+
+.oc-check {
+  position: absolute;
+  top: .4rem;
+  left: .4rem;
+  width: 16px; height: 16px;
+  border-radius: 4px;
+  border: 2px solid var(--border);
+  background: white;
+  display: flex; align-items: center; justify-content: center;
+  transition: all .12s;
+  font-size: .65rem;
+  color: white;
+}
+.order-card.selected .oc-check { background: var(--primary); border-color: var(--primary); }
+
+.oc-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: .3rem; }
+.oc-no { font-size: .7rem; font-weight: 800; color: var(--primary); }
+.oc-timer {
+  font-size: .65rem; font-weight: 700;
+  padding: .1rem .35rem; border-radius: 6px;
+}
+.timer-ok   { background: var(--green-light); color: #15803d; }
+.timer-warn { background: var(--yellow-light); color: #a16207; }
+.timer-late { background: var(--red-light); color: #b91c1c; }
+
+.oc-customer { font-size: .76rem; font-weight: 700; margin-bottom: .15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.oc-address  { font-size: .64rem; color: var(--text-muted); margin-bottom: .3rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.oc-region   { font-size: .62rem; font-weight: 700; background: var(--blue-light); color: #0e7490; padding: .1rem .4rem; border-radius: 6px; display: inline-block; margin-bottom: .3rem; }
+.oc-bottom   { display: flex; align-items: center; justify-content: space-between; padding-top: .3rem; border-top: 1px solid var(--gray-light,#f3f4f6); }
+.oc-amount   { font-size: .72rem; font-weight: 800; color: var(--text); }
+.oc-type     { font-size: .6rem; font-weight: 700; padding: .1rem .4rem; border-radius: 6px; }
+.type-cash   { background: #fef3c7; color: #92400e; }
+.type-visa   { background: #dbeafe; color: #1e40af; }
+.type-other  { background: var(--green-light); color: #15803d; }
+.oc-status   { font-size: .6rem; font-weight: 700; padding: .1rem .35rem; border-radius: 6px; }
+.st-pending  { background: var(--green-light); color: #15803d; }
+.st-postponed{ background: var(--purple-light); color: #6d28d9; }
+
+/* ===== MODALS ===== */
+.modal-overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.5); z-index: 200;
+  align-items: center; justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: white; border-radius: 14px;
+  width: 90%; max-width: 420px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.2);
+  overflow: hidden;
+}
+.modal-header {
+  padding: .875rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.modal-title { font-weight: 700; font-size: .875rem; }
+.modal-close { background: none; border: none; cursor: pointer; font-size: 1.1rem; color: var(--text-muted); }
+.modal-body { padding: 1.25rem; }
+.modal-footer { padding: .875rem 1.25rem; border-top: 1px solid var(--border); display: flex; gap: .5rem; justify-content: flex-end; }
+.form-group { margin-bottom: .875rem; }
+.form-group label { display: block; font-size: .78rem; font-weight: 600; margin-bottom: .35rem; }
+.form-control { width: 100%; height: 38px; padding: 0 .75rem; border: 1.5px solid var(--border); border-radius: 8px; font-family: 'Cairo', sans-serif; font-size: .82rem; outline: none; }
+.form-control:focus { border-color: var(--primary); }
+.btn { display: inline-flex; align-items: center; gap: .35rem; padding: .45rem .9rem; border-radius: 8px; font-family: 'Cairo', sans-serif; font-size: .78rem; font-weight: 700; cursor: pointer; border: none; transition: all .15s; }
+.btn-primary { background: var(--primary); color: white; }
+.btn-primary:hover { background: var(--primary-dark); }
+.btn-outline { background: white; color: var(--text); border: 1px solid var(--border); }
+.btn-outline:hover { background: var(--bg); }
+.btn-green { background: var(--green); color: white; }
+
+/* Selected orders list in modal */
+.selected-list { max-height: 160px; overflow-y: auto; margin-bottom: .75rem; }
+.selected-item { display: flex; align-items: center; justify-content: space-between; padding: .35rem .5rem; border-radius: 6px; background: var(--bg); margin-bottom: .25rem; font-size: .75rem; }
+.selected-item-no { font-weight: 700; color: var(--primary); }
+.selected-item-name { color: var(--text-muted); }
+
+/* Loading */
+.loading-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.6); z-index: 300; display: none; align-items: center; justify-content: center; }
+.loading-overlay.show { display: flex; }
+.spinner { width: 36px; height: 36px; border: 3px solid rgba(255,255,255,.2); border-top-color: white; border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Empty */
+.empty-msg { grid-column: 1/-1; text-align: center; padding: 2rem; color: var(--text-muted); font-size: .82rem; }
+
+/* Notification */
+.toast {
+  position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+  background: #1e293b; color: white; padding: .6rem 1.25rem;
+  border-radius: 10px; font-size: .8rem; font-weight: 600;
+  z-index: 400; display: none; align-items: center; gap: .5rem;
+  box-shadow: 0 8px 30px rgba(0,0,0,.2);
+  animation: slideUp .25s ease;
+}
+.toast.show { display: flex; }
+@keyframes slideUp { from{transform:translateX(-50%) translateY(20px);opacity:0} to{transform:translateX(-50%) translateY(0);opacity:1} }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="dispatch-header">
+  <div class="dh-title">
+    🚚 <span>شاشة</span> التوزيع
+  </div>
+  <div class="dh-stats" id="headerStats"></div>
+  <div class="dh-refresh">
+    <div class="refresh-dot"></div>
+    <span class="dh-time" id="clockTime"></span>
+    <button class="auto-refresh-btn" onclick="loadAll()">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      تحديث
+    </button>
+  </div>
+</header>
+
+<!-- SECTION 1: DRIVERS -->
+<div class="section-label">
+  <span class="sl-title">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+    الطيارين النشطون
+  </span>
+  <span class="sl-badge" id="driversLabel" style="background:rgba(74,222,128,.15);color:#4ade80">—</span>
+</div>
+<div class="drivers-section">
+  <div class="drivers-scroll" id="driversScroll"></div>
+</div>
+
+<!-- SECTION 2: TRIPS -->
+<div class="section-label" style="background:#f8fafc;border-bottom:1px solid var(--border);border-top:1px solid var(--border)">
+  <span class="sl-title" style="color:#475569">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    الرحلات الجارية
+  </span>
+  <span class="sl-badge" id="tripsLabel" style="background:var(--blue-light);color:#0e7490">—</span>
+</div>
+<div class="trips-section">
+  <div class="trips-scroll" id="tripsScroll"></div>
+</div>
+
+<!-- SECTION 3: UNASSIGNED ORDERS -->
+<div class="orders-section">
+  <div class="orders-toolbar">
+    <div class="search-wrap">
+      <svg class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" class="toolbar-search" id="orderSearch" placeholder="بحث..." oninput="renderOrders()">
+    </div>
+    <button class="filter-tab active" onclick="setFilter('all',this)">الكل <span class="cnt" id="f-all">0</span></button>
+    <button class="filter-tab" onclick="setFilter('pending',this)">جاهز <span class="cnt" id="f-pending">0</span></button>
+    <button class="filter-tab" onclick="setFilter('postponed',this)">مؤجل <span class="cnt" id="f-postponed">0</span></button>
+    <button class="filter-tab" onclick="setFilter('late',this)">⚠️ متأخر <span class="cnt" id="f-late">0</span></button>
+    <span class="select-info" id="selectInfo"></span>
+    <button class="assign-batch-btn" id="assignBatchBtn" onclick="openAssignModal()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4z"/></svg>
+      تعيين طيار
+    </button>
+  </div>
+  <div class="orders-grid" id="ordersGrid"></div>
+</div>
+
+<!-- Modal: Assign -->
+<div class="modal-overlay" id="assignModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">تعيين طيار للطلبات</span>
+      <button class="modal-close" onclick="closeModal('assignModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="selectedOrdersList" class="selected-list"></div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>اختر الطيار</label>
+        <select class="form-control" id="assignDriverSelect"></select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('assignModal')">إلغاء</button>
+      <button class="btn btn-green" onclick="confirmAssign()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        تعيين
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Order detail quick view -->
+<div class="modal-overlay" id="orderDetailModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="odm-title">تفاصيل الطلب</span>
+      <button class="modal-close" onclick="closeModal('orderDetailModal')">✕</button>
+    </div>
+    <div class="modal-body" id="odm-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('orderDetailModal')">إغلاق</button>
+      <button class="btn btn-primary" id="odm-assign-btn">تعيين طيار</button>
+    </div>
+  </div>
+</div>
+
+<div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div></div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = 'https://rxtjoqulmgkkcohmgzgi.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const DRIVER_COLORS = ['#1a56db','#7c3aed','#16a34a','#ea580c','#0891b2','#ca8a04','#dc2626','#0d9488','#b45309','#1e40af','#065f46','#92400e','#4338ca','#0f766e'];
+const STATUS_COLORS = { pending:'#16a34a', picked:'#0891b2', delivered:'#ca8a04', completed:'#6b7280', postponed:'#7c3aed', cancelled:'#dc2626' };
+const PAYMENT_LABELS = { cash:'كاش', visa:'فيزا', transfer:'تحويل', deferred:'آجل' };
+
+let allOrders = [], allDrivers = [], activeTrips = [], tripOrdersMap = {};
+let unassignedOrders = [];
+let selectedOrders = new Set();
+let currentFilter = 'all';
+let filterByDriver = null;
+
+// Clock
+setInterval(() => {
+  const now = new Date();
+  document.getElementById('clockTime').textContent =
+    now.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}, 1000);
+
+async function loadAll() {
+  showLoading(true);
+  try {
+    const [ordersRes, driversRes, tripsRes, rrRes] = await Promise.all([
+      db.from('orders').select('*').order('created_at', {ascending:false}),
+      db.from('users').select('*').eq('role','driver').eq('is_active',true).order('full_name'),
+      db.from('trips').select('*, users(full_name)').eq('status','active').order('created_at',{ascending:false}),
+      db.from('trip_orders').select('*')
+    ]);
+
+    allOrders  = ordersRes.data  || [];
+    allDrivers = driversRes.data || [];
+    activeTrips = tripsRes.data  || [];
+
+    tripOrdersMap = {};
+    (rrRes.data||[]).forEach(r => {
+      if (!tripOrdersMap[r.trip_id]) tripOrdersMap[r.trip_id] = [];
+      tripOrdersMap[r.trip_id].push(r.order_id);
+    });
+
+    // Unassigned = no driver_id OR status pending/postponed without driver
+    unassignedOrders = allOrders.filter(o =>
+      !o.driver_id && ['pending','postponed'].includes(o.status)
+    );
+
+    renderHeader();
+    renderDrivers();
+    renderTrips();
+    renderOrders();
+  } catch(e) { console.error(e); showToast('خطأ في تحميل البيانات'); }
+  showLoading(false);
+}
+
+// ===== HEADER =====
+function renderHeader() {
+  const pending = unassignedOrders.length;
+  const picked = allOrders.filter(o=>o.status==='picked').length;
+  const late = allOrders.filter(o=>isLate(o)).length;
+  const onlineDrivers = allDrivers.length;
+  document.getElementById('headerStats').innerHTML = `
+    <span class="dh-stat dhs-pending">📦 ${pending} غير موزع</span>
+    <span class="dh-stat dhs-picked">🚗 ${picked} في الطريق</span>
+    ${late>0?`<span class="dh-stat dhs-late">⚠️ ${late} متأخر</span>`:''}
+    <span class="dh-stat dhs-drivers">👤 ${onlineDrivers} طيار</span>
+  `;
+}
+
+// ===== DRIVERS =====
+function renderDrivers() {
+  const scroll = document.getElementById('driversScroll');
+  const driverOrderCount = {};
+  allOrders.filter(o=>o.status==='picked'&&o.driver_id).forEach(o=>{
+    driverOrderCount[o.driver_id] = (driverOrderCount[o.driver_id]||0)+1;
+  });
+
+  document.getElementById('driversLabel').textContent = `${allDrivers.length} طيار`;
+
+  if (!allDrivers.length) {
+    scroll.innerHTML = '<div style="color:#64748b;font-size:.75rem;padding:.5rem">لا يوجد طيارين نشطون</div>';
+    return;
+  }
+
+  scroll.innerHTML = allDrivers.map((d, i) => {
+    const color = DRIVER_COLORS[i % DRIVER_COLORS.length];
+    const activeCount = driverOrderCount[d.id] || 0;
+    const deliveredToday = allOrders.filter(o=>o.driver_id===d.id&&['delivered','completed'].includes(o.status)).length;
+    let statusClass = 'status-free', stClass = 'st-free', stLabel = 'متاح';
+    if (activeCount > 0) { statusClass = 'status-busy'; stClass = 'st-busy'; stLabel = `${activeCount} طلب`; }
+    else if (deliveredToday > 0) { statusClass = 'status-done'; stClass = 'st-done'; stLabel = `${deliveredToday} وصّل`; }
+    const initials = (d.full_name||'?').split(' ').slice(0,2).map(w=>w[0]).join('');
+    const isSelected = filterByDriver === d.id;
+    return `
+      <div class="driver-chip ${statusClass} ${isSelected?'selected':''}" onclick="toggleDriverFilter('${d.id}')">
+        <div class="driver-avatar-wrap">
+          <div class="driver-avatar" style="background:${color}">${initials}
+            ${activeCount>0?`<div class="driver-orders-badge">${activeCount}</div>`:''}
+          </div>
+        </div>
+        <div class="driver-chip-name">${d.full_name?.split(' ').slice(0,2).join(' ')||'—'}</div>
+        <div class="driver-chip-status ${stClass}">${stLabel}</div>
+      </div>`;
+  }).join('');
+}
+
+function toggleDriverFilter(driverId) {
+  filterByDriver = filterByDriver === driverId ? null : driverId;
+  renderDrivers();
+  // Highlight trips for this driver
+  document.querySelectorAll('.trip-card').forEach(c => {
+    c.classList.toggle('highlighted', filterByDriver && c.dataset.driverId === filterByDriver);
+  });
+}
+
+// ===== TRIPS =====
+function renderTrips() {
+  const scroll = document.getElementById('tripsScroll');
+  document.getElementById('tripsLabel').textContent = `${activeTrips.length} رحلة`;
+
+  if (!activeTrips.length) {
+    scroll.innerHTML = '<div style="color:var(--text-muted);font-size:.78rem;padding:.75rem;text-align:center">لا توجد رحلات جارية</div>';
+    return;
+  }
+
+  scroll.innerHTML = activeTrips.map((trip, i) => {
+    const driverName = trip.users?.full_name || trip.driver_name || 'غير محدد';
+    const color = DRIVER_COLORS[i % DRIVER_COLORS.length];
+    const orderIds = tripOrdersMap[trip.id] || [];
+    const tripOrders = orderIds.map(id => allOrders.find(o=>o.id===id)).filter(Boolean);
+    const total = tripOrders.reduce((s,o)=>s+Number(o.total_bill_net||0),0);
+    const delivered = tripOrders.filter(o=>['delivered','completed'].includes(o.status)).length;
+    const driverId = trip.driver_id || '';
+
+    return `
+      <div class="trip-card ${filterByDriver===driverId?'highlighted':''}" data-driver-id="${driverId}">
+        <div class="tc-header">
+          <div class="tc-avatar" style="background:${color}">${driverName.charAt(0)}</div>
+          <div class="tc-driver-info">
+            <div class="tc-driver-name">${driverName.split(' ').slice(0,2).join(' ')}</div>
+            <div class="tc-driver-meta">${delivered}/${tripOrders.length} · ${total.toLocaleString()} ج</div>
+          </div>
+          <div class="tc-status-dot" style="background:${delivered===tripOrders.length&&tripOrders.length>0?'#4ade80':'#a78bfa'}"></div>
+        </div>
+        <div class="tc-orders">
+          ${tripOrders.length ? tripOrders.map(o => {
+            const late = isLate(o);
+            const statusColor = STATUS_COLORS[o.status]||'#9ca3af';
+            const custName = o.customer_name||o.cust_name||'—';
+            return `<div class="tc-order-row ${late?'late':''}" onclick="openOrderDetail('${o.id}')">
+              <span class="tc-order-no">${o.bill_no||o.id?.slice(0,6)}</span>
+              <span class="tc-order-name">${custName}</span>
+              <div class="tc-order-status" style="background:${statusColor}"></div>
+              <span class="tc-order-amount">${Number(o.total_bill_net||0).toLocaleString()}</span>
+            </div>`;
+          }).join('') : '<div style="font-size:.72rem;color:var(--text-muted);text-align:center;padding:.5rem">لا توجد طلبات</div>'}
+        </div>
+        <div class="tc-footer">
+          <span class="tc-total">${total.toLocaleString()} ج.م</span>
+          <button class="tc-action-btn tcb-complete" onclick="completeTrip('${trip.id}')">إنهاء الرحلة</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ===== ORDERS =====
+function isLate(o) {
+  if (['completed','cancelled','delivered'].includes(o.status)) return false;
+  return (new Date() - new Date(o.created_at)) / 60000 > 30;
+}
+
+function getTimer(dateStr) {
+  const mins = Math.floor((new Date() - new Date(dateStr)) / 60000);
+  const h = Math.floor(mins/60), m = mins%60;
+  return { label: h>0?`${h}:${String(m).padStart(2,'0')}`:`${mins}د`, mins };
+}
+
+function setFilter(f, el) {
+  currentFilter = f;
+  document.querySelectorAll('.filter-tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  renderOrders();
+}
+
+function renderOrders() {
+  const search = document.getElementById('orderSearch').value.toLowerCase();
+  let orders = [...unassignedOrders];
+
+  if (currentFilter === 'pending') orders = orders.filter(o=>o.status==='pending');
+  else if (currentFilter === 'postponed') orders = orders.filter(o=>o.status==='postponed');
+  else if (currentFilter === 'late') orders = orders.filter(o=>isLate(o));
+
+  if (search) orders = orders.filter(o=>
+    (o.bill_no||'').toLowerCase().includes(search) ||
+    (o.customer_name||o.cust_name||'').toLowerCase().includes(search) ||
+    (o.cust_region||'').toLowerCase().includes(search)
+  );
+
+  // Update filter counts
+  document.getElementById('f-all').textContent = unassignedOrders.length;
+  document.getElementById('f-pending').textContent = unassignedOrders.filter(o=>o.status==='pending').length;
+  document.getElementById('f-postponed').textContent = unassignedOrders.filter(o=>o.status==='postponed').length;
+  document.getElementById('f-late').textContent = unassignedOrders.filter(o=>isLate(o)).length;
+
+  const grid = document.getElementById('ordersGrid');
+  if (!orders.length) {
+    grid.innerHTML = '<div class="empty-msg">📭 لا توجد طلبات غير موزعة</div>';
+    return;
+  }
+
+  // Sort: late first, then by time
+  orders.sort((a,b) => {
+    const al = isLate(a) ? 1 : 0, bl = isLate(b) ? 1 : 0;
+    if (al !== bl) return bl - al;
+    return new Date(a.created_at) - new Date(b.created_at);
+  });
+
+  grid.innerHTML = orders.map(o => {
+    const late = isLate(o);
+    const timer = getTimer(o.created_at);
+    const timerClass = timer.mins > 45 ? 'timer-late' : timer.mins > 20 ? 'timer-warn' : 'timer-ok';
+    const pm = o.payment_method || (o.bill_type?.includes('فيزا')?'visa':'cash');
+    const pmLabel = PAYMENT_LABELS[pm] || o.bill_type || 'كاش';
+    const pmClass = pm==='visa'?'type-visa':pm==='cash'||!pm?'type-cash':'type-other';
+    const custName = o.customer_name || o.cust_name || '—';
+    const selected = selectedOrders.has(o.id);
+    return `
+      <div class="order-card ${late?'late':''} ${selected?'selected':''}" onclick="toggleSelect('${o.id}',event)" id="oc-${o.id}">
+        <div class="oc-check">${selected?'✓':''}</div>
+        <div class="oc-top">
+          <span class="oc-no">${o.bill_no||o.id?.slice(0,8)}</span>
+          <span class="oc-timer ${timerClass}">${timer.label}</span>
+        </div>
+        <div class="oc-customer">${custName}</div>
+        <div class="oc-address">${o.customer_address||o.cust_address||'—'}</div>
+        ${o.cust_region?`<span class="oc-region">${o.cust_region}</span>`:''}
+        <div class="oc-bottom">
+          <span class="oc-amount">${Number(o.total_bill_net||0).toLocaleString()} ج</span>
+          <span class="oc-type ${pmClass}">${pmLabel}</span>
+          <span class="oc-status ${o.status==='postponed'?'st-postponed':'st-pending'}">${o.status==='postponed'?'مؤجل':'جاهز'}</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function toggleSelect(orderId, e) {
+  // If double click → open detail
+  if (e.detail === 2) { openOrderDetail(orderId); return; }
+
+  if (selectedOrders.has(orderId)) selectedOrders.delete(orderId);
+  else selectedOrders.add(orderId);
+
+  // Update card
+  const card = document.getElementById(`oc-${orderId}`);
+  if (card) {
+    card.classList.toggle('selected', selectedOrders.has(orderId));
+    card.querySelector('.oc-check').textContent = selectedOrders.has(orderId) ? '✓' : '';
+  }
+  updateSelectionUI();
+}
+
+function updateSelectionUI() {
+  const count = selectedOrders.size;
+  const info = document.getElementById('selectInfo');
+  const btn = document.getElementById('assignBatchBtn');
+  if (count > 0) {
+    info.textContent = `${count} طلب محدد`;
+    info.classList.add('show');
+    btn.classList.add('show');
+  } else {
+    info.classList.remove('show');
+    btn.classList.remove('show');
+  }
+}
+
+// ===== ASSIGN =====
+function openAssignModal() {
+  if (selectedOrders.size === 0) { showToast('اختر طلباً واحداً على الأقل'); return; }
+  const sel = document.getElementById('assignDriverSelect');
+  sel.innerHTML = allDrivers.map(d=>`<option value="${d.id}">${d.full_name}</option>`).join('');
+  const list = document.getElementById('selectedOrdersList');
+  const orders = [...selectedOrders].map(id=>unassignedOrders.find(o=>o.id===id)).filter(Boolean);
+  list.innerHTML = orders.map(o=>`
+    <div class="selected-item">
+      <span class="selected-item-no">${o.bill_no||o.id?.slice(0,8)}</span>
+      <span class="selected-item-name">${o.customer_name||o.cust_name||'—'}</span>
+      <span style="font-weight:700;font-size:.72rem">${Number(o.total_bill_net||0).toLocaleString()} ج</span>
+    </div>`).join('');
+  document.getElementById('assignModal').classList.add('open');
+}
+
+async function confirmAssign() {
+  const driverId = document.getElementById('assignDriverSelect').value;
+  if (!driverId) { showToast('اختر الطيار'); return; }
+  const driver = allDrivers.find(d=>d.id===driverId);
+  const orderIds = [...selectedOrders];
+  showLoading(true);
+  try {
+    // Update orders
+    await db.from('orders').update({
+      driver_id: driverId,
+      deliveryman: driver?.full_name,
+      status: 'picked',
+      picked_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }).in('id', orderIds);
+
+    // Create trip
+    const total = orderIds.map(id=>allOrders.find(o=>o.id===id)).filter(Boolean)
+      .reduce((s,o)=>s+Number(o.total_bill_net||0),0);
+    const { data: trip } = await db.from('trips').insert({
+      driver_id: driverId, driver_name: driver?.full_name,
+      status: 'active', orders_count: orderIds.length,
+      total_amount: total, created_at: new Date().toISOString()
+    }).select().single();
+
+    if (trip) {
+      await db.from('trip_orders').insert(orderIds.map(id=>({trip_id:trip.id, order_id:id})));
+    }
+
+    selectedOrders.clear();
+    updateSelectionUI();
+    closeModal('assignModal');
+    showToast(`✓ تم تعيين ${orderIds.length} طلب للطيار ${driver?.full_name}`);
+    await loadAll();
+  } catch(e) { console.error(e); showToast('حدث خطأ'); }
+  showLoading(false);
+}
+
+// ===== TRIP COMPLETE =====
+async function completeTrip(tripId) {
+  if (!confirm('إنهاء الرحلة وتحويل الطلبات لمكتمل؟')) return;
+  showLoading(true);
+  try {
+    const orderIds = tripOrdersMap[tripId] || [];
+    await db.from('trips').update({status:'completed', updated_at:new Date().toISOString()}).eq('id',tripId);
+    if (orderIds.length) await db.from('orders').update({status:'completed', updated_at:new Date().toISOString()}).in('id',orderIds);
+    showToast('✓ تم إنهاء الرحلة');
+    await loadAll();
+  } catch(e) { showToast('حدث خطأ'); }
+  showLoading(false);
+}
+
+// ===== ORDER DETAIL =====
+function openOrderDetail(orderId) {
+  const o = allOrders.find(x=>x.id===orderId); if (!o) return;
+  const pm = o.payment_method;
+  const pmLabel = pm ? PAYMENT_LABELS[pm] : (o.bill_type||'—');
+  const timer = getTimer(o.created_at);
+  document.getElementById('odm-title').textContent = `طلب #${o.bill_no||orderId.slice(0,8)}`;
+  document.getElementById('odm-body').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:.4rem;font-size:.8rem">
+      <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid #f3f4f6"><span style="color:var(--text-muted)">العميل</span><strong>${o.customer_name||o.cust_name||'—'}</strong></div>
+      <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid #f3f4f6"><span style="color:var(--text-muted)">العنوان</span><span style="text-align:left">${o.customer_address||o.cust_address||'—'}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid #f3f4f6"><span style="color:var(--text-muted)">المنطقة</span><strong>${o.cust_region||'—'}</strong></div>
+      <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid #f3f4f6"><span style="color:var(--text-muted)">المبلغ</span><strong style="color:var(--text)">${Number(o.total_bill_net||0).toLocaleString()} ج.م</strong></div>
+      <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid #f3f4f6"><span style="color:var(--text-muted)">طريقة الدفع</span><strong>${pmLabel}</strong></div>
+      <div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid #f3f4f6"><span style="color:var(--text-muted)">منذ</span><strong style="color:${timer.mins>30?'var(--red)':'var(--text)'}">${timer.label}</strong></div>
+      ${o.notes?`<div style="padding:.5rem;background:var(--yellow-light);border-radius:8px;font-size:.75rem">📝 ${o.notes}</div>`:''}
+    </div>`;
+  const assignBtn = document.getElementById('odm-assign-btn');
+  if (!o.driver_id) {
+    assignBtn.style.display = 'flex';
+    assignBtn.onclick = () => {
+      closeModal('orderDetailModal');
+      selectedOrders.clear();
+      selectedOrders.add(orderId);
+      updateSelectionUI();
+      openAssignModal();
+    };
+  } else {
+    assignBtn.style.display = 'none';
+  }
+  document.getElementById('orderDetailModal').classList.add('open');
+}
+
+// ===== UTILS =====
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')}));
+function showLoading(show) { document.getElementById('loadingOverlay').classList.toggle('show',show); }
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2500);
+}
+
+// Auto refresh every 30s
+setInterval(loadAll, 30000);
+
+// Init
+const stored = sessionStorage.getItem('delivery_user');
+if (!stored) window.location.href = '../auth.html';
+loadAll();
+</script>
+</body>
+</html>
