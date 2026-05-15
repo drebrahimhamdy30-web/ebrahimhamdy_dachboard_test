@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>التقارير</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="../delivery-style.css">
+<style>
+body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg); }
+
+.report-filters { display: flex; gap: .625rem; align-items: center; flex-wrap: wrap; margin-bottom: 1.25rem; }
+.date-range-label { font-size: .78rem; font-weight: 600; color: var(--text-muted); }
+
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: .875rem; margin-bottom: 1.5rem; }
+
+/* Bar chart */
+.bar-chart-wrap { display: flex; align-items: flex-end; gap: 4px; height: 100px; padding: 0 .25rem; }
+.bc-bar { flex: 1; border-radius: 5px 5px 0 0; background: var(--primary); min-width: 6px; opacity: .75; cursor: pointer; transition: opacity .15s; position: relative; }
+.bc-bar:hover { opacity: 1; }
+.bc-bar-tooltip { position: absolute; top: -22px; left: 50%; transform: translateX(-50%); background: var(--text); color: white; font-size: .6rem; padding: .15rem .3rem; border-radius: 4px; white-space: nowrap; display: none; }
+.bc-bar:hover .bc-bar-tooltip { display: block; }
+.bc-labels { display: flex; gap: 4px; }
+.bc-label { flex: 1; text-align: center; font-size: .58rem; color: var(--text-muted); }
+
+.charts-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.25rem; }
+@media(max-width:650px) { .charts-2 { grid-template-columns: 1fr; } }
+
+/* Status pie */
+.pie-legend { display: flex; flex-direction: column; gap: .4rem; }
+.pie-legend-row { display: flex; align-items: center; justify-content: space-between; font-size: .75rem; }
+.pie-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: .4rem; }
+.pie-pct { font-size: .7rem; color: var(--text-muted); }
+
+/* Regions table */
+.region-row { display: flex; align-items: center; gap: .75rem; padding: .5rem .25rem; border-bottom: 1px solid var(--gray-light); }
+.region-row:last-child { border-bottom: none; }
+.region-name { flex: 1; font-size: .78rem; font-weight: 600; }
+.region-bar-wrap { flex: 2; }
+.region-bar { height: 10px; background: var(--gray-light); border-radius: 10px; overflow: hidden; }
+.region-bar-fill { height: 100%; background: var(--primary); border-radius: 10px; }
+.region-count { font-size: .75rem; font-weight: 700; min-width: 30px; text-align: left; }
+
+/* Export buttons */
+.export-row { display: flex; gap: .5rem; justify-content: flex-end; margin-bottom: 1rem; }
+
+/* Driver ranking */
+.rank-row { display: flex; align-items: center; gap: .75rem; padding: .625rem 0; border-bottom: 1px solid var(--gray-light); }
+.rank-row:last-child { border-bottom: none; }
+.rank-num { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: .7rem; font-weight: 700; background: var(--gray-light); color: var(--text-muted); flex-shrink: 0; }
+.rank-num.top1 { background: #fbbf24; color: white; }
+.rank-num.top2 { background: #9ca3af; color: white; }
+.rank-num.top3 { background: #92400e; color: white; }
+.rank-name { flex: 1; font-size: .78rem; font-weight: 600; }
+.rank-val { font-size: .78rem; font-weight: 700; color: var(--text); }
+</style>
+</head>
+<body>
+
+<!-- Filters -->
+<div class="report-filters">
+  <span class="date-range-label">الفترة:</span>
+  <input type="date" class="filter-input" id="dateFrom">
+  <span style="font-size:.75rem;color:var(--text-muted)">إلى</span>
+  <input type="date" class="filter-input" id="dateTo">
+  <button class="btn btn-primary btn-sm" onclick="loadReport()">تطبيق</button>
+  <button class="btn btn-outline btn-sm" onclick="setToday()">اليوم</button>
+  <button class="btn btn-outline btn-sm" onclick="setThisWeek()">هذا الأسبوع</button>
+  <button class="btn btn-outline btn-sm" onclick="setThisMonth()">هذا الشهر</button>
+</div>
+
+<!-- KPIs -->
+<div class="kpi-grid" id="kpiGrid"></div>
+
+<!-- Export -->
+<div class="export-row">
+  <button class="btn btn-outline btn-sm" onclick="exportCSV()">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    تصدير CSV
+  </button>
+</div>
+
+<!-- Charts Row -->
+<div class="charts-2">
+  <!-- Daily orders chart -->
+  <div class="card">
+    <div class="card-header"><span class="card-title">الطلبات اليومية</span></div>
+    <div class="card-body">
+      <div class="bar-chart-wrap" id="dailyBars"></div>
+      <div class="bc-labels" id="dailyLabels"></div>
+    </div>
+  </div>
+  <!-- Status distribution -->
+  <div class="card">
+    <div class="card-header"><span class="card-title">توزيع الحالات</span></div>
+    <div class="card-body">
+      <div style="display:flex;align-items:center;gap:1.25rem">
+        <svg width="90" height="90" viewBox="0 0 90 90" id="statusPie">
+          <circle cx="45" cy="45" r="35" fill="none" stroke="#f3f4f6" stroke-width="12"/>
+        </svg>
+        <div class="pie-legend" id="pieLegend"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Bottom row -->
+<div class="charts-2">
+  <!-- Top regions -->
+  <div class="card">
+    <div class="card-header"><span class="card-title">أكثر المناطق طلبات</span></div>
+    <div class="card-body" id="regionsChart"></div>
+  </div>
+  <!-- Driver rankings -->
+  <div class="card">
+    <div class="card-header"><span class="card-title">أفضل الطيارين</span></div>
+    <div class="card-body" id="driverRankings"></div>
+  </div>
+</div>
+
+<div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../supabase-config.js"></script>
+<script src="../permissions.js"></script>
+<script>
+const STATUS_COLORS = { pending:'#16a34a', picked:'#0891b2', delivered:'#ca8a04', completed:'#6b7280', cancelled:'#dc2626', postponed:'#7c3aed' };
+const STATUS_LABELS = { pending:'جاهز', picked:'في الطريق', delivered:'تم التسليم', completed:'مكتمل', cancelled:'ملغي', postponed:'مؤجل' };
+
+let reportOrders = [];
+
+function setToday() {
+  const d = new Date().toISOString().split('T')[0];
+  document.getElementById('dateFrom').value = d;
+  document.getElementById('dateTo').value = d;
+  loadReport();
+}
+function setThisWeek() {
+  const now = new Date();
+  const mon = new Date(now); mon.setDate(now.getDate() - now.getDay() + 1);
+  document.getElementById('dateFrom').value = mon.toISOString().split('T')[0];
+  document.getElementById('dateTo').value = now.toISOString().split('T')[0];
+  loadReport();
+}
+function setThisMonth() {
+  const now = new Date();
+  document.getElementById('dateFrom').value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+  document.getElementById('dateTo').value = now.toISOString().split('T')[0];
+  loadReport();
+}
+
+async function loadReport() {
+  showLoading(true);
+  const from = document.getElementById('dateFrom').value;
+  const to = document.getElementById('dateTo').value;
+
+  let query = db.from('orders').select('*').order('created_at', { ascending: false });
+  if (from) query = query.gte('created_at', from + 'T00:00:00');
+  if (to) query = query.lte('created_at', to + 'T23:59:59');
+
+  const { data } = await query;
+  reportOrders = data || [];
+
+  renderKPIs();
+  renderDailyChart();
+  renderStatusPie();
+  renderRegions();
+  renderDriverRankings();
+  showLoading(false);
+}
+
+function renderKPIs() {
+  const orders = reportOrders;
+  const total = orders.length;
+  const completed = orders.filter(o => ['delivered','completed'].includes(o.status)).length;
+  const cancelled = orders.filter(o => o.status === 'cancelled').length;
+  const revenue = orders.filter(o => ['delivered','completed'].includes(o.status)).reduce((s, o) => s + Number(o.total_bill_net||0), 0);
+  const rate = total > 0 ? Math.round((completed/total)*100) : 0;
+  const avgOrder = completed > 0 ? Math.round(revenue / completed) : 0;
+
+  document.getElementById('kpiGrid').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-icon" style="background:var(--blue-light)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0891b2" stroke-width="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/></svg></div>
+      <div class="stat-label">إجمالي الطلبات</div>
+      <div class="stat-value">${total}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:var(--green-light)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div>
+      <div class="stat-label">تم التوصيل</div>
+      <div class="stat-value">${completed}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:var(--red-light)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></div>
+      <div class="stat-label">ملغي</div>
+      <div class="stat-value">${cancelled}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:#fff7ed"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ea580c" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+      <div class="stat-label">الإيرادات</div>
+      <div class="stat-value" style="font-size:1.05rem">${revenue.toLocaleString('ar-EG')}</div>
+      <div class="stat-sub">جنيه مصري</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:var(--purple-light)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg></div>
+      <div class="stat-label">معدل الإنجاز</div>
+      <div class="stat-value">${rate}%</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:var(--yellow-light)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ca8a04" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></div>
+      <div class="stat-label">متوسط الطلب</div>
+      <div class="stat-value" style="font-size:1.05rem">${avgOrder.toLocaleString()}</div>
+      <div class="stat-sub">جنيه</div>
+    </div>`;
+}
+
+function renderDailyChart() {
+  const dayMap = {};
+  reportOrders.forEach(o => {
+    const day = o.created_at?.split('T')[0];
+    if (day) dayMap[day] = (dayMap[day] || 0) + 1;
+  });
+  const days = Object.entries(dayMap).sort((a,b) => a[0].localeCompare(b[0])).slice(-14);
+  const max = Math.max(...days.map(d => d[1]), 1);
+
+  document.getElementById('dailyBars').innerHTML = days.map(([day, count]) =>
+    `<div class="bc-bar" style="height:${(count/max)*100}%" title="${count} طلب">
+      <div class="bc-bar-tooltip">${count}</div>
+    </div>`
+  ).join('');
+  document.getElementById('dailyLabels').innerHTML = days.map(([day]) =>
+    `<span class="bc-label">${day.slice(5)}</span>`
+  ).join('');
+}
+
+function renderStatusPie() {
+  const counts = {};
+  reportOrders.forEach(o => counts[o.status] = (counts[o.status]||0)+1);
+  const total = reportOrders.length || 1;
+  const r = 35, circ = 2 * Math.PI * r;
+  let offset = 0;
+  const svg = document.getElementById('statusPie');
+  // Clear existing circles except the background
+  while (svg.children.length > 1) svg.removeChild(svg.lastChild);
+  const legend = document.getElementById('pieLegend');
+  legend.innerHTML = '';
+  Object.entries(counts).sort((a,b)=>b[1]-a[1]).forEach(([status, count]) => {
+    const pct = count / total;
+    const dash = pct * circ;
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', 45); circle.setAttribute('cy', 45); circle.setAttribute('r', r);
+    circle.setAttribute('fill', 'none');
+    circle.setAttribute('stroke', STATUS_COLORS[status]||'#ccc');
+    circle.setAttribute('stroke-width', 12);
+    circle.setAttribute('stroke-dasharray', `${dash} ${circ-dash}`);
+    circle.setAttribute('stroke-dashoffset', -offset * circ);
+    circle.setAttribute('transform', 'rotate(-90 45 45)');
+    svg.appendChild(circle);
+    offset += pct;
+    legend.innerHTML += `<div class="pie-legend-row">
+      <span><span class="pie-dot" style="background:${STATUS_COLORS[status]||'#ccc'}"></span>${STATUS_LABELS[status]||status}</span>
+      <span><strong>${count}</strong> <span class="pie-pct">${Math.round(pct*100)}%</span></span>
+    </div>`;
+  });
+}
+
+function renderRegions() {
+  const regionMap = {};
+  reportOrders.forEach(o => { if (o.cust_region) regionMap[o.cust_region] = (regionMap[o.cust_region]||0)+1; });
+  const sorted = Object.entries(regionMap).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const max = sorted[0]?.[1] || 1;
+  document.getElementById('regionsChart').innerHTML = sorted.length ? sorted.map(([region, count]) => `
+    <div class="region-row">
+      <span class="region-name">${region}</span>
+      <div class="region-bar-wrap"><div class="region-bar"><div class="region-bar-fill" style="width:${(count/max)*100}%"></div></div></div>
+      <span class="region-count">${count}</span>
+    </div>`).join('') : '<div class="empty-state"><p>لا بيانات</p></div>';
+}
+
+function renderDriverRankings() {
+  const driverMap = {};
+  reportOrders.filter(o => ['delivered','completed'].includes(o.status) && o.deliveryman)
+    .forEach(o => {
+      if (!driverMap[o.deliveryman]) driverMap[o.deliveryman] = { count: 0, revenue: 0 };
+      driverMap[o.deliveryman].count++;
+      driverMap[o.deliveryman].revenue += Number(o.total_bill_net||0);
+    });
+  const sorted = Object.entries(driverMap).sort((a,b)=>b[1].count-a[1].count).slice(0,8);
+  document.getElementById('driverRankings').innerHTML = sorted.length ? sorted.map(([name, data], i) => {
+    const rankClass = i===0?'top1':i===1?'top2':i===2?'top3':'';
+    return `<div class="rank-row">
+      <div class="rank-num ${rankClass}">${i+1}</div>
+      <span class="rank-name">${name}</span>
+      <span class="rank-val">${data.count} طلب · ${data.revenue.toLocaleString()} ج</span>
+    </div>`;
+  }).join('') : '<div class="empty-state"><p>لا بيانات</p></div>';
+}
+
+function exportCSV() {
+  const headers = ['رقم الفاتورة','اسم العميل','المنطقة','المبلغ','نوع الدفع','الحالة','الطيار','التاريخ'];
+  const rows = reportOrders.map(o => [
+    o.bill_no||'', o.customer_name||o.cust_name||'', o.cust_region||'',
+    o.total_bill_net||0, o.bill_type||'', STATUS_LABELS[o.status]||o.status,
+    o.deliveryman||'', o.created_at?.split('T')[0]||''
+  ]);
+  const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+  const blob = new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `تقرير_${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+}
+
+function showLoading(show) { document.getElementById('loadingOverlay').classList.toggle('show', show); }
+
+// Init with today
+setToday();
+</script>
+</body>
+</html>

@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>نظرة عامة</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="../delivery-style.css">
+<style>
+body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg); }
+.page-title { font-size: 1rem; font-weight: 700; margin-bottom: 1.25rem; color: var(--text); display: flex; align-items: center; gap: .5rem; }
+
+/* Stats Grid */
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: .875rem; margin-bottom: 1.25rem; }
+
+/* Charts row */
+.charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.25rem; }
+@media(max-width:700px) { .charts-row { grid-template-columns: 1fr; } }
+
+/* Mini bar chart */
+.mini-bar-wrap { display: flex; align-items: flex-end; gap: 4px; height: 60px; }
+.mini-bar { flex: 1; border-radius: 4px 4px 0 0; background: var(--primary); opacity: .7; transition: opacity .15s; min-width: 8px; }
+.mini-bar:hover { opacity: 1; }
+.mini-bar-label { font-size: .6rem; color: var(--text-muted); text-align: center; margin-top: 3px; }
+
+/* Status donut */
+.donut-wrap { display: flex; align-items: center; gap: 1rem; }
+.donut-svg { flex-shrink: 0; }
+.donut-legend { flex: 1; display: flex; flex-direction: column; gap: .35rem; }
+.legend-row { display: flex; align-items: center; justify-content: space-between; font-size: .72rem; }
+.legend-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-left: .35rem; }
+
+/* Recent orders */
+.recent-table-wrap { overflow-x: auto; }
+.recent-table { width: 100%; border-collapse: collapse; font-size: .78rem; }
+.recent-table th { padding: .55rem .875rem; text-align: right; font-weight: 600; color: var(--text-muted); background: var(--gray-light); border-bottom: 1px solid var(--border); font-size: .7rem; white-space: nowrap; }
+.recent-table td { padding: .6rem .875rem; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: middle; }
+.recent-table tr:last-child td { border-bottom: none; }
+.recent-table tr:hover td { background: #fafafa; }
+
+/* Driver status row */
+.drivers-status { display: flex; gap: .5rem; overflow-x: auto; padding-bottom: .25rem; margin-bottom: 1.25rem; }
+.driver-status-card { background: white; border: 1px solid var(--border); border-radius: 10px; padding: .65rem .875rem; display: flex; align-items: center; gap: .625rem; flex-shrink: 0; min-width: 160px; }
+.driver-status-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: .8rem; color: white; }
+.driver-status-info { flex: 1; min-width: 0; }
+.driver-status-name { font-size: .75rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.driver-status-orders { font-size: .65rem; color: var(--text-muted); }
+
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: .75rem; }
+.section-title { font-size: .85rem; font-weight: 700; color: var(--text); }
+
+/* Alert bar */
+.alert-bar { display: flex; align-items: center; gap: .625rem; padding: .625rem 1rem; background: var(--red-light); border: 1px solid #fecaca; border-radius: 10px; margin-bottom: 1rem; font-size: .78rem; color: #b91c1c; font-weight: 600; }
+.alert-bar svg { flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<div id="lateAlert" style="display:none" class="alert-bar">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+  <span id="lateAlertText"></span>
+</div>
+
+<!-- Stats -->
+<div class="stats-grid" id="statsGrid">
+  <div class="stat-card">
+    <div class="stat-icon" style="background:var(--green-light)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    </div>
+    <div class="stat-label">جاهز للتوصيل</div>
+    <div class="stat-value" id="s-pending">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:var(--blue-light)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0891b2" stroke-width="2"><path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4z"/></svg>
+    </div>
+    <div class="stat-label">في الطريق</div>
+    <div class="stat-value" id="s-picked">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:var(--yellow-light)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ca8a04" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+    </div>
+    <div class="stat-label">تم التسليم</div>
+    <div class="stat-value" id="s-delivered">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:var(--gray-light)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+    </div>
+    <div class="stat-label">مكتمل اليوم</div>
+    <div class="stat-value" id="s-completed">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:var(--red-light)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    </div>
+    <div class="stat-label">متأخر</div>
+    <div class="stat-value" id="s-late" style="color:var(--red)">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:#fff7ed">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ea580c" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+    </div>
+    <div class="stat-label">إجمالي المبيعات</div>
+    <div class="stat-value" id="s-revenue" style="font-size:1.1rem">—</div>
+  </div>
+</div>
+
+<!-- Charts row -->
+<div class="charts-row">
+  <!-- Status donut -->
+  <div class="card">
+    <div class="card-header"><span class="card-title">توزيع الحالات</span></div>
+    <div class="card-body">
+      <div class="donut-wrap" id="donutWrap">
+        <svg class="donut-svg" width="100" height="100" viewBox="0 0 100 100" id="donutSvg">
+          <circle cx="50" cy="50" r="38" fill="none" stroke="#f3f4f6" stroke-width="14"/>
+        </svg>
+        <div class="donut-legend" id="donutLegend"></div>
+      </div>
+    </div>
+  </div>
+  <!-- Hourly bars -->
+  <div class="card">
+    <div class="card-header"><span class="card-title">طلبات الساعات الأخيرة</span></div>
+    <div class="card-body">
+      <div class="mini-bar-wrap" id="hourlyBars"></div>
+      <div style="display:flex;justify-content:space-between;margin-top:.25rem" id="hourlyLabels"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Active Drivers -->
+<div class="section-header">
+  <span class="section-title">🚗 الطيارين النشطون</span>
+  <span class="text-xs text-muted" id="driversCount"></span>
+</div>
+<div class="drivers-status" id="driversStatus"></div>
+
+<!-- Recent Orders -->
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">آخر الطلبات</span>
+    <button class="btn btn-outline btn-sm" onclick="parent.postMessage({type:'navigate',page:'orders',title:'إدارة الطلبات'}, '*')">عرض الكل</button>
+  </div>
+  <div class="recent-table-wrap">
+    <table class="recent-table">
+      <thead>
+        <tr>
+          <th>رقم الفاتورة</th>
+          <th>العميل</th>
+          <th>المنطقة</th>
+          <th>المبلغ</th>
+          <th>الطيار</th>
+          <th>الحالة</th>
+          <th>الوقت</th>
+        </tr>
+      </thead>
+      <tbody id="recentOrders"></tbody>
+    </table>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../supabase-config.js"></script>
+<script src="../permissions.js"></script>
+<script>
+const STATUS_LABELS = { pending:'جاهز', picked:'في الطريق', delivered:'تم التسليم', completed:'مكتمل', cancelled:'ملغي', postponed:'مؤجل' };
+const STATUS_COLORS = { pending:'#16a34a', picked:'#0891b2', delivered:'#ca8a04', completed:'#6b7280', cancelled:'#dc2626', postponed:'#7c3aed' };
+const BADGE_CLASS = { pending:'badge-pending', picked:'badge-picked', delivered:'badge-delivered', completed:'badge-completed', cancelled:'badge-cancelled', postponed:'badge-postponed' };
+const DRIVER_COLORS = ['#1a56db','#7c3aed','#16a34a','#ea580c','#0891b2','#ca8a04','#dc2626','#0d9488'];
+
+let allOrders = [], allUsers = [];
+
+async function init() {
+  const user = getCurrentUser();
+  if (!user) return;
+
+  const [ordersRes, usersRes] = await Promise.all([
+    db.from('orders').select('*').order('created_at', { ascending: false }),
+    db.from('users').select('id, full_name, role, is_active').eq('role', 'driver')
+  ]);
+
+  allOrders = ordersRes.data || [];
+  allUsers = usersRes.data || [];
+
+  renderStats();
+  renderDonut();
+  renderHourly();
+  renderDrivers();
+  renderRecentOrders();
+}
+
+function renderStats() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const orders = allOrders;
+
+  const pending = orders.filter(o => o.status === 'pending').length;
+  const picked = orders.filter(o => o.status === 'picked').length;
+  const delivered = orders.filter(o => o.status === 'delivered').length;
+  const completed = orders.filter(o => o.status === 'completed' && new Date(o.created_at) >= today).length;
+  const late = orders.filter(o => {
+    if (['completed','cancelled'].includes(o.status)) return false;
+    return (new Date() - new Date(o.created_at)) / 60000 > 45;
+  }).length;
+  const revenue = orders.filter(o => ['delivered','completed'].includes(o.status) && new Date(o.created_at) >= today)
+    .reduce((s, o) => s + (Number(o.total_bill_net) || 0), 0);
+
+  document.getElementById('s-pending').textContent = pending;
+  document.getElementById('s-picked').textContent = picked;
+  document.getElementById('s-delivered').textContent = delivered;
+  document.getElementById('s-completed').textContent = completed;
+  document.getElementById('s-late').textContent = late;
+  document.getElementById('s-revenue').textContent = revenue.toLocaleString('ar-EG') + ' ج';
+
+  if (late > 0) {
+    document.getElementById('lateAlert').style.display = 'flex';
+    document.getElementById('lateAlertText').textContent = `تحذير: ${late} طلب متأخر عن الوقت المحدد`;
+  }
+}
+
+function renderDonut() {
+  const counts = {};
+  allOrders.forEach(o => { counts[o.status] = (counts[o.status] || 0) + 1; });
+  const total = allOrders.length || 1;
+  const radius = 38, circ = 2 * Math.PI * radius;
+
+  let offset = 0;
+  const svg = document.getElementById('donutSvg');
+  const legend = document.getElementById('donutLegend');
+  legend.innerHTML = '';
+
+  Object.entries(counts).forEach(([status, count]) => {
+    const pct = count / total;
+    const dash = pct * circ;
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', 50); circle.setAttribute('cy', 50); circle.setAttribute('r', radius);
+    circle.setAttribute('fill', 'none');
+    circle.setAttribute('stroke', STATUS_COLORS[status] || '#ccc');
+    circle.setAttribute('stroke-width', 14);
+    circle.setAttribute('stroke-dasharray', `${dash} ${circ - dash}`);
+    circle.setAttribute('stroke-dashoffset', -offset * circ);
+    circle.setAttribute('transform', 'rotate(-90 50 50)');
+    svg.appendChild(circle);
+    offset += pct;
+
+    legend.innerHTML += `<div class="legend-row">
+      <span><span class="legend-dot" style="background:${STATUS_COLORS[status]||'#ccc'}"></span>${STATUS_LABELS[status]||status}</span>
+      <span style="font-weight:700">${count}</span>
+    </div>`;
+  });
+}
+
+function renderHourly() {
+  const now = new Date();
+  const hours = [];
+  for (let i = 7; i >= 0; i--) {
+    const h = new Date(now); h.setHours(now.getHours() - i, 0, 0, 0);
+    hours.push(h);
+  }
+  const counts = hours.map(h => allOrders.filter(o => {
+    const d = new Date(o.created_at);
+    return d >= h && d < new Date(h.getTime() + 3600000);
+  }).length);
+  const max = Math.max(...counts, 1);
+
+  const bars = document.getElementById('hourlyBars');
+  const labels = document.getElementById('hourlyLabels');
+  bars.innerHTML = ''; labels.innerHTML = '';
+
+  hours.forEach((h, i) => {
+    const pct = Math.max((counts[i] / max) * 100, 5);
+    bars.innerHTML += `<div class="mini-bar" style="height:${pct}%;background:${i===hours.length-1?'var(--primary)':'var(--primary-light)'}" title="${counts[i]} طلب"></div>`;
+  });
+  labels.innerHTML = hours.map(h => `<span class="mini-bar-label">${h.getHours()}:00</span>`).join('');
+}
+
+function renderDrivers() {
+  const driverOrders = {};
+  allOrders.filter(o => o.status === 'picked' && o.driver_id).forEach(o => {
+    driverOrders[o.driver_id] = (driverOrders[o.driver_id] || 0) + 1;
+  });
+
+  const active = allUsers.filter(u => u.is_active);
+  document.getElementById('driversCount').textContent = `${active.length} طيار`;
+
+  document.getElementById('driversStatus').innerHTML = active.slice(0, 12).map((u, i) => {
+    const cnt = driverOrders[u.id] || 0;
+    const color = DRIVER_COLORS[i % DRIVER_COLORS.length];
+    const statusLabel = cnt > 0 ? `${cnt} طلب في الطريق` : 'متاح';
+    return `<div class="driver-status-card">
+      <div class="driver-status-avatar" style="background:${color}">${u.full_name?.charAt(0)||'د'}</div>
+      <div class="driver-status-info">
+        <div class="driver-status-name">${u.full_name}</div>
+        <div class="driver-status-orders">${statusLabel}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderRecentOrders() {
+  const recent = allOrders.slice(0, 15);
+  document.getElementById('recentOrders').innerHTML = recent.map(o => {
+    const mins = Math.floor((new Date() - new Date(o.created_at)) / 60000);
+    const timeStr = mins < 60 ? `${mins} دقيقة` : `${Math.floor(mins/60)} ساعة`;
+    return `<tr>
+      <td style="font-weight:700;color:var(--primary)">${o.bill_no||'—'}</td>
+      <td style="max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${o.cust_name||'—'}</td>
+      <td><span style="font-size:.65rem;background:var(--blue-light);color:#0e7490;padding:.1rem .4rem;border-radius:6px">${o.cust_region||'—'}</span></td>
+      <td style="font-weight:700">${Number(o.total_bill_net||0).toLocaleString('ar-EG')}</td>
+      <td style="font-size:.7rem;color:var(--text-muted)">${o.deliveryman||'—'}</td>
+      <td><span class="badge ${BADGE_CLASS[o.status]||''}">${STATUS_LABELS[o.status]||o.status}</span></td>
+      <td style="color:var(--text-muted);font-size:.7rem">${timeStr}</td>
+    </tr>`;
+  }).join('');
+}
+
+init();
+setInterval(init, 60000);
+</script>
+</body>
+</html>
