@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>إدارة الطلبات</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --primary:#1a56db;--primary-dark:#1344b0;--primary-light:#e8f0fe;
+  --green:#16a34a;--green-light:#dcfce7;
+  --yellow:#ca8a04;--yellow-light:#fef9c3;
+  --purple:#7c3aed;--purple-light:#ede9fe;
+  --red:#dc2626;--red-light:#fee2e2;
+  --blue:#0891b2;--blue-light:#ecfeff;
+  --orange:#ea580c;--orange-light:#fff7ed;
+  --gray:#6b7280;--gray-light:#f3f4f6;
+  --text:#111827;--text-muted:#6b7280;
+  --border:#e5e7eb;--bg:#f1f5f9;--white:#fff;
+}
+body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:var(--white);border-bottom:1px solid var(--border);padding:.5rem 1rem;display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap}
+.topbar-right{display:flex;align-items:center;gap:.5rem}
+.topbar-left{display:flex;align-items:center;gap:.5rem}
+.btn{display:inline-flex;align-items:center;gap:.35rem;padding:.4rem .85rem;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;border:none;transition:all .15s;white-space:nowrap}
+.btn-primary{background:var(--primary);color:white}.btn-primary:hover{background:var(--primary-dark)}
+.btn-green{background:var(--green);color:white}.btn-green:hover{background:#15803d}
+.btn-outline{background:white;color:var(--text);border:1px solid var(--border)}.btn-outline:hover{background:var(--gray-light)}
+.btn-red{background:var(--red);color:white}
+.btn-yellow{background:var(--yellow);color:white}
+.btn-sm{padding:.3rem .65rem;font-size:.72rem}
+.statsbar{background:var(--white);border-bottom:1px solid var(--border);padding:.4rem 1rem;display:flex;align-items:center;gap:.5rem;overflow-x:auto;flex-wrap:nowrap}
+.stat-pill{display:inline-flex;align-items:center;gap:.3rem;padding:.3rem .75rem;border-radius:20px;font-size:.72rem;font-weight:600;cursor:pointer;border:2px solid transparent;white-space:nowrap;transition:all .15s}
+.stat-pill.active{border-color:var(--primary)}
+.stat-pill .count{font-weight:700;font-size:.8rem}
+.sp-all{background:#f0f9ff;color:#0369a1}.sp-green{background:var(--green-light);color:#15803d}
+.sp-purple{background:var(--purple-light);color:#6d28d9}.sp-yellow{background:var(--yellow-light);color:#a16207}
+.sp-red{background:var(--red-light);color:#b91c1c}.sp-blue{background:var(--blue-light);color:#0e7490}
+.sp-gray{background:var(--gray-light);color:#374151}
+.drivers-section{background:var(--white);border-bottom:1px solid var(--border);padding:.6rem 1rem}
+.drivers-label{font-size:.72rem;color:var(--text-muted);font-weight:600;margin-bottom:.5rem}
+.drivers-row{display:flex;gap:.5rem;overflow-x:auto;padding-bottom:.25rem}
+.driver-card{display:flex;flex-direction:column;align-items:center;gap:.2rem;cursor:pointer;min-width:64px;padding:.3rem .4rem;border-radius:10px;border:2px solid transparent;transition:all .15s;flex-shrink:0}
+.driver-card:hover{background:var(--gray-light)}
+.driver-card.selected{border-color:var(--primary);background:var(--primary-light)}
+.driver-avatar{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;color:white;position:relative;flex-shrink:0}
+.driver-avatar .badge{position:absolute;top:-4px;left:-4px;width:18px;height:18px;border-radius:50%;background:var(--primary);color:white;font-size:.6rem;display:flex;align-items:center;justify-content:center;font-weight:700;border:2px solid white}
+.driver-name{font-size:.65rem;color:var(--text);font-weight:600;text-align:center;max-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.driver-status{font-size:.6rem;font-weight:600}
+.da-green{background:#16a34a}.da-purple{background:#7c3aed}.da-yellow{background:#ca8a04}.da-gray{background:#9ca3af}
+.main-content{flex:1;padding:.75rem 1rem;overflow:hidden}
+.tabs-row{display:flex;align-items:center;gap:.5rem;margin-bottom:.75rem;flex-wrap:wrap}
+.tab-btn{padding:.35rem .85rem;border-radius:20px;font-size:.75rem;font-weight:600;cursor:pointer;border:1.5px solid var(--border);background:white;color:var(--text-muted);transition:all .15s;display:flex;align-items:center;gap:.3rem;font-family:'Cairo',sans-serif}
+.tab-btn.active{background:var(--primary);color:white;border-color:var(--primary)}
+.tab-badge{background:rgba(255,255,255,0.3);padding:.1rem .4rem;border-radius:10px;font-size:.65rem}
+.tab-btn:not(.active) .tab-badge{background:var(--gray-light);color:var(--text-muted)}
+.orders-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.6rem;overflow-y:auto;max-height:calc(100vh - 280px)}
+.order-card{background:white;border-radius:10px;border:1.5px solid var(--border);padding:.6rem;cursor:pointer;transition:all .15s;position:relative;overflow:hidden}
+.order-card:hover{border-color:var(--primary);box-shadow:0 2px 12px rgba(26,86,219,0.1)}
+.order-card.status-pending{border-right:4px solid var(--green)}
+.order-card.status-postponed{border-right:4px solid var(--purple)}
+.order-card.status-picked{border-right:4px solid var(--blue)}
+.order-card.status-delivered{border-right:4px solid var(--yellow)}
+.order-card.status-late{border-right:4px solid var(--red);background:#fff8f8}
+.order-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem}
+.order-no{font-size:.72rem;font-weight:700;color:var(--primary)}
+.order-timer{font-size:.72rem;font-weight:700;padding:.1rem .4rem;border-radius:6px}
+.timer-green{background:var(--green-light);color:#15803d}
+.timer-red{background:var(--red-light);color:#b91c1c}
+.timer-yellow{background:var(--yellow-light);color:#a16207}
+.order-customer{font-size:.78rem;font-weight:600;color:var(--text);margin-bottom:.2rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.order-address{font-size:.68rem;color:var(--text-muted);margin-bottom:.35rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.order-region{font-size:.65rem;font-weight:600;color:var(--blue);background:var(--blue-light);padding:.1rem .4rem;border-radius:6px;display:inline-block;margin-bottom:.35rem}
+.order-footer{display:flex;align-items:center;justify-content:space-between;margin-top:.35rem;padding-top:.35rem;border-top:1px solid var(--gray-light)}
+.order-amount{font-size:.75rem;font-weight:700;color:var(--text)}
+.order-type{font-size:.65rem;font-weight:600;padding:.1rem .4rem;border-radius:6px}
+.type-cash{background:#fef3c7;color:#92400e}.type-visa{background:#dbeafe;color:#1e40af}
+.type-transfer{background:var(--green-light);color:#15803d}.type-deferred{background:var(--orange-light);color:#c2410c}
+.order-status-badge{font-size:.62rem;font-weight:600;padding:.1rem .4rem;border-radius:6px}
+.sb-pending{background:var(--green-light);color:#15803d}.sb-picked{background:var(--blue-light);color:#0e7490}
+.sb-delivered{background:var(--yellow-light);color:#a16207}.sb-postponed{background:var(--purple-light);color:#6d28d9}
+.sb-cancelled{background:var(--red-light);color:#b91c1c}.sb-completed{background:var(--gray-light);color:#374151}
+.order-driver{font-size:.65rem;color:var(--text-muted);margin-top:.25rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.order-actions{display:flex;gap:.25rem;margin-top:.35rem;flex-wrap:wrap}
+.action-btn{padding:.2rem .45rem;border-radius:6px;font-size:.62rem;font-weight:600;cursor:pointer;border:1px solid;transition:all .15s;font-family:'Cairo',sans-serif}
+.ab-assign{background:var(--green-light);color:#15803d;border-color:#bbf7d0}
+.ab-postpone{background:var(--purple-light);color:#6d28d9;border-color:#ddd6fe}
+.ab-urgent{background:var(--red-light);color:#b91c1c;border-color:#fecaca}
+.ab-delivered{background:var(--yellow-light);color:#a16207;border-color:#fde68a}
+.ab-cancel{background:var(--gray-light);color:#374151;border-color:#d1d5db}
+.ab-edit{background:var(--blue-light);color:#0e7490;border-color:#a5f3fc}
+.empty-state{text-align:center;padding:3rem 1rem;color:var(--text-muted);grid-column:1/-1}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:200;align-items:flex-start;justify-content:center;padding-top:5vh}
+.modal-overlay.open{display:flex}
+.modal{background:white;border-radius:14px;width:90%;max-width:500px;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.2)}
+.modal-header{padding:1rem 1.25rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:white;z-index:1}
+.modal-title{font-weight:700;font-size:.9rem}
+.modal-close{background:none;border:none;cursor:pointer;color:var(--text-muted);padding:.25rem;border-radius:6px;font-size:1.1rem}
+.modal-body{padding:1.25rem}
+.modal-footer{padding:.875rem 1.25rem;border-top:1px solid var(--border);display:flex;gap:.5rem;justify-content:flex-end;position:sticky;bottom:0;background:white}
+.form-group{margin-bottom:.875rem}
+.form-group label{display:block;font-size:.78rem;font-weight:600;margin-bottom:.35rem;color:var(--text)}
+.form-control{width:100%;height:36px;padding:0 .75rem;border:1px solid var(--border);border-radius:8px;font-family:'Cairo',sans-serif;font-size:.82rem;color:var(--text);outline:none;background:white}
+.form-control:focus{border-color:var(--primary)}
+textarea.form-control{height:70px;padding:.5rem .75rem;resize:vertical}
+.form-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
+.detail-row{display:flex;justify-content:space-between;align-items:flex-start;padding:.5rem 0;border-bottom:1px solid var(--gray-light);font-size:.8rem;gap:1rem}
+.detail-row:last-child{border-bottom:none}
+.detail-label{color:var(--text-muted);font-weight:500;flex-shrink:0}
+.detail-value{font-weight:600;color:var(--text);text-align:left;word-break:break-word}
+.section-divider{font-size:.72rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin:.75rem 0 .25rem;padding-bottom:.25rem;border-bottom:1px solid var(--border)}
+
+/* Payment method buttons */
+.payment-options{display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem}
+.pay-btn{padding:.5rem .3rem;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;border:2px solid var(--border);background:white;color:var(--text);transition:all .15s;text-align:center}
+.pay-btn:hover{border-color:var(--primary)}
+.pay-btn.selected{border-color:var(--primary);background:var(--primary-light);color:var(--primary)}
+.pay-btn.pay-cash.selected{border-color:#92400e;background:#fef3c7;color:#92400e}
+.pay-btn.pay-visa.selected{border-color:#1e40af;background:#dbeafe;color:#1e40af}
+.pay-btn.pay-transfer.selected{border-color:#15803d;background:var(--green-light);color:#15803d}
+.pay-btn.pay-deferred.selected{border-color:#c2410c;background:var(--orange-light);color:#c2410c}
+
+/* Timing info */
+.timing-row{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.25rem}
+.timing-pill{font-size:.68rem;font-weight:600;padding:.2rem .6rem;border-radius:20px;background:var(--blue-light);color:#0e7490}
+
+.loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,0.7);z-index:300;display:none;align-items:center;justify-content:center}
+.loading-overlay.show{display:flex}
+.spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.refresh-dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:10px}
+</style>
+</head>
+<body>
+
+<div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div></div>
+
+<div class="topbar">
+  <div class="topbar-right" style="gap:.75rem">
+    <span style="font-weight:700;font-size:.9rem;color:var(--text)">إدارة الطلبات</span>
+    <div class="refresh-dot" title="تحديث تلقائي كل دقيقة"></div>
+  </div>
+  <div class="topbar-left">
+    <button class="btn btn-green" onclick="openAddOrderModal()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      طلب يدوي
+    </button>
+    <button class="btn btn-outline" onclick="loadData()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      تحديث
+    </button>
+  </div>
+</div>
+
+<div class="statsbar">
+  <div class="stat-pill sp-all active" onclick="filterByStatus('')" data-status="">كل الطلبات <span class="count" id="cnt-all">0</span></div>
+  <div class="stat-pill sp-green" onclick="filterByStatus('pending')" data-status="pending">جاهز <span class="count" id="cnt-pending">0</span></div>
+  <div class="stat-pill sp-blue" onclick="filterByStatus('picked')" data-status="picked">في رحلة <span class="count" id="cnt-picked">0</span></div>
+  <div class="stat-pill sp-yellow" onclick="filterByStatus('delivered')" data-status="delivered">تم التوصيل <span class="count" id="cnt-delivered">0</span></div>
+  <div class="stat-pill sp-purple" onclick="filterByStatus('postponed')" data-status="postponed">مؤجل <span class="count" id="cnt-postponed">0</span></div>
+  <div class="stat-pill sp-red" onclick="filterByStatus('cancelled')" data-status="cancelled">ملغي <span class="count" id="cnt-cancelled">0</span></div>
+  <div class="stat-pill sp-gray" onclick="filterByStatus('completed')" data-status="completed">مكتمل <span class="count" id="cnt-completed">0</span></div>
+  <div class="stat-pill sp-red" onclick="filterByLate()" data-status="late" style="margin-right:auto">⚠️ متأخر <span class="count" id="cnt-late">0</span></div>
+</div>
+
+<div class="drivers-section">
+  <div class="drivers-label">الطيارين</div>
+  <div class="drivers-row" id="driversRow"><div style="font-size:.75rem;color:var(--text-muted)">جاري التحميل...</div></div>
+</div>
+
+<div class="main-content">
+  <div class="tabs-row">
+    <button class="tab-btn active" onclick="setTab('all',this)">كل الطلبات <span class="tab-badge" id="tab-cnt-all">0</span></button>
+    <button class="tab-btn" onclick="setTab('pending',this)">جاهز <span class="tab-badge" id="tab-cnt-pending">0</span></button>
+    <button class="tab-btn" onclick="setTab('picked',this)">في رحلة <span class="tab-badge" id="tab-cnt-picked">0</span></button>
+    <button class="tab-btn" onclick="setTab('delivered',this)">تم التوصيل <span class="tab-badge" id="tab-cnt-delivered">0</span></button>
+    <button class="tab-btn" onclick="setTab('postponed',this)">مؤجل <span class="tab-badge" id="tab-cnt-postponed">0</span></button>
+    <button class="tab-btn" onclick="setTab('late',this)">متأخر <span class="tab-badge" id="tab-cnt-late">0</span></button>
+    <input type="text" placeholder="بحث..." id="searchInput" oninput="renderOrders()"
+      style="margin-right:auto;height:32px;padding:0 .75rem;border:1px solid var(--border);border-radius:20px;font-family:'Cairo',sans-serif;font-size:.78rem;outline:none;width:160px">
+  </div>
+  <div class="orders-grid" id="ordersGrid">
+    <div class="empty-state"><div style="font-size:2rem">⏳</div><p>جاري تحميل الطلبات...</p></div>
+  </div>
+</div>
+
+<!-- Modal: Order Detail -->
+<div class="modal-overlay" id="orderModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="orderModalTitle">تفاصيل الطلب</span>
+      <button class="modal-close" onclick="closeModal('orderModal')">✕</button>
+    </div>
+    <div class="modal-body" id="orderModalBody"></div>
+    <div class="modal-footer" id="orderModalFooter"></div>
+  </div>
+</div>
+
+<!-- Modal: Assign Driver -->
+<div class="modal-overlay" id="assignModal">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-header">
+      <span class="modal-title">تعيين طيار</span>
+      <button class="modal-close" onclick="closeModal('assignModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="assignOrderId">
+      <div class="form-group">
+        <label>اختر الطيار</label>
+        <select class="form-control" id="assignDriverSelect"></select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('assignModal')">إلغاء</button>
+      <button class="btn btn-green" onclick="confirmAssign()">تعيين</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Delivery Confirmation (payment method) -->
+<div class="modal-overlay" id="deliverModal">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <span class="modal-title">تأكيد التوصيل</span>
+      <button class="modal-close" onclick="closeModal('deliverModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="deliverOrderId">
+      <div class="form-group">
+        <label>طريقة الدفع *</label>
+        <div class="payment-options">
+          <button class="pay-btn pay-cash" onclick="selectPayment('cash',this)">💵 كاش</button>
+          <button class="pay-btn pay-visa" onclick="selectPayment('visa',this)">💳 فيزا</button>
+          <button class="pay-btn pay-transfer" onclick="selectPayment('transfer',this)">🏦 تحويل</button>
+          <button class="pay-btn pay-deferred" onclick="selectPayment('deferred',this)">📋 آجل</button>
+        </div>
+        <input type="hidden" id="deliverPayment">
+      </div>
+      <div class="form-group">
+        <label>المبلغ المحصل (ج.م)</label>
+        <input type="number" class="form-control" id="deliverAmount" placeholder="0" min="0">
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>ملاحظة الطيار</label>
+        <textarea class="form-control" id="deliverDriverNote" placeholder="أي ملاحظات على التوصيل..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('deliverModal')">إلغاء</button>
+      <button class="btn btn-yellow" onclick="confirmDeliver()">✓ تأكيد التوصيل</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Postpone -->
+<div class="modal-overlay" id="postponeModal">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-header">
+      <span class="modal-title">تأجيل الطلب</span>
+      <button class="modal-close" onclick="closeModal('postponeModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="postponeOrderId">
+      <div class="form-group">
+        <label>وقت التأجيل</label>
+        <input type="datetime-local" class="form-control" id="postponeTime">
+      </div>
+      <div class="form-group">
+        <label>سبب التأجيل</label>
+        <textarea class="form-control" id="postponeReason" placeholder="أدخل سبب التأجيل..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('postponeModal')">إلغاء</button>
+      <button class="btn btn-primary" onclick="confirmPostpone()">تأجيل</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Cancel -->
+<div class="modal-overlay" id="cancelModal">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-header">
+      <span class="modal-title">إلغاء الطلب</span>
+      <button class="modal-close" onclick="closeModal('cancelModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="cancelOrderId">
+      <div class="form-group" style="margin-bottom:0">
+        <label>سبب الإلغاء</label>
+        <textarea class="form-control" id="cancelReason" placeholder="أدخل سبب الإلغاء..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('cancelModal')">إلغاء</button>
+      <button class="btn btn-red" onclick="confirmCancel()">تأكيد الإلغاء</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Edit -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header">
+      <span class="modal-title">تعديل الطلب</span>
+      <button class="modal-close" onclick="closeModal('editModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="editOrderId">
+      <div class="form-group">
+        <label>المنطقة</label>
+        <input type="text" class="form-control" id="editRegion" placeholder="المنطقة">
+      </div>
+      <div class="form-group">
+        <label>ملاحظة الموظف</label>
+        <textarea class="form-control" id="editStaffNotes" placeholder="ملاحظة الموظف..."></textarea>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>ملاحظات عامة</label>
+        <textarea class="form-control" id="editNotes" placeholder="ملاحظات..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('editModal')">إلغاء</button>
+      <button class="btn btn-primary" onclick="confirmEdit()">حفظ</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Add Manual Order -->
+<div class="modal-overlay" id="addOrderModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">إضافة طلب يدوي</span>
+      <button class="modal-close" onclick="closeModal('addOrderModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label>رقم الفاتورة</label>
+          <input type="text" class="form-control" id="mo-billno" placeholder="رقم الفاتورة">
+        </div>
+        <div class="form-group">
+          <label>نوع الدفع</label>
+          <select class="form-control" id="mo-billtype">
+            <option value="كاش">كاش</option>
+            <option value="فيزا">فيزا</option>
+            <option value="تحويل">تحويل</option>
+            <option value="آجل">آجل</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>اسم العميل</label>
+        <input type="text" class="form-control" id="mo-custname" placeholder="اسم العميل">
+      </div>
+      <div class="form-group">
+        <label>عنوان العميل</label>
+        <input type="text" class="form-control" id="mo-address" placeholder="العنوان">
+      </div>
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label>المنطقة</label>
+          <input type="text" class="form-control" id="mo-region" placeholder="المنطقة">
+        </div>
+        <div class="form-group">
+          <label>المبلغ</label>
+          <input type="number" class="form-control" id="mo-amount" placeholder="0">
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>ملاحظات</label>
+        <textarea class="form-control" id="mo-notes" placeholder="ملاحظات..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('addOrderModal')">إلغاء</button>
+      <button class="btn btn-green" onclick="saveManualOrder()">إضافة</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = 'https://rxtjoqulmgkkcohmgzgi.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const PAYMENT_LABELS = { cash:'كاش', visa:'فيزا', transfer:'تحويل', deferred:'آجل' };
+const PAYMENT_STYLE  = { cash:'background:#fef3c7;color:#92400e', visa:'background:#dbeafe;color:#1e40af', transfer:'background:var(--green-light);color:#15803d', deferred:'background:#fff7ed;color:#c2410c' };
+const STATUS_LABELS  = { pending:'جاهز', picked:'في رحلة', delivered:'وصّل', completed:'مكتمل', postponed:'مؤجل', cancelled:'ملغي' };
+
+let allOrders = [], allDrivers = [];
+let currentStatus = '', currentDriver = null, isLateFilter = false, currentTab = 'all';
+let currentUser = null;
+const LATE_MINUTES = 30;
+
+window.addEventListener('DOMContentLoaded', async () => {
+  const stored = sessionStorage.getItem('delivery_user');
+  if (!stored) { window.location.href = '../auth.html'; return; }
+  currentUser = JSON.parse(stored);
+  await loadData();
+  setInterval(loadData, 60000);
+});
+
+async function loadData() {
+  showLoading(true);
+  try {
+    const [ordersRes, driversRes] = await Promise.all([
+      db.from('orders').select('*').order('created_at', {ascending:false}),
+      db.from('users').select('*').eq('role','driver').eq('is_active',true)
+    ]);
+    allOrders = ordersRes.data || [];
+    allDrivers = driversRes.data || [];
+    updateStats();
+    renderDrivers();
+    renderOrders();
+  } catch(e) { console.error(e); }
+  showLoading(false);
+}
+
+function updateStats() {
+  const lateOrders = allOrders.filter(o => isLate(o));
+  document.getElementById('cnt-all').textContent = allOrders.length;
+  ['pending','picked','delivered','postponed','cancelled','completed'].forEach(s =>
+    document.getElementById(`cnt-${s}`).textContent = allOrders.filter(o=>o.status===s).length
+  );
+  document.getElementById('cnt-late').textContent = lateOrders.length;
+  document.getElementById('tab-cnt-all').textContent = allOrders.length;
+  ['pending','picked','delivered','postponed'].forEach(s =>
+    document.getElementById(`tab-cnt-${s}`).textContent = allOrders.filter(o=>o.status===s).length
+  );
+  document.getElementById('tab-cnt-late').textContent = lateOrders.length;
+}
+
+function isLate(order) {
+  if (['completed','cancelled','delivered'].includes(order.status)) return false;
+  return (new Date() - new Date(order.created_at)) / 60000 > LATE_MINUTES;
+}
+
+function calcDuration(from, to) {
+  if (!from || !to) return null;
+  const mins = Math.floor((new Date(to) - new Date(from)) / 60000);
+  if (mins < 60) return `${mins} د`;
+  return `${Math.floor(mins/60)}س ${mins%60}د`;
+}
+
+function getElapsedTime(dateStr) {
+  if (!dateStr) return '—';
+  const diff = Math.floor((new Date() - new Date(dateStr)) / 60000);
+  if (diff < 60) return diff + ' د';
+  return Math.floor(diff/60) + ':' + String(diff%60).padStart(2,'0');
+}
+
+function renderDrivers() {
+  const row = document.getElementById('driversRow');
+  if (!allDrivers.length) { row.innerHTML = '<div style="font-size:.75rem;color:var(--text-muted)">لا يوجد طيارين</div>'; return; }
+  const driverOrders = {};
+  allDrivers.forEach(d => { driverOrders[d.id] = {active:[], delivered:[]}; });
+  allOrders.forEach(o => {
+    if (o.driver_id && driverOrders[o.driver_id]) {
+      if (o.status === 'picked') driverOrders[o.driver_id].active.push(o);
+      if (['delivered','completed'].includes(o.status)) driverOrders[o.driver_id].delivered.push(o);
+    }
+  });
+  row.innerHTML = allDrivers.map(d => {
+    const active = driverOrders[d.id]?.active.length || 0;
+    const delivered = driverOrders[d.id]?.delivered.length || 0;
+    let colorClass = 'da-green', statusLabel = 'متاح';
+    if (active > 0) { colorClass = 'da-purple'; statusLabel = active + ' طلب'; }
+    else if (delivered > 0) { colorClass = 'da-yellow'; statusLabel = delivered + ' وصّل'; }
+    const initials = d.full_name?.split(' ').slice(0,2).map(w=>w[0]).join('') || 'D';
+    return `<div class="driver-card ${currentDriver===d.id?'selected':''}" onclick="filterByDriver('${d.id}')">
+      <div class="driver-avatar ${colorClass}">${initials}${active>0?`<div class="badge">${active}</div>`:''}</div>
+      <div class="driver-name">${d.full_name?.split(' ')[0]||'—'}</div>
+      <div class="driver-status" style="color:${colorClass==='da-green'?'#16a34a':colorClass==='da-purple'?'#7c3aed':'#ca8a04'}">${statusLabel}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderOrders() {
+  const search = document.getElementById('searchInput')?.value?.toLowerCase() || '';
+  let orders = [...allOrders];
+  if (isLateFilter) orders = orders.filter(o => isLate(o));
+  else if (currentTab !== 'all') orders = orders.filter(o => o.status === currentTab);
+  if (currentDriver) orders = orders.filter(o => o.driver_id === currentDriver);
+  if (search) orders = orders.filter(o =>
+    (o.bill_no||'').toLowerCase().includes(search) ||
+    (o.customer_name||o.cust_name||'').toLowerCase().includes(search) ||
+    (o.cust_region||'').toLowerCase().includes(search)
+  );
+  const grid = document.getElementById('ordersGrid');
+  if (!orders.length) { grid.innerHTML = `<div class="empty-state"><div style="font-size:2.5rem">📭</div><p>لا توجد طلبات</p></div>`; return; }
+
+  grid.innerHTML = orders.map(o => {
+    const late = isLate(o);
+    const elapsed = getElapsedTime(o.created_at);
+    const timerClass = late ? 'timer-red' : elapsed > '20' ? 'timer-yellow' : 'timer-green';
+    const cardClass = late ? 'status-late' : `status-${o.status}`;
+    const custName = o.customer_name || o.cust_name || '—';
+    const amount = o.total_bill_net || o.amount || 0;
+    const pm = o.payment_method;
+    const pmStyle = pm ? PAYMENT_STYLE[pm] : (o.bill_type?.includes('فيزا') ? 'background:#dbeafe;color:#1e40af' : 'background:#fef3c7;color:#92400e');
+    const pmLabel = pm ? PAYMENT_LABELS[pm] : (o.bill_type || 'كاش');
+    const orderTime = calcDuration(o.created_at, o.delivered_at);
+    const driverTime = calcDuration(o.picked_at, o.delivered_at);
+
+    return `<div class="order-card ${cardClass}" onclick="openOrderDetail('${o.id}')">
+      <div class="order-header">
+        <span class="order-no">${o.bill_no||o.id?.slice(0,8)}</span>
+        <span class="order-timer ${timerClass}">${elapsed}</span>
+      </div>
+      <div class="order-customer">${custName}</div>
+      <div class="order-address">${o.customer_address||o.cust_address||'—'}</div>
+      ${o.cust_region?`<span class="order-region">${o.cust_region}</span>`:''}
+      <div class="order-footer">
+        <span class="order-amount">${Number(amount).toLocaleString()} ج</span>
+        <span class="order-type" style="${pmStyle}">${pmLabel}</span>
+        <span class="order-status-badge sb-${o.status}">${STATUS_LABELS[o.status]||o.status}</span>
+      </div>
+      ${o.deliveryman?`<div class="order-driver">🚗 ${o.deliveryman}</div>`:''}
+      ${orderTime?`<div style="font-size:.62rem;color:var(--text-muted);margin-top:.2rem">⏱ ${orderTime}</div>`:''}
+      ${o.driver_notes?`<div style="font-size:.62rem;color:#6d28d9;margin-top:.2rem;background:var(--purple-light);padding:.1rem .4rem;border-radius:6px">💬 ${o.driver_notes}</div>`:''}
+      <div class="order-actions" onclick="event.stopPropagation()">
+        ${o.status==='pending'?`<button class="action-btn ab-assign" onclick="openAssign('${o.id}')">تعيين</button>`:''}
+        ${['pending','postponed'].includes(o.status)?`<button class="action-btn ab-postpone" onclick="openPostpone('${o.id}')">تأجيل</button>`:''}
+        ${o.status==='picked'?`<button class="action-btn ab-delivered" onclick="openDeliver('${o.id}')">وصّل</button>`:''}
+        ${!['completed','cancelled'].includes(o.status)?`<button class="action-btn ab-cancel" onclick="openCancel('${o.id}')">إلغاء</button>`:''}
+        <button class="action-btn ab-edit" onclick="openEdit('${o.id}')">تعديل</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ===== ORDER DETAIL =====
+function openOrderDetail(id) {
+  const o = allOrders.find(x => x.id === id); if (!o) return;
+  const custName = o.customer_name || o.cust_name || '—';
+  const orderDuration = calcDuration(o.created_at, o.delivered_at);
+  const driverDuration = calcDuration(o.picked_at, o.delivered_at);
+  const pm = o.payment_method;
+  const pmLabel = pm ? PAYMENT_LABELS[pm] : (o.bill_type || '—');
+  const pmStyle = pm ? PAYMENT_STYLE[pm] : '';
+
+  document.getElementById('orderModalTitle').textContent = `طلب #${o.bill_no||id.slice(0,8)}`;
+  document.getElementById('orderModalBody').innerHTML = `
+    <div class="section-divider">بيانات الطلب</div>
+    <div class="detail-row"><span class="detail-label">رقم الفاتورة</span><span class="detail-value">${o.bill_no||'—'}</span></div>
+    <div class="detail-row"><span class="detail-label">العميل</span><span class="detail-value">${custName}</span></div>
+    <div class="detail-row"><span class="detail-label">العنوان</span><span class="detail-value">${o.customer_address||o.cust_address||'—'}</span></div>
+    <div class="detail-row"><span class="detail-label">المنطقة</span><span class="detail-value">${o.cust_region||'—'}</span></div>
+    <div class="detail-row"><span class="detail-label">المبلغ</span><span class="detail-value">${Number(o.total_bill_net||0).toLocaleString()} ج.م</span></div>
+    ${o.collected_amount?`<div class="detail-row"><span class="detail-label">المحصل فعلاً</span><span class="detail-value" style="color:var(--green)">${Number(o.collected_amount).toLocaleString()} ج.م</span></div>`:''}
+    <div class="detail-row"><span class="detail-label">طريقة الدفع</span><span class="detail-value"><span style="padding:.1rem .5rem;border-radius:8px;${pmStyle}">${pmLabel}</span></span></div>
+    <div class="detail-row"><span class="detail-label">عدد الأصناف</span><span class="detail-value">${o.count_of_items||0}</span></div>
+    <div class="detail-row"><span class="detail-label">الحالة</span><span class="detail-value"><span class="order-status-badge sb-${o.status}">${STATUS_LABELS[o.status]||o.status}</span></span></div>
+
+    <div class="section-divider">بيانات التوصيل</div>
+    <div class="detail-row"><span class="detail-label">الطيار</span><span class="detail-value">${o.deliveryman||'—'}</span></div>
+    <div class="detail-row"><span class="detail-label">وقت الاستلام</span><span class="detail-value">${o.picked_at?new Date(o.picked_at).toLocaleString('ar-EG'):'—'}</span></div>
+    <div class="detail-row"><span class="detail-label">وقت التسليم</span><span class="detail-value">${o.delivered_at?new Date(o.delivered_at).toLocaleString('ar-EG'):'—'}</span></div>
+    <div class="detail-row"><span class="detail-label">⏱ وقت الطلب</span><span class="detail-value" style="color:var(--blue)">${orderDuration||'—'}</span></div>
+    <div class="detail-row"><span class="detail-label">⏱ وقت الطيار</span><span class="detail-value" style="color:var(--purple)">${driverDuration||'—'}</span></div>
+    ${o.attempt_count>0?`<div class="detail-row"><span class="detail-label">محاولات التوصيل</span><span class="detail-value">${o.attempt_count}</span></div>`:''}
+
+    <div class="section-divider">الملاحظات</div>
+    <div class="detail-row"><span class="detail-label">ملاحظة الطيار</span><span class="detail-value">${o.driver_notes||'—'}</span></div>
+    <div class="detail-row"><span class="detail-label">ملاحظة الموظف</span><span class="detail-value">${o.staff_notes||'—'}</span></div>
+    ${o.postpone_reason?`<div class="detail-row"><span class="detail-label">سبب التأجيل</span><span class="detail-value">${o.postpone_reason}</span></div>`:''}
+    ${o.cancelled_reason?`<div class="detail-row"><span class="detail-label">سبب الإلغاء</span><span class="detail-value" style="color:var(--red)">${o.cancelled_reason}</span></div>`:''}
+    <div class="detail-row"><span class="detail-label">ملاحظات</span><span class="detail-value">${o.notes||'—'}</span></div>
+  `;
+  document.getElementById('orderModalFooter').innerHTML = `
+    <button class="btn btn-outline btn-sm" onclick="closeModal('orderModal')">إغلاق</button>
+    ${o.status==='pending'?`<button class="btn btn-green btn-sm" onclick="closeModal('orderModal');openAssign('${o.id}')">تعيين طيار</button>`:''}
+    ${o.status==='picked'?`<button class="btn btn-yellow btn-sm" onclick="closeModal('orderModal');openDeliver('${o.id}')">تأكيد التوصيل</button>`:''}
+  `;
+  document.getElementById('orderModal').classList.add('open');
+}
+
+// ===== ASSIGN =====
+function openAssign(orderId) {
+  document.getElementById('assignOrderId').value = orderId;
+  document.getElementById('assignDriverSelect').innerHTML = allDrivers.map(d=>`<option value="${d.id}">${d.full_name}</option>`).join('');
+  document.getElementById('assignModal').classList.add('open');
+}
+async function confirmAssign() {
+  const orderId = document.getElementById('assignOrderId').value;
+  const driverId = document.getElementById('assignDriverSelect').value;
+  const driver = allDrivers.find(d=>d.id===driverId);
+  showLoading(true);
+  await db.from('orders').update({
+    driver_id: driverId, deliveryman: driver?.full_name,
+    status: 'picked', picked_at: new Date().toISOString(),
+    attempt_count: 1, updated_at: new Date().toISOString()
+  }).eq('id', orderId);
+  closeModal('assignModal');
+  await loadData();
+}
+
+// ===== DELIVER =====
+function openDeliver(orderId) {
+  const o = allOrders.find(x=>x.id===orderId); if (!o) return;
+  document.getElementById('deliverOrderId').value = orderId;
+  document.getElementById('deliverPayment').value = '';
+  document.getElementById('deliverAmount').value = o.total_bill_net || '';
+  document.getElementById('deliverDriverNote').value = '';
+  document.querySelectorAll('.pay-btn').forEach(b=>b.classList.remove('selected'));
+  document.getElementById('deliverModal').classList.add('open');
+}
+function selectPayment(method, btn) {
+  document.querySelectorAll('.pay-btn').forEach(b=>b.classList.remove('selected'));
+  btn.classList.add('selected');
+  document.getElementById('deliverPayment').value = method;
+}
+async function confirmDeliver() {
+  const orderId = document.getElementById('deliverOrderId').value;
+  const payment = document.getElementById('deliverPayment').value;
+  if (!payment) { alert('اختر طريقة الدفع'); return; }
+  const amount = parseFloat(document.getElementById('deliverAmount').value) || 0;
+  const driverNote = document.getElementById('deliverDriverNote').value.trim();
+  showLoading(true);
+  await db.from('orders').update({
+    status: 'delivered',
+    payment_method: payment,
+    collected_amount: amount,
+    driver_notes: driverNote || null,
+    delivered_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  }).eq('id', orderId);
+  closeModal('deliverModal');
+  await loadData();
+}
+
+// ===== POSTPONE =====
+function openPostpone(orderId) {
+  document.getElementById('postponeOrderId').value = orderId;
+  const now = new Date(); now.setHours(now.getHours()+1);
+  document.getElementById('postponeTime').value = now.toISOString().slice(0,16);
+  document.getElementById('postponeReason').value = '';
+  document.getElementById('postponeModal').classList.add('open');
+}
+async function confirmPostpone() {
+  const orderId = document.getElementById('postponeOrderId').value;
+  const reason = document.getElementById('postponeReason').value;
+  showLoading(true);
+  await db.from('orders').update({
+    status: 'postponed', postpone_reason: reason,
+    updated_at: new Date().toISOString()
+  }).eq('id', orderId);
+  closeModal('postponeModal');
+  await loadData();
+}
+
+// ===== CANCEL =====
+function openCancel(orderId) {
+  document.getElementById('cancelOrderId').value = orderId;
+  document.getElementById('cancelReason').value = '';
+  document.getElementById('cancelModal').classList.add('open');
+}
+async function confirmCancel() {
+  const orderId = document.getElementById('cancelOrderId').value;
+  const reason = document.getElementById('cancelReason').value;
+  showLoading(true);
+  await db.from('orders').update({
+    status: 'cancelled', cancelled_reason: reason,
+    updated_at: new Date().toISOString()
+  }).eq('id', orderId);
+  closeModal('cancelModal');
+  await loadData();
+}
+
+// ===== EDIT =====
+function openEdit(orderId) {
+  const o = allOrders.find(x=>x.id===orderId); if (!o) return;
+  document.getElementById('editOrderId').value = orderId;
+  document.getElementById('editRegion').value = o.cust_region || '';
+  document.getElementById('editStaffNotes').value = o.staff_notes || '';
+  document.getElementById('editNotes').value = o.notes || '';
+  document.getElementById('editModal').classList.add('open');
+}
+async function confirmEdit() {
+  const orderId = document.getElementById('editOrderId').value;
+  showLoading(true);
+  await db.from('orders').update({
+    cust_region: document.getElementById('editRegion').value,
+    staff_notes: document.getElementById('editStaffNotes').value,
+    notes: document.getElementById('editNotes').value,
+    updated_at: new Date().toISOString()
+  }).eq('id', orderId);
+  closeModal('editModal');
+  await loadData();
+}
+
+// ===== ADD MANUAL =====
+function openAddOrderModal() { document.getElementById('addOrderModal').classList.add('open'); }
+async function saveManualOrder() {
+  const billNo = document.getElementById('mo-billno').value.trim();
+  const custName = document.getElementById('mo-custname').value.trim();
+  if (!billNo || !custName) { alert('رقم الفاتورة واسم العميل مطلوبان'); return; }
+  showLoading(true);
+  await db.from('orders').insert({
+    bill_no: billNo, bill_type: document.getElementById('mo-billtype').value,
+    customer_name: custName, customer_address: document.getElementById('mo-address').value,
+    cust_region: document.getElementById('mo-region').value,
+    total_bill_net: parseFloat(document.getElementById('mo-amount').value) || 0,
+    notes: document.getElementById('mo-notes').value,
+    status: 'pending', branch_id: currentUser?.branch_id
+  });
+  closeModal('addOrderModal');
+  await loadData();
+}
+
+// ===== FILTERS =====
+function filterByStatus(status) {
+  currentTab = status || 'all'; isLateFilter = false;
+  document.querySelectorAll('.stat-pill').forEach(p=>p.classList.toggle('active', p.dataset.status===status));
+  renderOrders();
+}
+function filterByLate() { isLateFilter = true; currentTab = 'late'; renderOrders(); }
+function filterByDriver(id) { currentDriver = currentDriver===id?null:id; renderDrivers(); renderOrders(); }
+function setTab(tab, el) {
+  currentTab = tab; isLateFilter = tab==='late';
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  renderOrders();
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')}));
+function showLoading(show) { document.getElementById('loadingOverlay').classList.toggle('show',show); }
+</script>
+</body>
+</html>
