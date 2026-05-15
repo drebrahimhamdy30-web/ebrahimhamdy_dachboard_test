@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>الفروع</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="../delivery-style.css">
+<style>
+body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg); }
+
+.branches-layout { display: grid; grid-template-columns: 280px 1fr; gap: 1rem; }
+@media(max-width:800px) { .branches-layout { grid-template-columns: 1fr; } }
+
+/* Branch selector */
+.branch-selector { display: flex; flex-direction: column; gap: .5rem; }
+.branch-selector-item {
+  background: white;
+  border-radius: 10px;
+  border: 1.5px solid var(--border);
+  padding: .875rem 1rem;
+  cursor: pointer;
+  transition: all .15s;
+}
+.branch-selector-item:hover { border-color: var(--primary); }
+.branch-selector-item.selected { border-color: var(--primary); background: var(--primary-light); }
+.branch-selector-name { font-weight: 700; font-size: .875rem; color: var(--text); }
+.branch-selector-meta { font-size: .7rem; color: var(--text-muted); margin-top: .2rem; }
+.branch-selector-stats { display: flex; gap: .5rem; margin-top: .4rem; }
+.branch-mini-stat {
+  font-size: .65rem;
+  font-weight: 600;
+  padding: .1rem .4rem;
+  border-radius: 8px;
+}
+
+/* Detail panel */
+.branch-detail-header { display: flex; align-items: flex-start; justify-content: space-between; }
+.branch-detail-name { font-size: 1rem; font-weight: 700; color: var(--text); }
+.branch-detail-meta { font-size: .78rem; color: var(--text-muted); margin-top: .25rem; }
+
+/* Routes in branch */
+.branch-routes { display: flex; flex-direction: column; gap: .625rem; margin-top: .75rem; }
+.branch-route-card {
+  background: var(--bg);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.branch-route-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .625rem .875rem;
+  cursor: pointer;
+  border-bottom: 1px solid transparent;
+  transition: background .15s;
+}
+.branch-route-header:hover { background: #e8f0fe22; }
+.branch-route-header.expanded { border-bottom-color: var(--border); }
+.branch-route-name { font-weight: 700; font-size: .82rem; }
+.branch-route-count { font-size: .68rem; color: var(--text-muted); }
+.branch-route-body { padding: .625rem .875rem; display: none; }
+.branch-route-body.open { display: block; }
+
+.region-chips { display: flex; gap: .35rem; flex-wrap: wrap; }
+.region-chip {
+  font-size: .68rem;
+  font-weight: 600;
+  padding: .2rem .6rem;
+  border-radius: 20px;
+  background: white;
+  border: 1px solid var(--border);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+}
+.region-chip-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+/* Summary cards */
+.branch-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: .625rem; margin-bottom: 1rem; }
+.branch-summary-card {
+  background: white;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  padding: .75rem;
+  text-align: center;
+}
+.bsc-value { font-size: 1.4rem; font-weight: 700; color: var(--text); }
+.bsc-label { font-size: .68rem; color: var(--text-muted); margin-top: .15rem; }
+
+.empty-detail { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 3rem 1rem; color: var(--text-muted); gap: .75rem; }
+
+/* Stats */
+.stats-top { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .75rem; margin-bottom: 1.25rem; }
+</style>
+</head>
+<body>
+
+<div class="flex-between" style="margin-bottom:1.25rem;flex-wrap:wrap;gap:.625rem">
+  <div>
+    <div style="font-size:.9rem;font-weight:700">إدارة الفروع</div>
+    <div style="font-size:.75rem;color:var(--text-muted)" id="branchesCount">جاري التحميل...</div>
+  </div>
+  <button class="btn btn-primary" onclick="openAddBranchModal()">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    إضافة فرع
+  </button>
+</div>
+
+<!-- Top stats -->
+<div class="stats-top" id="topStats"></div>
+
+<div class="branches-layout">
+  <!-- Left: Branch list -->
+  <div>
+    <div style="font-size:.78rem;font-weight:600;color:var(--text-muted);margin-bottom:.5rem">الفروع</div>
+    <div class="branch-selector" id="branchSelector">
+      <div class="empty-state"><div class="icon">⏳</div><p>جاري التحميل...</p></div>
+    </div>
+  </div>
+
+  <!-- Right: Detail -->
+  <div class="card" id="branchDetail">
+    <div class="empty-detail">
+      <div class="icon">🏢</div>
+      <p>اختر فرعاً لعرض تفاصيله</p>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Add/Edit Branch -->
+<div class="modal-overlay" id="branchModal">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <span class="modal-title" id="branchModalTitle">إضافة فرع جديد</span>
+      <button class="modal-close" onclick="closeBranchModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="b-id">
+      <div class="form-group">
+        <label>اسم الفرع *</label>
+        <input type="text" class="form-control" id="b-name" placeholder="مثال: فرع سان ستيفانو">
+      </div>
+      <div class="form-group">
+        <label>العنوان</label>
+        <input type="text" class="form-control" id="b-address" placeholder="عنوان الفرع">
+      </div>
+      <div class="form-group">
+        <label>رقم الهاتف</label>
+        <input type="text" class="form-control" id="b-phone" placeholder="03xxxxxxx">
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="checkbox-item">
+          <input type="checkbox" id="b-active" checked>
+          <span style="font-weight:600">فرع نشط</span>
+        </label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeBranchModal()">إلغاء</button>
+      <button class="btn btn-primary" onclick="saveBranch()">حفظ</button>
+    </div>
+  </div>
+</div>
+
+<div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../supabase-config.js"></script>
+<script src="../permissions.js"></script>
+<script>
+const REGION_TYPE_COLORS = { inside:'#16a34a', outside:'#ca8a04', permit:'#7c3aed', hard:'#dc2626' };
+
+let allBranches = [], allRoutes = [], allRegions = [], routeRegionsMap = {};
+let selectedBranchId = null;
+
+async function init() {
+  const user = getCurrentUser(); if (!user) return;
+  showLoading(true);
+  try {
+    const [branchRes, routesRes, regionsRes, rrRes] = await Promise.all([
+      db.from('branches').select('*').order('name'),
+      db.from('routes').select('*').order('name'),
+      db.from('regions').select('*').order('name'),
+      db.from('route_regions').select('*')
+    ]);
+    allBranches = branchRes.data || [];
+    allRoutes = routesRes.data || [];
+    allRegions = regionsRes.data || [];
+
+    routeRegionsMap = {};
+    (rrRes.data || []).forEach(r => {
+      if (!routeRegionsMap[r.route_id]) routeRegionsMap[r.route_id] = [];
+      routeRegionsMap[r.route_id].push(r.region_id);
+    });
+
+    renderTopStats();
+    renderBranchList();
+    if (selectedBranchId) showBranchDetail(selectedBranchId);
+    document.getElementById('branchesCount').textContent = `${allBranches.length} فرع`;
+  } catch(e) { console.error(e); }
+  showLoading(false);
+}
+
+function getBranchRoutes(branchId) {
+  return allRoutes.filter(r => r.branch_id === branchId);
+}
+
+function getBranchRegions(branchId) {
+  const routes = getBranchRoutes(branchId);
+  const regionIds = new Set();
+  routes.forEach(r => (routeRegionsMap[r.id] || []).forEach(rid => regionIds.add(rid)));
+  return [...regionIds].map(rid => allRegions.find(r => r.id === rid)).filter(Boolean);
+}
+
+function renderTopStats() {
+  const totalRoutes = allRoutes.length;
+  const totalRegions = allRegions.length;
+  document.getElementById('topStats').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-icon" style="background:var(--blue-light)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0891b2" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
+      <div class="stat-label">عدد الفروع</div>
+      <div class="stat-value">${allBranches.length}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:var(--green-light)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg></div>
+      <div class="stat-label">خطوط السير</div>
+      <div class="stat-value">${totalRoutes}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon" style="background:var(--purple-light)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div>
+      <div class="stat-label">المناطق</div>
+      <div class="stat-value">${totalRegions}</div>
+    </div>`;
+}
+
+function renderBranchList() {
+  const sel = document.getElementById('branchSelector');
+  if (!allBranches.length) {
+    sel.innerHTML = '<div class="empty-state"><div class="icon">🏢</div><p>لا توجد فروع</p></div>';
+    return;
+  }
+  sel.innerHTML = allBranches.map(b => {
+    const routes = getBranchRoutes(b.id);
+    const regions = getBranchRegions(b.id);
+    return `
+      <div class="branch-selector-item ${selectedBranchId===b.id?'selected':''}" onclick="selectBranch('${b.id}')">
+        <div class="branch-selector-name">${b.name}</div>
+        <div class="branch-selector-meta">${b.address || 'بدون عنوان'}</div>
+        <div class="branch-selector-stats">
+          <span class="branch-mini-stat" style="background:var(--blue-light);color:#0e7490">${routes.length} خط</span>
+          <span class="branch-mini-stat" style="background:var(--purple-light);color:#6d28d9">${regions.length} منطقة</span>
+          <span class="branch-mini-stat" style="${b.is_active?'background:var(--green-light);color:#15803d':'background:var(--gray-light);color:#6b7280'}">${b.is_active?'نشط':'معطل'}</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function selectBranch(id) {
+  selectedBranchId = id;
+  renderBranchList();
+  showBranchDetail(id);
+}
+
+function showBranchDetail(branchId) {
+  const branch = allBranches.find(b => b.id === branchId);
+  if (!branch) return;
+
+  const branchRoutes = getBranchRoutes(branchId);
+  const branchRegions = getBranchRegions(branchId);
+  const activeRoutes = branchRoutes.filter(r => r.is_active).length;
+
+  document.getElementById('branchDetail').innerHTML = `
+    <div class="card-header">
+      <div>
+        <div class="branch-detail-name">🏢 ${branch.name}</div>
+        <div class="branch-detail-meta">
+          ${branch.address ? `📍 ${branch.address}` : ''}
+          ${branch.phone ? ` · 📞 ${branch.phone}` : ''}
+        </div>
+      </div>
+      <div style="display:flex;gap:.4rem">
+        <button class="btn btn-outline btn-sm" onclick="openEditBranch('${branch.id}')">تعديل</button>
+        <button class="btn btn-sm" style="background:var(--red-light);color:#b91c1c" onclick="deleteBranch('${branch.id}')">حذف</button>
+      </div>
+    </div>
+    <div class="card-body">
+
+      <!-- Summary -->
+      <div class="branch-summary">
+        <div class="branch-summary-card">
+          <div class="bsc-value">${branchRoutes.length}</div>
+          <div class="bsc-label">خط سير</div>
+        </div>
+        <div class="branch-summary-card">
+          <div class="bsc-value">${branchRegions.length}</div>
+          <div class="bsc-label">منطقة</div>
+        </div>
+        <div class="branch-summary-card">
+          <div class="bsc-value">${activeRoutes}</div>
+          <div class="bsc-label">خط نشط</div>
+        </div>
+      </div>
+
+      <!-- Routes with regions -->
+      <div style="font-size:.82rem;font-weight:700;margin-bottom:.5rem">خطوط السير والمناطق</div>
+      ${branchRoutes.length ? `
+        <div class="branch-routes">
+          ${branchRoutes.map(r => {
+            const regionIds = routeRegionsMap[r.id] || [];
+            const regions = regionIds.map(rid => allRegions.find(x => x.id === rid)).filter(Boolean);
+            return `
+              <div class="branch-route-card">
+                <div class="branch-route-header" onclick="toggleRouteBody('rbody-${r.id}',this)">
+                  <div>
+                    <span class="branch-route-name">${r.name}</span>
+                    <span class="branch-route-count" style="margin-right:.4rem">(${regions.length} منطقة)</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:.4rem">
+                    <span class="badge ${r.is_active?'badge-active':'badge-inactive'}" style="font-size:.6rem">${r.is_active?'نشط':'معطل'}</span>
+                    <span style="font-size:.7rem;color:var(--text-muted)">▼</span>
+                  </div>
+                </div>
+                <div class="branch-route-body" id="rbody-${r.id}">
+                  ${regions.length ? `
+                    <div class="region-chips">
+                      ${regions.map(reg => {
+                        const mainType = (reg.types||[])[0];
+                        const dotColor = mainType ? REGION_TYPE_COLORS[mainType] : '#9ca3af';
+                        return `<div class="region-chip">
+                          <div class="region-chip-dot" style="background:${dotColor}"></div>
+                          ${reg.name}
+                          ${reg.is_scheduled ? ' 🕐' : ''}
+                        </div>`;
+                      }).join('')}
+                    </div>` : `<div style="font-size:.75rem;color:var(--text-muted)">لا توجد مناطق في هذا الخط</div>`
+                  }
+                </div>
+              </div>`;
+          }).join('')}
+        </div>` : `<div style="font-size:.8rem;color:var(--text-muted);padding:.75rem 0">لا توجد خطوط سير مرتبطة بهذا الفرع</div>`
+      }
+
+      <!-- All regions summary -->
+      ${branchRegions.length ? `
+        <div style="margin-top:1rem">
+          <div style="font-size:.78rem;font-weight:700;margin-bottom:.5rem">كل مناطق الفرع (${branchRegions.length})</div>
+          <div class="region-chips">
+            ${branchRegions.map(r => {
+              const mainType = (r.types||[])[0];
+              const dotColor = mainType ? REGION_TYPE_COLORS[mainType] : '#9ca3af';
+              return `<div class="region-chip">
+                <div class="region-chip-dot" style="background:${dotColor}"></div>
+                ${r.name}
+              </div>`;
+            }).join('')}
+          </div>
+        </div>` : ''
+      }
+    </div>`;
+}
+
+function toggleRouteBody(id, header) {
+  const body = document.getElementById(id);
+  body.classList.toggle('open');
+  header.classList.toggle('expanded');
+}
+
+function openAddBranchModal() {
+  document.getElementById('branchModalTitle').textContent = 'إضافة فرع جديد';
+  ['b-id','b-name','b-address','b-phone'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('b-active').checked = true;
+  document.getElementById('branchModal').classList.add('open');
+}
+
+function openEditBranch(id) {
+  const b = allBranches.find(x => x.id === id); if (!b) return;
+  document.getElementById('branchModalTitle').textContent = 'تعديل الفرع';
+  document.getElementById('b-id').value = b.id;
+  document.getElementById('b-name').value = b.name || '';
+  document.getElementById('b-address').value = b.address || '';
+  document.getElementById('b-phone').value = b.phone || '';
+  document.getElementById('b-active').checked = b.is_active !== false;
+  document.getElementById('branchModal').classList.add('open');
+}
+
+async function saveBranch() {
+  const name = document.getElementById('b-name').value.trim();
+  if (!name) { alert('اسم الفرع مطلوب'); return; }
+  const payload = {
+    name,
+    address: document.getElementById('b-address').value.trim() || null,
+    phone: document.getElementById('b-phone').value.trim() || null,
+    is_active: document.getElementById('b-active').checked,
+  };
+  showLoading(true);
+  const id = document.getElementById('b-id').value;
+  if (id) {
+    await db.from('branches').update(payload).eq('id', id);
+  } else {
+    const { data } = await db.from('branches').insert(payload).select().single();
+    if (data) selectedBranchId = data.id;
+  }
+  closeBranchModal();
+  await init();
+}
+
+async function deleteBranch(id) {
+  if (!confirm('هل تريد حذف هذا الفرع؟')) return;
+  showLoading(true);
+  await db.from('branches').delete().eq('id', id);
+  if (selectedBranchId === id) {
+    selectedBranchId = null;
+    document.getElementById('branchDetail').innerHTML = '<div class="empty-detail"><div class="icon">🏢</div><p>اختر فرعاً لعرض تفاصيله</p></div>';
+  }
+  await init();
+}
+
+function closeBranchModal() { document.getElementById('branchModal').classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(m => m.addEventListener('click', e => { if(e.target===m) m.classList.remove('open'); }));
+function showLoading(show) { document.getElementById('loadingOverlay').classList.toggle('show', show); }
+
+init();
+</script>
+</body>
+</html>
