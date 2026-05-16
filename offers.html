@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>العروض - صيدليات د. إبراهيم</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    .offers-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+      padding: 4px 0;
+    }
+    .offer-card {
+      background: var(--surface-2);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 16px;
+      position: relative;
+      transition: all 0.2s;
+    }
+    .offer-card:hover { border-color: var(--accent); }
+    .offer-card.expired {
+      opacity: 0.6;
+      border-color: var(--danger);
+    }
+    .offer-type-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+    .offer-type-company { background:#dbeafe; color:#1d4ed8; }
+    .offer-type-item    { background:#dcfce7; color:#15803d; }
+    .offer-name {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+    }
+    .offer-details {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      margin-bottom: 10px;
+      white-space: pre-wrap;
+    }
+    .offer-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+    .offer-actions { display: flex; gap: 6px; }
+    .expired-badge {
+      background: #fee2e2;
+      color: #991b1b;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+    .active-badge {
+      background: #dcfce7;
+      color: #15803d;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.75);
+      z-index: 99999;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-box {
+      background: #1e293b;
+      border: 2px solid #334155;
+      border-radius: 16px;
+      padding: 24px;
+      width: 90%;
+      max-width: 480px;
+      direction: rtl;
+      font-family: var(--font);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    }
+    .modal-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-label {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #94a3b8;
+      margin-bottom: 5px;
+    }
+    .modal-field { margin-bottom: 14px; }
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 20px;
+    }
+    .type-toggle {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .type-toggle-btn {
+      flex: 1;
+      padding: 10px;
+      border: 2px solid #334155;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #94a3b8;
+      font-family: var(--font);
+      font-size: 0.85rem;
+      font-weight: 700;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.2s;
+    }
+    .type-toggle-btn.active {
+      border-color: #38bdf8;
+      background: #0c4a6e;
+      color: #7dd3fc;
+    }
+  </style>
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+      <div class="page-header">
+        <div class="page-title">
+          <i class="fas fa-tags"></i> العروض والتخفيضات
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <select id="filterType" class="form-select" style="width:auto;" onchange="applyFilter()">
+            <option value="all">الكل</option>
+            <option value="شركة">شركات</option>
+            <option value="صنف">أصناف</option>
+          </select>
+          <select id="filterStatus" class="form-select" style="width:auto;" onchange="applyFilter()">
+            <option value="active">نشط ✅</option>
+            <option value="all">الكل</option>
+            <option value="expired">منتهي ❌</option>
+          </select>
+          <button class="btn btn-primary" onclick="openAddModal()">
+            <i class="fas fa-plus"></i> عرض جديد
+          </button>
+          <button class="btn btn-primary" onclick="loadOffers()">
+            <i class="fas fa-sync-alt"></i> تحديث
+          </button>
+        </div>
+      </div>
+
+      <div id="offers-container">
+        <p style="text-align:center;padding:40px;color:var(--text-muted);">⏳ جاري التحميل...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal الإضافة/التعديل -->
+  <div class="modal-overlay" id="offer-modal">
+    <div class="modal-box">
+      <div class="modal-title">
+        <span id="modal-title-text"><i class="fas fa-tag"></i> عرض جديد</span>
+        <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:1.2rem;">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <input type="hidden" id="modal-id">
+
+      <div class="modal-field">
+        <label class="modal-label">نوع العرض</label>
+        <div class="type-toggle">
+          <button class="type-toggle-btn active" id="btn-company" onclick="setOfferType('شركة')">
+            🏭 شركة كاملة
+          </button>
+          <button class="type-toggle-btn" id="btn-item" onclick="setOfferType('صنف')">
+            💊 صنف بعينه
+          </button>
+        </div>
+        <input type="hidden" id="modal-type" value="شركة">
+      </div>
+
+      <div class="modal-field">
+        <label class="modal-label" id="modal-name-label">اسم الشركة</label>
+        <input type="text" id="modal-name" class="form-input" placeholder="أدخل الاسم...">
+      </div>
+
+      <div class="modal-field">
+        <label class="modal-label">تفاصيل العرض</label>
+        <textarea id="modal-details" class="form-input" rows="4"
+          placeholder="اكتب تفاصيل العرض هنا..."
+          style="resize:vertical;"></textarea>
+      </div>
+
+      <div class="modal-field">
+        <label class="modal-label">
+          تاريخ الانتهاء
+          <span style="font-size:0.72rem;color:#64748b;font-weight:400;"> — اتركه فارغ لو مفيش تاريخ</span>
+        </label>
+        <input type="date" id="modal-expires" class="form-input">
+      </div>
+
+      <div class="modal-actions">
+        <button onclick="closeModal()" class="btn"
+          style="background:#334155;color:#94a3b8;border:none;">
+          إلغاء
+        </button>
+        <button onclick="saveOffer()" class="btn btn-primary" id="modal-save-btn">
+          <i class="fas fa-save"></i> حفظ
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    let activeUser = null;
+    let userBranch = '';
+    let allOffers  = [];
+
+    checkAuth().then(user => {
+      activeUser = user;
+      if (user) {
+        userBranch = (localStorage.getItem('userBranch') || '').trim();
+        window.onload = loadOffers;
+      }
+    });
+
+    async function loadOffers() {
+      const container = document.getElementById('offers-container');
+      container.innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-muted);">⏳ جاري جلب البيانات...</p>';
+      try {
+        const response = await fetchOffers();
+        allOffers = Array.isArray(response) ? response : [];
+        applyFilter();
+      } catch(e) {
+        container.innerHTML = '<p style="text-align:center;color:var(--danger);padding:40px;">❌ فشل الاتصال</p>';
+      }
+    }
+
+    function isExpired(offer) {
+      if (!offer.expires_at || offer.expires_at === 'null' || offer.expires_at === '') return false;
+      return new Date(offer.expires_at) < new Date();
+    }
+
+    function applyFilter() {
+      const typeVal   = document.getElementById('filterType').value;
+      const statusVal = document.getElementById('filterStatus').value;
+
+      const filtered = allOffers.filter(o => {
+        const expired = isExpired(o);
+        const typeMatch   = (typeVal === 'all' || o.type === typeVal);
+        const statusMatch = (
+          statusVal === 'all' ||
+          (statusVal === 'active'  && !expired) ||
+          (statusVal === 'expired' &&  expired)
+        );
+        return typeMatch && statusMatch;
+      });
+
+      renderOffers(filtered);
+    }
+
+    function renderOffers(items) {
+      const container = document.getElementById('offers-container');
+      if (items.length === 0) {
+        container.innerHTML = `
+          <div style="text-align:center;padding:60px;color:var(--text-muted);">
+            <i class="fas fa-tags" style="font-size:2.5rem;display:block;margin-bottom:12px;opacity:0.3;"></i>
+            لا توجد عروض
+          </div>`;
+        return;
+      }
+
+      // ترتيب: النشط أولاً ثم المنتهي
+      items.sort((a, b) => {
+        const aExp = isExpired(a) ? 1 : 0;
+        const bExp = isExpired(b) ? 1 : 0;
+        return aExp - bExp;
+      });
+
+      container.innerHTML = `<div class="offers-grid">${items.map(offer => {
+        const expired    = isExpired(offer);
+        const typeClass  = offer.type === 'شركة' ? 'offer-type-company' : 'offer-type-item';
+        const typeIcon   = offer.type === 'شركة' ? '🏭' : '💊';
+
+        let expiryText = '';
+        if (offer.expires_at && offer.expires_at !== 'null' && offer.expires_at !== '') {
+          const d = new Date(offer.expires_at);
+          expiryText = d.toLocaleDateString('ar-EG', {year:'numeric', month:'long', day:'numeric'});
+        }
+
+        return `
+          <div class="offer-card ${expired ? 'expired' : ''}">
+            <div class="offer-type-badge ${typeClass}">
+              ${typeIcon} ${offer.type}
+            </div>
+            <div class="offer-name">${offer.name || '---'}</div>
+            <div class="offer-details">${offer.details || ''}</div>
+            <div class="offer-footer">
+              <div>
+                ${expired
+                  ? `<span class="expired-badge">❌ منتهي — ${expiryText}</span>`
+                  : expiryText
+                    ? `<span style="font-size:0.75rem;color:var(--text-muted);"><i class="fas fa-clock"></i> ينتهي ${expiryText}</span>`
+                    : `<span class="active-badge">✅ سارٍ بدون تاريخ</span>`
+                }
+              </div>
+              <div class="offer-actions">
+                <button class="btn btn-sm btn-icon"
+                  onclick="openEditModal('${offer.id}')"
+                  style="background:var(--accent);color:#fff;padding:5px 8px;"
+                  title="تعديل">
+                  <i class="fas fa-edit"></i>
+                </button>
+                <button class="btn btn-sm btn-icon"
+                  onclick="deleteOffer('${offer.id}', this)"
+                  style="background:var(--danger);color:#fff;padding:5px 8px;"
+                  title="حذف">
+                  <i class="fas fa-trash"></i>
+                </button>
+              </div>
+            </div>
+          </div>`;
+      }).join('')}</div>`;
+    }
+
+    // ===== Modal =====
+    function setOfferType(type) {
+      document.getElementById('modal-type').value = type;
+      document.getElementById('modal-name-label').textContent =
+        type === 'شركة' ? 'اسم الشركة' : 'اسم الصنف';
+      document.getElementById('btn-company').classList.toggle('active', type === 'شركة');
+      document.getElementById('btn-item').classList.toggle('active',    type === 'صنف');
+    }
+
+    function openAddModal() {
+      document.getElementById('modal-id').value      = '';
+      document.getElementById('modal-name').value    = '';
+      document.getElementById('modal-details').value = '';
+      document.getElementById('modal-expires').value = '';
+      document.getElementById('modal-title-text').innerHTML = '<i class="fas fa-tag"></i> عرض جديد';
+      document.getElementById('modal-save-btn').innerHTML   = '<i class="fas fa-save"></i> حفظ';
+      setOfferType('شركة');
+      document.getElementById('offer-modal').style.display = 'flex';
+    }
+
+    function openEditModal(id) {
+      const offer = allOffers.find(o => o.id == id);
+      if (!offer) return;
+
+      document.getElementById('modal-id').value      = id;
+      document.getElementById('modal-name').value    = offer.name    || '';
+      document.getElementById('modal-details').value = offer.details || '';
+      document.getElementById('modal-title-text').innerHTML = '<i class="fas fa-edit"></i> تعديل العرض';
+      document.getElementById('modal-save-btn').innerHTML   = '<i class="fas fa-save"></i> حفظ التعديلات';
+
+      if (offer.expires_at && offer.expires_at !== 'null' && offer.expires_at !== '') {
+        document.getElementById('modal-expires').value = offer.expires_at.split('T')[0];
+      } else {
+        document.getElementById('modal-expires').value = '';
+      }
+
+      setOfferType(offer.type || 'شركة');
+      document.getElementById('offer-modal').style.display = 'flex';
+    }
+
+    function closeModal() {
+      document.getElementById('offer-modal').style.display = 'none';
+    }
+
+    async function saveOffer() {
+      const btn     = document.getElementById('modal-save-btn');
+      const id      = document.getElementById('modal-id').value;
+      const name    = document.getElementById('modal-name').value.trim();
+      const details = document.getElementById('modal-details').value.trim();
+      const expires = document.getElementById('modal-expires').value;
+      const type    = document.getElementById('modal-type').value;
+
+      if (!name)    { alert("برجاء إدخال الاسم");            return; }
+      if (!details) { alert("برجاء إدخال تفاصيل العرض");    return; }
+
+      btn.disabled  = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
+
+      const payload = {
+        type:       id ? "عرض_تعديل" : "عرض_جديد",
+        id:         id || undefined,
+        offer_type: type,
+        name,
+        details,
+        expires_at: expires || null,
+        branch:     userBranch,
+        createdAt:  new Date().toISOString()
+      };
+
+      const success = await updateData(payload);
+
+      if (success) {
+        closeModal();
+        loadOffers();
+      } else {
+        alert("❌ فشل الحفظ");
+      }
+
+      btn.disabled  = false;
+      btn.innerHTML = '<i class="fas fa-save"></i> حفظ';
+    }
+
+    async function deleteOffer(id, btn) {
+      if (!confirm("هل أنت متأكد من حذف هذا العرض؟")) return;
+      btn.disabled  = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+      const success = await updateData({
+        type: "عرض_حذف",
+        id
+      });
+
+      if (success) {
+        allOffers = allOffers.filter(o => o.id != id);
+        applyFilter();
+      } else {
+        alert("❌ فشل الحذف");
+        btn.disabled  = false;
+        btn.innerHTML = '<i class="fas fa-trash"></i>';
+      }
+    }
+
+    document.getElementById('offer-modal').addEventListener('click', function(e) {
+      if (e.target === this) closeModal();
+    });
+  </script>
+</body>
+</html>
