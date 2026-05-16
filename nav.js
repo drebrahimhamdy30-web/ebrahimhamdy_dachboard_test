@@ -25,7 +25,7 @@ function injectNavbar() {
         <i class="fas fa-clipboard-list"></i> جرد
       </a>
       <a href="notifications.html" class="${currentPage === 'notifications.html' ? 'active' : ''}">
-        <i class="fas fa-bell" style="position:relative;">
+        <i class="fas fa-bell" style="position:relative;">اشعارات
         </i>
         <a href="offers.html" class="${currentPage === 'offers.html' ? 'active' : ''}">
   <i class="fas fa-tags"></i> عروض
