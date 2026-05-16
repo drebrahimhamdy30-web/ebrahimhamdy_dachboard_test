@@ -27,6 +27,9 @@ function injectNavbar() {
       <a href="notifications.html" class="${currentPage === 'notifications.html' ? 'active' : ''}">
         <i class="fas fa-bell" style="position:relative;">
         </i>
+        <a href="offers.html" class="${currentPage === 'offers.html' ? 'active' : ''}">
+  <i class="fas fa-tags"></i> عروض
+</a>
         <span id="notif-badge" style="
           display:none;
           position:absolute;
