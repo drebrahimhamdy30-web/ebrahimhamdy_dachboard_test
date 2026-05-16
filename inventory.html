@@ -199,11 +199,30 @@
 
       try {
         const items = await fetchInventory();
-        rawData = items.filter(item => {
-          const typeMatch   = (item.type   || '').toLowerCase() === currentTab.toLowerCase();
-          const branchMatch = (item.branch || '') === userBranch;
-          return typeMatch && branchMatch;
-        });
+rawData = items.filter(item => {
+  const typeMatch   = (item.type   || '').toLowerCase() === currentTab.toLowerCase();
+  const branchMatch = (item.branch || '') === userBranch;
+  return typeMatch && branchMatch;
+});
+
+// ←── حذف التكرار — يبقى الأقدم — بس للي لسه متمش جرده
+const seen = new Map();
+rawData = rawData
+  .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0)) // الأقدم أول
+  .filter(item => {
+    const isDone = item.done === true || item.done === 'true';
+    const isSkip = item.skip === true || item.skip === 'true';
+    const code   = String(item.code || '').trim();
+
+    // لو مجروده أو متجاهلة — اعرضها من غير فلترة تكرار
+    if (isDone || isSkip) return true;
+
+    // لو لسه pending — شوف لو الكود اتكرر
+    if (!code || code === '---') return true;
+    if (seen.has(code)) return false;
+    seen.set(code, true);
+    return true;
+  });
         buildTableHeader();
         applyFilter();
       } catch(e) {
