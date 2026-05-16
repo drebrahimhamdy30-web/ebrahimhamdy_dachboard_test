@@ -20,6 +20,8 @@
       padding: 16px;
       position: relative;
       transition: all 0.2s;
+      display: flex;
+      flex-direction: column;
     }
     .offer-card:hover { border-color: var(--accent); }
     .offer-card.expired {
@@ -35,11 +37,12 @@
       font-size: 0.72rem;
       font-weight: 700;
       margin-bottom: 10px;
+      width: fit-content;
     }
     .offer-type-company { background:#dbeafe; color:#1d4ed8; }
     .offer-type-item    { background:#dcfce7; color:#15803d; }
     .offer-name {
-      font-size: 0.95rem;
+      font-size: 1rem;
       font-weight: 700;
       color: var(--text-primary);
       margin-bottom: 8px;
@@ -50,6 +53,7 @@
       line-height: 1.6;
       margin-bottom: 10px;
       white-space: pre-wrap;
+      flex: 1;
     }
     .offer-footer {
       display: flex;
@@ -78,8 +82,6 @@
       font-size: 0.72rem;
       font-weight: 700;
     }
-
-    /* Modal */
     .modal-overlay {
       display: none;
       position: fixed; inset: 0;
@@ -99,15 +101,6 @@
       font-family: var(--font);
       box-shadow: 0 20px 60px rgba(0,0,0,0.6);
     }
-    .modal-title {
-      font-size: 1rem;
-      font-weight: 700;
-      color: #f1f5f9;
-      margin-bottom: 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
     .modal-label {
       display: block;
       font-size: 0.78rem;
@@ -122,11 +115,7 @@
       justify-content: flex-end;
       margin-top: 20px;
     }
-    .type-toggle {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 14px;
-    }
+    .type-toggle { display: flex; gap: 8px; margin-bottom: 14px; }
     .type-toggle-btn {
       flex: 1;
       padding: 10px;
@@ -146,6 +135,7 @@
       background: #0c4a6e;
       color: #7dd3fc;
     }
+    .stats-row { margin-bottom: 16px; }
   </style>
 </head>
 <body>
@@ -156,11 +146,18 @@
         <div class="page-title">
           <i class="fas fa-tags"></i> العروض والتخفيضات
         </div>
-        <div style="display:flex;gap:8px;align-items:center;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <div class="field-icon-wrap" style="min-width:200px;">
+            <i class="fas fa-search field-icon"></i>
+            <input type="text" id="searchInput" class="form-input"
+              placeholder="بحث باسم أو تفاصيل..."
+              oninput="applyFilter()"
+              style="padding-right:34px;">
+          </div>
           <select id="filterType" class="form-select" style="width:auto;" onchange="applyFilter()">
             <option value="all">الكل</option>
-            <option value="شركة">شركات</option>
-            <option value="صنف">أصناف</option>
+            <option value="شركة">🏭 شركات</option>
+            <option value="صنف">💊 أصناف</option>
           </select>
           <select id="filterStatus" class="form-select" style="width:auto;" onchange="applyFilter()">
             <option value="active">نشط ✅</option>
@@ -176,6 +173,9 @@
         </div>
       </div>
 
+      <!-- إحصائيات -->
+      <div class="stats-row" id="stats-row"></div>
+
       <div id="offers-container">
         <p style="text-align:center;padding:40px;color:var(--text-muted);">⏳ جاري التحميل...</p>
       </div>
@@ -185,9 +185,12 @@
   <!-- Modal الإضافة/التعديل -->
   <div class="modal-overlay" id="offer-modal">
     <div class="modal-box">
-      <div class="modal-title">
-        <span id="modal-title-text"><i class="fas fa-tag"></i> عرض جديد</span>
-        <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:1.2rem;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <span id="modal-title-text" style="font-size:1rem;font-weight:700;color:#f1f5f9;">
+          <i class="fas fa-tag"></i> عرض جديد
+        </span>
+        <button onclick="closeModal()"
+          style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:1.2rem;">
           <i class="fas fa-times"></i>
         </button>
       </div>
@@ -222,7 +225,9 @@
       <div class="modal-field">
         <label class="modal-label">
           تاريخ الانتهاء
-          <span style="font-size:0.72rem;color:#64748b;font-weight:400;"> — اتركه فارغ لو مفيش تاريخ</span>
+          <span style="font-size:0.72rem;color:#64748b;font-weight:400;">
+            — اتركه فارغ لو مفيش تاريخ
+          </span>
         </label>
         <input type="date" id="modal-expires" class="form-input">
       </div>
@@ -260,6 +265,7 @@
       try {
         const response = await fetchOffers();
         allOffers = Array.isArray(response) ? response : [];
+        renderStats();
         applyFilter();
       } catch(e) {
         container.innerHTML = '<p style="text-align:center;color:var(--danger);padding:40px;">❌ فشل الاتصال</p>';
@@ -271,19 +277,45 @@
       return new Date(offer.expires_at) < new Date();
     }
 
+    function renderStats() {
+      const total   = allOffers.length;
+      const active  = allOffers.filter(o => !isExpired(o)).length;
+      const expired = allOffers.filter(o =>  isExpired(o)).length;
+
+      document.getElementById('stats-row').innerHTML = `
+        <div class="stat-card">
+          <div class="stat-num">${total}</div>
+          <div class="stat-lbl">إجمالي العروض</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" style="color:var(--success);">${active}</div>
+          <div class="stat-lbl">نشط ✅</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" style="color:var(--danger);">${expired}</div>
+          <div class="stat-lbl">منتهي ❌</div>
+        </div>
+      `;
+    }
+
     function applyFilter() {
       const typeVal   = document.getElementById('filterType').value;
       const statusVal = document.getElementById('filterStatus').value;
+      const searchVal = document.getElementById('searchInput').value.trim().toLowerCase();
 
       const filtered = allOffers.filter(o => {
-        const expired = isExpired(o);
+        const expired     = isExpired(o);
         const typeMatch   = (typeVal === 'all' || o.type === typeVal);
         const statusMatch = (
           statusVal === 'all' ||
           (statusVal === 'active'  && !expired) ||
           (statusVal === 'expired' &&  expired)
         );
-        return typeMatch && statusMatch;
+        const searchMatch = !searchVal || [
+          o.name, o.detailes, o.details
+        ].some(val => String(val || '').toLowerCase().includes(searchVal));
+
+        return typeMatch && statusMatch && searchMatch;
       });
 
       renderOffers(filtered);
@@ -300,17 +332,13 @@
         return;
       }
 
-      // ترتيب: النشط أولاً ثم المنتهي
-      items.sort((a, b) => {
-        const aExp = isExpired(a) ? 1 : 0;
-        const bExp = isExpired(b) ? 1 : 0;
-        return aExp - bExp;
-      });
+      items.sort((a, b) => (isExpired(a) ? 1 : 0) - (isExpired(b) ? 1 : 0));
 
       container.innerHTML = `<div class="offers-grid">${items.map(offer => {
-        const expired    = isExpired(offer);
-        const typeClass  = offer.type === 'شركة' ? 'offer-type-company' : 'offer-type-item';
-        const typeIcon   = offer.type === 'شركة' ? '🏭' : '💊';
+        const expired   = isExpired(offer);
+        const typeClass = offer.type === 'شركة' ? 'offer-type-company' : 'offer-type-item';
+        const typeIcon  = offer.type === 'شركة' ? '🏭' : '💊';
+        const details   = offer.detailes || offer.details || '';
 
         let expiryText = '';
         if (offer.expires_at && offer.expires_at !== 'null' && offer.expires_at !== '') {
@@ -324,13 +352,15 @@
               ${typeIcon} ${offer.type}
             </div>
             <div class="offer-name">${offer.name || '---'}</div>
-            <div class="offer-details">${offer.details || ''}</div>
+            <div class="offer-details">${details}</div>
             <div class="offer-footer">
               <div>
                 ${expired
                   ? `<span class="expired-badge">❌ منتهي — ${expiryText}</span>`
                   : expiryText
-                    ? `<span style="font-size:0.75rem;color:var(--text-muted);"><i class="fas fa-clock"></i> ينتهي ${expiryText}</span>`
+                    ? `<span style="font-size:0.75rem;color:var(--text-muted);">
+                         <i class="fas fa-clock"></i> ينتهي ${expiryText}
+                       </span>`
                     : `<span class="active-badge">✅ سارٍ بدون تاريخ</span>`
                 }
               </div>
@@ -353,7 +383,6 @@
       }).join('')}</div>`;
     }
 
-    // ===== Modal =====
     function setOfferType(type) {
       document.getElementById('modal-type').value = type;
       document.getElementById('modal-name-label').textContent =
@@ -367,8 +396,10 @@
       document.getElementById('modal-name').value    = '';
       document.getElementById('modal-details').value = '';
       document.getElementById('modal-expires').value = '';
-      document.getElementById('modal-title-text').innerHTML = '<i class="fas fa-tag"></i> عرض جديد';
-      document.getElementById('modal-save-btn').innerHTML   = '<i class="fas fa-save"></i> حفظ';
+      document.getElementById('modal-title-text').innerHTML =
+        '<i class="fas fa-tag"></i> عرض جديد';
+      document.getElementById('modal-save-btn').innerHTML =
+        '<i class="fas fa-save"></i> حفظ';
       setOfferType('شركة');
       document.getElementById('offer-modal').style.display = 'flex';
     }
@@ -379,9 +410,11 @@
 
       document.getElementById('modal-id').value      = id;
       document.getElementById('modal-name').value    = offer.name    || '';
-      document.getElementById('modal-details').value = offer.details || '';
-      document.getElementById('modal-title-text').innerHTML = '<i class="fas fa-edit"></i> تعديل العرض';
-      document.getElementById('modal-save-btn').innerHTML   = '<i class="fas fa-save"></i> حفظ التعديلات';
+      document.getElementById('modal-details').value = offer.detailes || offer.details || '';
+      document.getElementById('modal-title-text').innerHTML =
+        '<i class="fas fa-edit"></i> تعديل العرض';
+      document.getElementById('modal-save-btn').innerHTML =
+        '<i class="fas fa-save"></i> حفظ التعديلات';
 
       if (offer.expires_at && offer.expires_at !== 'null' && offer.expires_at !== '') {
         document.getElementById('modal-expires').value = offer.expires_at.split('T')[0];
@@ -405,13 +438,13 @@
       const expires = document.getElementById('modal-expires').value;
       const type    = document.getElementById('modal-type').value;
 
-      if (!name)    { alert("برجاء إدخال الاسم");            return; }
-      if (!details) { alert("برجاء إدخال تفاصيل العرض");    return; }
+      if (!name)    { alert("برجاء إدخال الاسم");         return; }
+      if (!details) { alert("برجاء إدخال تفاصيل العرض"); return; }
 
       btn.disabled  = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
 
-      const payload = {
+      const success = await updateData({
         type:       id ? "عرض_تعديل" : "عرض_جديد",
         id:         id || undefined,
         offer_type: type,
@@ -420,9 +453,7 @@
         expires_at: expires || null,
         branch:     userBranch,
         createdAt:  new Date().toISOString()
-      };
-
-      const success = await updateData(payload);
+      });
 
       if (success) {
         closeModal();
@@ -447,6 +478,7 @@
 
       if (success) {
         allOffers = allOffers.filter(o => o.id != id);
+        renderStats();
         applyFilter();
       } else {
         alert("❌ فشل الحذف");
