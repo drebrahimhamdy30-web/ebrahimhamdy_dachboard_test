@@ -384,38 +384,19 @@ async function init() {
   const user = getCurrentUser(); if (!user) return;
   showLoading(true);
   try {
-    const [settingsRes, driversRes] = await Promise.all([
-      db.from('dispatch_settings').select('*').single(),
-      db.from('drivers').select('id, full_name').eq('is_active', true).eq('is_online', true).order('full_name')
-    ]);
+    const branchesRes = await db.from('branches').select('*').order('name');
+    const driversRes  = await db.from('drivers').select('id, full_name, branch_id').eq('is_active', true);
+    allBranches = branchesRes.data || [];
+    allDrivers  = driversRes.data || [];
 
-    allDrivers = driversRes.data || [];
-    renderDriverSelect();
+    const sel = document.getElementById('branchSelect');
+    sel.innerHTML = '<option value="">اختر الفرع...</option>' +
+      allBranches.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
 
-    if (settingsRes.data) {
-      currentSettings = settingsRes.data;
-      populateSettings(settingsRes.data);
-      const updated = new Date(settingsRes.data.updated_at);
-      document.getElementById('lastUpdated').textContent =
-        `آخر تحديث: ${updated.toLocaleString('ar-EG')} بواسطة ${settingsRes.data.updated_by || '—'}`;
-    } else {
-      // Insert default settings
-      await db.from('dispatch_settings').insert({
-        max_orders_per_trip: 10,
-        late_threshold_minutes: 30,
-        alert_threshold_minutes: 20,
-        pickup_radius_meters: 200,
-        break_duration_minutes: 30,
-        location_check_enabled: true,
-        driver_can_request_break: true,
-        pharmacy_lat: null,
-        pharmacy_lng: null,
-      });
-      await init();
-      return;
+    if (user.branch_id) {
+      sel.value = user.branch_id;
+      await onBranchChange();
     }
-
-    await loadBreaks('pending');
   } catch(e) { console.error(e); }
   showLoading(false);
 }
