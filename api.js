@@ -25,7 +25,7 @@ async function fetchData()      { return await fetchFromN8N('orders'); }
 async function fetchContracts() { return await fetchFromN8N('contracts'); }
 async function fetchMissing()   { return await fetchFromN8N('missing'); }
 async function fetchInventory() { return await fetchFromN8N('inventory'); }  // ← الإضافة الوحيدة
-
+async function fetchOffers() { return await fetchFromN8N('offers'); }
 async function login(username, password) {
   try {
     const response = await fetch(LOGIN_URL, {
