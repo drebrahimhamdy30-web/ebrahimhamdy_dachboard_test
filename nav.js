@@ -2,9 +2,9 @@
 function injectNavbar() {
   const currentPage = window.location.pathname.split("/").pop();
   const navContent = `
-    <div class="nav-logo">
-      <i class="fas fa-clinic-medical"></i> د. إبراهيم
-    </div>
+<div class="nav-logo">
+  <span style="font-weight:900;font-size:1.1rem;letter-spacing:1px;">Phalix</span>
+</div>
     <nav class="nav-links">
       <a href="main.html" class="${currentPage === 'main.html' ? 'active' : ''}">
         <i class="fas fa-plus-circle"></i> مدخلات
