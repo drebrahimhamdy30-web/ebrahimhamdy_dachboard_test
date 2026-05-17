@@ -56,8 +56,7 @@
                        border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary);">
             </div>
             <select id="search-col" onchange="applyFilters()"
-              class="form-select"
-              style="font-size:13px;width:120px;">
+              class="form-select" style="font-size:13px;width:120px;">
               <option value="all">كل الأعمدة</option>
               <option value="item_name">اسم الصنف</option>
               <option value="item_code">كود الصنف</option>
@@ -91,11 +90,101 @@
     </div>
   </div>
 
+  <!-- Modal التعديل -->
+  <div id="edit-modal" style="
+    display:none;
+    position:fixed;inset:0;
+    background:rgba(0,0,0,0.75);
+    z-index:99999;
+    align-items:center;
+    justify-content:center;
+  ">
+    <div style="
+      background:#1e293b;
+      border:2px solid #334155;
+      border-radius:16px;
+      padding:24px;
+      width:90%;
+      max-width:480px;
+      direction:rtl;
+      font-family:var(--font);
+      box-shadow:0 20px 60px rgba(0,0,0,0.6);
+    ">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <span style="font-size:1rem;font-weight:700;color:#f1f5f9;">
+          <i class="fas fa-edit"></i> تعديل طلب التحويل
+        </span>
+        <button onclick="closeEditModal()"
+          style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:1.2rem;">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <input type="hidden" id="edit-id">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+        <div>
+          <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">كود الصنف</label>
+          <input type="text" id="edit-item-code" class="form-input"
+            oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">اسم الصنف</label>
+          <input type="text" id="edit-item-name" class="form-input">
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+        <div>
+          <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">كود العميل</label>
+          <input type="text" id="edit-cust-code" class="form-input"
+            inputmode="numeric"
+            oninput="this.value = this.value.replace(/[^0-9]/g, ''); if(this.value.length>5) this.value=this.value.slice(0,5);"
+            onchange="const v=parseInt(this.value); if(this.value && v>40000){alert('كود العميل يجب أن يكون بين 1 و 40000');this.value='';}">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">اسم العميل</label>
+          <input type="text" id="edit-cust-name" class="form-input">
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+        <div>
+          <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">الكمية</label>
+          <input type="number" id="edit-qty" class="form-input" min="1">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">الفرع المطلوب منه</label>
+          <select id="edit-branch" class="form-select">
+            <option value="المعمورة">المعمورة</option>
+            <option value="سان ستيفانو">سان ستيفانو</option>
+            <option value="سيدى بشر">سيدى بشر</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">ملاحظة</label>
+        <input type="text" id="edit-note" class="form-input">
+      </div>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button onclick="closeEditModal()" class="btn"
+          style="background:#334155;color:#94a3b8;border:none;">
+          إلغاء
+        </button>
+        <button onclick="saveEdit()" class="btn btn-primary" id="edit-save-btn">
+          <i class="fas fa-save"></i> حفظ التعديلات
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script src="api.js"></script>
   <script src="nav.js"></script>
   <script>
-    let rawData = [];
-    let activeUser = null;
+    let rawData        = [];
+    let activeUser     = null;
     let userBranchName = '';
 
     checkAuth().then(user => {
@@ -130,7 +219,7 @@
 
     function populateBranchFilter(data) {
       const branchSelect = document.getElementById('branch-select-filter');
-      const branches = new Set();
+      const branches     = new Set();
       data.forEach(item => {
         if (item.user   && item.user   !== userBranchName) branches.add(item.user);
         if (item.branch && item.branch !== userBranchName) branches.add(item.branch);
@@ -138,16 +227,16 @@
       branchSelect.innerHTML = '<option value="all">كل الفروع</option>';
       branches.forEach(br => {
         const opt = document.createElement('option');
-        opt.value = br;
+        opt.value       = br;
         opt.textContent = br;
         branchSelect.appendChild(opt);
       });
     }
 
     function applyFilters() {
-      const dv = document.getElementById('direction-filter').value;
-      const sv = document.getElementById('status-filter').value;
-      const bv = document.getElementById('branch-select-filter').value;
+      const dv        = document.getElementById('direction-filter').value;
+      const sv        = document.getElementById('status-filter').value;
+      const bv        = document.getElementById('branch-select-filter').value;
       const searchVal = document.getElementById('search-input').value.trim().toLowerCase();
       const searchCol = document.getElementById('search-col').value;
 
@@ -184,17 +273,17 @@
       tbody.innerHTML = '';
       items.forEach(item => {
         const canReply     = (item.branch === userBranchName);
+        const isSource     = (item.user   === userBranchName);
         const currentState = item.state || 'pending';
         const dateObj      = item.createdAt ? new Date(item.createdAt) : null;
         const dateStr      = dateObj ? `${dateObj.getDate()}/${dateObj.getMonth()+1}` : '-';
         const timeStr      = dateObj ? dateObj.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit'}) : '';
 
         const tr = document.createElement('tr');
-        tr.id = `row-${item.id}`;
+        tr.id    = `row-${item.id}`;
         tr.innerHTML = `
           <td style="font-size:0.75rem;line-height:1.4;">
-            ${dateStr}
-            <br>
+            ${dateStr}<br>
             <span style="color:var(--text-muted);font-size:0.7rem;">${timeStr}</span>
           </td>
           <td>
@@ -211,12 +300,8 @@
               ${item.item_code || '---'}
             </code>
           </td>
-          <td style="font-size:0.82rem;">
-            ${item.cust_name || '---'}
-          </td>
-          <td>
-            <b style="color:var(--warning);">${item.qty || '1'}</b>
-          </td>
+          <td style="font-size:0.82rem;">${item.cust_name || '---'}</td>
+          <td><b style="color:var(--warning);">${item.qty || '1'}</b></td>
           <td>
             <input type="text" id="note-${item.id}" class="table-input"
               value="${item.company || ''}"
@@ -235,7 +320,16 @@
           <td id="action-${item.id}">
             ${canReply
               ? `<i class="fas fa-check-circle" style="color:var(--text-muted);font-size:1.1rem;" title="يتم الحفظ تلقائياً"></i>`
-              : `<i class="fas fa-clock" style="color:var(--text-muted);"></i>`}
+              : `<div style="display:flex;gap:6px;align-items:center;">
+                   <i class="fas fa-clock" style="color:var(--text-muted);"></i>
+                   <button class="btn btn-sm btn-icon"
+                     onclick="openEditModal('${item.id}')"
+                     style="background:var(--accent);color:#fff;padding:5px 8px;"
+                     title="تعديل الطلب">
+                     <i class="fas fa-edit"></i>
+                   </button>
+                 </div>`
+            }
           </td>`;
         tbody.appendChild(tr);
       });
@@ -245,10 +339,8 @@
       const statusEl = document.getElementById(`stat-${id}`);
       const noteEl   = document.getElementById(`note-${id}`);
       const actionEl = document.getElementById(`action-${id}`);
-
       if (!statusEl) return;
 
-      // أظهر مؤشر الحفظ
       actionEl.innerHTML = '<i class="fas fa-spinner fa-spin" style="color:var(--text-muted);"></i>';
 
       const success = await updateData({
@@ -261,20 +353,89 @@
 
       if (success) {
         actionEl.innerHTML = '<i class="fas fa-check-circle" style="color:var(--success);font-size:1.1rem;"></i>';
-        // بعد ثانيتين يرجع للأيقونة الرمادية الهادية
         setTimeout(() => {
           if (actionEl) {
             actionEl.innerHTML = '<i class="fas fa-check-circle" style="color:var(--text-muted);font-size:1.1rem;" title="يتم الحفظ تلقائياً"></i>';
           }
         }, 2000);
+        const item = rawData.find(x => x.id == id);
+        if (item) { item.state = statusEl.value; item.company = noteEl ? noteEl.value : ''; }
       } else {
         actionEl.innerHTML = '<i class="fas fa-exclamation-circle" style="color:var(--danger);font-size:1.1rem;" title="فشل الحفظ"></i>';
-        // أعد قيمة السيليكت للقيمة السابقة لو فشل
-        if (triggerEl) {
-          alert("فشل الحفظ، يرجى المحاولة مجدداً");
-        }
+        if (triggerEl) alert("فشل الحفظ، يرجى المحاولة مجدداً");
       }
     }
+
+    // ===== Modal التعديل =====
+    function openEditModal(id) {
+      const item = rawData.find(x => x.id == id);
+      if (!item) return;
+
+      document.getElementById('edit-id').value        = id;
+      document.getElementById('edit-item-code').value = item.item_code || '';
+      document.getElementById('edit-item-name').value = item.item_name || item.item || '';
+      document.getElementById('edit-cust-code').value = item.cust_code || '';
+      document.getElementById('edit-cust-name').value = item.cust_name || '';
+      document.getElementById('edit-qty').value        = item.qty      || 1;
+      document.getElementById('edit-note').value       = item.company  || '';
+
+      // إخفاء فرع اليوزر من الاختيار
+      Array.from(document.getElementById('edit-branch').options).forEach(opt => {
+        opt.hidden = (opt.value === userBranchName);
+      });
+      document.getElementById('edit-branch').value = item.branch || '';
+
+      document.getElementById('edit-modal').style.display = 'flex';
+    }
+
+    function closeEditModal() {
+      document.getElementById('edit-modal').style.display = 'none';
+    }
+
+    async function saveEdit() {
+      const btn = document.getElementById('edit-save-btn');
+      const id  = document.getElementById('edit-id').value;
+
+      btn.disabled  = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
+
+      const success = await updateData({
+        id,
+        type:          "تحويل",
+        action:        "update_item",
+        item_code:     document.getElementById('edit-item-code').value.trim() || null,
+        item:          document.getElementById('edit-item-name').value.trim() || null,
+        customer_code: document.getElementById('edit-cust-code').value.trim() || null,
+        customer_name: document.getElementById('edit-cust-name').value.trim() || null,
+        qty:           document.getElementById('edit-qty').value              || 1,
+        company:       document.getElementById('edit-note').value.trim()      || null,
+        target_branch: document.getElementById('edit-branch').value,
+      });
+
+      if (success) {
+        const item = rawData.find(x => x.id == id);
+        if (item) {
+          item.item_code = document.getElementById('edit-item-code').value.trim();
+          item.item_name = document.getElementById('edit-item-name').value.trim();
+          item.cust_code = document.getElementById('edit-cust-code').value.trim();
+          item.cust_name = document.getElementById('edit-cust-name').value.trim();
+          item.qty       = document.getElementById('edit-qty').value;
+          item.company   = document.getElementById('edit-note').value.trim();
+          item.branch    = document.getElementById('edit-branch').value;
+        }
+        closeEditModal();
+        applyFilters();
+      } else {
+        alert("❌ فشل الحفظ");
+      }
+
+      btn.disabled  = false;
+      btn.innerHTML = '<i class="fas fa-save"></i> حفظ التعديلات';
+    }
+
+    document.getElementById('edit-modal').addEventListener('click', function(e) {
+      if (e.target === this) closeEditModal();
+    });
   </script>
 </body>
 </html>
