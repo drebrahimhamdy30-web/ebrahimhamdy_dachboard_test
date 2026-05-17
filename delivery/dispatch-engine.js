@@ -190,43 +190,46 @@ class DispatchEngine {
     return { map: map, routes: routes };
   }
 
-  async getDriverCurrentTrips(driverIds) {
-    if (!driverIds.length) return {};
+async getDriverCurrentTrips(driverIds) {
+  if (!driverIds.length) return {};
 
-    var tripsResult = await this.db
-      .from('trips')
-      .select('id, driver_id, route_id, orders_count')
-      .eq('status', 'active')
-      .in('driver_id', driverIds);
+  // جيب الرحلات بدون filter على driver_id من drivers
+  var tripsResult = await this.db
+    .from('trips')
+    .select('id, driver_id, route_id, orders_count')
+    .eq('status', 'active');
 
-    var pendingResult = await this.db
-      .from('orders')
-      .select('driver_id')
-      .eq('status', 'pending')
-      .in('driver_id', driverIds);
+  var pendingResult = await this.db
+    .from('orders')
+    .select('driver_id')
+    .eq('status', 'pending')
+    .in('driver_id', driverIds);
 
-    var driverOrderCount = {};
-    (pendingResult.data || []).forEach(function(o) {
-      driverOrderCount[o.driver_id] = (driverOrderCount[o.driver_id] || 0) + 1;
-    });
+  var driverOrderCount = {};
+  (pendingResult.data || []).forEach(function(o) {
+    driverOrderCount[o.driver_id] = (driverOrderCount[o.driver_id] || 0) + 1;
+  });
 
-    var result = {};
-    (tripsResult.data || []).forEach(function(trip) {
+  var result = {};
+  // فلتر في JavaScript بدل Supabase
+  (tripsResult.data || []).forEach(function(trip) {
+    if (driverIds.includes(trip.driver_id)) {
       result[trip.driver_id] = {
         trip_id: trip.id,
         route_id: trip.route_id,
         order_count: driverOrderCount[trip.driver_id] || 0
       };
-    });
+    }
+  });
 
-    driverIds.forEach(function(id) {
-      if (!result[id]) {
-        result[id] = { trip_id: null, route_id: null, order_count: 0 };
-      }
-    });
+  driverIds.forEach(function(id) {
+    if (!result[id]) {
+      result[id] = { trip_id: null, route_id: null, order_count: 0 };
+    }
+  });
 
-    return result;
-  }
+  return result;
+}
 
   async assignOrder(order, drivers, routeMap, driverTrips) {
     var regionName = (order.cust_region || '').trim().toLowerCase();
