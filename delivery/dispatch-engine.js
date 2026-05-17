@@ -82,25 +82,35 @@ class DispatchEngine {
     }
   }
 
-  // ===== جيب الطلبات اللي تحتاج توزيع =====
-  async getPendingOrders() {
-    const delayMins = this.settings.auto_dispatch_delay_minutes || 5;
-    const cutoff = new Date(Date.now() - delayMins * 60000).toISOString();
+async getPendingOrders() {
+  const delayMins = this.settings.auto_dispatch_delay_minutes || 5;
 
-    // أولوية الطلبات
-    let orderBy = 'created_at';
-    if (this.settings.order_priority === 'urgent_first') orderBy = 'notes'; // العاجل له notes تبدأ بـ 🚨
-    if (this.settings.order_priority === 'highest_value') orderBy = 'total_bill_net';
+  const { data } = await this.db
+    .from('orders')
+    .select('*')
+    .eq('status', 'pending')
+    .is('driver_id', null)
+    .order('created_at', { ascending: true });
 
-    const { data } = await this.db
-      .from('orders')
-      .select('*')
-      .eq('status', 'pending')
-      .is('driver_id', null)
-      .lte('created_at', cutoff) // انتظر X دقيقة
-      .order(orderBy === 'total_bill_net' ? 'total_bill_net' : 'created_at', {
-        ascending: orderBy !== 'total_bill_net'
-      });
+  let orders = data || [];
+
+  // فلتر الوقت في JavaScript
+  const cutoff = new Date(Date.now() - delayMins * 60000);
+  orders = orders.filter(o => new Date(o.bill_date || o.created_at) <= cutoff);
+
+  // العاجل أولاً
+  if (this.settings.order_priority === 'urgent_first') {
+    orders.sort((a, b) => {
+      const aU = (a.notes || '').includes('🚨') ? -1 : 0;
+      const bU = (b.notes || '').includes('🚨') ? -1 : 0;
+      return aU - bU;
+    });
+  } else if (this.settings.order_priority === 'highest_value') {
+    orders.sort((a, b) => Number(b.total_bill_net || 0) - Number(a.total_bill_net || 0));
+  }
+
+  return orders;
+}
 
     let orders = data || [];
 
