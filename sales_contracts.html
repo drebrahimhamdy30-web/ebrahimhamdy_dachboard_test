@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>فواتير التعاقد - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+      <div class="page-header">
+        <div class="page-title">
+          <i class="fas fa-file-invoice"></i> فواتير التعاقد
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <div class="field-icon-wrap" style="min-width:220px;">
+            <i class="fas fa-search field-icon"></i>
+            <input type="text" id="searchInput" class="form-input"
+              placeholder="بحث بالاسم أو الكود أو الفاتورة..."
+              oninput="applyFilter()"
+              style="padding-right:34px;">
+          </div>
+          <select id="stateFilter" class="form-select" style="width:auto;" onchange="applyFilter()">
+            <option value="default">قيد المتابعة</option>
+            <option value="all">الكل</option>
+            <option value="">فاضي</option>
+            <option value="فاتورة">فاتورة ✅</option>
+            <option value="مقابل مرتجع">مقابل مرتجع 🔄</option>
+            <option value="لنا فاتورة">لنا فاتورة 📄</option>
+            <option value="ملغاة">ملغاة ❌</option>
+          </select>
+          <button class="btn btn-primary" onclick="openAddModal()">
+            <i class="fas fa-plus"></i> إضافة فاتورة
+          </button>
+          <button class="btn btn-primary" onclick="loadData()">
+            <i class="fas fa-sync-alt"></i> تحديث
+          </button>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>رقم الفاتورة</th>
+              <th>التاريخ</th>
+              <th>كود العميل</th>
+              <th>اسم العميل</th>
+              <th>القيمة</th>
+              <th>الموظف</th>
+              <th>الفرع</th>
+              <th>الحالة</th>
+              <th>إجراء</th>
+            </tr>
+          </thead>
+          <tbody id="table-body">
+            <tr class="loading-row"><td colspan="9">⏳ جاري التحميل...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal التعديل -->
+  <div id="edit-modal" style="
+    display:none;
+    position:fixed;inset:0;
+    background:rgba(0,0,0,0.75);
+    z-index:99999;
+    align-items:center;
+    justify-content:center;
+  ">
+    <div style="
+      background:#1e293b;
+      border:2px solid #334155;
+      border-radius:16px;
+      padding:24px;
+      width:90%;
+      max-width:520px;
+      direction:rtl;
+      font-family:var(--font);
+      box-shadow:0 20px 60px rgba(0,0,0,0.6);
+      max-height:90vh;
+      overflow-y:auto;
+    ">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <span id="modal-title" style="font-size:1rem;font-weight:700;color:#f1f5f9;">
+          <i class="fas fa-edit"></i> تعديل فاتورة
+        </span>
+        <button onclick="closeModal()"
+          style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:1.2rem;">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <input type="hidden" id="modal-id">
+      <input type="hidden" id="modal-mode">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+        <div>
+          <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">
+            رقم الفاتورة <span id="bill-no-note" style="color:#64748b;font-weight:400;font-size:0.72rem;"></span>
+          </label>
+          <input type="text" id="modal-bill-no" class="form-input">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">التاريخ</label>
+          <input type="date" id="modal-bill-date" class="form-input">
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+        <div>
+          <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">كود العميل</label>
+          <input type="text" id="modal-cust-code" class="form-input"
+            inputmode="numeric"
+            oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">اسم العميل</label>
+          <input type="text" id="modal-cust-name" class="form-input">
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+        <div>
+          <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">القيمة</label>
+          <input type="number" id="modal-total" class="form-input" min="0" step="0.01">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">اسم الموظف</label>
+          <input type="text" id="modal-employee" class="form-input">
+        </div>
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:8px;">الحالة</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="state-btn" data-val="" onclick="setStateBtn(this)">⬜ فاضي</button>
+          <button class="state-btn" data-val="فاتورة" onclick="setStateBtn(this)">✅ فاتورة</button>
+          <button class="state-btn" data-val="مقابل مرتجع" onclick="setStateBtn(this)">🔄 مقابل مرتجع</button>
+          <button class="state-btn" data-val="لنا فاتورة" onclick="setStateBtn(this)">📄 لنا فاتورة</button>
+          <button class="state-btn" data-val="ملغاة" onclick="setStateBtn(this)" style="border-color:#ef4444;color:#ef4444;">❌ ملغاة</button>
+        </div>
+        <input type="hidden" id="modal-state" value="">
+      </div>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button onclick="closeModal()" class="btn"
+          style="background:#334155;color:#94a3b8;border:none;">
+          إلغاء
+        </button>
+        <button onclick="saveModal()" class="btn btn-primary" id="modal-save-btn">
+          <i class="fas fa-save"></i> حفظ
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .state-btn {
+      padding: 8px 14px;
+      border: 2px solid #334155;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #94a3b8;
+      font-family: var(--font);
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .state-btn.active {
+      border-color: #38bdf8;
+      background: #0c4a6e;
+      color: #7dd3fc;
+    }
+    .state-badge {
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .badge-empty    { background:#f1f5f9; color:#64748b; }
+    .badge-invoice  { background:#dcfce7; color:#15803d; }
+    .badge-return   { background:#dbeafe; color:#1d4ed8; }
+    .badge-ours     { background:#fef9c3; color:#854d0e; }
+    .badge-cancelled{ background:#fee2e2; color:#991b1b; }
+  </style>
+
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    let activeUser = null;
+    let userBranch = '';
+    let allData    = [];
+
+    checkAuth().then(user => {
+      activeUser = user;
+      if (user) {
+        userBranch = (localStorage.getItem('userBranch') || '').trim();
+        window.onload = loadData;
+      }
+    });
+
+    async function loadData() {
+      const tbody = document.getElementById('table-body');
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="9">⏳ جاري جلب البيانات...</td></tr>';
+      try {
+        const response = await fetchFromN8N('sales_contract');
+        allData = Array.isArray(response) ? response : (response.data || []);
+        applyFilter();
+      } catch(e) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
+      }
+    }
+
+    function applyFilter() {
+      const stateVal  = document.getElementById('stateFilter').value;
+      const searchVal = document.getElementById('searchInput').value.trim().toLowerCase();
+
+      const filtered = allData.filter(item => {
+        const state = (item.bill_state || '').trim();
+
+        let stateMatch = true;
+        if (stateVal === 'default') {
+          stateMatch = (state === '' || state === 'null' || state === 'مقابل مرتجع' || state === 'لنا فاتورة');
+        } else if (stateVal === 'all') {
+          stateMatch = true;
+        } else if (stateVal === '') {
+          stateMatch = (state === '' || state === 'null');
+        } else {
+          stateMatch = (state === stateVal);
+        }
+
+        const searchMatch = !searchVal || [
+          item.bill_no, item.cust_code, item.cust_name_ar,
+          item.employee_name, item.branch
+        ].some(val => String(val || '').toLowerCase().includes(searchVal));
+
+        return stateMatch && searchMatch;
+      });
+
+      renderTable(filtered);
+    }
+
+    function getStateBadge(state) {
+      const s = (state || '').trim();
+      if (!s || s === 'null') return `<span class="state-badge badge-empty">⬜ فاضي</span>`;
+      if (s === 'فاتورة')       return `<span class="state-badge badge-invoice">✅ فاتورة</span>`;
+      if (s === 'مقابل مرتجع') return `<span class="state-badge badge-return">🔄 مقابل مرتجع</span>`;
+      if (s === 'لنا فاتورة')  return `<span class="state-badge badge-ours">📄 لنا فاتورة</span>`;
+      if (s === 'ملغاة')        return `<span class="state-badge badge-cancelled">❌ ملغاة</span>`;
+      return `<span class="state-badge badge-empty">${s}</span>`;
+    }
+
+    function renderTable(items) {
+      const tbody = document.getElementById('table-body');
+      if (items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = items.map(item => {
+        const dateStr = item.bill_date
+          ? new Date(item.bill_date).toLocaleDateString('ar-EG', {year:'numeric', month:'numeric', day:'numeric'})
+          : '---';
+
+        return `
+          <tr>
+            <td><code style="font-size:0.82rem;color:var(--text-secondary);">${item.bill_no || '---'}</code></td>
+            <td style="font-size:0.78rem;color:var(--text-muted);">${dateStr}</td>
+            <td><code style="font-size:0.82rem;color:var(--text-secondary);">${item.cust_code || '---'}</code></td>
+            <td style="font-weight:600;font-size:0.85rem;">${item.cust_name_ar || '---'}</td>
+            <td><b style="color:var(--warning);">${item.total_bill || '0'}</b></td>
+            <td style="font-size:0.82rem;">${item.employee_name || '---'}</td>
+            <td><span class="branch-tag">${item.branch || '---'}</span></td>
+            <td>${getStateBadge(item.bill_state)}</td>
+            <td>
+              <button class="btn btn-sm btn-icon"
+                onclick="openEditModal('${item.id}')"
+                style="background:var(--accent);color:#fff;padding:5px 8px;"
+                title="تعديل">
+                <i class="fas fa-edit"></i>
+              </button>
+            </td>
+          </tr>`;
+      }).join('');
+    }
+
+    // ===== Modal =====
+    function setStateBtn(btn) {
+      document.querySelectorAll('.state-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('modal-state').value = btn.dataset.val;
+    }
+
+    function openAddModal() {
+      document.getElementById('modal-id').value        = '';
+      document.getElementById('modal-mode').value      = 'add';
+      document.getElementById('modal-title').innerHTML = '<i class="fas fa-plus"></i> إضافة فاتورة جديدة';
+      document.getElementById('modal-bill-no').value   = '';
+      document.getElementById('modal-bill-no').readOnly = false;
+      document.getElementById('bill-no-note').textContent = '';
+      document.getElementById('modal-bill-date').value = new Date().toISOString().split('T')[0];
+      document.getElementById('modal-cust-code').value = '';
+      document.getElementById('modal-cust-name').value = '';
+      document.getElementById('modal-total').value     = '';
+      document.getElementById('modal-employee').value  = '';
+      document.getElementById('modal-state').value     = '';
+      document.querySelectorAll('.state-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('modal-save-btn').innerHTML = '<i class="fas fa-save"></i> حفظ';
+      document.getElementById('edit-modal').style.display = 'flex';
+    }
+
+    function openEditModal(id) {
+      const item = allData.find(x => x.id == id);
+      if (!item) return;
+
+      document.getElementById('modal-id').value        = id;
+      document.getElementById('modal-mode').value      = 'edit';
+      document.getElementById('modal-title').innerHTML = '<i class="fas fa-edit"></i> تعديل فاتورة';
+      document.getElementById('modal-bill-no').value   = item.bill_no || '';
+      document.getElementById('modal-bill-no').readOnly = true;
+      document.getElementById('bill-no-note').textContent = '(لا يمكن تعديله)';
+      document.getElementById('modal-cust-code').value = item.cust_code    || '';
+      document.getElementById('modal-cust-name').value = item.cust_name_ar || '';
+      document.getElementById('modal-total').value     = item.total_bill   || '';
+      document.getElementById('modal-employee').value  = item.employee_name || '';
+      document.getElementById('modal-state').value     = item.bill_state   || '';
+
+      if (item.bill_date) {
+        document.getElementById('modal-bill-date').value = item.bill_date.split('T')[0];
+      } else {
+        document.getElementById('modal-bill-date').value = '';
+      }
+
+      // تحديد الحالة
+      document.querySelectorAll('.state-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.val === (item.bill_state || ''));
+      });
+
+      document.getElementById('modal-save-btn').innerHTML = '<i class="fas fa-save"></i> حفظ التعديلات';
+      document.getElementById('edit-modal').style.display = 'flex';
+    }
+
+    function closeModal() {
+      document.getElementById('edit-modal').style.display = 'none';
+    }
+
+    async function saveModal() {
+      const btn  = document.getElementById('modal-save-btn');
+      const mode = document.getElementById('modal-mode').value;
+      const id   = document.getElementById('modal-id').value;
+
+      const billNo   = document.getElementById('modal-bill-no').value.trim();
+      const billDate = document.getElementById('modal-bill-date').value;
+      const custCode = document.getElementById('modal-cust-code').value.trim();
+      const custName = document.getElementById('modal-cust-name').value.trim();
+      const total    = document.getElementById('modal-total').value.trim();
+      const employee = document.getElementById('modal-employee').value.trim();
+      const state    = document.getElementById('modal-state').value;
+
+      if (mode === 'add' && !billNo) { alert("برجاء إدخال رقم الفاتورة"); return; }
+      if (!custCode && !custName)    { alert("برجاء إدخال كود أو اسم العميل"); return; }
+
+      btn.disabled  = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
+
+      const payload = {
+        type:         mode === 'add' ? "تعاقد_جديد" : "تعاقد_تحديث",
+        id:           id || undefined,
+        bill_no:      billNo,
+        bill_date:    billDate || null,
+        cust_code:    custCode || null,
+        cust_name_ar: custName || null,
+        total_bill:   total    || null,
+        employee_name: employee || null,
+        bill_state:   state,
+        branch:       userBranch,
+        createdAt:    new Date().toISOString()
+      };
+
+      const success = await updateData(payload);
+
+      if (success) {
+        closeModal();
+        loadData();
+      } else {
+        alert("❌ فشل الحفظ");
+      }
+
+      btn.disabled  = false;
+      btn.innerHTML = '<i class="fas fa-save"></i> حفظ';
+    }
+
+    document.getElementById('edit-modal').addEventListener('click', function(e) {
+      if (e.target === this) closeModal();
+    });
+  </script>
+</body>
+</html>
