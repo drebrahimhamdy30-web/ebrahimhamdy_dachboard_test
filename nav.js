@@ -30,6 +30,9 @@ function injectNavbar() {
         <a href="offers.html" class="${currentPage === 'offers.html' ? 'active' : ''}">
   <i class="fas fa-tags"></i> عروض
 </a>
+<a href="sales_contracts.html" class="${currentPage === 'sales_contracts.html' ? 'active' : ''}">
+  <i class="fas fa-file-invoice"></i> فواتيرالتعاقد
+</a>
         <span id="notif-badge" style="
           display:none;
           position:absolute;
