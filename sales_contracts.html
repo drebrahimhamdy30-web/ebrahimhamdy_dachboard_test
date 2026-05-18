@@ -6,20 +6,6 @@
   <title>فواتير التعاقد - Phalix</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-  <style>
-    .state-badge {
-      padding: 3px 10px;
-      border-radius: 20px;
-      font-size: 0.72rem;
-      font-weight: 700;
-      white-space: nowrap;
-    }
-    .badge-empty     { background:#f1f5f9; color:#64748b; }
-    .badge-invoice   { background:#dcfce7; color:#15803d; }
-    .badge-return    { background:#dbeafe; color:#1d4ed8; }
-    .badge-ours      { background:#fef9c3; color:#854d0e; }
-    .badge-cancelled { background:#fee2e2; color:#991b1b; }
-  </style>
 </head>
 <body>
   <div class="nav-bar"></div>
@@ -153,6 +139,7 @@
       <div style="margin-bottom:20px;">
         <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:8px;">الحالة</label>
         <select id="modal-state" class="form-select">
+          <option value="">⏳ قيد الانتظار</option>
           <option value="فاتورة">✅ فاتورة</option>
           <option value="مقابل مرتجع">🔄 مقابل مرتجع</option>
           <option value="لنا فاتورة">📄 لنا فاتورة</option>
@@ -204,11 +191,11 @@
       const searchVal = document.getElementById('searchInput').value.trim().toLowerCase();
 
       const filtered = allData.filter(item => {
-        const state = (item.bill_state || '').trim();
+        const state = (item.bill_state && item.bill_state !== 'null') ? item.bill_state.trim() : '';
 
         let stateMatch = true;
         if (stateVal === 'default') {
-          stateMatch = (state === '' || state === 'null' || state === 'مقابل مرتجع' || state === 'لنا فاتورة');
+          stateMatch = (state === '' || state === 'مقابل مرتجع' || state === 'لنا فاتورة');
         } else if (stateVal === 'all') {
           stateMatch = true;
         } else {
@@ -238,7 +225,7 @@
           ? new Date(item.bill_date).toLocaleDateString('ar-EG', {year:'numeric', month:'numeric', day:'numeric'})
           : '---';
 
-        const state = (item.bill_state && item.bill_state !== 'null') ? item.bill_state : '';
+        const state = (item.bill_state && item.bill_state !== 'null') ? item.bill_state.trim() : '';
 
         return `
           <tr>
@@ -247,11 +234,11 @@
             <td><code style="font-size:0.82rem;color:var(--text-secondary);">${(item.cust_code && item.cust_code !== 'null') ? item.cust_code : '---'}</code></td>
             <td style="font-weight:600;font-size:0.85rem;">${item.cust_name_ar || '---'}</td>
             <td><b style="color:var(--warning);">${item.total_bill || '0'}</b></td>
-            <td style="font-size:0.82rem;">${item.employee_name || '---'}</td>
+            <td style="font-size:0.82rem;">${(item.employee_name && item.employee_name !== 'null') ? item.employee_name : '---'}</td>
             <td><span class="branch-tag">${item.branch || '---'}</span></td>
             <td>
               <select class="table-select" onchange="quickUpdateState('${item.id}', this.value)">
-                <option value=""               ${state === ''               ? 'selected' : ''}>— فاضي</option>
+                <option value=""               ${state === ''               ? 'selected' : ''}>⏳ قيد الانتظار</option>
                 <option value="فاتورة"         ${state === 'فاتورة'         ? 'selected' : ''}>✅ فاتورة</option>
                 <option value="مقابل مرتجع"   ${state === 'مقابل مرتجع'   ? 'selected' : ''}>🔄 مقابل مرتجع</option>
                 <option value="لنا فاتورة"    ${state === 'لنا فاتورة'    ? 'selected' : ''}>📄 لنا فاتورة</option>
@@ -288,18 +275,18 @@
 
     // ===== Modal =====
     function openAddModal() {
-      document.getElementById('modal-id').value          = '';
-      document.getElementById('modal-mode').value        = 'add';
-      document.getElementById('modal-title').innerHTML   = '<i class="fas fa-plus"></i> إضافة فاتورة جديدة';
-      document.getElementById('modal-bill-no').value     = '';
-      document.getElementById('modal-bill-no').readOnly  = false;
+      document.getElementById('modal-id').value           = '';
+      document.getElementById('modal-mode').value         = 'add';
+      document.getElementById('modal-title').innerHTML    = '<i class="fas fa-plus"></i> إضافة فاتورة جديدة';
+      document.getElementById('modal-bill-no').value      = '';
+      document.getElementById('modal-bill-no').readOnly   = false;
       document.getElementById('bill-no-note').textContent = '';
-      document.getElementById('modal-bill-date').value   = new Date().toISOString().split('T')[0];
-      document.getElementById('modal-cust-code').value   = '';
-      document.getElementById('modal-cust-name').value   = '';
-      document.getElementById('modal-total').value       = '';
-      document.getElementById('modal-employee').value    = '';
-      document.getElementById('modal-state').value       = 'فاتورة';
+      document.getElementById('modal-bill-date').value    = new Date().toISOString().split('T')[0];
+      document.getElementById('modal-cust-code').value    = '';
+      document.getElementById('modal-cust-name').value    = '';
+      document.getElementById('modal-total').value        = '';
+      document.getElementById('modal-employee').value     = '';
+      document.getElementById('modal-state').value        = '';
       document.getElementById('modal-save-btn').innerHTML = '<i class="fas fa-save"></i> حفظ';
       document.getElementById('edit-modal').style.display = 'flex';
     }
@@ -308,16 +295,16 @@
       const item = allData.find(x => x.id == id);
       if (!item) return;
 
-      document.getElementById('modal-id').value          = id;
-      document.getElementById('modal-mode').value        = 'edit';
-      document.getElementById('modal-title').innerHTML   = '<i class="fas fa-edit"></i> تعديل فاتورة';
-      document.getElementById('modal-bill-no').value     = item.bill_no || '';
-      document.getElementById('modal-bill-no').readOnly  = true;
+      document.getElementById('modal-id').value           = id;
+      document.getElementById('modal-mode').value         = 'edit';
+      document.getElementById('modal-title').innerHTML    = '<i class="fas fa-edit"></i> تعديل فاتورة';
+      document.getElementById('modal-bill-no').value      = item.bill_no || '';
+      document.getElementById('modal-bill-no').readOnly   = true;
       document.getElementById('bill-no-note').textContent = '(لا يمكن تعديله)';
-      document.getElementById('modal-cust-code').value   = item.cust_code     || '';
-      document.getElementById('modal-cust-name').value   = item.cust_name_ar  || '';
-      document.getElementById('modal-total').value       = item.total_bill    || '';
-      document.getElementById('modal-employee').value    = item.employee_name || '';
+      document.getElementById('modal-cust-code').value    = item.cust_code     || '';
+      document.getElementById('modal-cust-name').value    = item.cust_name_ar  || '';
+      document.getElementById('modal-total').value        = item.total_bill    || '';
+      document.getElementById('modal-employee').value     = item.employee_name || '';
 
       if (item.bill_date) {
         document.getElementById('modal-bill-date').value = item.bill_date.split('T')[0];
@@ -325,7 +312,7 @@
         document.getElementById('modal-bill-date').value = '';
       }
 
-      const stateVal = (item.bill_state && item.bill_state !== 'null') ? item.bill_state : 'فاتورة';
+      const stateVal = (item.bill_state && item.bill_state !== 'null') ? item.bill_state.trim() : '';
       document.getElementById('modal-state').value = stateVal;
 
       document.getElementById('modal-save-btn').innerHTML = '<i class="fas fa-save"></i> حفظ التعديلات';
