@@ -40,7 +40,6 @@
           <select id="stateFilter" class="form-select" style="width:auto;" onchange="applyFilter()">
             <option value="default">قيد المتابعة</option>
             <option value="all">الكل</option>
-            <option value="">فاضي</option>
             <option value="فاتورة">فاتورة ✅</option>
             <option value="مقابل مرتجع">مقابل مرتجع 🔄</option>
             <option value="لنا فاتورة">لنا فاتورة 📄</option>
@@ -151,7 +150,6 @@
         </div>
       </div>
 
-      <!-- الحالة -->
       <div style="margin-bottom:20px;">
         <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:8px;">الحالة</label>
         <select id="modal-state" class="form-select">
@@ -213,8 +211,6 @@
           stateMatch = (state === '' || state === 'null' || state === 'مقابل مرتجع' || state === 'لنا فاتورة');
         } else if (stateVal === 'all') {
           stateMatch = true;
-        } else if (stateVal === '') {
-          stateMatch = (state === '' || state === 'null');
         } else {
           stateMatch = (state === stateVal);
         }
@@ -230,16 +226,6 @@
       renderTable(filtered);
     }
 
-    function getStateBadge(state) {
-      const s = (state || '').trim();
-      if (!s || s === 'null') return `<span class="state-badge badge-empty">— فاضي</span>`;
-      if (s === 'فاتورة')       return `<span class="state-badge badge-invoice">✅ فاتورة</span>`;
-      if (s === 'مقابل مرتجع') return `<span class="state-badge badge-return">🔄 مقابل مرتجع</span>`;
-      if (s === 'لنا فاتورة')  return `<span class="state-badge badge-ours">📄 لنا فاتورة</span>`;
-      if (s === 'ملغاة')        return `<span class="state-badge badge-cancelled">❌ ملغاة</span>`;
-      return `<span class="state-badge badge-empty">${s}</span>`;
-    }
-
     function renderTable(items) {
       const tbody = document.getElementById('table-body');
       if (items.length === 0) {
@@ -252,6 +238,8 @@
           ? new Date(item.bill_date).toLocaleDateString('ar-EG', {year:'numeric', month:'numeric', day:'numeric'})
           : '---';
 
+        const state = (item.bill_state && item.bill_state !== 'null') ? item.bill_state : '';
+
         return `
           <tr>
             <td><code style="font-size:0.82rem;color:var(--text-secondary);">${item.bill_no || '---'}</code></td>
@@ -261,7 +249,15 @@
             <td><b style="color:var(--warning);">${item.total_bill || '0'}</b></td>
             <td style="font-size:0.82rem;">${item.employee_name || '---'}</td>
             <td><span class="branch-tag">${item.branch || '---'}</span></td>
-            <td>${getStateBadge(item.bill_state)}</td>
+            <td>
+              <select class="table-select" onchange="quickUpdateState('${item.id}', this.value)">
+                <option value=""               ${state === ''               ? 'selected' : ''}>— فاضي</option>
+                <option value="فاتورة"         ${state === 'فاتورة'         ? 'selected' : ''}>✅ فاتورة</option>
+                <option value="مقابل مرتجع"   ${state === 'مقابل مرتجع'   ? 'selected' : ''}>🔄 مقابل مرتجع</option>
+                <option value="لنا فاتورة"    ${state === 'لنا فاتورة'    ? 'selected' : ''}>📄 لنا فاتورة</option>
+                <option value="ملغاة"          ${state === 'ملغاة'          ? 'selected' : ''}>❌ ملغاة</option>
+              </select>
+            </td>
             <td>
               <button class="btn btn-sm btn-icon"
                 onclick="openEditModal('${item.id}')"
@@ -274,20 +270,36 @@
       }).join('');
     }
 
+    async function quickUpdateState(id, newState) {
+      const success = await updateData({
+        type:       "contract_update",
+        id,
+        bill_state: newState
+      });
+
+      if (success) {
+        const item = allData.find(x => x.id == id);
+        if (item) item.bill_state = newState;
+      } else {
+        alert("❌ فشل التحديث");
+        applyFilter();
+      }
+    }
+
     // ===== Modal =====
     function openAddModal() {
-      document.getElementById('modal-id').value         = '';
-      document.getElementById('modal-mode').value       = 'add';
-      document.getElementById('modal-title').innerHTML  = '<i class="fas fa-plus"></i> إضافة فاتورة جديدة';
-      document.getElementById('modal-bill-no').value    = '';
-      document.getElementById('modal-bill-no').readOnly = false;
+      document.getElementById('modal-id').value          = '';
+      document.getElementById('modal-mode').value        = 'add';
+      document.getElementById('modal-title').innerHTML   = '<i class="fas fa-plus"></i> إضافة فاتورة جديدة';
+      document.getElementById('modal-bill-no').value     = '';
+      document.getElementById('modal-bill-no').readOnly  = false;
       document.getElementById('bill-no-note').textContent = '';
-      document.getElementById('modal-bill-date').value  = new Date().toISOString().split('T')[0];
-      document.getElementById('modal-cust-code').value  = '';
-      document.getElementById('modal-cust-name').value  = '';
-      document.getElementById('modal-total').value      = '';
-      document.getElementById('modal-employee').value   = '';
-      document.getElementById('modal-state').value      = 'فاتورة';
+      document.getElementById('modal-bill-date').value   = new Date().toISOString().split('T')[0];
+      document.getElementById('modal-cust-code').value   = '';
+      document.getElementById('modal-cust-name').value   = '';
+      document.getElementById('modal-total').value       = '';
+      document.getElementById('modal-employee').value    = '';
+      document.getElementById('modal-state').value       = 'فاتورة';
       document.getElementById('modal-save-btn').innerHTML = '<i class="fas fa-save"></i> حفظ';
       document.getElementById('edit-modal').style.display = 'flex';
     }
@@ -296,16 +308,16 @@
       const item = allData.find(x => x.id == id);
       if (!item) return;
 
-      document.getElementById('modal-id').value         = id;
-      document.getElementById('modal-mode').value       = 'edit';
-      document.getElementById('modal-title').innerHTML  = '<i class="fas fa-edit"></i> تعديل فاتورة';
-      document.getElementById('modal-bill-no').value    = item.bill_no || '';
-      document.getElementById('modal-bill-no').readOnly = true;
+      document.getElementById('modal-id').value          = id;
+      document.getElementById('modal-mode').value        = 'edit';
+      document.getElementById('modal-title').innerHTML   = '<i class="fas fa-edit"></i> تعديل فاتورة';
+      document.getElementById('modal-bill-no').value     = item.bill_no || '';
+      document.getElementById('modal-bill-no').readOnly  = true;
       document.getElementById('bill-no-note').textContent = '(لا يمكن تعديله)';
-      document.getElementById('modal-cust-code').value  = item.cust_code     || '';
-      document.getElementById('modal-cust-name').value  = item.cust_name_ar  || '';
-      document.getElementById('modal-total').value      = item.total_bill    || '';
-      document.getElementById('modal-employee').value   = item.employee_name || '';
+      document.getElementById('modal-cust-code').value   = item.cust_code     || '';
+      document.getElementById('modal-cust-name').value   = item.cust_name_ar  || '';
+      document.getElementById('modal-total').value       = item.total_bill    || '';
+      document.getElementById('modal-employee').value    = item.employee_name || '';
 
       if (item.bill_date) {
         document.getElementById('modal-bill-date').value = item.bill_date.split('T')[0];
@@ -337,8 +349,8 @@
       const employee = document.getElementById('modal-employee').value.trim();
       const state    = document.getElementById('modal-state').value;
 
-      if (mode === 'add' && !billNo)    { alert("برجاء إدخال رقم الفاتورة"); return; }
-      if (!custCode && !custName)        { alert("برجاء إدخال كود أو اسم العميل"); return; }
+      if (mode === 'add' && !billNo)  { alert("برجاء إدخال رقم الفاتورة");      return; }
+      if (!custCode && !custName)      { alert("برجاء إدخال كود أو اسم العميل"); return; }
 
       btn.disabled  = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
@@ -347,11 +359,11 @@
         type:          mode === 'add' ? "contract_new" : "contract_update",
         id:            id || undefined,
         bill_no:       billNo,
-        bill_date:     billDate || null,
-        cust_code:     custCode || null,
-        cust_name_ar:  custName || null,
-        total_bill:    total    || null,
-        employee_name: employee || null,
+        bill_date:     billDate    || null,
+        cust_code:     custCode    || null,
+        cust_name_ar:  custName    || null,
+        total_bill:    total       || null,
+        employee_name: employee    || null,
         bill_state:    state,
         branch:        userBranch,
         createdAt:     new Date().toISOString()
