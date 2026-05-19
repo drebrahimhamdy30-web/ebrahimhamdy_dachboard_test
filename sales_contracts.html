@@ -16,6 +16,10 @@
           <i class="fas fa-file-invoice"></i> فواتير التعاقد
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+
+          <!-- إحصائيات -->
+          <div id="stats-bar" style="display:flex;gap:8px;align-items:center;font-size:0.82rem;"></div>
+
           <div class="field-icon-wrap" style="min-width:220px;">
             <i class="fas fa-search field-icon"></i>
             <input type="text" id="searchInput" class="form-input"
@@ -214,13 +218,28 @@
     }
 
     function renderTable(items) {
+      // إحصائيات
+      const total   = allData.length;
+      const pending = allData.filter(i => {
+        const s = (i.bill_state && i.bill_state !== 'null') ? i.bill_state.trim() : '';
+        return s === '';
+      }).length;
+
+      document.getElementById('stats-bar').innerHTML = `
+        <span style="background:var(--surface-3);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-weight:700;color:var(--text-secondary);">
+          📄 الكل: ${total}
+        </span>
+        <span style="background:#fef9c3;border-radius:20px;padding:4px 12px;font-weight:700;color:#854d0e;">
+          ⏳ انتظار: ${pending}
+        </span>
+      `;
+
       const tbody = document.getElementById('table-body');
       if (items.length === 0) {
         tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج</td></tr>';
         return;
       }
 
-      // ترتيب تصاعدي برقم الفاتورة
       items.sort((a, b) => {
         const aNo = parseInt(String(a.bill_no || '0').replace(/\D/g, '')) || 0;
         const bNo = parseInt(String(b.bill_no || '0').replace(/\D/g, '')) || 0;
@@ -228,14 +247,13 @@
       });
 
       tbody.innerHTML = items.map(item => {
-
-const dateObj = item.bill_date ? new Date(item.bill_date) : null;
-const dateStr = dateObj
-  ? dateObj.toLocaleDateString('ar-EG', {year:'numeric', month:'numeric', day:'numeric'})
-  : '---';
-const timeStr = dateObj
-  ? dateObj.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit', hour12:true})
-  : '';
+        const dateObj = item.bill_date ? new Date(item.bill_date) : null;
+        const dateStr = dateObj
+          ? dateObj.toLocaleDateString('ar-EG', {year:'numeric', month:'numeric', day:'numeric'})
+          : '---';
+        const timeStr = dateObj
+          ? dateObj.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit', hour12:true})
+          : '';
 
         const state = (item.bill_state && item.bill_state !== 'null') ? item.bill_state.trim() : '';
 
@@ -243,9 +261,9 @@ const timeStr = dateObj
           <tr>
             <td><code style="font-size:0.82rem;color:var(--text-secondary);">${item.bill_no || '---'}</code></td>
             <td style="font-size:0.75rem;line-height:1.4;">
-  ${dateStr}<br>
-  <span style="color:var(--text-muted);font-size:0.7rem;">${timeStr}</span>
-</td>
+              ${dateStr}<br>
+              <span style="color:var(--text-muted);font-size:0.7rem;">${timeStr}</span>
+            </td>
             <td><code style="font-size:0.82rem;color:var(--text-secondary);">${(item.cust_code && item.cust_code !== 'null') ? item.cust_code : '---'}</code></td>
             <td style="font-weight:600;font-size:0.85rem;">${item.cust_name_ar || '---'}</td>
             <td><b style="color:var(--warning);">${item.total_bill || '0'}</b></td>
@@ -272,43 +290,55 @@ const timeStr = dateObj
       }).join('');
     }
 
-async function quickUpdateState(id, newState) {
-  const item = allData.find(x => x.id == id);
-  if (!item) return;
+    async function quickUpdateState(id, newState) {
+      const item = allData.find(x => x.id == id);
+      if (!item) return;
 
-  // لو الحالة الحالية "لنا فاتورة" — محتاج باسورد
-  const currentState = (item.bill_state && item.bill_state !== 'null') ? item.bill_state.trim() : '';
-  if (currentState === 'لنا فاتورة') {
-    const pass = prompt('هذا الإجراء يحتاج صلاحية — أدخل كلمة المرور:');
-    if (pass !== '902170') {
-      alert('كلمة المرور غير صحيحة ❌');
-      applyFilter(); // يرجع للقيمة القديمة
-      return;
+      const currentState = (item.bill_state && item.bill_state !== 'null') ? item.bill_state.trim() : '';
+      if (currentState === 'لنا فاتورة') {
+        const pass = prompt('هذا الإجراء يحتاج صلاحية — أدخل كلمة المرور:');
+        if (pass !== '902170') {
+          alert('كلمة المرور غير صحيحة ❌');
+          applyFilter();
+          return;
+        }
+      }
+
+      const success = await updateData({
+        type:          "contract_update",
+        id,
+        bill_no:       item.bill_no       || null,
+        bill_date:     item.bill_date     || null,
+        cust_code:     item.cust_code     || null,
+        cust_name_ar:  item.cust_name_ar  || null,
+        total_bill:    item.total_bill    || null,
+        employee_name: item.employee_name || null,
+        bill_state:    newState,
+        branch:        item.branch        || null,
+      });
+
+      if (success) {
+        item.bill_state = newState;
+        renderTable(allData.filter(i => {
+          const stateVal  = document.getElementById('stateFilter').value;
+          const searchVal = document.getElementById('searchInput').value.trim().toLowerCase();
+          const state = (i.bill_state && i.bill_state !== 'null') ? i.bill_state.trim() : '';
+          let stateMatch = true;
+          if (stateVal === 'default') {
+            stateMatch = (state === '' || state === 'مقابل مرتجع' || state === 'لنا فاتورة');
+          } else if (stateVal !== 'all') {
+            stateMatch = (state === stateVal);
+          }
+          const searchMatch = !searchVal || [i.bill_no, i.cust_code, i.cust_name_ar, i.employee_name, i.branch]
+            .some(val => String(val || '').toLowerCase().includes(searchVal));
+          return stateMatch && searchMatch;
+        }));
+      } else {
+        alert("❌ فشل التحديث");
+        applyFilter();
+      }
     }
-  }
 
-  const success = await updateData({
-    type:          "contract_update",
-    id,
-    bill_no:       item.bill_no       || null,
-    bill_date:     item.bill_date     || null,
-    cust_code:     item.cust_code     || null,
-    cust_name_ar:  item.cust_name_ar  || null,
-    total_bill:    item.total_bill    || null,
-    employee_name: item.employee_name || null,
-    bill_state:    newState,
-    branch:        item.branch        || null,
-  });
-
-  if (success) {
-    item.bill_state = newState;
-  } else {
-    alert("❌ فشل التحديث");
-    applyFilter();
-  }
-}
-
-    // ===== Modal =====
     function openAddModal() {
       document.getElementById('modal-id').value           = '';
       document.getElementById('modal-mode').value         = 'add';
