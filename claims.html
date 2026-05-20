@@ -1,0 +1,471 @@
+<!-- claims.html -->
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>المطالبات - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    .tabs-bar { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+    .tab-btn {
+      padding:8px 20px; border-radius:20px; border:1px solid var(--border);
+      background:var(--surface-3); color:var(--text-secondary);
+      font-size:0.88rem; cursor:pointer; transition:all 0.2s; font-family:var(--font);
+    }
+    .tab-btn.active { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:700; }
+    .section-title {
+      font-size:0.9rem; font-weight:700; color:var(--text-primary);
+      margin:16px 0 8px; padding:8px 12px;
+      background:var(--surface-3); border-radius:8px;
+      display:flex; align-items:center; gap:8px;
+    }
+    .claim-card {
+      background:var(--surface-2); border:1.5px solid var(--border);
+      border-radius:var(--radius-md); padding:16px; margin-bottom:12px;
+    }
+    .claim-card.collected { opacity:0.6; border-color:var(--success); }
+    .total-row {
+      background:var(--surface-3); font-weight:700;
+      border-top:2px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+      <div class="page-header">
+        <div class="page-title">
+          <i class="fas fa-file-invoice-dollar"></i> المطالبات
+        </div>
+        <button class="btn btn-primary" onclick="loadAll()">
+          <i class="fas fa-sync-alt"></i> تحديث
+        </button>
+      </div>
+
+      <div class="tabs-bar">
+        <button class="tab-btn active" onclick="switchTab('pending', this)">📋 جاهزة للمطالبة</button>
+        <button class="tab-btn" onclick="switchTab('claims', this)">📁 المطالبات المرسلة</button>
+      </div>
+
+      <!-- تبويب ١: جاهزة للمطالبة -->
+      <div id="tab-pending">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+          <button class="btn btn-primary" onclick="createClaim()" id="create-claim-btn">
+            <i class="fas fa-paper-plane"></i> إنشاء مطالبة
+          </button>
+        </div>
+
+        <!-- عاملين -->
+        <div class="section-title">👷 عاملين</div>
+        <div class="table-wrap">
+          <table id="table-workers">
+            <thead>
+              <tr>
+                <th>م</th>
+                <th>رقم القيد</th>
+                <th>اسم العميل</th>
+                <th>ملاحظات</th>
+                <th>طريقة الدفع</th>
+                <th>المبلغ المطالب</th>
+                <th>الفرع</th>
+              </tr>
+            </thead>
+            <tbody id="workers-body">
+              <tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-muted);">⏳ جاري التحميل...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div id="workers-total" style="text-align:left;font-weight:700;color:var(--warning);padding:8px 0 16px;font-size:0.9rem;"></div>
+
+        <!-- معاشات -->
+        <div class="section-title">👴 معاشات</div>
+        <div class="table-wrap">
+          <table id="table-retirees">
+            <thead>
+              <tr>
+                <th>م</th>
+                <th>رقم القيد</th>
+                <th>اسم العميل</th>
+                <th>ملاحظات</th>
+                <th>طريقة الدفع</th>
+                <th>المبلغ المطالب</th>
+                <th>الفرع</th>
+              </tr>
+            </thead>
+            <tbody id="retirees-body">
+              <tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-muted);">⏳ جاري التحميل...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div id="retirees-total" style="text-align:left;font-weight:700;color:var(--warning);padding:8px 0;font-size:0.9rem;"></div>
+      </div>
+
+      <!-- تبويب ٢: المطالبات المرسلة -->
+      <div id="tab-claims" style="display:none;">
+        <div id="claims-container">
+          <p style="text-align:center;padding:40px;color:var(--text-muted);">⏳ جاري التحميل...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    let activeUser  = null;
+    let userBranch  = '';
+    let allContracts = [];
+    let allClaims    = [];
+    let currentTab   = 'pending';
+
+    checkAuth().then(user => {
+      activeUser = user;
+      if (user) {
+        userBranch = (localStorage.getItem('userBranch') || '').trim();
+        window.onload = loadAll;
+      }
+    });
+
+    async function loadAll() {
+      try {
+        const [cResp, clResp] = await Promise.all([
+          fetchFromN8N('sales_contract'),
+          fetchFromN8N('claims')
+        ]);
+        allContracts = Array.isArray(cResp) ? cResp : (cResp.data || []);
+        allClaims    = Array.isArray(clResp) ? clResp : (clResp.data || []);
+        renderCurrentTab();
+      } catch(e) {
+        console.error(e);
+      }
+    }
+
+    function switchTab(tab, btn) {
+      currentTab = tab;
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab-pending').style.display = tab === 'pending' ? '' : 'none';
+      document.getElementById('tab-claims').style.display  = tab === 'claims'  ? '' : 'none';
+      renderCurrentTab();
+    }
+
+    function renderCurrentTab() {
+      if (currentTab === 'pending') renderPending();
+      else renderClaims();
+    }
+
+    function extractQaid(name) {
+      if (!name) return { name: '', qaid: '' };
+      const match = name.match(/^(.*?)\s+(\d+)$/);
+      if (match) return { name: match[1].trim(), qaid: match[2] };
+      return { name: name.trim(), qaid: '' };
+    }
+
+    function calcAmount(total, paymentType) {
+      const t = parseFloat(total) || 0;
+      if (!paymentType || paymentType === '3/4') return t * 0.75;
+      if (paymentType === 'مساهمة كاملة')        return t;
+      if (paymentType === 'مساهمة 50%')           return t * 0.5;
+      return t * 0.75;
+    }
+
+    function renderPending() {
+      // فلتر: فاتورة + claim_id فاضي
+      const ready = allContracts.filter(item => {
+        const state    = (item.bill_state && item.bill_state !== 'null') ? item.bill_state.trim() : '';
+        const claimId  = (item.claim_id   && item.claim_id   !== 'null') ? item.claim_id.trim()   : '';
+        return state === 'فاتورة' && !claimId;
+      });
+
+      // ترتيب من الأقدم للأحدث
+      ready.sort((a, b) => new Date(a.bill_date || 0) - new Date(b.bill_date || 0));
+
+      const workers  = ready.filter(i => (i.bill_type || '').trim() === 'عاملين');
+      const retirees = ready.filter(i => (i.bill_type || '').trim() === 'معاشات');
+
+      renderGroup('workers-body',  workers,  'workers-total');
+      renderGroup('retirees-body', retirees, 'retirees-total');
+    }
+
+    function renderGroup(tbodyId, items, totalId) {
+      const tbody = document.getElementById(tbodyId);
+      const totalEl = document.getElementById(totalId);
+
+      if (items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-muted);">لا توجد فواتير</td></tr>`;
+        totalEl.textContent = '';
+        return;
+      }
+
+      let grandTotal = 0;
+      tbody.innerHTML = items.map((item, idx) => {
+        const { name, qaid } = extractQaid(item.cust_name_ar || '');
+        const amount          = calcAmount(item.total_bill, item.payment_type);
+        grandTotal           += amount;
+        const payType         = (item.payment_type && item.payment_type !== 'null') ? item.payment_type : '3/4';
+        const notes           = (item.employee_name && item.employee_name !== 'null') ? item.employee_name : '';
+
+        return `
+          <tr>
+            <td style="text-align:center;font-weight:700;">${idx + 1}</td>
+            <td style="text-align:center;font-weight:700;color:var(--accent-dark);">${qaid || '---'}</td>
+            <td style="font-weight:600;">${name || item.cust_name_ar || '---'}</td>
+            <td style="font-size:0.82rem;color:var(--text-secondary);">${notes}</td>
+            <td style="font-size:0.78rem;color:var(--text-muted);">${payType}</td>
+            <td><b style="color:var(--warning);">${amount.toFixed(2)}</b></td>
+            <td><span class="branch-tag">${item.branch || '---'}</span></td>
+          </tr>`;
+      }).join('');
+
+      totalEl.innerHTML = `الإجمالي: <span style="color:var(--warning);">${grandTotal.toFixed(2)}</span> جنيه`;
+    }
+
+    async function createClaim() {
+      const ready = allContracts.filter(item => {
+        const state   = (item.bill_state && item.bill_state !== 'null') ? item.bill_state.trim() : '';
+        const claimId = (item.claim_id   && item.claim_id   !== 'null') ? item.claim_id.trim()   : '';
+        return state === 'فاتورة' && !claimId;
+      });
+
+      if (ready.length === 0) {
+        alert('لا توجد فواتير جاهزة للمطالبة');
+        return;
+      }
+
+      if (!confirm(`هل تريد إنشاء مطالبة بـ ${ready.length} فاتورة؟`)) return;
+
+      const btn = document.getElementById('create-claim-btn');
+      btn.disabled  = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الإنشاء...';
+
+      try {
+        // ١. أنشئ المطالبة
+        const claimResp = await fetch("https://agent.ebrahimhamdy.com/webhook/taskmanagement", {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            type:       "claim_new",
+            claim_date: new Date().toISOString(),
+            status:     "pending",
+            created_by: activeUser
+          })
+        });
+
+        const claimData = await claimResp.json();
+        const claimArr  = Array.isArray(claimData) ? claimData : [claimData];
+        const claimId   = claimArr[0]?.id;
+
+        if (!claimId) { alert('❌ فشل إنشاء المطالبة'); return; }
+
+        // ٢. حدّث كل فاتورة بالـ claim_id
+        const claimDate = new Date().toISOString();
+        await Promise.all(ready.map(item =>
+          updateData({
+            type:          "contract_update",
+            id:            item.id,
+            bill_no:       item.bill_no       || null,
+            bill_date:     item.bill_date     || null,
+            cust_code:     item.cust_code     || null,
+            cust_name_ar:  item.cust_name_ar  || null,
+            total_bill:    item.total_bill    || null,
+            employee_name: item.employee_name || null,
+            bill_state:    item.bill_state    || null,
+            bill_type:     item.bill_type     || null,
+            payment_type:  item.payment_type  || null,
+            branch:        item.branch        || null,
+            claim_id:      String(claimId),
+            claim_date:    claimDate
+          })
+        ));
+
+        // ٣. اطبع الـ PDF
+        generatePDF(ready, claimId, claimDate);
+
+        await loadAll();
+      } catch(e) {
+        alert('❌ خطأ في الاتصال');
+        console.error(e);
+      } finally {
+        btn.disabled  = false;
+        btn.innerHTML = '<i class="fas fa-paper-plane"></i> إنشاء مطالبة';
+      }
+    }
+
+    function generatePDF(items, claimId, claimDate) {
+      const dateStr = new Date(claimDate).toLocaleDateString('ar-EG', {
+        year:'numeric', month:'long', day:'numeric'
+      });
+
+      items.sort((a, b) => new Date(a.bill_date || 0) - new Date(b.bill_date || 0));
+
+      const workers  = items.filter(i => (i.bill_type || '').trim() === 'عاملين');
+      const retirees = items.filter(i => (i.bill_type || '').trim() === 'معاشات');
+
+      function buildTable(list, startIdx) {
+        if (list.length === 0) return '<p style="color:#666;">لا توجد فواتير</p>';
+        let total = 0;
+        let rows = list.map((item, i) => {
+          const { name, qaid } = extractQaid(item.cust_name_ar || '');
+          const amount          = calcAmount(item.total_bill, item.payment_type);
+          total                += amount;
+          const notes           = (item.employee_name && item.employee_name !== 'null') ? item.employee_name : '';
+          return `
+            <tr>
+              <td style="text-align:center;">${startIdx + i + 1}</td>
+              <td style="text-align:center;font-weight:bold;">${qaid || '---'}</td>
+              <td>${name || item.cust_name_ar || '---'}</td>
+              <td style="font-size:11px;color:#555;">${notes}</td>
+              <td style="text-align:center;font-size:11px;">${item.payment_type || '3/4'}</td>
+              <td style="text-align:center;font-weight:bold;">${amount.toFixed(2)}</td>
+            </tr>`;
+        }).join('');
+        rows += `
+          <tr style="background:#f0fdf4;font-weight:bold;">
+            <td colspan="5" style="text-align:left;padding:8px;">الإجمالي</td>
+            <td style="text-align:center;color:#16a34a;">${total.toFixed(2)}</td>
+          </tr>`;
+        return `
+          <table border="1" cellpadding="6" cellspacing="0"
+            style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px;">
+            <thead style="background:#1e40af;color:#fff;">
+              <tr>
+                <th width="5%">م</th>
+                <th width="12%">رقم القيد</th>
+                <th width="30%">اسم العميل</th>
+                <th width="25%">ملاحظات</th>
+                <th width="13%">طريقة الدفع</th>
+                <th width="15%">المبلغ المطالب</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>`;
+      }
+
+      const totalAll = items.reduce((s, i) => s + calcAmount(i.total_bill, i.payment_type), 0);
+
+      const html = `
+        <!DOCTYPE html>
+        <html dir="rtl" lang="ar">
+        <head>
+          <meta charset="UTF-8">
+          <title>مطالبة رقم ${claimId}</title>
+          <style>
+            * { box-sizing:border-box; }
+            body { font-family:'Arial',sans-serif; margin:20px; direction:rtl; }
+            h1 { color:#1e3a8a; font-size:18px; margin-bottom:4px; }
+            h2 { color:#1e40af; font-size:14px; margin:16px 0 6px; border-bottom:2px solid #1e40af; padding-bottom:4px; }
+            .header { border:2px solid #1e3a8a; padding:12px; border-radius:8px; margin-bottom:16px; }
+            .meta { font-size:12px; color:#555; margin-top:4px; }
+            .grand-total { background:#1e3a8a; color:#fff; padding:10px 16px; border-radius:8px; margin-top:16px; font-size:14px; font-weight:bold; text-align:left; }
+            @media print { body { margin:10px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>📋 مطالبة رقم ${claimId}</h1>
+            <div class="meta">التاريخ: ${dateStr} — أعدها: ${activeUser}</div>
+          </div>
+
+          <h2>👷 عاملين</h2>
+          ${buildTable(workers, 0)}
+
+          <h2>👴 معاشات</h2>
+          ${buildTable(retirees, workers.length)}
+
+          <div class="grand-total">
+            الإجمالي الكلي للمطالبة: ${totalAll.toFixed(2)} جنيه
+          </div>
+        </body>
+        </html>`;
+
+      const win = window.open('', '_blank');
+      win.document.write(html);
+      win.document.close();
+      win.print();
+    }
+
+    function renderClaims() {
+      const container = document.getElementById('claims-container');
+      if (allClaims.length === 0) {
+        container.innerHTML = '<p style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد مطالبات</p>';
+        return;
+      }
+
+      allClaims.sort((a, b) => new Date(b.claim_date || 0) - new Date(a.claim_date || 0));
+
+      container.innerHTML = allClaims.map(claim => {
+        const dateStr    = claim.claim_date
+          ? new Date(claim.claim_date).toLocaleDateString('ar-EG', {year:'numeric', month:'long', day:'numeric'})
+          : '---';
+        const collected  = (claim.status === 'collected');
+        const relatedBills = allContracts.filter(i =>
+          i.claim_id && String(i.claim_id).trim() === String(claim.id).trim()
+        );
+        const totalAmount = relatedBills.reduce((s, i) => s + calcAmount(i.total_bill, i.payment_type), 0);
+
+        return `
+          <div class="claim-card ${collected ? 'collected' : ''}">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+              <div>
+                <div style="font-weight:700;font-size:0.95rem;">
+                  📋 مطالبة رقم ${claim.id}
+                  ${collected
+                    ? '<span style="background:#dcfce7;color:#15803d;padding:2px 10px;border-radius:20px;font-size:0.72rem;margin-right:8px;">✅ تم التحصيل</span>'
+                    : '<span style="background:#fef9c3;color:#854d0e;padding:2px 10px;border-radius:20px;font-size:0.72rem;margin-right:8px;">⏳ لم يُحصَّل</span>'}
+                </div>
+                <div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;">
+                  ${dateStr} — ${claim.created_by || ''}
+                  — <b style="color:var(--warning);">${totalAmount.toFixed(2)} جنيه</b>
+                  — <span style="color:var(--text-secondary);">${relatedBills.length} فاتورة</span>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <button class="btn btn-sm btn-primary"
+                  onclick="printClaim('${claim.id}')">
+                  <i class="fas fa-print"></i> PDF
+                </button>
+                ${!collected ? `
+                  <button class="btn btn-sm btn-success"
+                    onclick="collectClaim('${claim.id}', this)">
+                    <i class="fas fa-check-circle"></i> تم التحصيل
+                  </button>` : ''}
+              </div>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    async function collectClaim(id, btn) {
+      if (!confirm('هل تم تحصيل هذه المطالبة؟')) return;
+      btn.disabled  = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+      const success = await updateData({
+        type:   "claim_collected",
+        id,
+        status: "collected"
+      });
+
+      if (success) {
+        await loadAll();
+      } else {
+        alert('❌ فشل التحديث');
+        btn.disabled  = false;
+        btn.innerHTML = '<i class="fas fa-check-circle"></i> تم التحصيل';
+      }
+    }
+
+    function printClaim(claimId) {
+      const relatedBills = allContracts.filter(i =>
+        i.claim_id && String(i.claim_id).trim() === String(claimId).trim()
+      );
+      const claim     = allClaims.find(c => String(c.id) === String(claimId));
+      const claimDate = claim?.claim_date || new Date().toISOString();
+      generatePDF(relatedBills, claimId, claimDate);
+    }
+  </script>
+</body>
+</html>
