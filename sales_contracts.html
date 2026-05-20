@@ -1,3 +1,4 @@
+<!-- sales_contracts.html -->
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -16,10 +17,7 @@
           <i class="fas fa-file-invoice"></i> فواتير التعاقد
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-
-          <!-- إحصائيات -->
           <div id="stats-bar" style="display:flex;gap:8px;align-items:center;font-size:0.82rem;"></div>
-
           <div class="field-icon-wrap" style="min-width:220px;">
             <i class="fas fa-search field-icon"></i>
             <input type="text" id="searchInput" class="form-input"
@@ -55,12 +53,14 @@
               <th>القيمة</th>
               <th>الموظف</th>
               <th>الفرع</th>
+              <th>نوع الفاتورة</th>
+              <th>طريقة الدفع</th>
               <th>الحالة</th>
               <th>إجراء</th>
             </tr>
           </thead>
           <tbody id="table-body">
-            <tr class="loading-row"><td colspan="9">⏳ جاري التحميل...</td></tr>
+            <tr class="loading-row"><td colspan="11">⏳ جاري التحميل...</td></tr>
           </tbody>
         </table>
       </div>
@@ -140,6 +140,26 @@
         </div>
       </div>
 
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+        <div>
+          <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">نوع الفاتورة</label>
+          <select id="modal-bill-type" class="form-select">
+            <option value="">— اختر —</option>
+            <option value="عاملين">👷 عاملين</option>
+            <option value="معاشات">👴 معاشات</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">طريقة الدفع</label>
+          <select id="modal-payment-type" class="form-select">
+            <option value="">— اختر —</option>
+            <option value="3/4">3/4</option>
+            <option value="مساهمة كاملة">مساهمة كاملة</option>
+            <option value="مساهمة 50%">مساهمة 50%</option>
+          </select>
+        </div>
+      </div>
+
       <div style="margin-bottom:20px;">
         <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:8px;">الحالة</label>
         <select id="modal-state" class="form-select">
@@ -180,13 +200,13 @@
 
     async function loadData() {
       const tbody = document.getElementById('table-body');
-      tbody.innerHTML = '<tr class="loading-row"><td colspan="9">⏳ جاري جلب البيانات...</td></tr>';
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="11">⏳ جاري جلب البيانات...</td></tr>';
       try {
         const response = await fetchFromN8N('sales_contract');
         allData = Array.isArray(response) ? response : (response.data || []);
         applyFilter();
       } catch(e) {
-        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
       }
     }
 
@@ -196,7 +216,6 @@
 
       const filtered = allData.filter(item => {
         const state = (item.bill_state && item.bill_state !== 'null') ? item.bill_state.trim() : '';
-
         let stateMatch = true;
         if (stateVal === 'default') {
           stateMatch = (state === '' || state === 'مقابل مرتجع' || state === 'لنا فاتورة');
@@ -205,20 +224,25 @@
         } else {
           stateMatch = (state === stateVal);
         }
-
         const searchMatch = !searchVal || [
           item.bill_no, item.cust_code, item.cust_name_ar,
-          item.employee_name, item.branch
+          item.employee_name, item.branch, item.bill_type, item.payment_type
         ].some(val => String(val || '').toLowerCase().includes(searchVal));
-
         return stateMatch && searchMatch;
       });
 
       renderTable(filtered);
     }
 
+    function calcAmount(total, paymentType) {
+      const t = parseFloat(total) || 0;
+      if (!paymentType || paymentType === '3/4') return (t * 0.75).toFixed(2);
+      if (paymentType === 'مساهمة كاملة')        return t.toFixed(2);
+      if (paymentType === 'مساهمة 50%')           return (t * 0.5).toFixed(2);
+      return (t * 0.75).toFixed(2);
+    }
+
     function renderTable(items) {
-      // إحصائيات
       const total   = allData.length;
       const pending = allData.filter(i => {
         const s = (i.bill_state && i.bill_state !== 'null') ? i.bill_state.trim() : '';
@@ -236,11 +260,11 @@
 
       const tbody = document.getElementById('table-body');
       if (items.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج</td></tr>';
         return;
       }
 
-items.sort((a, b) => new Date(b.bill_date || 0) - new Date(a.bill_date || 0));
+      items.sort((a, b) => new Date(b.bill_date || 0) - new Date(a.bill_date || 0));
 
       tbody.innerHTML = items.map(item => {
         const dateObj = item.bill_date ? new Date(item.bill_date) : null;
@@ -250,12 +274,19 @@ items.sort((a, b) => new Date(b.bill_date || 0) - new Date(a.bill_date || 0));
         const timeStr = dateObj
           ? dateObj.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit', hour12:true})
           : '';
-
-        const state = (item.bill_state && item.bill_state !== 'null') ? item.bill_state.trim() : '';
+        const state       = (item.bill_state    && item.bill_state    !== 'null') ? item.bill_state.trim()    : '';
+        const billType    = (item.bill_type     && item.bill_type     !== 'null') ? item.bill_type            : '---';
+        const paymentType = (item.payment_type  && item.payment_type  !== 'null') ? item.payment_type         : '---';
+        const claimBadge  = (item.claim_id && item.claim_id !== 'null')
+          ? `<span style="font-size:0.7rem;background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:20px;">📋 مطالبة</span>`
+          : '';
 
         return `
           <tr>
-            <td><code style="font-size:0.82rem;color:var(--text-secondary);">${item.bill_no || '---'}</code></td>
+            <td>
+              <code style="font-size:0.82rem;color:var(--text-secondary);">${item.bill_no || '---'}</code>
+              ${claimBadge}
+            </td>
             <td style="font-size:0.75rem;line-height:1.4;">
               ${dateStr}<br>
               <span style="color:var(--text-muted);font-size:0.7rem;">${timeStr}</span>
@@ -265,6 +296,12 @@ items.sort((a, b) => new Date(b.bill_date || 0) - new Date(a.bill_date || 0));
             <td><b style="color:var(--warning);">${item.total_bill || '0'}</b></td>
             <td style="font-size:0.82rem;">${(item.employee_name && item.employee_name !== 'null') ? item.employee_name : '---'}</td>
             <td><span class="branch-tag">${item.branch || '---'}</span></td>
+            <td>
+              <span style="font-size:0.78rem;font-weight:700;color:${billType === 'عاملين' ? '#0ea5e9' : '#8b5cf6'};">
+                ${billType === 'عاملين' ? '👷' : billType === 'معاشات' ? '👴' : ''} ${billType}
+              </span>
+            </td>
+            <td style="font-size:0.78rem;color:var(--text-secondary);">${paymentType}</td>
             <td>
               <select class="table-select" onchange="quickUpdateState('${item.id}', this.value)">
                 <option value=""               ${state === ''               ? 'selected' : ''}>⏳ قيد الانتظار</option>
@@ -310,25 +347,14 @@ items.sort((a, b) => new Date(b.bill_date || 0) - new Date(a.bill_date || 0));
         total_bill:    item.total_bill    || null,
         employee_name: item.employee_name || null,
         bill_state:    newState,
+        bill_type:     item.bill_type     || null,
+        payment_type:  item.payment_type  || null,
         branch:        item.branch        || null,
       });
 
       if (success) {
         item.bill_state = newState;
-        renderTable(allData.filter(i => {
-          const stateVal  = document.getElementById('stateFilter').value;
-          const searchVal = document.getElementById('searchInput').value.trim().toLowerCase();
-          const state = (i.bill_state && i.bill_state !== 'null') ? i.bill_state.trim() : '';
-          let stateMatch = true;
-          if (stateVal === 'default') {
-            stateMatch = (state === '' || state === 'مقابل مرتجع' || state === 'لنا فاتورة');
-          } else if (stateVal !== 'all') {
-            stateMatch = (state === stateVal);
-          }
-          const searchMatch = !searchVal || [i.bill_no, i.cust_code, i.cust_name_ar, i.employee_name, i.branch]
-            .some(val => String(val || '').toLowerCase().includes(searchVal));
-          return stateMatch && searchMatch;
-        }));
+        applyFilter();
       } else {
         alert("❌ فشل التحديث");
         applyFilter();
@@ -336,20 +362,22 @@ items.sort((a, b) => new Date(b.bill_date || 0) - new Date(a.bill_date || 0));
     }
 
     function openAddModal() {
-      document.getElementById('modal-id').value           = '';
-      document.getElementById('modal-mode').value         = 'add';
-      document.getElementById('modal-title').innerHTML    = '<i class="fas fa-plus"></i> إضافة فاتورة جديدة';
-      document.getElementById('modal-bill-no').value      = '';
-      document.getElementById('modal-bill-no').readOnly   = false;
-      document.getElementById('bill-no-note').textContent = '';
-      document.getElementById('modal-bill-date').value    = new Date().toISOString().split('T')[0];
-      document.getElementById('modal-cust-code').value    = '';
-      document.getElementById('modal-cust-name').value    = '';
-      document.getElementById('modal-total').value        = '';
-      document.getElementById('modal-employee').value     = '';
-      document.getElementById('modal-state').value        = '';
-      document.getElementById('modal-save-btn').innerHTML = '<i class="fas fa-save"></i> حفظ';
-      document.getElementById('edit-modal').style.display = 'flex';
+      document.getElementById('modal-id').value              = '';
+      document.getElementById('modal-mode').value            = 'add';
+      document.getElementById('modal-title').innerHTML       = '<i class="fas fa-plus"></i> إضافة فاتورة جديدة';
+      document.getElementById('modal-bill-no').value         = '';
+      document.getElementById('modal-bill-no').readOnly      = false;
+      document.getElementById('bill-no-note').textContent    = '';
+      document.getElementById('modal-bill-date').value       = new Date().toISOString().split('T')[0];
+      document.getElementById('modal-cust-code').value       = '';
+      document.getElementById('modal-cust-name').value       = '';
+      document.getElementById('modal-total').value           = '';
+      document.getElementById('modal-employee').value        = '';
+      document.getElementById('modal-bill-type').value       = '';
+      document.getElementById('modal-payment-type').value    = '';
+      document.getElementById('modal-state').value           = '';
+      document.getElementById('modal-save-btn').innerHTML    = '<i class="fas fa-save"></i> حفظ';
+      document.getElementById('edit-modal').style.display    = 'flex';
     }
 
     function openEditModal(id) {
@@ -366,6 +394,8 @@ items.sort((a, b) => new Date(b.bill_date || 0) - new Date(a.bill_date || 0));
       document.getElementById('modal-cust-name').value    = item.cust_name_ar  || '';
       document.getElementById('modal-total').value        = item.total_bill    || '';
       document.getElementById('modal-employee').value     = item.employee_name || '';
+      document.getElementById('modal-bill-type').value    = (item.bill_type    && item.bill_type    !== 'null') ? item.bill_type    : '';
+      document.getElementById('modal-payment-type').value = (item.payment_type && item.payment_type !== 'null') ? item.payment_type : '';
 
       if (item.bill_date) {
         document.getElementById('modal-bill-date').value = item.bill_date.split('T')[0];
@@ -389,13 +419,15 @@ items.sort((a, b) => new Date(b.bill_date || 0) - new Date(a.bill_date || 0));
       const mode = document.getElementById('modal-mode').value;
       const id   = document.getElementById('modal-id').value;
 
-      const billNo   = document.getElementById('modal-bill-no').value.trim();
-      const billDate = document.getElementById('modal-bill-date').value;
-      const custCode = document.getElementById('modal-cust-code').value.trim();
-      const custName = document.getElementById('modal-cust-name').value.trim();
-      const total    = document.getElementById('modal-total').value.trim();
-      const employee = document.getElementById('modal-employee').value.trim();
-      const state    = document.getElementById('modal-state').value;
+      const billNo      = document.getElementById('modal-bill-no').value.trim();
+      const billDate    = document.getElementById('modal-bill-date').value;
+      const custCode    = document.getElementById('modal-cust-code').value.trim();
+      const custName    = document.getElementById('modal-cust-name').value.trim();
+      const total       = document.getElementById('modal-total').value.trim();
+      const employee    = document.getElementById('modal-employee').value.trim();
+      const billType    = document.getElementById('modal-bill-type').value;
+      const paymentType = document.getElementById('modal-payment-type').value;
+      const state       = document.getElementById('modal-state').value;
 
       if (mode === 'add' && !billNo)  { alert("برجاء إدخال رقم الفاتورة");      return; }
       if (!custCode && !custName)      { alert("برجاء إدخال كود أو اسم العميل"); return; }
@@ -407,11 +439,13 @@ items.sort((a, b) => new Date(b.bill_date || 0) - new Date(a.bill_date || 0));
         type:          mode === 'add' ? "contract_new" : "contract_update",
         id:            id || undefined,
         bill_no:       billNo,
-        bill_date:     billDate    || null,
-        cust_code:     custCode    || null,
-        cust_name_ar:  custName    || null,
-        total_bill:    total       || null,
-        employee_name: employee    || null,
+        bill_date:     billDate      || null,
+        cust_code:     custCode      || null,
+        cust_name_ar:  custName      || null,
+        total_bill:    total         || null,
+        employee_name: employee      || null,
+        bill_type:     billType      || null,
+        payment_type:  paymentType   || null,
         bill_state:    state,
         branch:        userBranch,
         createdAt:     new Date().toISOString()
