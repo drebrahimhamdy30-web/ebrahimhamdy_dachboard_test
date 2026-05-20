@@ -1,4 +1,3 @@
-<!-- sales_contracts.html -->
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -274,10 +273,8 @@
         const timeStr = dateObj
           ? dateObj.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit', hour12:true})
           : '';
-        const state       = (item.bill_state    && item.bill_state    !== 'null') ? item.bill_state.trim()    : '';
-        const billType    = (item.bill_type     && item.bill_type     !== 'null') ? item.bill_type            : '---';
-        const paymentType = (item.payment_type  && item.payment_type  !== 'null') ? item.payment_type         : '---';
-        const claimBadge  = (item.claim_id && item.claim_id !== 'null')
+        const state      = (item.bill_state && item.bill_state !== 'null') ? item.bill_state.trim() : '';
+        const claimBadge = (item.claim_id && item.claim_id !== 'null' && item.claim_id !== '' && item.claim_id !== '0')
           ? `<span style="font-size:0.7rem;background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:20px;">📋 مطالبة</span>`
           : '';
 
@@ -297,11 +294,20 @@
             <td style="font-size:0.82rem;">${(item.employee_name && item.employee_name !== 'null') ? item.employee_name : '---'}</td>
             <td><span class="branch-tag">${item.branch || '---'}</span></td>
             <td>
-              <span style="font-size:0.78rem;font-weight:700;color:${billType === 'عاملين' ? '#0ea5e9' : '#8b5cf6'};">
-                ${billType === 'عاملين' ? '👷' : billType === 'معاشات' ? '👴' : ''} ${billType}
-              </span>
+              <select class="table-select" onchange="quickUpdateBillType('${item.id}', this.value)">
+                <option value=""        ${!item.bill_type || item.bill_type === 'null' ? 'selected' : ''}>— اختر —</option>
+                <option value="عاملين" ${(item.bill_type || '') === 'عاملين' ? 'selected' : ''}>👷 عاملين</option>
+                <option value="معاشات" ${(item.bill_type || '') === 'معاشات' ? 'selected' : ''}>👴 معاشات</option>
+              </select>
             </td>
-            <td style="font-size:0.78rem;color:var(--text-secondary);">${paymentType}</td>
+            <td>
+              <select class="table-select" onchange="quickUpdatePaymentType('${item.id}', this.value)">
+                <option value=""               ${!item.payment_type || item.payment_type === 'null' ? 'selected' : ''}>— اختر —</option>
+                <option value="3/4"            ${(item.payment_type || '') === '3/4'           ? 'selected' : ''}>3/4</option>
+                <option value="مساهمة كاملة"  ${(item.payment_type || '') === 'مساهمة كاملة' ? 'selected' : ''}>مساهمة كاملة</option>
+                <option value="مساهمة 50%"    ${(item.payment_type || '') === 'مساهمة 50%'   ? 'selected' : ''}>مساهمة 50%</option>
+              </select>
+            </td>
             <td>
               <select class="table-select" onchange="quickUpdateState('${item.id}', this.value)">
                 <option value=""               ${state === ''               ? 'selected' : ''}>⏳ قيد الانتظار</option>
@@ -361,23 +367,65 @@
       }
     }
 
+    async function quickUpdateBillType(id, newVal) {
+      const item = allData.find(x => x.id == id);
+      if (!item) return;
+      const success = await updateData({
+        type:          "contract_update",
+        id,
+        bill_no:       item.bill_no       || null,
+        bill_date:     item.bill_date     || null,
+        cust_code:     item.cust_code     || null,
+        cust_name_ar:  item.cust_name_ar  || null,
+        total_bill:    item.total_bill    || null,
+        employee_name: item.employee_name || null,
+        bill_state:    item.bill_state    || null,
+        bill_type:     newVal             || null,
+        payment_type:  item.payment_type  || null,
+        branch:        item.branch        || null,
+      });
+      if (success) { item.bill_type = newVal; }
+      else { alert("❌ فشل التحديث"); applyFilter(); }
+    }
+
+    async function quickUpdatePaymentType(id, newVal) {
+      const item = allData.find(x => x.id == id);
+      if (!item) return;
+      const success = await updateData({
+        type:          "contract_update",
+        id,
+        bill_no:       item.bill_no       || null,
+        bill_date:     item.bill_date     || null,
+        cust_code:     item.cust_code     || null,
+        cust_name_ar:  item.cust_name_ar  || null,
+        total_bill:    item.total_bill    || null,
+        employee_name: item.employee_name || null,
+        bill_state:    item.bill_state    || null,
+        bill_type:     item.bill_type     || null,
+        payment_type:  newVal             || null,
+        branch:        item.branch        || null,
+      });
+      if (success) { item.payment_type = newVal; }
+      else { alert("❌ فشل التحديث"); applyFilter(); }
+    }
+
     function openAddModal() {
-      document.getElementById('modal-id').value              = '';
-      document.getElementById('modal-mode').value            = 'add';
-      document.getElementById('modal-title').innerHTML       = '<i class="fas fa-plus"></i> إضافة فاتورة جديدة';
-      document.getElementById('modal-bill-no').value         = '';
-      document.getElementById('modal-bill-no').readOnly      = false;
-      document.getElementById('bill-no-note').textContent    = '';
-      document.getElementById('modal-bill-date').value       = new Date().toISOString().split('T')[0];
-      document.getElementById('modal-cust-code').value       = '';
-      document.getElementById('modal-cust-name').value       = '';
-      document.getElementById('modal-total').value           = '';
-      document.getElementById('modal-employee').value        = '';
-      document.getElementById('modal-bill-type').value       = '';
-      document.getElementById('modal-payment-type').value    = '';
-      document.getElementById('modal-state').value           = '';
-      document.getElementById('modal-save-btn').innerHTML    = '<i class="fas fa-save"></i> حفظ';
-      document.getElementById('edit-modal').style.display    = 'flex';
+      document.getElementById('modal-id').value           = '';
+      document.getElementById('modal-mode').value         = 'add';
+      document.getElementById('modal-title').innerHTML    = '<i class="fas fa-plus"></i> إضافة فاتورة جديدة';
+      document.getElementById('modal-bill-no').value      = '';
+      document.getElementById('modal-bill-no').readOnly   = false;
+      document.getElementById('bill-no-note').textContent = '';
+      document.getElementById('modal-bill-date').value    = new Date().toISOString().split('T')[0];
+      document.getElementById('modal-cust-code').value    = '';
+      document.getElementById('modal-cust-name').value    = '';
+      document.getElementById('modal-total').value        = '';
+      document.getElementById('modal-employee').value     = '';
+      document.getElementById('modal-bill-type').value    = '';
+      document.getElementById('modal-payment-type').value = '';
+      document.getElementById('modal-state').value        = '';
+      document.getElementById('modal-save-btn').innerHTML = '<i class="fas fa-save"></i> حفظ';
+      document.getElementById('edit-modal').style.display = 'flex';
     }
 
     function openEditModal(id) {
