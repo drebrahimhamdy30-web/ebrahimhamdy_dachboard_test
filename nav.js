@@ -61,6 +61,9 @@ function injectNavbar() {
       <a href="missing_items.html" class="${currentPage === 'missing_items.html' ? 'active' : ''}">
         <i class="fas fa-truck"></i> لم يصل
       </a>
+      <a href="inventory_min.html" class="${currentPage === 'inventory_min.html' ? 'active' : ''}">
+  <i class="fas fa-boxes"></i> حدود المخزون
+</a>
     </nav>
     <div class="user-info">
       <span id="nav-user">${localStorage.getItem('activeUser') || ''}</span>
