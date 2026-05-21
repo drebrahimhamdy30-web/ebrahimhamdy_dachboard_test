@@ -184,18 +184,18 @@
     }
 
     function applyFilter() {
-      const searchVal  = document.getElementById('searchInput').value.trim().toLowerCase();
-      const belowOnly  = document.getElementById('belowOnly').checked;
-      const branchVal  = document.getElementById('branchFilter').value;
-      const typeVal    = document.getElementById('typeFilter').value;
+      const searchVal = document.getElementById('searchInput').value.trim().toLowerCase();
+      const belowOnly = document.getElementById('belowOnly').checked;
+      const branchVal = document.getElementById('branchFilter').value;
+      const typeVal   = document.getElementById('typeFilter').value;
 
       const filtered = allData.filter(item => {
-        const searchMatch  = !searchVal || [item.item_code, item.item_name]
+        const searchMatch = !searchVal || [item.item_code, item.item_name]
           .some(v => String(v || '').toLowerCase().includes(searchVal));
-        const belowMatch   = !belowOnly ||
+        const belowMatch  = !belowOnly ||
           (parseFloat(item.current_stock) < parseFloat(item.min_stock));
-        const branchMatch  = branchVal === 'all' || String(item.branch || '').trim() === branchVal;
-        const typeMatch    = typeVal   === 'all' || String(item.item_type || '').trim() === typeVal;
+        const branchMatch = branchVal === 'all' || String(item.branch    || '').trim() === branchVal;
+        const typeMatch   = typeVal   === 'all' || String(item.item_type || '').trim() === typeVal;
         return searchMatch && belowMatch && branchMatch && typeMatch;
       });
 
@@ -236,9 +236,9 @@
       });
 
       tbody.innerHTML = items.map(item => {
-        const stock   = parseFloat(item.current_stock) || 0;
-        const minS    = parseFloat(item.min_stock)     || 0;
-        const isBelow = stock < minS;
+        const stock     = parseFloat(item.current_stock) || 0;
+        const minS      = parseFloat(item.min_stock)     || 0;
+        const isBelow   = stock < minS;
         const typeColor = item.item_type === 'دواء' ? '#0ea5e9' : '#8b5cf6';
 
         return `
@@ -267,12 +267,20 @@
               </span>
             </td>
             <td>
-              <button class="btn btn-sm btn-icon"
-                onclick="refreshItem('${item.id}', '${item.item_code}')"
-                style="background:var(--accent);color:#fff;padding:5px 8px;"
-                title="تحديث الرصيد">
-                <i class="fas fa-sync-alt"></i>
-              </button>
+              <div style="display:flex;gap:4px;">
+                <button class="btn btn-sm btn-icon"
+                  onclick="refreshItem('${item.id}', '${item.item_code}')"
+                  style="background:var(--accent);color:#fff;padding:5px 8px;"
+                  title="تحديث الرصيد">
+                  <i class="fas fa-sync-alt"></i>
+                </button>
+                <button class="btn btn-sm btn-icon"
+                  onclick="deleteItem('${item.id}', '${item.item_name}')"
+                  style="background:var(--danger);color:#fff;padding:5px 8px;"
+                  title="حذف">
+                  <i class="fas fa-trash"></i>
+                </button>
+              </div>
             </td>
           </tr>`;
       }).join('');
@@ -306,7 +314,6 @@
             `<span style="color:var(--danger);font-size:0.85rem;">❌ لم يتم العثور على الصنف</span>`;
           document.getElementById('lookup-details').style.display = 'none';
         } else {
-          // تحقق لو الصنف موجود في نفس الفرع
           const alreadyExists = allData.some(x =>
             String(x.item_code).trim() === String(code).trim() &&
             String(x.branch).trim()    === String(userBranch).trim()
@@ -320,8 +327,8 @@
             document.getElementById('lookup-details').style.display = 'none';
           } else {
             document.getElementById('lookup-name').value  = data.itm_name_ar || '';
-            document.getElementById('lookup-stock').value = data.balance ?? 0;
-            document.getElementById('lookup-type').value  = data.item_type  || '';
+            document.getElementById('lookup-stock').value = data.balance      ?? 0;
+            document.getElementById('lookup-type').value  = data.item_type   || '';
             document.getElementById('lookup-min').value   = '';
             document.getElementById('lookup-result').innerHTML = '';
             document.getElementById('lookup-details').style.display = '';
@@ -393,6 +400,7 @@
         if (item) {
           item.min_stock = newMin;
           renderStats();
+          applyFilter();
         }
       } else {
         alert('❌ فشل التحديث');
@@ -435,6 +443,24 @@
         }
       } catch(e) {
         alert('❌ خطأ في الاتصال');
+      }
+    }
+
+    // ===== حذف صنف =====
+    async function deleteItem(id, itemName) {
+      if (!confirm(`هل تريد حذف "${itemName}" من قائمة حدود المخزون؟`)) return;
+
+      const success = await updateData({
+        type: "inventory_delete",
+        id
+      });
+
+      if (success) {
+        allData = allData.filter(x => String(x.id) !== String(id));
+        renderStats();
+        applyFilter();
+      } else {
+        alert('❌ فشل الحذف');
       }
     }
   </script>
