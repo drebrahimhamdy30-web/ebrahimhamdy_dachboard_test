@@ -252,46 +252,81 @@
     }
 
     // ===== بحث وإضافة صنف جديد =====
-    async function lookupItem() {
-      const code = document.getElementById('lookup-code').value.trim();
-      if (!code) { alert('برجاء إدخال كود الصنف'); return; }
+async function lookupItem() {
+  const code = document.getElementById('lookup-code').value.trim();
+  if (!code) { alert('برجاء إدخال كود الصنف'); return; }
 
-      const btn = document.getElementById('lookup-btn');
-      btn.disabled  = true;
-      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+  const btn = document.getElementById('lookup-btn');
+  btn.disabled  = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
-      try {
-        const resp = await fetch("https://agent.ebrahimhamdy.com/webhook/taskmanagement", {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ type: "inventory_lookup", code })
-        });
+  try {
+    const resp = await fetch("https://agent.ebrahimhamdy.com/webhook/taskmanagement", {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        type:   "inventory_lookup",
+        code,
+        branch: userBranch
+      })
+    });
 
-        const raw  = await resp.json();
-        const data = Array.isArray(raw) ? raw[0] : raw;
+    const raw  = await resp.json();
+    const data = Array.isArray(raw) ? raw[0] : raw;
 
-        if (!data || (!data.item_name && !data.name)) {
-          document.getElementById('lookup-result').innerHTML =
-            `<span style="color:var(--danger);font-size:0.85rem;">❌ لم يتم العثور على الصنف</span>`;
-          document.getElementById('lookup-details').style.display = 'none';
-        } else {
-          const name  = data.item_name || data.name  || '';
-          const stock = data.current_stock ?? data.stock ?? data.qty ?? 0;
-
-          document.getElementById('lookup-name').value  = name;
-          document.getElementById('lookup-stock').value = stock;
-          document.getElementById('lookup-min').value   = '';
-          document.getElementById('lookup-result').innerHTML = '';
-          document.getElementById('lookup-details').style.display = '';
-        }
-      } catch(e) {
-        document.getElementById('lookup-result').innerHTML =
-          `<span style="color:var(--danger);font-size:0.85rem;">❌ خطأ في الاتصال</span>`;
-      } finally {
-        btn.disabled  = false;
-        btn.innerHTML = '<i class="fas fa-search"></i> جلب البيانات';
-      }
+    if (!data || !data.found) {
+      document.getElementById('lookup-result').innerHTML =
+        `<span style="color:var(--danger);font-size:0.85rem;">❌ لم يتم العثور على الصنف</span>`;
+      document.getElementById('lookup-details').style.display = 'none';
+    } else {
+      document.getElementById('lookup-name').value  = data.itm_name_ar || '';
+      document.getElementById('lookup-stock').value = data.balance ?? 0;
+      document.getElementById('lookup-min').value   = '';
+      document.getElementById('lookup-result').innerHTML = '';
+      document.getElementById('lookup-details').style.display = '';
     }
+  } catch(e) {
+    document.getElementById('lookup-result').innerHTML =
+      `<span style="color:var(--danger);font-size:0.85rem;">❌ خطأ في الاتصال</span>`;
+  } finally {
+    btn.disabled  = false;
+    btn.innerHTML = '<i class="fas fa-search"></i> جلب البيانات';
+  }
+}
+
+async function refreshItem(itemCode) {
+  try {
+    const resp = await fetch("https://agent.ebrahimhamdy.com/webhook/taskmanagement", {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        type:   "inventory_lookup",
+        code:   itemCode,
+        branch: userBranch
+      })
+    });
+
+    const raw  = await resp.json();
+    const data = Array.isArray(raw) ? raw[0] : raw;
+
+    if (data && data.found) {
+      await updateData({
+        type:          "inventory_update",
+        item_code:     itemCode,
+        current_stock: data.balance ?? 0
+      });
+      const item = allData.find(x => String(x.item_code) === String(itemCode));
+      if (item) {
+        item.current_stock = data.balance ?? 0;
+        applyFilter();
+      }
+    } else {
+      alert('❌ لم يتم العثور على الصنف');
+    }
+  } catch(e) {
+    alert('❌ خطأ في الاتصال');
+  }
+}
 
     async function saveNewItem() {
       const code  = document.getElementById('lookup-code').value.trim();
