@@ -1,76 +1,74 @@
-// ===== Navbar =====
 function injectNavbar() {
   const currentPage = window.location.pathname.split("/").pop();
   const navContent = `
 <div class="nav-logo">
   <span style="font-weight:900;font-size:1.1rem;letter-spacing:1px;">Phalix</span>
 </div>
-    <nav class="nav-links">
-      <a href="main.html" class="${currentPage === 'main.html' ? 'active' : ''}">
-        <i class="fas fa-plus-circle"></i> مدخلات
-      </a>
-      <a href="purchases.html" class="${currentPage === 'purchases.html' ? 'active' : ''}">
-        <i class="fas fa-shopping-cart"></i> مشتريات
-      </a>
-      <a href="transfers.html" class="${currentPage === 'transfers.html' ? 'active' : ''}">
-        <i class="fas fa-exchange-alt"></i> تحويلات
-      </a>
-      <a href="customer_service.html" class="${currentPage === 'customer_service.html' ? 'active' : ''}">
-        <i class="fas fa-headset"></i> خدمة العملاء
-      </a>
-      <a href="shortages.html" class="${currentPage === 'shortages.html' ? 'active' : ''}">
-        <i class="fas fa-exclamation-triangle"></i> نواقص
-      </a>
-      <a href="inventory.html" class="${currentPage === 'inventory.html' ? 'active' : ''}">
-        <i class="fas fa-clipboard-list"></i> جرد
-      </a>
-      <a href="notifications.html" class="${currentPage === 'notifications.html' ? 'active' : ''}">
-        <i class="fas fa-bell" style="position:relative;">اشعارات
-        </i>
-        <a href="offers.html" class="${currentPage === 'offers.html' ? 'active' : ''}">
-  <i class="fas fa-tags"></i> عروض
-</a>
-<a href="sales_contracts.html" class="${currentPage === 'sales_contracts.html' ? 'active' : ''}">
-  <i class="fas fa-file-invoice"></i> فواتيرالتعاقد
-</a>
-<a href="claims.html" class="${currentPage === 'claims.html' ? 'active' : ''}">
-  <i class="fas fa-file-invoice-dollar"></i> مطالبات
-</a>
-        <span id="notif-badge" style="
-          display:none;
-          position:absolute;
-          top:-4px;
-          right:-8px;
-          background:#ef4444;
-          color:#fff;
-          border-radius:50%;
-          width:16px;
-          height:16px;
-          font-size:0.6rem;
-          font-weight:700;
-          align-items:center;
-          justify-content:center;
-          line-height:16px;
-          text-align:center;
-        ">0</span>
-        إشعارات
-      </a>
-      <a href="contracts.html" class="${currentPage === 'contracts.html' ? 'active' : ''}">
-        <i class="fas fa-file-contract"></i> لنا فواتير تعاقد لدى العملاء
-      </a>
-      <a href="missing_items.html" class="${currentPage === 'missing_items.html' ? 'active' : ''}">
-        <i class="fas fa-truck"></i> لم يصل
-      </a>
-      <a href="inventory_min.html" class="${currentPage === 'inventory_min.html' ? 'active' : ''}">
-  <i class="fas fa-boxes"></i> حدود المخزون
-</a>
-    </nav>
-    <div class="user-info">
-      <span id="nav-user">${localStorage.getItem('activeUser') || ''}</span>
-      <button class="btn-logout" onclick="logout()">
-        <i class="fas fa-sign-out-alt"></i>
-      </button>
-    </div>
+<nav class="nav-links">
+  <a href="main.html" class="${currentPage === 'main.html' ? 'active' : ''}">
+    <i class="fas fa-plus-circle"></i> مدخلات
+  </a>
+  <a href="purchases.html" class="${currentPage === 'purchases.html' ? 'active' : ''}">
+    <i class="fas fa-shopping-cart"></i> مشتريات
+  </a>
+  <a href="transfers.html" class="${currentPage === 'transfers.html' ? 'active' : ''}">
+    <i class="fas fa-exchange-alt"></i> تحويلات
+  </a>
+  <a href="customer_service.html" class="${currentPage === 'customer_service.html' ? 'active' : ''}">
+    <i class="fas fa-headset"></i> خدمة العملاء
+  </a>
+  <a href="shortages.html" class="${currentPage === 'shortages.html' ? 'active' : ''}">
+    <i class="fas fa-exclamation-triangle"></i> نواقص
+  </a>
+  <a href="inventory.html" class="${currentPage === 'inventory.html' ? 'active' : ''}">
+    <i class="fas fa-clipboard-list"></i> جرد
+  </a>
+  <a href="notifications.html" class="${currentPage === 'notifications.html' ? 'active' : ''}" style="position:relative;">
+    <i class="fas fa-bell"></i>
+    <span id="notif-badge" style="
+      display:none;
+      position:absolute;
+      top:-4px;
+      right:-8px;
+      background:#ef4444;
+      color:#fff;
+      border-radius:50%;
+      width:16px;
+      height:16px;
+      font-size:0.6rem;
+      font-weight:700;
+      align-items:center;
+      justify-content:center;
+      line-height:16px;
+      text-align:center;
+    ">0</span>
+    إشعارات
+  </a>
+  <a href="offers.html" class="${currentPage === 'offers.html' ? 'active' : ''}">
+    <i class="fas fa-tags"></i> عروض
+  </a>
+  <a href="sales_contracts.html" class="${currentPage === 'sales_contracts.html' ? 'active' : ''}">
+    <i class="fas fa-file-invoice"></i> فواتير التعاقد
+  </a>
+  <a href="claims.html" class="${currentPage === 'claims.html' ? 'active' : ''}">
+    <i class="fas fa-file-invoice-dollar"></i> مطالبات
+  </a>
+  <a href="contracts.html" class="${currentPage === 'contracts.html' ? 'active' : ''}">
+    <i class="fas fa-file-contract"></i> لنا فواتير تعاقد لدى العملاء
+  </a>
+  <a href="missing_items.html" class="${currentPage === 'missing_items.html' ? 'active' : ''}">
+    <i class="fas fa-truck"></i> لم يصل
+  </a>
+  <a href="inventory_min.html" class="${currentPage === 'inventory_min.html' ? 'active' : ''}">
+    <i class="fas fa-boxes"></i> حدود المخزون
+  </a>
+</nav>
+<div class="user-info">
+  <span id="nav-user">${localStorage.getItem('activeUser') || ''}</span>
+  <button class="btn-logout" onclick="logout()">
+    <i class="fas fa-sign-out-alt"></i>
+  </button>
+</div>
   `;
   const navBar = document.querySelector('.nav-bar');
   if (navBar) navBar.innerHTML = navContent;
