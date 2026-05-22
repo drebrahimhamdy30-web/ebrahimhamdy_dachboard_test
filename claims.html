@@ -150,7 +150,7 @@
 
     function extractQaid(name) {
       if (!name) return { name: '', qaid: '' };
-      const match = name.match(/^(.*?)\s+(\d+)$/);
+      const match = name.match(/^(.*?)[\s\*]+(\d+).*$/);
       if (match) return { name: match[1].trim(), qaid: match[2] };
       return { name: name.trim(), qaid: '' };
     }
@@ -165,13 +165,17 @@
 
     function renderPending() {
       const ready = allContracts.filter(item => {
-        const state    = String(item.bill_state || '').trim();
-        const claimId  = item.claim_id;
+        const state      = String(item.bill_state || '').trim();
+        const claimId    = item.claim_id;
         const hasNoClaim = !claimId || claimId === 'null' || claimId === '' || claimId === '0';
         return state === 'فاتورة' && hasNoClaim;
       });
 
-      ready.sort((a, b) => new Date(a.bill_date || 0) - new Date(b.bill_date || 0));
+      ready.sort((a, b) => {
+        const aSerial = parseInt(a.serial_no) || 9999;
+        const bSerial = parseInt(b.serial_no) || 9999;
+        return aSerial - bSerial;
+      });
 
       const workers  = ready.filter(i => String(i.bill_type || '').trim() === 'عاملين');
       const retirees = ready.filter(i => String(i.bill_type || '').trim() === 'معاشات');
@@ -197,10 +201,13 @@
         grandTotal           += amount;
         const payType         = (item.payment_type && item.payment_type !== 'null') ? item.payment_type : '3/4';
         const notes           = (item.employee_name && item.employee_name !== 'null') ? item.employee_name : '';
+        const serialNum       = (item.serial_no && item.serial_no !== 'null' && item.serial_no !== '0')
+          ? item.serial_no
+          : idx + 1;
 
         return `
           <tr>
-            <td style="text-align:center;font-weight:700;">${idx + 1}</td>
+            <td style="text-align:center;font-weight:700;">${serialNum}</td>
             <td style="text-align:center;font-weight:700;color:var(--accent-dark);">${qaid || '---'}</td>
             <td style="font-weight:600;">${name || item.cust_name_ar || '---'}</td>
             <td style="font-size:0.82rem;color:var(--text-secondary);">${notes}</td>
@@ -214,8 +221,8 @@
 
     async function createClaim() {
       const ready = allContracts.filter(item => {
-        const state    = String(item.bill_state || '').trim();
-        const claimId  = item.claim_id;
+        const state      = String(item.bill_state || '').trim();
+        const claimId    = item.claim_id;
         const hasNoClaim = !claimId || claimId === 'null' || claimId === '' || claimId === '0';
         return state === 'فاتورة' && hasNoClaim;
       });
@@ -260,6 +267,7 @@
             bill_type:     item.bill_type     || null,
             payment_type:  item.payment_type  || null,
             branch:        item.branch        || null,
+            serial_no:     item.serial_no     || null,
             claim_id:      String(claimId),
             claim_date:    claimDate
           })
@@ -282,12 +290,16 @@
         year:'numeric', month:'long', day:'numeric'
       });
 
-      items.sort((a, b) => new Date(a.bill_date || 0) - new Date(b.bill_date || 0));
+      items.sort((a, b) => {
+        const aSerial = parseInt(a.serial_no) || 9999;
+        const bSerial = parseInt(b.serial_no) || 9999;
+        return aSerial - bSerial;
+      });
 
       const workers  = items.filter(i => (i.bill_type || '').trim() === 'عاملين');
       const retirees = items.filter(i => (i.bill_type || '').trim() === 'معاشات');
 
-      function buildTable(list, startIdx) {
+      function buildTable(list) {
         if (list.length === 0) return '<p style="color:#666;">لا توجد فواتير</p>';
         let total = 0;
         let rows  = list.map((item, i) => {
@@ -295,9 +307,12 @@
           const amount          = calcAmount(item.total_bill, item.payment_type);
           total                += amount;
           const notes           = (item.employee_name && item.employee_name !== 'null') ? item.employee_name : '';
+          const serialNum       = (item.serial_no && item.serial_no !== 'null' && item.serial_no !== '0')
+            ? item.serial_no
+            : i + 1;
           return `
             <tr>
-              <td style="text-align:center;">${startIdx + i + 1}</td>
+              <td style="text-align:center;">${serialNum}</td>
               <td style="text-align:center;font-weight:bold;">${qaid || '---'}</td>
               <td>${name || item.cust_name_ar || '---'}</td>
               <td style="font-size:11px;color:#555;">${notes}</td>
@@ -352,9 +367,9 @@
             <div class="meta">التاريخ: ${dateStr} — أعدها: ${activeUser}</div>
           </div>
           <h2>👷 عاملين</h2>
-          ${buildTable(workers, 0)}
+          ${buildTable(workers)}
           <h2>👴 معاشات</h2>
-          ${buildTable(retirees, workers.length)}
+          ${buildTable(retirees)}
           <div class="grand-total">
             الإجمالي الكلي للمطالبة: ${totalAll.toFixed(2)} جنيه
           </div>
@@ -377,16 +392,16 @@
       allClaims.sort((a, b) => new Date(b.claim_date || 0) - new Date(a.claim_date || 0));
 
       container.innerHTML = allClaims.map(claim => {
-        const dateStr    = claim.claim_date
+        const dateStr      = claim.claim_date
           ? new Date(claim.claim_date).toLocaleDateString('ar-EG', {year:'numeric', month:'long', day:'numeric'})
           : '---';
-        const collected  = (claim.status === 'collected');
+        const collected    = (claim.status === 'collected');
         const relatedBills = allContracts.filter(i => {
           const cid = i.claim_id;
           return cid && cid !== 'null' && cid !== '' && cid !== '0' &&
             String(cid).trim() === String(claim.id).trim();
         });
-        const totalAmount = relatedBills.reduce((s, i) => s + calcAmount(i.total_bill, i.payment_type), 0);
+        const totalAmount  = relatedBills.reduce((s, i) => s + calcAmount(i.total_bill, i.payment_type), 0);
 
         return `
           <div class="claim-card ${collected ? 'collected' : ''}">
