@@ -68,26 +68,14 @@
 
   <!-- Modal الإضافة/التعديل -->
   <div id="edit-modal" style="
-    display:none;
-    position:fixed;inset:0;
-    background:rgba(0,0,0,0.75);
-    z-index:99999;
-    align-items:center;
-    justify-content:center;
-  ">
+    display:none;position:fixed;inset:0;
+    background:rgba(0,0,0,0.75);z-index:99999;
+    align-items:center;justify-content:center;">
     <div style="
-      background:#1e293b;
-      border:2px solid #334155;
-      border-radius:16px;
-      padding:24px;
-      width:90%;
-      max-width:520px;
-      direction:rtl;
-      font-family:var(--font);
-      box-shadow:0 20px 60px rgba(0,0,0,0.6);
-      max-height:90vh;
-      overflow-y:auto;
-    ">
+      background:#1e293b;border:2px solid #334155;border-radius:16px;
+      padding:24px;width:90%;max-width:520px;direction:rtl;
+      font-family:var(--font);box-shadow:0 20px 60px rgba(0,0,0,0.6);
+      max-height:90vh;overflow-y:auto;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
         <span id="modal-title" style="font-size:1rem;font-weight:700;color:#f1f5f9;">
           <i class="fas fa-edit"></i> تعديل فاتورة
@@ -172,11 +160,65 @@
 
       <div style="display:flex;gap:8px;justify-content:flex-end;">
         <button onclick="closeModal()" class="btn"
-          style="background:#334155;color:#94a3b8;border:none;">
-          إلغاء
-        </button>
+          style="background:#334155;color:#94a3b8;border:none;">إلغاء</button>
         <button onclick="saveModal()" class="btn btn-primary" id="modal-save-btn">
           <i class="fas fa-save"></i> حفظ
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal الدمج -->
+  <div id="merge-modal" style="
+    display:none;position:fixed;inset:0;
+    background:rgba(0,0,0,0.75);z-index:99999;
+    align-items:center;justify-content:center;">
+    <div style="
+      background:#1e293b;border:2px solid #334155;border-radius:16px;
+      padding:24px;width:90%;max-width:480px;direction:rtl;
+      font-family:var(--font);box-shadow:0 20px 60px rgba(0,0,0,0.6);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <span style="font-size:1rem;font-weight:700;color:#f1f5f9;">
+          <i class="fas fa-compress-arrows-alt"></i> دمج فاتورتين
+        </span>
+        <button onclick="closeMergeModal()"
+          style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:1.2rem;">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <input type="hidden" id="merge-a-id">
+
+      <!-- فاتورة A -->
+      <div style="background:var(--surface-3);border-radius:8px;padding:12px;margin-bottom:16px;">
+        <div style="font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:6px;">
+          الفاتورة الأساسية (ستُضاف إليها القيمة)
+        </div>
+        <div id="merge-a-info" style="font-size:0.85rem;color:var(--text-primary);line-height:1.8;"></div>
+      </div>
+
+      <!-- فاتورة B -->
+      <div style="margin-bottom:20px;">
+        <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:8px;">
+          الفاتورة المراد دمجها (نفس كود العميل)
+        </label>
+        <select id="merge-b-select" class="form-select" onchange="onMergeBSelect()">
+          <option value="">— اختر فاتورة —</option>
+        </select>
+        <div id="merge-b-info" style="margin-top:8px;font-size:0.82rem;color:var(--text-muted);"></div>
+      </div>
+
+      <!-- ملخص -->
+      <div id="merge-summary" style="display:none;background:#0f172a;border-radius:8px;padding:12px;margin-bottom:16px;font-size:0.85rem;">
+        <div style="color:#94a3b8;margin-bottom:6px;font-weight:700;">ملخص الدمج:</div>
+        <div id="merge-summary-text" style="color:var(--text-primary);line-height:1.8;"></div>
+      </div>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button onclick="closeMergeModal()" class="btn"
+          style="background:#334155;color:#94a3b8;border:none;">إلغاء</button>
+        <button onclick="executeMerge()" class="btn btn-primary" id="merge-save-btn">
+          <i class="fas fa-compress-arrows-alt"></i> تأكيد الدمج
         </button>
       </div>
     </div>
@@ -209,41 +251,41 @@
       }
     }
 
-function applyFilter() {
-  const stateVal  = document.getElementById('stateFilter').value;
-  const searchVal = document.getElementById('searchInput').value.trim().toLowerCase();
+    function applyFilter() {
+      const stateVal  = document.getElementById('stateFilter').value;
+      const searchVal = document.getElementById('searchInput').value.trim().toLowerCase();
 
-  const filtered = allData.filter(item => {
-    const state     = (item.bill_state && item.bill_state !== 'null') ? item.bill_state.trim() : '';
-    const noType    = !item.bill_type    || item.bill_type    === 'null' || item.bill_type    === '';
-    const noPayment = !item.payment_type || item.payment_type === 'null' || item.payment_type === '';
+      const filtered = allData.filter(item => {
+        const state     = (item.bill_state && item.bill_state !== 'null') ? item.bill_state.trim() : '';
+        const noType    = !item.bill_type    || item.bill_type    === 'null' || item.bill_type    === '';
+        const noPayment = !item.payment_type || item.payment_type === 'null' || item.payment_type === '';
 
-if (stateVal === 'default') {
-  const noType    = !item.bill_type    || item.bill_type    === 'null' || item.bill_type    === '';
-  const noPayment = !item.payment_type || item.payment_type === 'null' || item.payment_type === '';
+        let stateMatch = true;
+        if (stateVal === 'default') {
+          if (state === '') {
+            stateMatch = true;
+          } else if (state === 'فاتورة') {
+            stateMatch = noType || noPayment;
+          } else {
+            stateMatch = false;
+          }
+        } else if (stateVal === 'all') {
+          stateMatch = true;
+        } else {
+          stateMatch = (state === stateVal);
+        }
 
-  if (state === '') {
-    // قيد الانتظار — يظهر دايماً
-    stateMatch = true;
-  } else if (state === 'فاتورة') {
-    // فاتورة — يظهر بس لو نوع أو طريقة فاضيين
-    stateMatch = noType || noPayment;
-  } else {
-    // أي حاجة تانية — مش يظهر
-    stateMatch = false;
-  }
-}
+        const searchMatch = !searchVal || [
+          item.bill_no, item.cust_code, item.cust_name_ar,
+          item.employee_name, item.branch, item.bill_type, item.payment_type
+        ].some(val => String(val || '').toLowerCase().includes(searchVal));
 
-    const searchMatch = !searchVal || [
-      item.bill_no, item.cust_code, item.cust_name_ar,
-      item.employee_name, item.branch, item.bill_type, item.payment_type
-    ].some(val => String(val || '').toLowerCase().includes(searchVal));
+        return stateMatch && searchMatch;
+      });
 
-    return stateMatch && searchMatch;
-  });
+      renderTable(filtered);
+    }
 
-  renderTable(filtered);
-}
     function calcAmount(total, paymentType) {
       const t = parseFloat(total) || 0;
       if (!paymentType || paymentType === '3/4') return (t * 0.75).toFixed(2);
@@ -329,17 +371,26 @@ if (stateVal === 'default') {
               </select>
             </td>
             <td>
-              <button class="btn btn-sm btn-icon"
-                onclick="openEditModal('${item.id}')"
-                style="background:var(--accent);color:#fff;padding:5px 8px;"
-                title="تعديل">
-                <i class="fas fa-edit"></i>
-              </button>
+              <div style="display:flex;gap:4px;">
+                <button class="btn btn-sm btn-icon"
+                  onclick="openEditModal('${item.id}')"
+                  style="background:var(--accent);color:#fff;padding:5px 8px;"
+                  title="تعديل">
+                  <i class="fas fa-edit"></i>
+                </button>
+                <button class="btn btn-sm btn-icon"
+                  onclick="openMergeModal('${item.id}')"
+                  style="background:#8b5cf6;color:#fff;padding:5px 8px;"
+                  title="دمج مع فاتورة أخرى">
+                  <i class="fas fa-compress-arrows-alt"></i>
+                </button>
+              </div>
             </td>
           </tr>`;
       }).join('');
     }
 
+    // ===== Quick Updates =====
     async function quickUpdateState(id, newState) {
       const item = allData.find(x => x.id == id);
       if (!item) return;
@@ -369,13 +420,8 @@ if (stateVal === 'default') {
         branch:        item.branch        || null,
       });
 
-      if (success) {
-        item.bill_state = newState;
-        applyFilter();
-      } else {
-        alert("❌ فشل التحديث");
-        applyFilter();
-      }
+      if (success) { item.bill_state = newState; applyFilter(); }
+      else { alert("❌ فشل التحديث"); applyFilter(); }
     }
 
     async function quickUpdateBillType(id, newVal) {
@@ -420,6 +466,7 @@ if (stateVal === 'default') {
       else { alert("❌ فشل التحديث"); applyFilter(); }
     }
 
+    // ===== Modal الإضافة/التعديل =====
     function openAddModal() {
       document.getElementById('modal-id').value           = '';
       document.getElementById('modal-mode').value         = 'add';
@@ -510,19 +557,125 @@ if (stateVal === 'default') {
         createdAt:     new Date().toISOString()
       });
 
-      if (success) {
-        closeModal();
-        loadData();
-      } else {
-        alert("❌ فشل الحفظ");
-      }
+      if (success) { closeModal(); loadData(); }
+      else { alert("❌ فشل الحفظ"); }
 
       btn.disabled  = false;
       btn.innerHTML = '<i class="fas fa-save"></i> حفظ';
     }
 
+    // ===== Modal الدمج =====
+    function openMergeModal(id) {
+      const itemA = allData.find(x => x.id == id);
+      if (!itemA) return;
+
+      document.getElementById('merge-a-id').value = id;
+      document.getElementById('merge-a-info').innerHTML = `
+        <b>رقم الفاتورة:</b> ${itemA.bill_no || '---'}<br>
+        <b>العميل:</b> ${itemA.cust_name_ar || '---'} (${itemA.cust_code || '---'})<br>
+        <b>القيمة:</b> <span style="color:var(--warning);">${itemA.total_bill || 0}</span> جنيه
+      `;
+
+      // فلتر الفواتير بنفس كود العميل (ما عدا A)
+      const custCode = String(itemA.cust_code || '').trim();
+      const candidates = allData.filter(x =>
+        String(x.id) !== String(id) &&
+        String(x.cust_code || '').trim() === custCode &&
+        (x.bill_state !== 'مدموجة') &&
+        (!x.claim_id || x.claim_id === 'null' || x.claim_id === '' || x.claim_id === '0')
+      );
+
+      const select = document.getElementById('merge-b-select');
+      select.innerHTML = '<option value="">— اختر فاتورة —</option>';
+      candidates.forEach(x => {
+        const opt = document.createElement('option');
+        opt.value       = x.id;
+        opt.textContent = `${x.bill_no} — ${x.total_bill || 0} جنيه`;
+        select.appendChild(opt);
+      });
+
+      document.getElementById('merge-b-info').textContent    = '';
+      document.getElementById('merge-summary').style.display = 'none';
+      document.getElementById('merge-modal').style.display   = 'flex';
+    }
+
+    function onMergeBSelect() {
+      const aId   = document.getElementById('merge-a-id').value;
+      const bId   = document.getElementById('merge-b-select').value;
+      const itemA = allData.find(x => String(x.id) === String(aId));
+      const itemB = allData.find(x => String(x.id) === String(bId));
+
+      if (!itemB) {
+        document.getElementById('merge-b-info').textContent    = '';
+        document.getElementById('merge-summary').style.display = 'none';
+        return;
+      }
+
+      const totalA   = parseFloat(itemA?.total_bill || 0);
+      const totalB   = parseFloat(itemB.total_bill  || 0);
+      const newTotal = totalA + totalB;
+
+      document.getElementById('merge-b-info').innerHTML = `
+        <span style="color:var(--text-secondary);">
+          العميل: ${itemB.cust_name_ar || '---'} — القيمة: ${totalB} جنيه
+        </span>`;
+
+      document.getElementById('merge-summary').style.display = '';
+      document.getElementById('merge-summary-text').innerHTML = `
+        ✅ فاتورة <b>${itemA?.bill_no}</b> ستصبح قيمتها: <b style="color:var(--warning);">${newTotal} جنيه</b><br>
+        🔒 فاتورة <b>${itemB.bill_no}</b> ستُخفى ولن تُضاف في المطالبات
+      `;
+    }
+
+    function closeMergeModal() {
+      document.getElementById('merge-modal').style.display = 'none';
+    }
+
+    async function executeMerge() {
+      const aId   = document.getElementById('merge-a-id').value;
+      const bId   = document.getElementById('merge-b-select').value;
+
+      if (!bId) { alert('برجاء اختيار الفاتورة المراد دمجها'); return; }
+
+      const itemA = allData.find(x => String(x.id) === String(aId));
+      const itemB = allData.find(x => String(x.id) === String(bId));
+
+      if (!itemA || !itemB) return;
+
+      if (!confirm(`تأكيد دمج فاتورة ${itemB.bill_no} في فاتورة ${itemA.bill_no}؟`)) return;
+
+      const btn = document.getElementById('merge-save-btn');
+      btn.disabled  = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الدمج...';
+
+      const totalA   = parseFloat(itemA.total_bill || 0);
+      const totalB   = parseFloat(itemB.total_bill || 0);
+      const newTotal = totalA + totalB;
+
+      const success = await updateData({
+        type:      "contract_merge",
+        bill_a_id: aId,
+        bill_a_no: itemA.bill_no,
+        bill_b_id: bId,
+        new_total: newTotal
+      });
+
+      if (success) {
+        closeMergeModal();
+        await loadData();
+      } else {
+        alert('❌ فشل الدمج');
+      }
+
+      btn.disabled  = false;
+      btn.innerHTML = '<i class="fas fa-compress-arrows-alt"></i> تأكيد الدمج';
+    }
+
     document.getElementById('edit-modal').addEventListener('click', function(e) {
       if (e.target === this) closeModal();
+    });
+    document.getElementById('merge-modal').addEventListener('click', function(e) {
+      if (e.target === this) closeMergeModal();
     });
   </script>
 </body>
