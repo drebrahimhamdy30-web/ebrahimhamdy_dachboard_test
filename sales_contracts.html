@@ -189,7 +189,6 @@
 
       <input type="hidden" id="merge-a-id">
 
-      <!-- فاتورة A -->
       <div style="background:var(--surface-3);border-radius:8px;padding:12px;margin-bottom:16px;">
         <div style="font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:6px;">
           الفاتورة الأساسية (ستُضاف إليها القيمة)
@@ -197,7 +196,6 @@
         <div id="merge-a-info" style="font-size:0.85rem;color:var(--text-primary);line-height:1.8;"></div>
       </div>
 
-      <!-- فاتورة B -->
       <div style="margin-bottom:20px;">
         <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:8px;">
           الفاتورة المراد دمجها (نفس كود العميل)
@@ -208,7 +206,6 @@
         <div id="merge-b-info" style="margin-top:8px;font-size:0.82rem;color:var(--text-muted);"></div>
       </div>
 
-      <!-- ملخص -->
       <div id="merge-summary" style="display:none;background:#0f172a;border-radius:8px;padding:12px;margin-bottom:16px;font-size:0.85rem;">
         <div style="color:#94a3b8;margin-bottom:6px;font-weight:700;">ملخص الدمج:</div>
         <div id="merge-summary-text" style="color:var(--text-primary);line-height:1.8;"></div>
@@ -294,6 +291,15 @@
       return (t * 0.75).toFixed(2);
     }
 
+    function getNextSerial(billType) {
+      const sameType = allData.filter(i =>
+        String(i.bill_type || '').trim() === billType &&
+        i.serial_no && i.serial_no !== 'null' && i.serial_no !== '0'
+      );
+      const maxSerial = Math.max(0, ...sameType.map(i => parseInt(i.serial_no) || 0));
+      return maxSerial + 1;
+    }
+
     function renderTable(items) {
       const total   = allData.length;
       const pending = allData.filter(i => {
@@ -330,12 +336,15 @@
         const claimBadge = (item.claim_id && item.claim_id !== 'null' && item.claim_id !== '' && item.claim_id !== '0')
           ? `<span style="font-size:0.7rem;background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:20px;">📋 مطالبة</span>`
           : '';
+        const serialBadge = (item.serial_no && item.serial_no !== 'null' && item.serial_no !== '0')
+          ? `<span style="font-size:0.7rem;background:#dcfce7;color:#15803d;padding:2px 8px;border-radius:20px;">م ${item.serial_no}</span>`
+          : '';
 
         return `
           <tr>
             <td>
               <code style="font-size:0.82rem;color:var(--text-secondary);">${item.bill_no || '---'}</code>
-              ${claimBadge}
+              ${claimBadge}${serialBadge}
             </td>
             <td style="font-size:0.75rem;line-height:1.4;">
               ${dateStr}<br>
@@ -395,6 +404,16 @@
       const item = allData.find(x => x.id == id);
       if (!item) return;
 
+      if (newState === 'فاتورة') {
+        const hasBillType    = item.bill_type    && item.bill_type    !== 'null' && item.bill_type    !== '';
+        const hasPaymentType = item.payment_type && item.payment_type !== 'null' && item.payment_type !== '';
+        if (!hasBillType || !hasPaymentType) {
+          alert('⚠️ برجاء اختيار نوع الفاتورة وطريقة الدفع أولاً');
+          applyFilter();
+          return;
+        }
+      }
+
       const currentState = (item.bill_state && item.bill_state !== 'null') ? item.bill_state.trim() : '';
       if (currentState === 'لنا فاتورة') {
         const pass = prompt('هذا الإجراء يحتاج صلاحية — أدخل كلمة المرور:');
@@ -403,6 +422,14 @@
           applyFilter();
           return;
         }
+      }
+
+      let serialNo = item.serial_no || null;
+      if (newState === 'فاتورة' && (!serialNo || serialNo === 'null' || serialNo === '0')) {
+        serialNo = getNextSerial(String(item.bill_type || '').trim());
+      }
+      if (newState !== 'فاتورة') {
+        serialNo = null;
       }
 
       const success = await updateData({
@@ -418,10 +445,17 @@
         bill_type:     item.bill_type     || null,
         payment_type:  item.payment_type  || null,
         branch:        item.branch        || null,
+        serial_no:     serialNo,
       });
 
-      if (success) { item.bill_state = newState; applyFilter(); }
-      else { alert("❌ فشل التحديث"); applyFilter(); }
+      if (success) {
+        item.bill_state = newState;
+        item.serial_no  = serialNo;
+        applyFilter();
+      } else {
+        alert("❌ فشل التحديث");
+        applyFilter();
+      }
     }
 
     async function quickUpdateBillType(id, newVal) {
@@ -440,6 +474,7 @@
         bill_type:     newVal             || null,
         payment_type:  item.payment_type  || null,
         branch:        item.branch        || null,
+        serial_no:     item.serial_no     || null,
       });
       if (success) { item.bill_type = newVal; }
       else { alert("❌ فشل التحديث"); applyFilter(); }
@@ -461,6 +496,7 @@
         bill_type:     item.bill_type     || null,
         payment_type:  newVal             || null,
         branch:        item.branch        || null,
+        serial_no:     item.serial_no     || null,
       });
       if (success) { item.payment_type = newVal; }
       else { alert("❌ فشل التحديث"); applyFilter(); }
@@ -565,44 +601,42 @@
     }
 
     // ===== Modal الدمج =====
-function openMergeModal(id) {
-  const itemA = allData.find(x => x.id == id);
-  if (!itemA) return;
+    function openMergeModal(id) {
+      const itemA = allData.find(x => x.id == id);
+      if (!itemA) return;
 
-  const custCode = String(itemA.cust_code || '').trim();
-  console.log('itemA:', itemA.bill_no, '| cust_code:', custCode, '| type:', typeof itemA.cust_code);
-  console.log('allData count:', allData.length);
+      const custCode   = String(itemA.cust_code || '').trim();
+      const candidates = allData.filter(x => {
+        const xCode = String(x.cust_code || '').trim();
+        return (
+          String(x.id) !== String(id) &&
+          xCode === custCode &&
+          x.bill_state !== 'مدموجة' &&
+          (!x.claim_id || x.claim_id === 'null' || x.claim_id === '' || x.claim_id === '0')
+        );
+      });
 
-  const candidates = allData.filter(x => {
-    const xCode  = String(x.cust_code || '').trim();
-    const xId    = String(x.id);
-    const match  = xId !== String(id) && xCode === custCode && x.bill_state !== 'مدموجة';
-    console.log('→', x.bill_no, '| code:', xCode, '| match:', match);
-    return match;
-  });
+      document.getElementById('merge-a-id').value = id;
+      document.getElementById('merge-a-info').innerHTML = `
+        <b>رقم الفاتورة:</b> ${itemA.bill_no || '---'}<br>
+        <b>العميل:</b> ${itemA.cust_name_ar || '---'} (${itemA.cust_code || '---'})<br>
+        <b>القيمة:</b> <span style="color:var(--warning);">${itemA.total_bill || 0}</span> جنيه
+      `;
 
-  console.log('candidates found:', candidates.length);
+      const select = document.getElementById('merge-b-select');
+      select.innerHTML = '<option value="">— اختر فاتورة —</option>';
+      candidates.forEach(x => {
+        const opt = document.createElement('option');
+        opt.value       = x.id;
+        opt.textContent = `${x.bill_no} — ${x.total_bill || 0} جنيه`;
+        select.appendChild(opt);
+      });
 
-  document.getElementById('merge-a-id').value = id;
-  document.getElementById('merge-a-info').innerHTML = `
-    <b>رقم الفاتورة:</b> ${itemA.bill_no || '---'}<br>
-    <b>العميل:</b> ${itemA.cust_name_ar || '---'} (${itemA.cust_code || '---'})<br>
-    <b>القيمة:</b> <span style="color:var(--warning);">${itemA.total_bill || 0}</span> جنيه
-  `;
+      document.getElementById('merge-b-info').textContent    = '';
+      document.getElementById('merge-summary').style.display = 'none';
+      document.getElementById('merge-modal').style.display   = 'flex';
+    }
 
-  const select = document.getElementById('merge-b-select');
-  select.innerHTML = '<option value="">— اختر فاتورة —</option>';
-  candidates.forEach(x => {
-    const opt = document.createElement('option');
-    opt.value       = x.id;
-    opt.textContent = `${x.bill_no} — ${x.total_bill || 0} جنيه`;
-    select.appendChild(opt);
-  });
-
-  document.getElementById('merge-b-info').textContent    = '';
-  document.getElementById('merge-summary').style.display = 'none';
-  document.getElementById('merge-modal').style.display   = 'flex';
-}
     function onMergeBSelect() {
       const aId   = document.getElementById('merge-a-id').value;
       const bId   = document.getElementById('merge-b-select').value;
@@ -645,7 +679,6 @@ function openMergeModal(id) {
       const itemB = allData.find(x => String(x.id) === String(bId));
 
       if (!itemA || !itemB) return;
-
       if (!confirm(`تأكيد دمج فاتورة ${itemB.bill_no} في فاتورة ${itemA.bill_no}؟`)) return;
 
       const btn = document.getElementById('merge-save-btn');
@@ -664,12 +697,8 @@ function openMergeModal(id) {
         new_total: newTotal
       });
 
-      if (success) {
-        closeMergeModal();
-        await loadData();
-      } else {
-        alert('❌ فشل الدمج');
-      }
+      if (success) { closeMergeModal(); await loadData(); }
+      else { alert('❌ فشل الدمج'); }
 
       btn.disabled  = false;
       btn.innerHTML = '<i class="fas fa-compress-arrows-alt"></i> تأكيد الدمج';
