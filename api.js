@@ -7,7 +7,9 @@ async function fetchFromN8N(category) {
   try {
     const response = await fetch(`${FETCH_URL}?type=${category}`);
     if (!response.ok) throw new Error('Network error');
-    const data = await response.json();
+    const text = await response.text();
+    if (!text || text.trim() === '') return [];
+    const data = JSON.parse(text);
     if (Array.isArray(data) && data[0]?.data) return data[0].data;
     if (Array.isArray(data) && data[0]?.branch) return data;
     if (Array.isArray(data) && data[0]?.invoice_no) return data;
