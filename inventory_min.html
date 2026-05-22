@@ -26,7 +26,7 @@
       margin-bottom: 20px;
     }
     .min-input {
-      width: 80px;
+      width: 70px;
       padding: 4px 8px;
       border-radius: 6px;
       border: 1.5px solid var(--border);
@@ -37,6 +37,18 @@
       text-align: center;
     }
     .min-input:focus { border-color: var(--accent); outline: none; }
+    .save-min-btn {
+      background: var(--success);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 3px 8px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 700;
+      line-height: 1.6;
+    }
+    .save-min-btn:hover { opacity: 0.85; }
   </style>
 </head>
 <body>
@@ -242,7 +254,7 @@
         const typeColor = item.item_type === 'دواء' ? '#0ea5e9' : '#8b5cf6';
 
         return `
-          <tr class="${isBelow ? 'below-min' : ''}">
+          <tr class="${isBelow ? 'below-min' : ''}" id="row-${item.id}">
             <td><code style="font-size:0.82rem;">${item.item_code || '---'}</code></td>
             <td style="font-weight:600;font-size:0.85rem;">${item.item_name || '---'}</td>
             <td>
@@ -252,17 +264,24 @@
             </td>
             <td><span class="branch-tag">${item.branch || '---'}</span></td>
             <td>
-              <b style="color:${isBelow ? 'var(--danger)' : 'var(--success)'};">
+              <b id="stock-${item.id}" style="color:${isBelow ? 'var(--danger)' : 'var(--success)'};">
                 ${stock}
               </b>
             </td>
             <td>
-              <input type="number" class="min-input" value="${minS}" min="0"
-                id="min-${item.id}"
-                onchange="saveMinStock('${item.id}', this.value)">
+              <div style="display:flex;gap:4px;align-items:center;">
+                <input type="number" class="min-input" value="${minS}" min="0"
+                  id="min-${item.id}"
+                  onkeydown="if(event.key==='Enter') saveMinStock('${item.id}', this.value)">
+                <button class="save-min-btn"
+                  onclick="saveMinStock('${item.id}', document.getElementById('min-${item.id}').value)"
+                  title="حفظ الحد الأدنى">
+                  ✓
+                </button>
+              </div>
             </td>
             <td>
-              <span class="stock-badge ${isBelow ? 'badge-danger' : 'badge-ok'}">
+              <span class="stock-badge ${isBelow ? 'badge-danger' : 'badge-ok'}" id="badge-${item.id}">
                 ${isBelow ? '⚠️ تحت الحد' : '✅ كافي'}
               </span>
             </td>
@@ -387,45 +406,44 @@
       document.getElementById('lookup-details').style.display = 'none';
     }
 
-async function saveMinStock(id, newMin) {
-  const item = allData.find(x => String(x.id) === String(id));
-  
-  const success = await updateData({
-    type:          "inventory_update",
-    id,
-    min_stock:     newMin,
-    current_stock: item?.current_stock ?? 0  // ←── ضيف
-  });
+    // ===== تحديث الحد الأدنى =====
+    async function saveMinStock(id, newMin) {
+      const item = allData.find(x => String(x.id) === String(id));
 
-  if (success) {
-    if (item) {
-      item.min_stock = newMin;
-      renderStats();
-      const input = document.getElementById(`min-${id}`);
-      if (input) {
-        const row     = input.closest('tr');
-        const stock   = parseFloat(item.current_stock) || 0;
-        const minS    = parseFloat(newMin) || 0;
-        const isBelow = stock < minS;
-        if (row) {
-          row.className = isBelow ? 'below-min' : '';
-          const badge = row.querySelector('.stock-badge');
+      const success = await updateData({
+        type:          "inventory_update",
+        id,
+        min_stock:     newMin,
+        current_stock: item?.current_stock ?? 0
+      });
+
+      if (success) {
+        if (item) {
+          item.min_stock = parseFloat(newMin);
+          renderStats();
+
+          const stock   = parseFloat(item.current_stock) || 0;
+          const minS    = parseFloat(newMin) || 0;
+          const isBelow = stock < minS;
+
+          const row   = document.getElementById(`row-${id}`);
+          const badge = document.getElementById(`badge-${id}`);
+          const stockEl = document.getElementById(`stock-${id}`);
+
+          if (row)   row.className = isBelow ? 'below-min' : '';
           if (badge) {
             badge.className   = `stock-badge ${isBelow ? 'badge-danger' : 'badge-ok'}`;
             badge.textContent = isBelow ? '⚠️ تحت الحد' : '✅ كافي';
           }
-          const stockCell = row.querySelectorAll('td')[4]?.querySelector('b');
-          if (stockCell) {
-            stockCell.style.color = isBelow ? 'var(--danger)' : 'var(--success)';
-          }
+          if (stockEl) stockEl.style.color = isBelow ? 'var(--danger)' : 'var(--success)';
         }
+      } else {
+        alert('❌ فشل التحديث');
+        loadAll();
       }
     }
-  } else {
-    alert('❌ فشل التحديث');
-    loadAll();
-  }
-}
+
+    // ===== تحديث رصيد صنف واحد =====
     async function refreshItem(id, itemCode) {
       try {
         const item = allData.find(x => String(x.id) === String(id));
@@ -436,7 +454,7 @@ async function saveMinStock(id, newMin) {
           body:    JSON.stringify({
             type:   "inventory_lookup",
             code:   itemCode,
-            branch: userBranch
+            branch: item?.branch || userBranch
           })
         });
 
@@ -453,7 +471,26 @@ async function saveMinStock(id, newMin) {
 
           if (item) {
             item.current_stock = data.balance ?? 0;
-            applyFilter();
+
+            const stock   = parseFloat(item.current_stock) || 0;
+            const minS    = parseFloat(item.min_stock)     || 0;
+            const isBelow = stock < minS;
+
+            const row     = document.getElementById(`row-${id}`);
+            const badge   = document.getElementById(`badge-${id}`);
+            const stockEl = document.getElementById(`stock-${id}`);
+
+            if (row)   row.className = isBelow ? 'below-min' : '';
+            if (badge) {
+              badge.className   = `stock-badge ${isBelow ? 'badge-danger' : 'badge-ok'}`;
+              badge.textContent = isBelow ? '⚠️ تحت الحد' : '✅ كافي';
+            }
+            if (stockEl) {
+              stockEl.textContent = stock;
+              stockEl.style.color = isBelow ? 'var(--danger)' : 'var(--success)';
+            }
+
+            renderStats();
           }
         } else {
           alert('❌ لم يتم العثور على الصنف');
