@@ -25,6 +25,36 @@
       border-radius:var(--radius-md); padding:16px; margin-bottom:12px;
     }
     .claim-card.collected { opacity:0.6; border-color:var(--success); }
+    .editable-cell {
+      cursor:pointer;
+      padding:4px 6px;
+      border-radius:4px;
+      transition:background 0.15s;
+      min-width:60px;
+      display:inline-block;
+    }
+    .editable-cell:hover { background:var(--surface-3); }
+    .cell-input {
+      background:var(--surface-3);
+      border:1.5px solid var(--accent);
+      border-radius:4px;
+      color:var(--text-primary);
+      font-family:var(--font);
+      font-size:0.82rem;
+      padding:3px 6px;
+      width:100%;
+      outline:none;
+    }
+    .cell-select {
+      background:var(--surface-3);
+      border:1.5px solid var(--accent);
+      border-radius:4px;
+      color:var(--text-primary);
+      font-family:var(--font);
+      font-size:0.82rem;
+      padding:3px 4px;
+      outline:none;
+    }
   </style>
 </head>
 <body>
@@ -148,16 +178,16 @@
       else renderClaims();
     }
 
-function extractQaid(name) {
-  if (!name) return { name: '', qaid: '' };
-  const match = name.match(/(\d+)/);
-  if (match) {
-    const qaid    = match[1];
-    const cleaned = name.replace(qaid, '').replace(/[\*\/\-\_]+/g, ' ').trim();
-    return { name: cleaned, qaid };
-  }
-  return { name: name.trim(), qaid: '' };
-}
+    function extractQaid(name) {
+      if (!name) return { name: '', qaid: '' };
+      const match = name.match(/(\d+)/);
+      if (match) {
+        const qaid    = match[1];
+        const cleaned = name.replace(qaid, '').replace(/[\*\/\-\_]+/g, ' ').trim();
+        return { name: cleaned, qaid };
+      }
+      return { name: name.trim(), qaid: '' };
+    }
 
     function calcAmount(total, paymentType) {
       const t = parseFloat(total) || 0;
@@ -204,18 +234,26 @@ function extractQaid(name) {
         const amount          = calcAmount(item.total_bill, item.payment_type);
         grandTotal           += amount;
         const payType         = (item.payment_type && item.payment_type !== 'null') ? item.payment_type : '3/4';
-        const notes           = (item.employee_name && item.employee_name !== 'null') ? item.employee_name : '';
         const serialNum       = (item.serial_no && item.serial_no !== 'null' && item.serial_no !== '0')
-          ? item.serial_no
-          : idx + 1;
+          ? item.serial_no : idx + 1;
 
         return `
-          <tr>
-            <td style="text-align:center;font-weight:700;">${serialNum}</td>
-            <td style="text-align:center;font-weight:700;color:var(--accent-dark);">${qaid || '---'}</td>
-            <td style="font-weight:600;">${name || item.cust_name_ar || '---'}</td>
-            <td style="font-size:0.82rem;color:var(--text-secondary);">${notes}</td>
-            <td style="font-size:0.78rem;color:var(--text-muted);">${payType}</td>
+          <tr id="claim-row-${item.id}">
+            <td style="text-align:center;font-weight:700;">
+              <span class="editable-cell" onclick="editSerial('${item.id}', this, ${serialNum})">${serialNum}</span>
+            </td>
+            <td style="text-align:center;font-weight:700;color:var(--accent-dark);">
+              <span class="editable-cell" onclick="editQaid('${item.id}', this, '${qaid}')">${qaid || '---'}</span>
+            </td>
+            <td style="font-weight:600;">
+              <span class="editable-cell" onclick="editName('${item.id}', this, '${(item.cust_name_ar || '').replace(/'/g, "&#39;")}')">${name || item.cust_name_ar || '---'}</span>
+            </td>
+            <td>
+              <span class="editable-cell" onclick="editNotes('${item.id}', this, '')">—</span>
+            </td>
+            <td style="font-size:0.78rem;">
+              <span class="editable-cell" onclick="editPayment('${item.id}', this, '${payType}')">${payType}</span>
+            </td>
             <td><b style="color:var(--warning);">${amount.toFixed(2)}</b></td>
           </tr>`;
       }).join('');
@@ -223,6 +261,209 @@ function extractQaid(name) {
       totalEl.innerHTML = `الإجمالي: <span style="color:var(--warning);">${grandTotal.toFixed(2)}</span> جنيه`;
     }
 
+    // ===== Inline Edit Functions =====
+
+    function editSerial(id, el, current) {
+      const input = document.createElement('input');
+      input.type      = 'number';
+      input.value     = current;
+      input.className = 'cell-input';
+      input.style.width = '60px';
+      el.replaceWith(input);
+      input.focus();
+      input.select();
+
+      const save = async () => {
+        const newVal = input.value.trim();
+        const item   = allContracts.find(x => String(x.id) === String(id));
+        if (!item) return;
+        const span = document.createElement('span');
+        span.className = 'editable-cell';
+        span.textContent = newVal || current;
+        span.onclick = () => editSerial(id, span, parseInt(newVal) || current);
+        input.replaceWith(span);
+        if (newVal && newVal != current) {
+          await updateData({
+            type: "contract_update", id,
+            bill_no: item.bill_no || null, bill_date: item.bill_date || null,
+            cust_code: item.cust_code || null, cust_name_ar: item.cust_name_ar || null,
+            total_bill: item.total_bill || null, employee_name: item.employee_name || null,
+            bill_state: item.bill_state || null, bill_type: item.bill_type || null,
+            payment_type: item.payment_type || null, branch: item.branch || null,
+            serial_no: newVal
+          });
+          item.serial_no = newVal;
+        }
+      };
+      input.addEventListener('blur', save);
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { input.value = current; input.blur(); } });
+    }
+
+    function editQaid(id, el, current) {
+      const item = allContracts.find(x => String(x.id) === String(id));
+      if (!item) return;
+      const { name } = extractQaid(item.cust_name_ar || '');
+
+      const input = document.createElement('input');
+      input.type      = 'text';
+      input.value     = current === '---' ? '' : current;
+      input.className = 'cell-input';
+      input.style.width = '80px';
+      el.replaceWith(input);
+      input.focus();
+      input.select();
+
+      const save = async () => {
+        const newQaid   = input.value.trim();
+        const newName   = newQaid ? `${name} ${newQaid}` : name;
+        const span = document.createElement('span');
+        span.className   = 'editable-cell';
+        span.textContent = newQaid || '---';
+        span.style.color = 'var(--accent-dark)';
+        span.style.fontWeight = '700';
+        span.onclick = () => editQaid(id, span, newQaid);
+        input.replaceWith(span);
+        if (newQaid !== (current === '---' ? '' : current)) {
+          await updateData({
+            type: "contract_update", id,
+            bill_no: item.bill_no || null, bill_date: item.bill_date || null,
+            cust_code: item.cust_code || null, cust_name_ar: newName,
+            total_bill: item.total_bill || null, employee_name: item.employee_name || null,
+            bill_state: item.bill_state || null, bill_type: item.bill_type || null,
+            payment_type: item.payment_type || null, branch: item.branch || null,
+            serial_no: item.serial_no || null
+          });
+          item.cust_name_ar = newName;
+        }
+      };
+      input.addEventListener('blur', save);
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { input.value = current; input.blur(); } });
+    }
+
+    function editName(id, el, current) {
+      const item = allContracts.find(x => String(x.id) === String(id));
+      if (!item) return;
+      const { qaid } = extractQaid(item.cust_name_ar || '');
+      const { name } = extractQaid(item.cust_name_ar || '');
+
+      const input = document.createElement('input');
+      input.type      = 'text';
+      input.value     = name;
+      input.className = 'cell-input';
+      input.style.width = '160px';
+      el.replaceWith(input);
+      input.focus();
+      input.select();
+
+      const save = async () => {
+        const newName    = input.value.trim();
+        const fullName   = qaid ? `${newName} ${qaid}` : newName;
+        const span = document.createElement('span');
+        span.className   = 'editable-cell';
+        span.textContent = newName || name;
+        span.style.fontWeight = '600';
+        span.onclick = () => editName(id, span, fullName);
+        input.replaceWith(span);
+        if (newName && newName !== name) {
+          await updateData({
+            type: "contract_update", id,
+            bill_no: item.bill_no || null, bill_date: item.bill_date || null,
+            cust_code: item.cust_code || null, cust_name_ar: fullName,
+            total_bill: item.total_bill || null, employee_name: item.employee_name || null,
+            bill_state: item.bill_state || null, bill_type: item.bill_type || null,
+            payment_type: item.payment_type || null, branch: item.branch || null,
+            serial_no: item.serial_no || null
+          });
+          item.cust_name_ar = fullName;
+        }
+      };
+      input.addEventListener('blur', save);
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { input.value = name; input.blur(); } });
+    }
+
+    function editNotes(id, el, current) {
+      const item = allContracts.find(x => String(x.id) === String(id));
+      if (!item) return;
+
+      const input = document.createElement('input');
+      input.type      = 'text';
+      input.value     = current || '';
+      input.className = 'cell-input';
+      input.style.width = '140px';
+      el.replaceWith(input);
+      input.focus();
+
+      const save = async () => {
+        const newVal = input.value.trim();
+        const span   = document.createElement('span');
+        span.className   = 'editable-cell';
+        span.textContent = newVal || '—';
+        span.style.fontSize  = '0.82rem';
+        span.style.color     = 'var(--text-secondary)';
+        span.onclick = () => editNotes(id, span, newVal);
+        input.replaceWith(span);
+        if (newVal !== current) {
+          await updateData({
+            type: "contract_update", id,
+            bill_no: item.bill_no || null, bill_date: item.bill_date || null,
+            cust_code: item.cust_code || null, cust_name_ar: item.cust_name_ar || null,
+            total_bill: item.total_bill || null, employee_name: newVal || null,
+            bill_state: item.bill_state || null, bill_type: item.bill_type || null,
+            payment_type: item.payment_type || null, branch: item.branch || null,
+            serial_no: item.serial_no || null
+          });
+          item.employee_name = newVal;
+        }
+      };
+      input.addEventListener('blur', save);
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { input.value = current; input.blur(); } });
+    }
+
+    function editPayment(id, el, current) {
+      const item = allContracts.find(x => String(x.id) === String(id));
+      if (!item) return;
+
+      const select = document.createElement('select');
+      select.className = 'cell-select';
+      ['3/4', 'مساهمة كاملة', 'مساهمة 50%'].forEach(opt => {
+        const o = document.createElement('option');
+        o.value = opt; o.textContent = opt;
+        if (opt === current) o.selected = true;
+        select.appendChild(o);
+      });
+      el.replaceWith(select);
+      select.focus();
+
+      const save = async () => {
+        const newVal = select.value;
+        const span   = document.createElement('span');
+        span.className   = 'editable-cell';
+        span.textContent = newVal;
+        span.style.fontSize = '0.78rem';
+        span.onclick = () => editPayment(id, span, newVal);
+        select.replaceWith(span);
+        if (newVal !== current) {
+          await updateData({
+            type: "contract_update", id,
+            bill_no: item.bill_no || null, bill_date: item.bill_date || null,
+            cust_code: item.cust_code || null, cust_name_ar: item.cust_name_ar || null,
+            total_bill: item.total_bill || null, employee_name: item.employee_name || null,
+            bill_state: item.bill_state || null, bill_type: item.bill_type || null,
+            payment_type: newVal, branch: item.branch || null,
+            serial_no: item.serial_no || null
+          });
+          item.payment_type = newVal;
+          // تحديث المبلغ في نفس الصف
+          const row    = document.getElementById(`claim-row-${id}`);
+          const amtEl  = row?.querySelector('td:last-child b');
+          if (amtEl) amtEl.textContent = calcAmount(item.total_bill, newVal).toFixed(2);
+        }
+      };
+      select.addEventListener('blur', save);
+      select.addEventListener('change', save);
+    }
+
+    // ===== إنشاء مطالبة =====
     async function createClaim() {
       const ready = allContracts.filter(item => {
         const state      = String(item.bill_state || '').trim();
@@ -289,6 +530,7 @@ function extractQaid(name) {
       }
     }
 
+    // ===== PDF =====
     function generatePDF(items, claimId, claimDate) {
       const dateStr = new Date(claimDate).toLocaleDateString('ar-EG', {
         year:'numeric', month:'long', day:'numeric'
@@ -312,8 +554,7 @@ function extractQaid(name) {
           total                += amount;
           const notes           = (item.employee_name && item.employee_name !== 'null') ? item.employee_name : '';
           const serialNum       = (item.serial_no && item.serial_no !== 'null' && item.serial_no !== '0')
-            ? item.serial_no
-            : i + 1;
+            ? item.serial_no : i + 1;
           return `
             <tr>
               <td style="text-align:center;">${serialNum}</td>
@@ -386,6 +627,7 @@ function extractQaid(name) {
       win.print();
     }
 
+    // ===== المطالبات المرسلة =====
     function renderClaims() {
       const container = document.getElementById('claims-container');
       if (allClaims.length === 0) {
