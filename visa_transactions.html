@@ -108,6 +108,7 @@
         <button class="tab-btn active" onclick="switchTab('pending', this)">⏳ لم يُرحَّل</button>
         <button class="tab-btn" onclick="switchTab('posted', this)">✅ مرحَّل</button>
         <button class="tab-btn" onclick="switchTab('all', this)">📋 الكل</button>
+        <button class="tab-btn" style="border-color:#f59e0b;color:#b45309;" onclick="switchTab('extra', this)">⚠️ زيادات المحافظ</button>
       </div>
 
       <!-- Machine summary + bulk post button -->
@@ -117,6 +118,13 @@
         <span class="filter-label"><i class="fas fa-credit-card"></i> الماكينة:</span>
         <select id="machineFilter" class="form-select" style="width:auto;" onchange="applyFilter()">
           <option value="all">كل الماكينات</option>
+        </select>
+        <span class="filter-label" id="extra-filter-label" style="display:none;margin-right:12px;">الحالة:</span>
+        <select id="extraStatusFilter" class="form-select" style="width:auto;display:none;" onchange="applyFilter()">
+          <option value="all">الكل</option>
+          <option value="no_machine">غير مضاف (بدون ماكينة)</option>
+          <option value="pending">لم يُرحَّل</option>
+          <option value="posted">مرحَّل</option>
         </select>
       </div>
 
@@ -144,7 +152,10 @@
         </table>
       </div>
 
-      <div id="grand-total-bar" style="text-align:left;font-weight:700;color:var(--warning);padding:10px 0;font-size:0.9rem;"></div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;padding:10px 0;">
+        <div id="grand-total-bar" style="font-weight:700;color:var(--warning);font-size:0.9rem;"></div>
+        <div id="grand-bill-bar"  style="font-weight:700;color:var(--accent-dark);font-size:0.9rem;"></div>
+      </div>
 
     </div>
   </div>
@@ -218,6 +229,13 @@
         <textarea id="m-notes" class="modal-input" rows="2" style="resize:vertical;" placeholder="أي ملاحظات..."></textarea>
       </div>
 
+      <div class="modal-field">
+        <label class="modal-label">نوع المعاملة</label>
+        <select id="m-bill-kind" class="modal-input">
+          <option value="normal">معاملة عادية</option>
+          <option value="extra">زيادة من المحافظ ⚠️</option>
+        </select>
+      </div>
       <div class="modal-actions">
         <button onclick="closeModal()" class="btn" style="background:#334155;color:#94a3b8;border:none;">إلغاء</button>
         <button onclick="saveNew()" class="btn btn-primary" id="save-new-btn">
@@ -297,6 +315,12 @@
       currentTab = tab;
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
+      // show/hide extra filters
+      const isExtra = (tab === 'extra');
+      document.getElementById('machineFilter').style.display      = isExtra ? 'none' : '';
+      document.getElementById('extraStatusFilter').style.display  = isExtra ? '' : 'none';
+      document.getElementById('extra-filter-label').style.display = isExtra ? '' : 'none';
+      document.querySelector('.filter-label').style.display       = isExtra ? 'none' : '';
       applyFilter();
     }
 
@@ -320,11 +344,27 @@
     }
 
     function applyFilter() {
-      const search  = document.getElementById('searchInput').value.trim().toLowerCase();
-      const machine = document.getElementById('machineFilter').value;
+      const search      = document.getElementById('searchInput').value.trim().toLowerCase();
+      const machine     = document.getElementById('machineFilter').value;
+      const extraStatus = document.getElementById('extraStatusFilter').value;
 
       const filtered = allData.filter(item => {
-        const isPosted = (item.bill_status === 'مرحَّل' || item.bill_status === 'posted');
+        const isPosted  = (item.bill_status === 'مرحَّل' || item.bill_status === 'posted');
+        const isExtra   = (item.bill_status === 'زيادة');
+        const hasMachine = item.machine_name && item.machine_name !== 'null' && item.machine_name !== '';
+
+        // extra tab — show only زيادة items
+        if (currentTab === 'extra') {
+          if (!isExtra) return false;
+          if (extraStatus === 'no_machine' && hasMachine)  return false;
+          if (extraStatus === 'pending'    && (isPosted || hasMachine)) return false;
+          if (extraStatus === 'posted'     && !isPosted)   return false;
+          if (search) return matchSearch(item, search);
+          return true;
+        }
+
+        // normal tabs — exclude زيادة items
+        if (isExtra) return false;
         if (currentTab === 'pending' && isPosted)  return false;
         if (currentTab === 'posted'  && !isPosted) return false;
         if (machine !== 'all' && String(item.machine_name || '').trim() !== machine) return false;
@@ -359,7 +399,7 @@
       // حساب اللي ممكن يتترحل (عنده ماكينة)
       const canPostCount = items.filter(i =>
         i.machine_name && i.machine_name !== 'null' && i.machine_name !== '' &&
-        i.bill_status !== 'مرحَّل' && i.bill_status !== 'posted'
+        i.bill_status !== 'مرحَّل' && i.bill_status !== 'posted' && i.bill_status !== 'زيادة'
       ).length;
 
       wrap.innerHTML =
@@ -383,8 +423,9 @@
     async function markAllPosted() {
       const toPost = allData.filter(item => {
         const isPosted   = (item.bill_status === 'مرحَّل' || item.bill_status === 'posted');
+        const isExtra    = (item.bill_status === 'زيادة');
         const hasMachine = item.machine_name && item.machine_name !== 'null' && item.machine_name !== '';
-        return !isPosted && hasMachine;
+        return !isPosted && !isExtra && hasMachine;
       });
 
       if (toPost.length === 0) { alert('لا توجد معاملات قابلة للترحيل'); return; }
@@ -435,12 +476,16 @@
       items.sort((a, b) => new Date(b.bill_date || 0) - new Date(a.bill_date || 0));
 
       let grandTotal = 0;
+      let grandBill   = 0;
       tbody.innerHTML = items.map(item => {
         const net         = parseFloat(item.total_bill_net) || 0;
         grandTotal       += net;
+        grandBill        += parseFloat(item.total_bill || 0);
         const isPosted    = (item.bill_status === 'مرحَّل' || item.bill_status === 'posted');
+        const isExtra    = (item.bill_status === 'زيادة');
         const _d          = item.bill_date ? new Date(item.bill_date) : null;
-        const dateStr     = _d ? _d.toLocaleDateString("ar-EG") + " " + _d.toLocaleTimeString("ar-EG", {hour:"2-digit", minute:"2-digit", hour12:true}) : "---";
+        const datePart    = _d ? _d.toLocaleDateString('ar-EG') : '---';
+        const timePart    = _d ? _d.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit', hour12:true}) : '';
         const saveDateStr = item.bill_save_date
           ? new Date(item.bill_save_date).toLocaleDateString('ar-EG') : '---';
         const hasMachine  = item.machine_name && item.machine_name !== 'null' && item.machine_name !== '';
@@ -448,7 +493,10 @@
         return `
           <tr id="row-${item.id}">
             <td><code style="font-size:0.82rem;color:var(--text-secondary);">${item.bill_no || '---'}</code></td>
-            <td style="font-size:0.75rem;line-height:1.6;white-space:nowrap;">${dateStr}</td>
+            <td style="font-size:0.75rem;line-height:1.4;white-space:nowrap;">
+              ${datePart}<br>
+              <span style="color:var(--text-muted);font-size:0.7rem;">${timePart}</span>
+            </td>
             <td><code style="font-size:0.78rem;color:var(--text-secondary);">${item.cust_code || '---'}</code></td>
             <td style="font-weight:600;font-size:0.85rem;">${item.cust_name_ar || '---'}</td>
             <td><b>${parseFloat(item.total_bill || 0).toFixed(2)}</b></td>
@@ -470,23 +518,32 @@
               ${item.bill_notes || '---'}
             </td>
             <td>
-              <span class="badge ${isPosted ? 'status-posted' : 'status-pending'}">
-                ${isPosted ? '✅ مرحَّل' : '⏳ لم يُرحَّل'}
-              </span>
+              ${isExtra
+                ? '<span class="badge" style="background:#ffedd5;color:#c2410c;">⚠️ زيادة</span>'
+                : isPosted
+                  ? '<span class="badge status-posted">✅ مرحَّل</span>'
+                  : '<span class="badge status-pending">⏳ لم يُرحَّل</span>'}
             </td>
             <td>
-              ${!isPosted && hasMachine
-                ? `<button class="btn btn-success btn-sm" onclick="markPosted('${item.id}', this)">
-                     <i class="fas fa-check"></i> ترحيل
-                   </button>`
-                : !isPosted && !hasMachine
-                  ? `<span style="font-size:0.72rem;color:var(--text-muted);">اختر ماكينة أولاً</span>`
-                  : `<i class="fas fa-check-double" style="color:var(--success);"></i>`}
+              ${isExtra
+                ? (!isPosted
+                    ? `<button class="btn btn-sm" style="background:#f59e0b;color:#fff;" onclick="markPosted('${item.id}', this)">
+                         <i class="fas fa-check"></i> ترحيل
+                       </button>`
+                    : '<i class="fas fa-check-double" style="color:var(--success);"></i>')
+                : !isPosted && hasMachine
+                  ? `<button class="btn btn-success btn-sm" onclick="markPosted('${item.id}', this)">
+                       <i class="fas fa-check"></i> ترحيل
+                     </button>`
+                  : !isPosted && !hasMachine
+                    ? `<span style="font-size:0.72rem;color:var(--text-muted);">اختر ماكينة أولاً</span>`
+                    : `<i class="fas fa-check-double" style="color:var(--success);"></i>`}
             </td>
           </tr>`;
       }).join('');
 
-      totalEl.innerHTML = `إجمالي صافي الفيزا (المعروض): <span style="color:var(--warning);">${grandTotal.toFixed(2)}</span> جنيه`;
+      totalEl.innerHTML = `إجمالي صافي الفيزا: <span style="color:var(--warning);">${grandTotal.toFixed(2)}</span> جنيه`;
+      document.getElementById('grand-bill-bar').innerHTML = `إجمالي الفواتير: <span style="color:var(--accent-dark);">${grandBill.toFixed(2)}</span> جنيه`;
     }
 
     function editNet(id, el, current) {
@@ -573,10 +630,22 @@
     }
 
     function getFiltered() {
-      const search  = document.getElementById('searchInput').value.trim().toLowerCase();
-      const machine = document.getElementById('machineFilter').value;
+      const search      = document.getElementById('searchInput').value.trim().toLowerCase();
+      const machine     = document.getElementById('machineFilter').value;
+      const extraStatus = document.getElementById('extraStatusFilter').value;
       return allData.filter(item => {
-        const isPosted = (item.bill_status === 'مرحَّل' || item.bill_status === 'posted');
+        const isPosted   = (item.bill_status === 'مرحَّل' || item.bill_status === 'posted');
+        const isExtra    = (item.bill_status === 'زيادة');
+        const hasMachine = item.machine_name && item.machine_name !== 'null' && item.machine_name !== '';
+        if (currentTab === 'extra') {
+          if (!isExtra) return false;
+          if (extraStatus === 'no_machine' && hasMachine)  return false;
+          if (extraStatus === 'pending'    && (isPosted || hasMachine)) return false;
+          if (extraStatus === 'posted'     && !isPosted)   return false;
+          if (search) return matchSearch(item, search);
+          return true;
+        }
+        if (isExtra) return false;
         if (currentTab === 'pending' && isPosted)  return false;
         if (currentTab === 'posted'  && !isPosted) return false;
         if (machine !== 'all' && String(item.machine_name || '').trim() !== machine) return false;
@@ -588,8 +657,11 @@
     function updateGrandTotal() {
       const items = getFiltered();
       const total = items.reduce((s, i) => s + (parseFloat(i.total_bill_net) || 0), 0);
+      const bill  = items.reduce((s, i) => s + (parseFloat(i.total_bill)     || 0), 0);
       document.getElementById('grand-total-bar').innerHTML =
-        `إجمالي صافي الفيزا (المعروض): <span style="color:var(--warning);">${total.toFixed(2)}</span> جنيه`;
+        `إجمالي صافي الفيزا: <span style="color:var(--warning);">${total.toFixed(2)}</span> جنيه`;
+      document.getElementById('grand-bill-bar').innerHTML =
+        `إجمالي الفواتير: <span style="color:var(--accent-dark);">${bill.toFixed(2)}</span> جنيه`;
     }
 
     async function markPosted(id, btn) {
@@ -628,6 +700,7 @@
       document.getElementById('m-employee').value   = '';
       document.getElementById('m-notes').value      = '';
       document.getElementById('m-machine').value    = '';
+      document.getElementById('m-bill-kind').value = 'normal';
       document.getElementById('add-modal').style.display = 'flex';
     }
 
@@ -658,7 +731,7 @@
         employee_name:  document.getElementById('m-employee').value.trim()   || null,
         bill_save_date: document.getElementById('m-save-date').value         || null,
         bill_notes:     document.getElementById('m-notes').value.trim()      || null,
-        bill_status:    'لم يُرحَّل'
+        bill_status:    document.getElementById('m-bill-kind').value === 'extra' ? 'زيادة' : 'لم يُرحَّل'
       });
 
       if (success) { closeModal(); await loadAll(); }
