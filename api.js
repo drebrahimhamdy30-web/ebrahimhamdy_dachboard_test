@@ -21,6 +21,9 @@ async function fetchFromN8N(category) {
     return [];
   }
 }
+async function fetchVisaTransactions() { 
+  return await fetchFromN8N('visa_transactions'); 
+}
 
 async function fetchOrders()    { return await fetchFromN8N('orders'); }
 async function fetchData()      { return await fetchFromN8N('orders'); }
