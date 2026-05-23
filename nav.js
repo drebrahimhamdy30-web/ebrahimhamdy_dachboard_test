@@ -53,6 +53,9 @@ function injectNavbar() {
   <a href="claims.html" class="${currentPage === 'claims.html' ? 'active' : ''}">
     <i class="fas fa-file-invoice-dollar"></i> مطالبات
   </a>
+  <a href="visa_transactions.html" class="${currentPage === 'visa_transactions.html' ? 'active' : ''}">
+  <i class="fas fa-credit-card"></i> فيزا
+</a>
   <a href="contracts.html" class="${currentPage === 'contracts.html' ? 'active' : ''}">
     <i class="fas fa-file-contract"></i> لنا فواتير تعاقد لدى العملاء
   </a>
