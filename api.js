@@ -10,12 +10,13 @@ async function fetchFromN8N(category) {
     const text = await response.text();
     if (!text || text.trim() === '') return [];
     const data = JSON.parse(text);
-if (Array.isArray(data) && data[0]?.data)       return data[0].data;
-if (Array.isArray(data) && data[0]?.branch)     return data;
-if (Array.isArray(data) && data[0]?.invoice_no) return data;
-if (Array.isArray(data) && data[0]?.cust_code)  return data;
-if (Array.isArray(data) && data[0]?.bill_no)    return data;  // ← أضف السطر ده
-if (data.data && Array.isArray(data.data))       return data.data;
+if (Array.isArray(data) && data[0]?.data)         return data[0].data;
+if (Array.isArray(data) && data[0]?.branch)       return data;
+if (Array.isArray(data) && data[0]?.invoice_no)   return data;
+if (Array.isArray(data) && data[0]?.cust_code)    return data;
+if (Array.isArray(data) && data[0]?.bill_no)      return data;
+if (Array.isArray(data) && data[0]?.machine_name) return data; // ← جديد
+if (data.data && Array.isArray(data.data))         return data.data;
 return Array.isArray(data) ? data : [];
   } catch (error) {
     console.error(`Error fetching ${category}:`, error);
@@ -24,6 +25,12 @@ return Array.isArray(data) ? data : [];
 }
 async function fetchVisaTransactions() { 
   return await fetchFromN8N('visa_transactions'); 
+}
+async function fetchVisaTransactions() { 
+  return await fetchFromN8N('visa_transactions'); 
+}
+async function fetchMachines() { 
+  return await fetchFromN8N('visa_machines'); 
 }
 
 async function fetchOrders()    { return await fetchFromN8N('orders'); }
