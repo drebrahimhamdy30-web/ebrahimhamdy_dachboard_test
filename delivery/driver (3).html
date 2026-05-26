@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>بورتال الطيار</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --primary:#1a56db;--green:#16a34a;--green-light:#dcfce7;
+  --yellow:#ca8a04;--yellow-light:#fef9c3;
+  --red:#dc2626;--red-light:#fee2e2;
+  --blue:#0891b2;--blue-light:#ecfeff;
+  --orange:#ea580c;--orange-light:#fff7ed;
+  --purple:#7c3aed;--purple-light:#ede9fe;
+  --gray:#6b7280;--gray-light:#f3f4f6;
+  --text:#111827;--text-muted:#6b7280;
+  --border:#e5e7eb;--bg:#f1f5f9;--white:#fff;
+}
+body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:5rem}
+
+/* HEADER */
+.header{background:var(--primary);color:white;padding:.875rem 1.25rem;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.h-name{font-size:.95rem;font-weight:700}
+.h-sub{font-size:.7rem;opacity:.8;margin-top:.1rem}
+.h-actions{display:flex;gap:.4rem;align-items:center}
+.h-btn{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:white;padding:.3rem .65rem;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.72rem;cursor:pointer;font-weight:600}
+.h-btn:active{background:rgba(255,255,255,.25)}
+
+/* STATUS BAR */
+.status-bar{display:flex;align-items:center;justify-content:space-between;padding:.5rem 1.25rem;font-size:.75rem;font-weight:600;border-bottom:1px solid var(--border)}
+.status-bar.online{background:#f0fdf4}
+.status-bar.offline{background:#fef2f2}
+.status-bar.on-break{background:#fef9c3}
+.status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-left:.4rem;vertical-align:middle}
+.dot-green{background:var(--green);animation:pulse 2s infinite}
+.dot-red{background:#9ca3af}
+.dot-yellow{background:var(--yellow);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* BREAK BANNER */
+.break-banner{background:var(--yellow-light);border-bottom:2px solid #fde68a;padding:.75rem 1.25rem;display:flex;align-items:center;justify-content:space-between}
+.break-timer{font-size:1.75rem;font-weight:800;color:#92400e;font-variant-numeric:tabular-nums}
+
+/* STATS */
+.stats{display:flex;background:white;border-bottom:1px solid var(--border)}
+.stat{flex:1;padding:.6rem .25rem;text-align:center;border-left:1px solid var(--border)}
+.stat:last-child{border-left:none}
+.stat-val{font-size:1.3rem;font-weight:800;color:var(--text)}
+.stat-lbl{font-size:.58rem;color:var(--text-muted);margin-top:.05rem}
+
+/* TABS */
+.tabs{display:flex;background:white;border-bottom:2px solid var(--border);overflow-x:auto;position:sticky;top:52px;z-index:40}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex-shrink:0;padding:.625rem 1rem;text-align:center;font-size:.75rem;font-weight:600;color:var(--text-muted);border:none;background:none;cursor:pointer;border-bottom:3px solid transparent;font-family:'Cairo',sans-serif;white-space:nowrap;margin-bottom:-2px}
+.tab.active{color:var(--primary);border-bottom-color:var(--primary)}
+
+/* CONTENT */
+.content{padding:.75rem}
+
+/* TRIP CARD */
+.trip-card{background:white;border-radius:14px;border:1.5px solid var(--border);margin-bottom:.875rem;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.trip-card.active-trip{border-color:var(--primary);box-shadow:0 0 0 2px rgba(26,86,219,.15)}
+.trip-card.completed-trip{opacity:.85}
+
+.trip-head{padding:.75rem 1rem;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);background:#fafafa;cursor:pointer}
+.trip-head-left{display:flex;align-items:center;gap:.5rem}
+.trip-badge{font-size:.65rem;font-weight:700;padding:.2rem .5rem;border-radius:6px}
+.tb-active{background:var(--primary);color:white}
+.tb-completed{background:var(--gray-light);color:var(--gray)}
+.trip-no{font-weight:700;font-size:.85rem}
+.trip-meta{font-size:.68rem;color:var(--text-muted);margin-top:.1rem}
+.trip-toggle{font-size:.8rem;color:var(--text-muted);transition:transform .2s}
+.trip-toggle.open{transform:rotate(180deg)}
+
+.trip-body{display:none;border-top:1px solid var(--border)}
+.trip-body.open{display:block}
+
+/* TRIP ACTIONS BAR */
+.trip-actions-bar{padding:.625rem 1rem;display:flex;gap:.5rem;flex-wrap:wrap;background:#f8fafc;border-bottom:1px solid var(--border)}
+.ta-btn{flex:1;min-width:120px;padding:.55rem;border-radius:9px;font-family:'Cairo',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;border:none;display:flex;align-items:center;justify-content:center;gap:.3rem}
+.ta-pickup-all{background:var(--orange);color:white}
+.ta-complete{background:var(--green);color:white}
+.ta-complete:disabled{background:#9ca3af;cursor:not-allowed}
+
+/* ORDER ROW */
+.order-rows{padding:.5rem .75rem;display:flex;flex-direction:column;gap:.5rem}
+.order-row{background:var(--bg);border-radius:10px;border:1.5px solid var(--border);overflow:hidden}
+.order-row.status-assigned{border-right:3px solid var(--orange)}
+.order-row.status-picked{border-right:3px solid var(--blue)}
+.order-row.status-delivered{border-right:3px solid var(--green)}
+.order-row.status-completed{border-right:3px solid var(--gray)}
+.order-row.late{border-right:3px solid var(--red)}
+
+.or-head{padding:.5rem .75rem;display:flex;align-items:center;gap:.5rem;cursor:pointer}
+.or-no{font-weight:800;color:var(--primary);font-size:.8rem;flex-shrink:0}
+.or-name{flex:1;font-size:.8rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.or-status{font-size:.62rem;font-weight:700;padding:.1rem .38rem;border-radius:5px;flex-shrink:0}
+.ors-assigned{background:var(--orange-light);color:#c2410c}
+.ors-picked{background:var(--blue-light);color:#0e7490}
+.ors-delivered{background:var(--green-light);color:#15803d}
+.ors-completed{background:var(--gray-light);color:var(--gray)}
+.or-chevron{font-size:.7rem;color:var(--text-muted);flex-shrink:0;transition:transform .2s}
+.or-chevron.open{transform:rotate(180deg)}
+
+.or-detail{display:none;padding:.5rem .75rem;border-top:1px solid var(--border);background:white}
+.or-detail.open{display:block}
+
+/* TIMERS */
+.or-timers{display:flex;gap:.25rem;flex-wrap:wrap;margin-bottom:.5rem}
+.oc-timer{font-size:.6rem;font-weight:700;padding:.1rem .35rem;border-radius:6px;display:flex;align-items:center;gap:.2rem}
+.oc-timer .ti{font-size:.55rem;opacity:.75}
+.t-create{background:#f0f9ff;color:#0369a1}
+.t-assign{background:var(--orange-light);color:#c2410c}
+.t-pick{background:var(--blue-light);color:#0e7490}
+.t-deliver{background:var(--green-light);color:#15803d}
+.t-late{background:var(--red-light);color:#b91c1c}
+
+.or-info{display:flex;flex-direction:column;gap:.25rem;margin-bottom:.5rem}
+.or-addr{font-size:.75rem;color:var(--text-muted)}
+.or-tags{display:flex;gap:.3rem;flex-wrap:wrap}
+.or-tag{font-size:.63rem;font-weight:600;padding:.12rem .4rem;border-radius:5px}
+.tag-region{background:var(--blue-light);color:#0e7490}
+.tag-cash{background:#fef3c7;color:#92400e}
+.tag-visa{background:#dbeafe;color:#1e40af}
+.tag-transfer{background:var(--green-light);color:#15803d}
+.tag-deferred{background:var(--orange-light);color:#c2410c}
+.or-amount{font-size:1rem;font-weight:800;margin-bottom:.4rem}
+.or-note{font-size:.7rem;padding:.3rem .5rem;border-radius:6px;margin-bottom:.3rem}
+.note-staff{background:var(--blue-light);color:#0e7490}
+.note-urgent{background:var(--red-light);color:#b91c1c;font-weight:700}
+
+.or-actions{display:flex;gap:.4rem;flex-wrap:wrap}
+.oa-btn{flex:1;min-width:80px;padding:.5rem;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer;border:none;display:flex;align-items:center;justify-content:center;gap:.25rem}
+.oa-pickup{background:var(--orange);color:white}
+.oa-deliver{background:var(--green);color:white}
+.oa-fail{background:var(--red-light);color:#b91c1c;border:1px solid #fecaca}
+
+/* TRIP SUMMARY */
+.trip-summary{padding:.625rem 1rem;border-top:1px solid var(--border);background:#f8fafc;display:flex;align-items:center;justify-content:space-between;font-size:.75rem}
+.ts-amount{font-weight:800;font-size:.9rem}
+.ts-progress{color:var(--text-muted)}
+
+/* EMPTY */
+.empty{text-align:center;padding:3rem 1rem;color:var(--text-muted)}
+.empty-icon{font-size:2.5rem;margin-bottom:.75rem}
+.empty p{font-size:.82rem}
+
+/* MODALS */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;align-items:flex-end;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:white;border-radius:18px 18px 0 0;width:100%;max-height:90vh;overflow-y:auto;padding:1.5rem;padding-bottom:2rem}
+.modal-handle{width:36px;height:4px;background:#d1d5db;border-radius:2px;margin:0 auto 1rem}
+.modal-title{font-weight:700;font-size:1rem;margin-bottom:1rem;text-align:center}
+.form-group{margin-bottom:1rem}
+.form-label{display:block;font-size:.8rem;font-weight:600;margin-bottom:.4rem;color:var(--text-muted)}
+.form-ctrl{width:100%;height:46px;padding:0 .875rem;border:1.5px solid var(--border);border-radius:10px;font-family:'Cairo',sans-serif;font-size:.875rem;outline:none;background:white}
+.form-ctrl:focus{border-color:var(--primary)}
+textarea.form-ctrl{height:80px;padding:.75rem;resize:none}
+.pay-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+.pay-opt{padding:.75rem .5rem;border-radius:10px;font-family:'Cairo',sans-serif;font-size:.8rem;font-weight:600;cursor:pointer;border:2px solid var(--border);background:white;text-align:center;transition:all .15s}
+.po-cash{border-color:#92400e!important;background:#fef3c7!important;color:#92400e!important}
+.po-visa{border-color:#1e40af!important;background:#dbeafe!important;color:#1e40af!important}
+.po-transfer{border-color:#15803d!important;background:var(--green-light)!important;color:#15803d!important}
+.po-deferred{border-color:#c2410c!important;background:var(--orange-light)!important;color:#c2410c!important}
+.fail-opts{display:flex;flex-direction:column;gap:.5rem}
+.fail-opt{padding:.75rem 1rem;border-radius:10px;font-family:'Cairo',sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;border:2px solid var(--border);background:white;text-align:right;transition:all .15s}
+.fail-opt:hover,.fail-opt.selected{border-color:var(--red);background:var(--red-light);color:#b91c1c}
+.btn-full{width:100%;height:48px;border-radius:10px;font-family:'Cairo',sans-serif;font-size:.9rem;font-weight:700;cursor:pointer;border:none;margin-bottom:.5rem;transition:all .15s}
+.btn-full:active{opacity:.85}
+.btn-green{background:var(--green);color:white}
+.btn-orange{background:var(--orange);color:white}
+.btn-primary{background:var(--primary);color:white}
+.btn-red{background:var(--red);color:white}
+.btn-gray{background:var(--gray-light);color:var(--text)}
+
+/* LOADING */
+.loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,.8);z-index:300;display:none;align-items:center;justify-content:center;flex-direction:column;gap:.75rem}
+.loading-overlay.show{display:flex}
+.spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.load-txt{font-size:.8rem;color:var(--text-muted);font-weight:600}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="h-name" id="driverName">بورتال الطيار</div>
+    <div class="h-sub" id="driverBranch">جاري التحميل...</div>
+  </div>
+  <div class="h-actions">
+    <button class="h-btn" onclick="requestBreak()" id="breakBtn" style="display:none">☕ استراحة</button>
+    <button class="h-btn" onclick="toggleStatus()" id="statusBtn">جاري...</button>
+    <button class="h-btn" onclick="doLogout()">خروج</button>
+  </div>
+</div>
+
+<div class="status-bar offline" id="statusBar">
+  <span><span class="status-dot dot-red" id="statusDot"></span><span id="statusText">جاري التحميل...</span></span>
+  <span id="lastRefresh" style="font-size:.65rem;color:var(--text-muted)"></span>
+</div>
+
+<div class="break-banner" id="breakBanner" style="display:none">
+  <div>
+    <div style="font-weight:700;color:#92400e">☕ في استراحة</div>
+    <div style="font-size:.72rem;color:#a16207">الوقت المتبقي</div>
+  </div>
+  <div class="break-timer" id="breakTimer">00:00</div>
+</div>
+
+<div class="stats">
+  <div class="stat"><div class="stat-val" id="s-assigned">0</div><div class="stat-lbl">على رحلة</div></div>
+  <div class="stat"><div class="stat-val" id="s-picked">0</div><div class="stat-lbl">استلمت</div></div>
+  <div class="stat"><div class="stat-val" id="s-delivered">0</div><div class="stat-lbl">وصّلت اليوم</div></div>
+  <div class="stat"><div class="stat-val" id="s-revenue" style="font-size:1rem">0</div><div class="stat-lbl">كاش ج</div></div>
+</div>
+
+<div class="tabs" id="tripTabs"></div>
+<div class="content" id="content">
+  <div class="empty"><div class="empty-icon">⏳</div><p>جاري التحميل...</p></div>
+</div>
+
+<!-- Modal: Deliver -->
+<div class="modal-overlay" id="deliverModal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">✅ تأكيد التوصيل</div>
+    <input type="hidden" id="dlv-id">
+    <div class="form-group">
+      <label class="form-label">طريقة الدفع *</label>
+      <div class="pay-grid">
+        <button class="pay-opt" onclick="selPay('cash',this)">💵 كاش</button>
+        <button class="pay-opt" onclick="selPay('visa',this)">💳 فيزا</button>
+        <button class="pay-opt" onclick="selPay('transfer',this)">🏦 تحويل</button>
+        <button class="pay-opt" onclick="selPay('deferred',this)">📋 آجل</button>
+      </div>
+      <input type="hidden" id="dlv-pay">
+    </div>
+    <div class="form-group">
+      <label class="form-label">المبلغ المحصل (ج.م)</label>
+      <input type="number" class="form-ctrl" id="dlv-amt" placeholder="0" min="0">
+    </div>
+    <div class="form-group">
+      <label class="form-label">ملاحظة (اختياري)</label>
+      <textarea class="form-ctrl" id="dlv-note" placeholder="ملاحظات..."></textarea>
+    </div>
+    <button class="btn-full btn-green" onclick="confirmDeliver()">✓ تأكيد التوصيل</button>
+    <button class="btn-full btn-gray" onclick="closeModal('deliverModal')">إلغاء</button>
+  </div>
+</div>
+
+<!-- Modal: Fail -->
+<div class="modal-overlay" id="failModal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">⚠️ تعذّر التوصيل</div>
+    <input type="hidden" id="fail-id">
+    <div class="form-group">
+      <label class="form-label">سبب التعذر *</label>
+      <div class="fail-opts">
+        <button class="fail-opt" onclick="selFail('لم أستطع التواصل مع العميل',this)">📵 لم أستطع التواصل مع العميل</button>
+        <button class="fail-opt" onclick="selFail('العميل ألغى الطلب',this)">❌ العميل ألغى الطلب</button>
+        <button class="fail-opt" onclick="selFail('العنوان غير صحيح',this)">📍 العنوان غير صحيح</button>
+        <button class="fail-opt" onclick="selFail('رفض الاستلام',this)">🚫 رفض الاستلام</button>
+      </div>
+      <input type="hidden" id="fail-reason">
+    </div>
+    <div class="form-group">
+      <label class="form-label">ملاحظة إضافية (اختياري)</label>
+      <textarea class="form-ctrl" id="fail-note" placeholder="تفاصيل..."></textarea>
+    </div>
+    <button class="btn-full btn-red" onclick="confirmFail()">إرسال البلاغ</button>
+    <button class="btn-full btn-gray" onclick="closeModal('failModal')">إلغاء</button>
+  </div>
+</div>
+
+<!-- Modal: Break -->
+<div class="modal-overlay" id="breakModal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">☕ طلب استراحة</div>
+    <div class="form-group">
+      <label class="form-label">سبب الاستراحة (اختياري)</label>
+      <textarea class="form-ctrl" id="brk-reason" placeholder="سبب الاستراحة..."></textarea>
+    </div>
+    <div style="background:var(--yellow-light);border-radius:10px;padding:.75rem;font-size:.78rem;color:#92400e;margin-bottom:1rem">
+      ⏳ سيُرسل طلبك للإدارة وستُفعّل الاستراحة بعد الموافقة
+    </div>
+    <button class="btn-full btn-primary" onclick="submitBreak()">إرسال الطلب</button>
+    <button class="btn-full btn-gray" onclick="closeModal('breakModal')">إلغاء</button>
+  </div>
+</div>
+
+<div class="loading-overlay" id="lo"><div class="spinner"></div><div class="load-txt">جاري التحميل...</div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL='https://rxtjoqulmgkkcohmgzgi.supabase.co';
+const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
+const {createClient}=supabase;
+const db=createClient(SUPABASE_URL,SUPABASE_KEY);
+
+const PAY_LABELS={cash:'💵 كاش',visa:'💳 فيزا',transfer:'🏦 تحويل',deferred:'📋 آجل'};
+const ST_LABEL={pending:'جاهز',assigned:'على رحلة',picked:'استلم',delivered:'وصّل',completed:'مكتمل',postponed:'تعذر'};
+
+let currentUser=null, driverRecord=null, settings=null;
+let activeBreak=null, breakInterval=null;
+let allTrips=[], tripOrders={}, currentTripId=null;
+
+window.addEventListener('DOMContentLoaded', async()=>{
+  const stored=sessionStorage.getItem('delivery_user');
+  if(!stored){window.location.href='auth.html';return;}
+  currentUser=JSON.parse(stored);
+  if(currentUser.role!=='driver'){window.location.href='app.html';return;}
+  document.getElementById('driverName').textContent=currentUser.full_name||'طيار';
+  load(true);
+  await loadDriver();
+  await loadSettings();
+  await loadAll();
+  load(false);
+  setInterval(loadAll,30000);
+  setInterval(updateAllTimers,60000);
+});
+
+async function loadDriver(){
+  try{
+    const {data,error}=await db.from('drivers').select('*,branches(name)').eq('user_id',currentUser.id);
+    if(error)throw error;
+    driverRecord=data&&data.length>0?data[0]:null;
+    if(driverRecord){
+      document.getElementById('driverBranch').textContent=driverRecord.branches?.name||'—';
+      updateStatusUI();
+      await checkBreak();
+    }
+  }catch(e){console.error('loadDriver:',e);}
+}
+
+async function loadSettings(){
+  if(!driverRecord?.branch_id)return;
+  try{
+    const {data}=await db.from('dispatch_settings').select('*').eq('branch_id',driverRecord.branch_id);
+    settings=data?.[0]||null;
+    if(settings?.driver_can_request_break!==false&&driverRecord)
+      document.getElementById('breakBtn').style.display='block';
+  }catch(e){}
+}
+
+async function loadAll(){
+  if(!driverRecord)return;
+  try{
+    // جيب آخر 4 رحلات (1 active + 3 completed)
+    const {data:trips}=await db.from('trips').select('*')
+      .eq('driver_id',driverRecord.id)
+      .in('status',['active','completed'])
+      .order('created_at',{ascending:false})
+      .limit(10);
+
+    const activeTrip=(trips||[]).find(t=>t.status==='active');
+    const completedTrips=(trips||[]).filter(t=>t.status==='completed').slice(0,3);
+    allTrips=activeTrip?[activeTrip,...completedTrips]:completedTrips;
+
+    // جيب الطلبات لكل رحلة
+    for(const trip of allTrips){
+      const {data:toData}=await db.from('trip_orders').select('order_id').eq('trip_id',trip.id);
+      const ids=(toData||[]).map(x=>x.order_id);
+      if(ids.length){
+        const {data:orders}=await db.from('orders').select('*').in('id',ids);
+        tripOrders[trip.id]=orders||[];
+      }else{
+        tripOrders[trip.id]=[];
+      }
+    }
+
+    // لو مفيش رحلة active جيب الطلبات assigned مباشرة
+    if(!activeTrip){
+      const {data:directOrders}=await db.from('orders').select('*').eq('driver_id',driverRecord.id).in('status',['assigned','picked']);
+      if(directOrders?.length){
+        const fakeTrip={id:'direct',status:'active',created_at:new Date().toISOString(),driver_id:driverRecord.id};
+        allTrips=[fakeTrip,...allTrips];
+        tripOrders['direct']=directOrders;
+      }
+    }
+
+    updateStats();
+    renderTabs();
+    if(!currentTripId&&allTrips.length)currentTripId=allTrips[0].id;
+    renderContent();
+    document.getElementById('lastRefresh').textContent='آخر تحديث: '+new Date().toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'});
+  }catch(e){console.error('loadAll:',e);}
+}
+
+function fm(mins){if(mins<0)mins=0;return mins<60?`${mins}د`:`${Math.floor(mins/60)}س${String(mins%60).padStart(2,'0')}د`}
+function dm(from,to=new Date()){if(!from)return 0;return Math.floor((new Date(to)-new Date(from))/60000)}
+
+function isLate(o){
+  if(['completed','delivered'].includes(o.status))return false;
+  const base=o.bill_date||o.created_at;
+  if(o.status==='assigned') return dm(o.assigned_at||base)>(settings?.max_assigned_minutes||10);
+  if(o.status==='picked')   return dm(o.picked_at||base)>(settings?.max_picked_minutes||30);
+  return false;
+}
+
+function buildTimers(o){
+  const base=o.bill_date||o.created_at;
+  let h='';
+
+  // منذ الإنشاء (دايماً)
+  const sinceCreate=dm(base);
+  h+=`<span class="oc-timer t-create"><span class="ti">إنشاء منذ</span>${fm(sinceCreate)}</span>`;
+
+  // منذ على رحلة (من وقت التعيين للآن أو للاستلام)
+  if(o.assigned_at){
+    const sinceAssign=o.picked_at?dm(o.assigned_at,o.picked_at):dm(o.assigned_at);
+    const late=!o.picked_at&&sinceAssign>(settings?.max_assigned_minutes||10);
+    const label=o.picked_at?'على رحلة':'على رحلة منذ';
+    h+=`<span class="oc-timer ${late?'t-late':'t-assign'}"><span class="ti">${label}</span>${fm(sinceAssign)}</span>`;
+  }
+
+  // منذ الاستلام (من وقت الاستلام للآن أو للتوصيل)
+  if(o.picked_at){
+    const sincePick=o.delivered_at?dm(o.picked_at,o.delivered_at):dm(o.picked_at);
+    const late=!o.delivered_at&&sincePick>(settings?.max_picked_minutes||30);
+    const label=o.delivered_at?'استلم':'استلم منذ';
+    h+=`<span class="oc-timer ${late?'t-late':'t-pick'}"><span class="ti">${label}</span>${fm(sincePick)}</span>`;
+  }
+
+  // منذ التوصيل
+  if(o.delivered_at){
+    const sinceDel=dm(o.delivered_at);
+    h+=`<span class="oc-timer t-deliver"><span class="ti">وصّل منذ</span>${fm(sinceDel)}</span>`;
+  }
+
+  return h;
+}
+
+function updateStats(){
+  const allOrders=Object.values(tripOrders).flat();
+  const today=new Date();today.setHours(0,0,0,0);
+  document.getElementById('s-assigned').textContent=allOrders.filter(o=>o.status==='assigned').length;
+  document.getElementById('s-picked').textContent=allOrders.filter(o=>o.status==='picked').length;
+  const del=allOrders.filter(o=>['delivered','completed'].includes(o.status)&&new Date(o.delivered_at||o.created_at)>=today);
+  document.getElementById('s-delivered').textContent=del.length;
+  const rev=del.filter(o=>o.payment_method==='cash'||(!o.payment_method&&(o.bill_type||'').includes('كاش'))).reduce((s,o)=>s+Number(o.collected_amount||o.total_bill_net||0),0);
+  document.getElementById('s-revenue').textContent=rev.toLocaleString('ar-EG');
+}
+
+function renderTabs(){
+  const tabs=document.getElementById('tripTabs');
+  if(!allTrips.length){tabs.innerHTML='';return;}
+  tabs.innerHTML=allTrips.map((t,i)=>{
+    const orders=tripOrders[t.id]||[];
+    const label=t.id==='direct'?'الرحلة الجارية':
+      t.status==='active'?'الرحلة الجارية':
+      `رحلة ${i}`;
+    const count=orders.length;
+    return `<button class="tab ${currentTripId===t.id?'active':''}" onclick="setTrip('${t.id}',this)">
+      ${label} <span style="background:${t.status==='active'?'var(--primary)':'#d1d5db'};color:${t.status==='active'?'white':'#6b7280'};border-radius:10px;padding:.05rem .35rem;font-size:.65rem;margin-right:.2rem">${count}</span>
+    </button>`;
+  }).join('');
+}
+
+function setTrip(id,el){
+  currentTripId=id;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  renderContent();
+}
+
+function renderContent(){
+  const content=document.getElementById('content');
+  if(!allTrips.length){
+    content.innerHTML='<div class="empty"><div class="empty-icon">🚗</div><p>لا توجد رحلات حالياً</p></div>';
+    return;
+  }
+  const trip=allTrips.find(t=>t.id===currentTripId);
+  if(!trip){return;}
+  const orders=tripOrders[trip.id]||[];
+  const isActive=trip.status==='active';
+  const assignedOrders=orders.filter(o=>o.status==='assigned');
+  const pickedOrders=orders.filter(o=>o.status==='picked');
+  const doneOrders=orders.filter(o=>['delivered','completed'].includes(o.status));
+  const total=orders.reduce((s,o)=>s+Number(o.total_bill_net||0),0);
+  const collected=orders.reduce((s,o)=>s+Number(o.collected_amount||0),0);
+  const canComplete=settings?.driver_can_complete_trip!==false;
+  const allDone=orders.length>0&&orders.every(o=>['delivered','completed','postponed','cancelled'].includes(o.status));
+
+  let actionsBar='';
+  if(isActive){
+    actionsBar=`<div class="trip-actions-bar">`;
+    if(assignedOrders.length>0)
+      actionsBar+=`<button class="ta-btn ta-pickup-all" onclick="pickupAll('${trip.id}')">▶️ استلمت الكل (${assignedOrders.length})</button>`;
+    if(canComplete){
+      const blockingCount=orders.filter(o=>['assigned','picked'].includes(o.status)).length;
+      actionsBar+=`<button class="ta-btn ta-complete" onclick="completeTrip('${trip.id}')" style="${blockingCount>0?'background:#9ca3af':''}">
+        ${blockingCount>0?`⏳ ينتظر ${blockingCount} طلب`:'🏁 إنهاء الرحلة'}
+      </button>`;
+    }
+    actionsBar+=`</div>`;
+  }
+
+  const orderRows=orders.map(o=>{
+    const late=isLate(o);
+    const stLabel=ST_LABEL[o.status]||o.status;
+    const stClass=`ors-${o.status}`;
+    const pm=o.payment_method;
+    const pmLabel=pm?PAY_LABELS[pm]:'كاش';
+    const pmClass=`tag-${pm||'cash'}`;
+    const amount=Number(o.total_bill_net||0);
+
+    let actions='';
+    if(o.status==='assigned')
+      // لازم يستلم الأول قبل ما يوصل
+      actions=`<button class="oa-btn oa-pickup" onclick="pickupOne('${o.id}')">▶️ استلمت</button>
+               <button class="oa-btn oa-fail" onclick="openFail('${o.id}')">⚠️ تعذر</button>`;
+    else if(o.status==='picked')
+      // بعد الاستلام يقدر يوصل
+      actions=`<button class="oa-btn oa-deliver" onclick="openDeliver('${o.id}')">✅ وصّلت</button>
+               <button class="oa-btn oa-fail" onclick="openFail('${o.id}')">⚠️ تعذر</button>`;
+    // delivered/completed/postponed لا يوجد أزرار
+
+    return `<div class="order-row status-${o.status} ${late?'late':''}">
+      <div class="or-head" onclick="toggleOrder('${o.id}')">
+        <span class="or-no">${o.bill_no||o.id?.slice(0,8)}</span>
+        <span class="or-name">${o.customer_name||o.cust_name||'—'}</span>
+        <span class="or-status ${stClass}">${stLabel}</span>
+        <span class="or-chevron" id="chev-${o.id}">▾</span>
+      </div>
+      <div class="or-detail" id="det-${o.id}">
+        <div class="or-timers">${buildTimers(o)}</div>
+        <div class="or-info">
+          <div class="or-addr">📍 ${o.customer_address||o.cust_address||'—'}</div>
+          <div class="or-tags">
+            ${o.cust_region?`<span class="or-tag tag-region">${o.cust_region}</span>`:''}
+            <span class="or-tag ${pmClass}">${pmLabel}</span>
+            ${o.count_of_items?`<span class="or-tag" style="background:var(--gray-light);color:var(--gray)">${o.count_of_items} صنف</span>`:''}
+          </div>
+        </div>
+        <div class="or-amount">${amount.toLocaleString('ar-EG')} ج.م</div>
+        ${o.collected_amount?`<div style="font-size:.72rem;color:var(--green);font-weight:600;margin-bottom:.3rem">✓ محصل: ${Number(o.collected_amount).toLocaleString()} ج</div>`:''}
+        ${(o.notes||'').includes('🚨')?`<div class="or-note note-urgent">🚨 طلب عاجل</div>`:''}
+        ${o.staff_notes?`<div class="or-note note-staff">💼 ${o.staff_notes}</div>`:''}
+        ${actions?`<div class="or-actions">${actions}</div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+
+  content.innerHTML=`<div class="trip-card ${isActive?'active-trip':'completed-trip'}">
+    <div class="trip-head" onclick="toggleTrip('${trip.id}')">
+      <div class="trip-head-left">
+        <span class="trip-badge ${isActive?'tb-active':'tb-completed'}">${isActive?'جارية':'مكتملة'}</span>
+        <div>
+          <div class="trip-no">${isActive?'الرحلة الجارية':'رحلة سابقة'}</div>
+          <div class="trip-meta">${new Date(trip.created_at).toLocaleDateString('ar-EG',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})} · ${orders.length} طلب</div>
+        </div>
+      </div>
+      <span class="trip-toggle open" id="ttog-${trip.id}">▾</span>
+    </div>
+    <div class="trip-body open" id="tbody-${trip.id}">
+      ${actionsBar}
+      <div class="order-rows">${orderRows||'<div style="text-align:center;padding:1rem;color:var(--text-muted);font-size:.8rem">لا توجد طلبات</div>'}</div>
+      <div class="trip-summary">
+        <div>
+          <div class="ts-amount">${total.toLocaleString('ar-EG')} ج.م</div>
+          ${collected>0?`<div style="font-size:.68rem;color:var(--green)">محصل: ${collected.toLocaleString()} ج</div>`:''}
+        </div>
+        <div class="ts-progress">${doneOrders.length}/${orders.length} مكتمل</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function toggleTrip(id){
+  const body=document.getElementById(`tbody-${id}`);
+  const tog=document.getElementById(`ttog-${id}`);
+  body.classList.toggle('open');
+  tog.classList.toggle('open');
+}
+
+function toggleOrder(id){
+  const det=document.getElementById(`det-${id}`);
+  const chev=document.getElementById(`chev-${id}`);
+  det.classList.toggle('open');
+  chev.classList.toggle('open');
+}
+
+function updateAllTimers(){renderContent();}
+
+// ===== ACTIONS =====
+async function pickupAll(tripId){
+  if(!confirm('تأكيد استلام جميع الطلبات؟'))return;
+  load(true);
+  const orders=tripOrders[tripId]||[];
+  const assigned=orders.filter(o=>o.status==='assigned');
+  const now=new Date().toISOString();
+  const ids=assigned.map(o=>o.id);
+  if(ids.length){
+    await db.from('orders').update({status:'picked',picked_at:now,updated_at:now}).in('id',ids);
+    for(const id of ids){
+      try{await db.from('order_logs').insert({order_id:id,event:'order_picked',details:{bulk:true},user_id:currentUser.id,user_name:currentUser.full_name});}catch(e){}
+    }
+  }
+  await loadAll();
+  load(false);
+}
+
+async function pickupOne(orderId){
+  load(true);
+  const now=new Date().toISOString();
+  await db.from('orders').update({status:'picked',picked_at:now,updated_at:now}).eq('id',orderId);
+  try{await db.from('order_logs').insert({order_id:orderId,event:'order_picked',details:{},user_id:currentUser.id,user_name:currentUser.full_name});}catch(e){}
+  await loadAll();
+  load(false);
+}
+
+function openDeliver(id){
+  const o=Object.values(tripOrders).flat().find(x=>x.id===id);if(!o)return;
+  document.getElementById('dlv-id').value=id;
+  document.getElementById('dlv-pay').value='';
+  document.getElementById('dlv-amt').value=o.total_bill_net||'';
+  document.getElementById('dlv-note').value='';
+  document.querySelectorAll('.pay-opt').forEach(b=>b.className='pay-opt');
+  document.getElementById('deliverModal').classList.add('open');
+}
+function selPay(m,btn){document.querySelectorAll('.pay-opt').forEach(b=>b.className='pay-opt');btn.classList.add(`po-${m}`);document.getElementById('dlv-pay').value=m;}
+async function confirmDeliver(){
+  const id=document.getElementById('dlv-id').value;
+  const pay=document.getElementById('dlv-pay').value;
+  if(!pay){alert('اختر طريقة الدفع');return;}
+  const amt=parseFloat(document.getElementById('dlv-amt').value)||0;
+  const note=document.getElementById('dlv-note').value.trim();
+  load(true);
+  const now=new Date().toISOString();
+  await db.from('orders').update({status:'delivered',payment_method:pay,collected_amount:amt,driver_notes:note||null,delivered_at:now,updated_at:now}).eq('id',id);
+  try{await db.from('order_logs').insert({order_id:id,event:'order_delivered',details:{payment:pay,amount:amt},user_id:currentUser.id,user_name:currentUser.full_name});}catch(e){}
+  closeModal('deliverModal');
+  await loadAll();
+  load(false);
+}
+
+function openFail(id){
+  document.getElementById('fail-id').value=id;
+  document.getElementById('fail-reason').value='';
+  document.getElementById('fail-note').value='';
+  document.querySelectorAll('.fail-opt').forEach(b=>b.classList.remove('selected'));
+  document.getElementById('failModal').classList.add('open');
+}
+function selFail(reason,btn){
+  document.querySelectorAll('.fail-opt').forEach(b=>b.classList.remove('selected'));
+  btn.classList.add('selected');
+  document.getElementById('fail-reason').value=reason;
+}
+async function confirmFail(){
+  const id=document.getElementById('fail-id').value;
+  const reason=document.getElementById('fail-reason').value;
+  if(!reason){alert('اختر سبب التعذر');return;}
+  const note=document.getElementById('fail-note').value.trim();
+  const o=Object.values(tripOrders).flat().find(x=>x.id===id);
+  load(true);
+  const now=new Date().toISOString();
+  await db.from('orders').update({
+    status:'postponed',postpone_reason:reason,driver_notes:note||null,
+    attempt_count:(o?.attempt_count||0)+1,
+    driver_id:null,deliveryman:null,assigned_at:null,picked_at:null,
+    updated_at:now
+  }).eq('id',id);
+  // شيله من الرحلة
+  if(currentTripId&&currentTripId!=='direct'){
+    await db.from('trip_orders').delete().eq('trip_id',currentTripId).eq('order_id',id);
+  }
+  try{await db.from('order_logs').insert({order_id:id,event:'order_postponed',details:{reason},user_id:currentUser.id,user_name:currentUser.full_name});}catch(e){}
+  closeModal('failModal');
+  await loadAll();
+  load(false);
+}
+
+async function completeTrip(tripId){
+  const orders=tripOrders[tripId]||[];
+  const blocking=orders.filter(o=>['assigned','picked'].includes(o.status));
+  if(blocking.length>0){
+    alert('لا يمكن إنهاء الرحلة — يوجد '+blocking.length+' طلب لم يتم توصيله بعد\nيجب توصيل أو تسجيل تعذر لجميع الطلبات أولاً');
+    return;
+  }
+  if(!confirm('إنهاء الرحلة؟ سيتم تحويل جميع الطلبات المُسلَّمة إلى مكتملة.'))return;
+  load(true);
+  const now=new Date().toISOString();
+  const orders=tripOrders[tripId]||[];
+  const deliveredIds=orders.filter(o=>o.status==='delivered').map(o=>o.id);
+  if(deliveredIds.length)
+    await db.from('orders').update({status:'completed',completed_at:now,updated_at:now}).in('id',deliveredIds);
+  if(tripId!=='direct')
+    await db.from('trips').update({status:'completed',updated_at:now}).eq('id',tripId);
+  try{await db.from('trip_logs').insert({trip_id:tripId,event:'trip_completed',details:{by:'driver'},user_id:currentUser.id,user_name:currentUser.full_name});}catch(e){}
+  await loadAll();
+  load(false);
+}
+
+// STATUS
+function updateStatusUI(){
+  if(!driverRecord)return;
+  const bar=document.getElementById('statusBar');
+  const dot=document.getElementById('statusDot');
+  const txt=document.getElementById('statusText');
+  const btn=document.getElementById('statusBtn');
+  if(activeBreak){
+    bar.className='status-bar on-break';dot.className='status-dot dot-yellow';
+    txt.textContent='في استراحة';btn.textContent='الرجوع للعمل';
+  }else if(driverRecord.is_online){
+    bar.className='status-bar online';dot.className='status-dot dot-green';
+    txt.textContent='أنت أونلاين — جاهز للرحلات';btn.textContent='🔴 أوفلاين';
+  }else{
+    bar.className='status-bar offline';dot.className='status-dot dot-red';
+    txt.textContent='أنت أوفلاين';btn.textContent='🟢 أونلاين';
+  }
+}
+async function toggleStatus(){
+  if(!driverRecord)return;
+  if(activeBreak){await endBreak();return;}
+  load(true);
+  const n=!driverRecord.is_online;
+  await db.from('drivers').update({is_online:n,last_seen:new Date().toISOString()}).eq('id',driverRecord.id);
+  driverRecord.is_online=n;updateStatusUI();load(false);
+}
+
+async function checkBreak(){
+  if(!driverRecord)return;
+  try{
+    const {data}=await db.from('driver_breaks').select('*').eq('driver_id',driverRecord.id).eq('status','approved').order('created_at',{ascending:false}).limit(1);
+    if(data?.length){
+      activeBreak=data[0];
+      document.getElementById('breakBanner').style.display='flex';
+      if(breakInterval)clearInterval(breakInterval);
+      breakInterval=setInterval(updateBreakTimer,1000);
+      updateBreakTimer();
+    }else{
+      activeBreak=null;document.getElementById('breakBanner').style.display='none';
+      if(breakInterval)clearInterval(breakInterval);
+    }
+    updateStatusUI();
+  }catch(e){}
+}
+function updateBreakTimer(){
+  if(!activeBreak?.started_at)return;
+  const el=Math.floor((new Date()-new Date(activeBreak.started_at))/1000);
+  const tot=(activeBreak.duration_minutes||30)*60;
+  const rem=Math.max(tot-el,0);
+  const m=Math.floor(rem/60),s=rem%60;
+  document.getElementById('breakTimer').textContent=`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  if(rem===0)checkBreak();
+}
+async function endBreak(){
+  if(!activeBreak)return;
+  load(true);
+  await db.from('driver_breaks').update({status:'ended',ended_at:new Date().toISOString()}).eq('id',activeBreak.id);
+  await db.from('drivers').update({is_online:true}).eq('id',driverRecord.id);
+  driverRecord.is_online=true;activeBreak=null;
+  document.getElementById('breakBanner').style.display='none';
+  if(breakInterval)clearInterval(breakInterval);
+  updateStatusUI();load(false);
+}
+
+function requestBreak(){
+  document.getElementById('brk-reason').value='';
+  document.getElementById('breakModal').classList.add('open');
+}
+async function submitBreak(){
+  if(!driverRecord){alert('خطأ في بيانات الطيار');return;}
+  const reason=document.getElementById('brk-reason').value.trim();
+  load(true);
+  await db.from('driver_breaks').insert({driver_id:driverRecord.id,requested_by:'driver',status:'pending',duration_minutes:settings?.break_duration_minutes||30,notes:reason||null});
+  closeModal('breakModal');
+  alert('✓ تم إرسال طلب الاستراحة — انتظر موافقة الإدارة');
+  load(false);
+}
+
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+document.querySelectorAll('.modal-overlay').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');}));
+function load(s){document.getElementById('lo').classList.toggle('show',s);}
+function doLogout(){sessionStorage.removeItem('delivery_user');window.location.href='auth.html';}
+</script>
+</body>
+</html>
