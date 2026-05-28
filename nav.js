@@ -1,5 +1,8 @@
 function injectNavbar() {
   const currentPage = window.location.pathname.split("/").pop();
+  const contractPages = ['sales_contracts.html','claims.html','contracts.html'];
+  const isContractPage = contractPages.includes(currentPage);
+
   const navContent = `
 <div class="nav-logo">
   <span style="font-weight:900;font-size:1.1rem;letter-spacing:1px;">Phalix</span>
@@ -47,20 +50,67 @@ function injectNavbar() {
   <a href="offers.html" class="${currentPage === 'offers.html' ? 'active' : ''}">
     <i class="fas fa-tags"></i> عروض
   </a>
-  <a href="sales_contracts.html" class="${currentPage === 'sales_contracts.html' ? 'active' : ''}">
-    <i class="fas fa-file-invoice"></i> فواتير التعاقد
-  </a>
-  <a href="claims.html" class="${currentPage === 'claims.html' ? 'active' : ''}">
-    <i class="fas fa-file-invoice-dollar"></i> مطالبات
-  </a>
+
+  <!-- ===== Dropdown: تعاقدات ===== -->
+  <div style="position:relative;display:flex;align-items:center;">
+    <a href="#" onclick="toggleContractsDropdown(event)" style="
+      color:${isContractPage ? 'var(--primary)' : '#94a3b8'};
+      background:${isContractPage ? 'var(--accent)' : 'transparent'};
+      padding:7px 12px; border-radius:8px;
+      font-size:0.8rem; font-weight:${isContractPage ? '700' : '500'};
+      display:flex; align-items:center; gap:5px;
+      text-decoration:none; white-space:nowrap; cursor:pointer;
+    ">
+      <i class="fas fa-file-contract"></i> تعاقدات
+      <i class="fas fa-chevron-down" style="font-size:0.6rem;margin-right:2px;"></i>
+    </a>
+    <div id="contracts-dropdown" style="
+      display:none;
+      position:absolute;
+      top:calc(100% + 6px);
+      right:0;
+      background:#1e293b;
+      border:1px solid #334155;
+      border-radius:10px;
+      min-width:210px;
+      box-shadow:0 8px 24px rgba(0,0,0,0.5);
+      z-index:9999;
+      overflow:hidden;
+    ">
+      <a href="sales_contracts.html" style="
+        display:flex; align-items:center; gap:8px;
+        padding:11px 16px; text-decoration:none; font-size:0.82rem;
+        color:${currentPage === 'sales_contracts.html' ? '#38bdf8' : '#94a3b8'};
+        background:${currentPage === 'sales_contracts.html' ? '#0c4a6e' : 'transparent'};
+        border-bottom:1px solid #334155;
+      ">
+        <i class="fas fa-file-invoice"></i> فواتير التعاقد
+      </a>
+      <a href="claims.html" style="
+        display:flex; align-items:center; gap:8px;
+        padding:11px 16px; text-decoration:none; font-size:0.82rem;
+        color:${currentPage === 'claims.html' ? '#38bdf8' : '#94a3b8'};
+        background:${currentPage === 'claims.html' ? '#0c4a6e' : 'transparent'};
+        border-bottom:1px solid #334155;
+      ">
+        <i class="fas fa-file-invoice-dollar"></i> مطالبات
+      </a>
+      <a href="contracts.html" style="
+        display:flex; align-items:center; gap:8px;
+        padding:11px 16px; text-decoration:none; font-size:0.82rem;
+        color:${currentPage === 'contracts.html' ? '#38bdf8' : '#94a3b8'};
+        background:${currentPage === 'contracts.html' ? '#0c4a6e' : 'transparent'};
+      ">
+        <i class="fas fa-file-contract"></i> لنا فواتير لدى العملاء
+      </a>
+    </div>
+  </div>
+
   <a href="visa_transactions.html" class="${currentPage === 'visa_transactions.html' ? 'active' : ''}">
-  <i class="fas fa-credit-card"></i> فيزا
-</a>
-  <a href="contracts.html" class="${currentPage === 'contracts.html' ? 'active' : ''}">
-    <i class="fas fa-file-contract"></i> لنا فواتير تعاقد لدى العملاء
+    <i class="fas fa-credit-card"></i> فيزا
   </a>
   <a href="missing_items.html" class="${currentPage === 'missing_items.html' ? 'active' : ''}">
-    <i class="fas fa-truck"></i> لم يصل
+    <i class="fas fa-truck"></i> لم يصل من الشركات
   </a>
   <a href="inventory_min.html" class="${currentPage === 'inventory_min.html' ? 'active' : ''}">
     <i class="fas fa-boxes"></i> حدود المخزون
@@ -77,6 +127,19 @@ function injectNavbar() {
   if (navBar) navBar.innerHTML = navContent;
 }
 
+function toggleContractsDropdown(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const menu = document.getElementById('contracts-dropdown');
+  if (!menu) return;
+  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+}
+
+document.addEventListener('click', () => {
+  const menu = document.getElementById('contracts-dropdown');
+  if (menu) menu.style.display = 'none';
+});
+
 document.addEventListener('DOMContentLoaded', () => {
   injectNavbar();
   setTimeout(startNotifWatcher, 2000);
@@ -90,17 +153,14 @@ function startNotifWatcher() {
   const token = localStorage.getItem('authToken');
   if (!token) return;
 
-  // مش بيتحقق فوراً — بس بيبدأ العداد من الساعة اللي فاتت
   const lastCheck = parseInt(localStorage.getItem('lastNotifCheck') || '0');
   const now       = Date.now();
   const oneHour   = 60 * 60 * 1000;
 
-  // لو فات أكتر من ساعة من آخر تحقق — اتحقق دلوقتي
   if (now - lastCheck >= oneHour) {
     checkNotifications();
   }
 
-  // كل ساعة اتحقق
   notifInterval = setInterval(checkNotifications, oneHour);
 }
 
@@ -116,7 +176,6 @@ async function checkNotifications() {
       return isReceived && !isDone;
     });
 
-    // ←── هنا صح — بره الـ filter
     localStorage.setItem('lastNotifCheck', Date.now().toString());
 
     const count = pending.length;
@@ -137,7 +196,7 @@ function updateNotifBadge(count) {
   const badge = document.getElementById('notif-badge');
   if (!badge) return;
   if (count > 0) {
-    badge.textContent  = count;
+    badge.textContent   = count;
     badge.style.display = 'flex';
   } else {
     badge.style.display = 'none';
@@ -156,32 +215,19 @@ function showNotifPopup(count) {
         from { opacity:0; transform:translateX(-50%) translateY(20px); }
         to   { opacity:1; transform:translateX(-50%) translateY(0); }
       }
-      @keyframes popupOut {
-        from { opacity:1; transform:translateX(-50%) translateY(0); }
-        to   { opacity:0; transform:translateX(-50%) translateY(20px); }
-      }
     </style>
     <div id="notif-popup-inner" style="
-      position:fixed;
-      bottom:24px;
-      left:50%;
+      position:fixed; bottom:24px; left:50%;
       transform:translateX(-50%);
-      background:#1e293b;
-      border:2px solid #f59e0b;
-      border-radius:16px;
-      padding:18px 24px;
+      background:#1e293b; border:2px solid #f59e0b;
+      border-radius:16px; padding:18px 24px;
       box-shadow:0 8px 32px rgba(0,0,0,0.5);
-      z-index:99999;
-      display:flex;
-      align-items:center;
-      gap:14px;
-      min-width:300px;
-      max-width:90vw;
+      z-index:99999; display:flex; align-items:center; gap:14px;
+      min-width:300px; max-width:90vw;
       animation:slideUp 0.3s ease;
-      font-family:'Tajawal',sans-serif;
-      direction:rtl;
+      font-family:'Tajawal',sans-serif; direction:rtl;
     ">
-      <div style="font-size:2rem;animation:none;">🔔</div>
+      <div style="font-size:2rem;">🔔</div>
       <div style="flex:1;">
         <div style="font-weight:700;color:#f59e0b;font-size:0.95rem;margin-bottom:4px;">
           لديك ${count} إشعار${count > 1 ? 'ات' : ''} غير مكتمل${count > 1 ? 'ة' : ''}
@@ -192,33 +238,20 @@ function showNotifPopup(count) {
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;flex-shrink:0;">
         <button onclick="window.location.href='notifications.html'" style="
-          padding:8px 14px;
-          background:#f59e0b;
-          color:#000;
-          border:none;
-          border-radius:8px;
-          font-weight:700;
-          cursor:pointer;
-          font-family:'Tajawal',sans-serif;
-          font-size:0.82rem;
-          white-space:nowrap;
+          padding:8px 14px; background:#f59e0b; color:#000;
+          border:none; border-radius:8px; font-weight:700;
+          cursor:pointer; font-family:'Tajawal',sans-serif;
+          font-size:0.82rem; white-space:nowrap;
         ">عرض الإشعارات</button>
         <button onclick="closeNotifPopup()" style="
-          padding:6px 14px;
-          background:transparent;
-          color:#64748b;
-          border:1px solid #334155;
-          border-radius:8px;
-          cursor:pointer;
-          font-family:'Tajawal',sans-serif;
-          font-size:0.78rem;
+          padding:6px 14px; background:transparent; color:#64748b;
+          border:1px solid #334155; border-radius:8px;
+          cursor:pointer; font-family:'Tajawal',sans-serif; font-size:0.78rem;
         ">إغلاق</button>
       </div>
     </div>
   `;
   document.body.appendChild(popup);
-
-  // إغلاق تلقائي بعد 8 ثواني
   setTimeout(() => closeNotifPopup(), 8000);
 }
 
@@ -230,7 +263,7 @@ function closeNotifPopup() {
 
 function playNotifSound() {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx   = new (window.AudioContext || window.webkitAudioContext)();
     const notes = [880, 1046, 880];
     notes.forEach((freq, i) => {
       const osc  = ctx.createOscillator();
