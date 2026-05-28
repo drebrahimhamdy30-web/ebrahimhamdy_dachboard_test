@@ -75,7 +75,7 @@ function injectNavbar() {
   createFloatingDropdown('contracts-dropdown', [
     { href: 'sales_contracts.html', icon: 'fa-file-invoice',        label: 'فواتير التعاقد',      active: currentPage === 'sales_contracts.html' },
     { href: 'claims.html',          icon: 'fa-file-invoice-dollar', label: 'مطالبات',             active: currentPage === 'claims.html' },
-    { href: 'contracts.html',       icon: 'fa-file-contract',       label: 'لنا فواتير لدى العملاء', active: currentPage === 'contracts.html' }
+    { href: 'contracts.html',       icon: 'fa-file-contract',       label: 'لنا فواتير لدى العملاء', active: currentPage === 'contracts.html' },
     { href: 'contracts_stats.html', icon: 'fa-chart-bar', label: 'إحصائيات', active: currentPage === 'contracts_stats.html' }
   ]);
 
