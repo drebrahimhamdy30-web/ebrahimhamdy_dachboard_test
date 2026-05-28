@@ -145,7 +145,7 @@ function bindToggle(toggleId, menuId) {
   });
 }
 
-document.addEventListener('DOMContentLoaded', function() {
+window.addEventListener('load', function() {
   injectNavbar();
   setTimeout(startNotifWatcher, 2000);
   document.addEventListener('click', function() {
