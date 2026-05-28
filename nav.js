@@ -38,6 +38,10 @@ function injectNavbar() {
         ' إشعارات</a>' +
       '<a href="offers.html" class="' + (currentPage === 'offers.html' ? 'active' : '') + '">' +
         '<i class="fas fa-tags"></i> عروض</a>' +
+    (localStorage.getItem('userRole') === 'admin' ?
+  '<a href="dashboard.html" class="' + (currentPage === 'dashboard.html' ? 'active' : '') + '" style="color:#f59e0b;font-weight:700;">' +
+    '<i class="fas fa-chart-line"></i> داشبورد</a>'
+  : '') +
       '<a id="contracts-toggle" href="#" style="' +
         'color:' + (isContractPage ? 'var(--primary)' : '#94a3b8') + ';' +
         'background:' + (isContractPage ? 'var(--accent)' : 'transparent') + ';' +
