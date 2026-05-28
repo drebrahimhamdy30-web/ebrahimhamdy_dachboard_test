@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>إحصائيات التعاقدات - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+      <div class="page-header">
+        <div class="page-title">
+          <i class="fas fa-chart-bar"></i> إحصائيات التعاقدات
+        </div>
+        <button class="btn btn-primary" onclick="loadAll()">
+          <i class="fas fa-sync-alt"></i> تحديث
+        </button>
+      </div>
+
+      <div id="stats-container">
+        <p style="text-align:center;padding:40px;color:var(--text-muted);">⏳ جاري التحميل...</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="nav.js" defer></script>
+  <script>
+    let allContracts = [];
+    let allClaims    = [];
+
+    const BRANCHES = ['المعمورة', 'سان ستيفانو', 'سيدى بشر'];
+
+    checkAuth().then(user => {
+      if (user) loadAll();
+    });
+
+    async function loadAll() {
+      document.getElementById('stats-container').innerHTML =
+        '<p style="text-align:center;padding:40px;color:var(--text-muted);">⏳ جاري جلب البيانات...</p>';
+      try {
+        const [cResp, clResp] = await Promise.all([
+          fetchFromN8N('sales_contract'),
+          fetchFromN8N('claims').catch(() => [])
+        ]);
+        allContracts = Array.isArray(cResp)  ? cResp  : (cResp.data  || []);
+        allClaims    = Array.isArray(clResp) ? clResp : (clResp.data || []);
+        render();
+      } catch(e) {
+        document.getElementById('stats-container').innerHTML =
+          '<p style="text-align:center;color:var(--danger);padding:40px;">❌ فشل الاتصال</p>';
+      }
+    }
+
+    function calcAmount(total, paymentType) {
+      const t = parseFloat(total) || 0;
+      if (!paymentType || paymentType === '3/4') return t * 0.75;
+      if (paymentType === 'مساهمة كاملة')        return t;
+      if (paymentType === 'مساهمة 50%')           return t * 0.5;
+      return t * 0.75;
+    }
+
+    function getBranchData(branch) {
+      const branchContracts = allContracts.filter(i =>
+        String(i.branch || '').trim() === branch
+      );
+
+      // ١. فواتير داخل المطالبات (مطالبات لم تُحصَّل)
+      const inClaims = branchContracts.filter(i => {
+        const claimId  = i.claim_id;
+        const hasClaim = claimId && claimId !== 'null' && claimId !== '' && claimId !== '0';
+        if (!hasClaim) return false;
+        const claim = allClaims.find(c => String(c.id) === String(claimId));
+        return claim && claim.status !== 'collected';
+      });
+
+      // ٢. فواتير تحت التجهيز (حالتها "فاتورة" بدون مطالبة)
+      const readyForClaim = branchContracts.filter(i => {
+        const state      = String(i.bill_state || '').trim();
+        const claimId    = i.claim_id;
+        const hasNoClaim = !claimId || claimId === 'null' || claimId === '' || claimId === '0';
+        return state === 'فاتورة' && hasNoClaim;
+      });
+
+      // ٣. فواتير قيد المراجعة (حالتها فارغة)
+      const underReview = branchContracts.filter(i => {
+        const state = String(i.bill_state || '').trim();
+        return state === '';
+      });
+
+      const inClaimsTotal    = inClaims.reduce((s, i) => s + calcAmount(i.total_bill, i.payment_type), 0);
+      const readyTotal       = readyForClaim.reduce((s, i) => s + calcAmount(i.total_bill, i.payment_type), 0);
+      const underReviewTotal = underReview.reduce((s, i) => s + calcAmount(i.total_bill, i.payment_type), 0);
+      const confirmedTotal   = inClaimsTotal + readyTotal;
+
+      return {
+        inClaims:         { count: inClaims.length,     total: inClaimsTotal },
+        readyForClaim:    { count: readyForClaim.length, total: readyTotal },
+        underReview:      { count: underReview.length,   total: underReviewTotal },
+        confirmedTotal
+      };
+    }
+
+    function fmt(num) {
+      return num.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function render() {
+      const data = BRANCHES.map(b => ({ branch: b, ...getBranchData(b) }));
+
+      const grandConfirmed   = data.reduce((s, d) => s + d.confirmedTotal, 0);
+      const grandUnderReview = data.reduce((s, d) => s + d.underReview.total, 0);
+
+      let html = `
+        <div style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>الفرع</th>
+                <th>
+                  <div>فواتير داخل المطالبات</div>
+                  <div style="font-size:0.7rem;font-weight:400;color:var(--text-muted);">لم تُحصَّل بعد</div>
+                </th>
+                <th>
+                  <div>فواتير تحت التجهيز</div>
+                  <div style="font-size:0.7rem;font-weight:400;color:var(--text-muted);">جاهزة للمطالبة</div>
+                </th>
+                <th style="background:#f0fdf4;">
+                  <div>الإجمالي المؤكد</div>
+                  <div style="font-size:0.7rem;font-weight:400;color:#16a34a;">رصيد الخزنة</div>
+                </th>
+                <th style="background:#fefce8;">
+                  <div>قيد المراجعة</div>
+                  <div style="font-size:0.7rem;font-weight:400;color:#a16207;">تحت المراجعة</div>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+      `;
+
+      data.forEach(d => {
+        html += `
+          <tr>
+            <td>
+              <span class="branch-tag" style="font-size:0.85rem;">${d.branch}</span>
+            </td>
+            <td>
+              <b style="color:var(--accent-dark);font-size:0.95rem;">${fmt(d.inClaims.total)}</b>
+              <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">${d.inClaims.count} فاتورة</div>
+            </td>
+            <td>
+              <b style="color:var(--warning);font-size:0.95rem;">${fmt(d.readyForClaim.total)}</b>
+              <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">${d.readyForClaim.count} فاتورة</div>
+            </td>
+            <td style="background:#f0fdf4;">
+              <b style="color:#16a34a;font-size:1.05rem;">${fmt(d.confirmedTotal)}</b>
+              <div style="font-size:0.7rem;color:#16a34a;margin-top:2px;">جنيه</div>
+            </td>
+            <td style="background:#fefce8;">
+              <b style="color:#a16207;font-size:0.95rem;">${fmt(d.underReview.total)}</b>
+              <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px;">${d.underReview.count} فاتورة</div>
+            </td>
+          </tr>
+        `;
+      });
+
+      // صف الإجمالي
+      html += `
+            <tr style="background:var(--surface-3);font-weight:700;">
+              <td><b>الإجمالي الكلي</b></td>
+              <td>
+                <b style="color:var(--accent-dark);">${fmt(data.reduce((s,d)=>s+d.inClaims.total,0))}</b>
+                <div style="font-size:0.72rem;color:var(--text-muted);">${data.reduce((s,d)=>s+d.inClaims.count,0)} فاتورة</div>
+              </td>
+              <td>
+                <b style="color:var(--warning);">${fmt(data.reduce((s,d)=>s+d.readyForClaim.total,0))}</b>
+                <div style="font-size:0.72rem;color:var(--text-muted);">${data.reduce((s,d)=>s+d.readyForClaim.count,0)} فاتورة</div>
+              </td>
+              <td style="background:#f0fdf4;">
+                <b style="color:#16a34a;font-size:1.1rem;">${fmt(grandConfirmed)}</b>
+                <div style="font-size:0.7rem;color:#16a34a;">جنيه</div>
+              </td>
+              <td style="background:#fefce8;">
+                <b style="color:#a16207;">${fmt(grandUnderReview)}</b>
+                <div style="font-size:0.72rem;color:var(--text-muted);">${data.reduce((s,d)=>s+d.underReview.count,0)} فاتورة</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ملاحظة توضيحية -->
+      <div style="margin-top:16px;padding:12px 16px;background:var(--surface-3);border-radius:var(--radius-md);font-size:0.82rem;color:var(--text-secondary);line-height:1.8;">
+        <b style="color:var(--text-primary);">📌 توضيح:</b><br>
+        <span style="color:#16a34a;">■</span> <b>الإجمالي المؤكد</b> = فواتير داخل مطالبات لم تُحصَّل + فواتير جاهزة للمطالبة — هذا هو رصيد الخزنة الفعلي<br>
+        <span style="color:#a16207;">■</span> <b>قيد المراجعة</b> = فواتير لم يحدد لها المحاسب حالة بعد — قد تُضاف للخزنة أو لا
+      </div>
+      `;
+
+      document.getElementById('stats-container').innerHTML = html;
+    }
+  </script>
+</body>
+</html>
