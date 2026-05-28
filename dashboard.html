@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    .dash-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .date-filter {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .date-filter label { font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); }
+    .date-filter input { width: 150px; }
+
+    /* KPI Cards */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    .kpi-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 18px 20px;
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .kpi-icon {
+      width: 46px; height: 46px;
+      border-radius: var(--radius-md);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.2rem;
+      flex-shrink: 0;
+    }
+    .kpi-body { flex: 1; min-width: 0; }
+    .kpi-value {
+      font-size: 1.5rem;
+      font-weight: 900;
+      line-height: 1.1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .kpi-label { font-size: 0.75rem; color: var(--text-muted); margin-top: 3px; font-weight: 500; }
+
+    /* Branch Cards */
+    .branches-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .branch-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 18px;
+      box-shadow: var(--shadow-sm);
+    }
+    .branch-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .branch-name { font-size: 0.95rem; font-weight: 700; color: var(--text-primary); }
+    .branch-total { font-size: 1.1rem; font-weight: 900; color: var(--accent-dark); }
+    .branch-metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .branch-metric { text-align: center; }
+    .branch-metric-val { font-size: 0.95rem; font-weight: 700; color: var(--text-primary); }
+    .branch-metric-lbl { font-size: 0.68rem; color: var(--text-muted); margin-top: 2px; }
+
+    /* Payment type breakdown */
+    .pay-breakdown { display: flex; gap: 6px; flex-wrap: wrap; }
+    .pay-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 10px; border-radius: 20px;
+      font-size: 0.72rem; font-weight: 700;
+    }
+    .pay-cash  { background: #dcfce7; color: #15803d; }
+    .pay-visa  { background: #dbeafe; color: #1d4ed8; }
+    .pay-ajal  { background: #fef9c3; color: #a16207; }
+
+    /* Top employees table */
+    .section-title {
+      font-size: 0.95rem; font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 14px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .section-title i { color: var(--accent); }
+
+    .emp-table { width: 100%; border-collapse: collapse; }
+    .emp-table th {
+      background: var(--surface-3);
+      padding: 9px 12px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--text-secondary);
+      text-align: right;
+      border-bottom: 2px solid var(--border);
+    }
+    .emp-table td {
+      padding: 9px 12px;
+      font-size: 0.82rem;
+      border-bottom: 1px solid var(--surface-3);
+      vertical-align: middle;
+    }
+    .emp-table tr:last-child td { border-bottom: none; }
+    .emp-table tr:hover td { background: var(--surface-2); }
+    .rank-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 22px; height: 22px; border-radius: 50%;
+      font-size: 0.72rem; font-weight: 700;
+    }
+    .rank-1 { background: #fef9c3; color: #a16207; }
+    .rank-2 { background: #f1f5f9; color: #475569; }
+    .rank-3 { background: #ffedd5; color: #c2410c; }
+    .rank-n { background: var(--surface-3); color: var(--text-muted); }
+
+    .loading-overlay {
+      text-align: center; padding: 60px;
+      color: var(--text-muted); font-size: 1rem;
+    }
+
+    @media(max-width:640px) {
+      .kpi-grid { grid-template-columns: 1fr 1fr; }
+      .branches-grid { grid-template-columns: 1fr; }
+      .branch-metrics { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+
+      <div class="dash-header">
+        <div class="page-title">
+          <i class="fas fa-chart-line"></i> لوحة المؤشرات
+        </div>
+        <div class="date-filter">
+          <label>من</label>
+          <input type="date" id="date-from" class="form-input">
+          <label>إلى</label>
+          <input type="date" id="date-to" class="form-input">
+          <button class="btn btn-primary" onclick="loadDashboard()">
+            <i class="fas fa-search"></i> عرض
+          </button>
+        </div>
+      </div>
+
+      <div id="dashboard-content">
+        <div class="loading-overlay">⏳ جاري تحميل البيانات...</div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    const DASH_URL = 'https://agent.ebrahimhamdy.com/webhook/dashboard';
+
+    const BRANCH_DISPLAY = {
+      'الصيدلية':      'المعمورة',
+      'ابراهيم حمدي 2': 'سان ستيفانو',
+      'ابراهيم حمدي 3': 'سيدى بشر'
+    };
+
+    checkAuth().then(user => {
+      if (!user) return;
+      const role = localStorage.getItem('userRole') || '';
+      if (role !== 'admin') {
+        document.getElementById('dashboard-content').innerHTML =
+          '<div class="loading-overlay" style="color:var(--danger);">🔒 هذه الصفحة للإدارة فقط</div>';
+        return;
+      }
+      // تعيين التواريخ الافتراضية: اليوم
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('date-from').value = today;
+      document.getElementById('date-to').value   = today;
+      loadDashboard();
+    });
+
+    async function loadDashboard() {
+      const dateFrom = document.getElementById('date-from').value;
+      const dateTo   = document.getElementById('date-to').value;
+      if (!dateFrom || !dateTo) { alert('برجاء اختيار الفترة'); return; }
+
+      document.getElementById('dashboard-content').innerHTML =
+        '<div class="loading-overlay">⏳ جاري جلب البيانات...</div>';
+
+      try {
+        const resp = await fetch(
+          DASH_URL + '?type=sales_summary&date_from=' + dateFrom + '&date_to=' + dateTo
+        );
+        const raw  = await resp.json();
+        const data = Array.isArray(raw) ? raw : (raw.data || []);
+
+        if (!data.length) {
+          document.getElementById('dashboard-content').innerHTML =
+            '<div class="loading-overlay">لا توجد بيانات في هذه الفترة</div>';
+          return;
+        }
+
+        renderDashboard(data, dateFrom, dateTo);
+      } catch(e) {
+        document.getElementById('dashboard-content').innerHTML =
+          '<div class="loading-overlay" style="color:var(--danger);">❌ فشل الاتصال</div>';
+      }
+    }
+
+    function num(v) { return parseFloat(v) || 0; }
+    function fmt(v) {
+      return num(v).toLocaleString('ar-EG', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    }
+    function fmt2(v) {
+      return num(v).toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function renderDashboard(data, dateFrom, dateTo) {
+      // ===== حسابات إجمالية =====
+      const totalSales  = data.reduce((s, r) => s + num(r.Net_Sales), 0);
+      const totalTx     = data.reduce((s, r) => s + num(r.Bills_Count), 0);
+      const totalDisc   = data.reduce((s, r) => s + num(r.Total_Discounts), 0);
+      const avgPerTx    = totalTx > 0 ? totalSales / totalTx : 0;
+
+      const cashSales   = data.filter(r => r.Type === 'كاش').reduce((s, r) => s + num(r.Net_Sales), 0);
+      const visaSales   = data.filter(r => r.Type === 'فيزا').reduce((s, r) => s + num(r.Net_Sales), 0);
+      const ajalSales   = data.filter(r => r.Type === 'آجل').reduce((s, r) => s + num(r.Net_Sales), 0);
+
+      // ===== حسابات لكل فرع =====
+      const branches = {};
+      data.forEach(r => {
+        const b = r.Branch_Name;
+        if (!branches[b]) branches[b] = { rows: [], total: 0, tx: 0, disc: 0, cash: 0, visa: 0, ajal: 0 };
+        branches[b].rows.push(r);
+        branches[b].total += num(r.Net_Sales);
+        branches[b].tx    += num(r.Bills_Count);
+        branches[b].disc  += num(r.Total_Discounts);
+        if (r.Type === 'كاش') branches[b].cash += num(r.Net_Sales);
+        if (r.Type === 'فيزا') branches[b].visa += num(r.Net_Sales);
+        if (r.Type === 'آجل') branches[b].ajal += num(r.Net_Sales);
+      });
+
+      // ===== أعلى موظفين =====
+      const empMap = {};
+      data.forEach(r => {
+        const key = r.Employee_Name + '||' + r.Branch_Name;
+        if (!empMap[key]) empMap[key] = { name: r.Employee_Name, branch: r.Branch_Name, sales: 0, tx: 0 };
+        empMap[key].sales += num(r.Net_Sales);
+        empMap[key].tx    += num(r.Bills_Count);
+      });
+      const topEmps = Object.values(empMap)
+        .sort((a, b) => b.sales - a.sales)
+        .slice(0, 10);
+
+      // ===== بناء الـ HTML =====
+      let html = '';
+
+      // KPI Cards
+      html += `
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-icon" style="background:#dbeafe;">
+              <i class="fas fa-pound-sign" style="color:#1d4ed8;"></i>
+            </div>
+            <div class="kpi-body">
+              <div class="kpi-value" style="color:#1d4ed8;">${fmt(totalSales)}</div>
+              <div class="kpi-label">إجمالي المبيعات (جنيه)</div>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon" style="background:#dcfce7;">
+              <i class="fas fa-receipt" style="color:#15803d;"></i>
+            </div>
+            <div class="kpi-body">
+              <div class="kpi-value" style="color:#15803d;">${fmt(totalTx)}</div>
+              <div class="kpi-label">عدد الفواتير</div>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon" style="background:#fef9c3;">
+              <i class="fas fa-calculator" style="color:#a16207;"></i>
+            </div>
+            <div class="kpi-body">
+              <div class="kpi-value" style="color:#a16207;">${fmt2(avgPerTx)}</div>
+              <div class="kpi-label">متوسط الفاتورة (جنيه)</div>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon" style="background:#fee2e2;">
+              <i class="fas fa-tags" style="color:#b91c1c;"></i>
+            </div>
+            <div class="kpi-body">
+              <div class="kpi-value" style="color:#b91c1c;">${fmt2(totalDisc)}</div>
+              <div class="kpi-label">إجمالي الخصومات (جنيه)</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Payment breakdown -->
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
+          <span style="font-size:0.8rem;font-weight:700;color:var(--text-secondary);">تفصيل طريقة الدفع:</span>
+          <span class="pay-badge pay-cash">💵 كاش: ${fmt(cashSales)} ج</span>
+          <span class="pay-badge pay-visa">💳 فيزا: ${fmt(visaSales)} ج</span>
+          <span class="pay-badge pay-ajal">📋 آجل: ${fmt(ajalSales)} ج</span>
+        </div>
+      `;
+
+      // Branch Cards
+      html += '<div class="branches-grid">';
+      Object.entries(branches).forEach(([branchKey, b]) => {
+        const displayName = BRANCH_DISPLAY[branchKey] || branchKey;
+        const avg = b.tx > 0 ? b.total / b.tx : 0;
+        html += `
+          <div class="branch-card">
+            <div class="branch-card-header">
+              <span class="branch-name"><i class="fas fa-store" style="color:var(--accent);margin-left:6px;"></i>${displayName}</span>
+              <span class="branch-total">${fmt(b.total)} ج</span>
+            </div>
+            <div class="branch-metrics">
+              <div class="branch-metric">
+                <div class="branch-metric-val">${fmt(b.tx)}</div>
+                <div class="branch-metric-lbl">فاتورة</div>
+              </div>
+              <div class="branch-metric">
+                <div class="branch-metric-val">${fmt2(avg)}</div>
+                <div class="branch-metric-lbl">متوسط/فاتورة</div>
+              </div>
+              <div class="branch-metric">
+                <div class="branch-metric-val" style="color:var(--danger);">${fmt2(b.disc)}</div>
+                <div class="branch-metric-lbl">خصومات</div>
+              </div>
+            </div>
+            <div class="pay-breakdown">
+              <span class="pay-badge pay-cash">كاش ${fmt(b.cash)}</span>
+              <span class="pay-badge pay-visa">فيزا ${fmt(b.visa)}</span>
+              ${b.ajal > 0 ? `<span class="pay-badge pay-ajal">آجل ${fmt(b.ajal)}</span>` : ''}
+            </div>
+          </div>
+        `;
+      });
+      html += '</div>';
+
+      // Top Employees
+      html += `
+        <div class="card" style="margin-top:0;border:1px solid var(--border);">
+          <div class="section-title">
+            <i class="fas fa-trophy"></i> أعلى الموظفين مبيعاً
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="emp-table">
+              <thead>
+                <tr>
+                  <th style="width:40px;text-align:center;">#</th>
+                  <th>الموظف</th>
+                  <th>الفرع</th>
+                  <th style="text-align:left;">المبيعات</th>
+                  <th style="text-align:left;">الفواتير</th>
+                  <th style="text-align:left;">متوسط/فاتورة</th>
+                </tr>
+              </thead>
+              <tbody>
+      `;
+      topEmps.forEach((e, i) => {
+        const rankClass = i === 0 ? 'rank-1' : i === 1 ? 'rank-2' : i === 2 ? 'rank-3' : 'rank-n';
+        const rankIcon  = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1);
+        const avg       = e.tx > 0 ? e.sales / e.tx : 0;
+        const dispBranch = BRANCH_DISPLAY[e.branch] || e.branch;
+        html += `
+          <tr>
+            <td style="text-align:center;">
+              <span class="rank-badge ${rankClass}">${rankIcon}</span>
+            </td>
+            <td style="font-weight:600;">${e.name}</td>
+            <td><span class="branch-tag">${dispBranch}</span></td>
+            <td style="font-weight:700;color:var(--accent-dark);">${fmt(e.sales)} ج</td>
+            <td>${fmt(e.tx)}</td>
+            <td>${fmt2(avg)} ج</td>
+          </tr>
+        `;
+      });
+      html += `
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('dashboard-content').innerHTML = html;
+    }
+  </script>
+</body>
+</html>
