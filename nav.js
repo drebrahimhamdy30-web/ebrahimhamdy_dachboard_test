@@ -127,13 +127,18 @@ function injectNavbar() {
   if (navBar) navBar.innerHTML = navContent;
 }
 
-function toggleContractsDropdown(e) {
-  e.preventDefault();
-  e.stopPropagation();
-  const menu = document.getElementById('contracts-dropdown');
-  if (!menu) return;
-  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
-}
+function toggleContractsDropdown(e) { ... }
+
+document.addEventListener('DOMContentLoaded', () => {
+  injectNavbar();
+  setTimeout(startNotifWatcher, 2000);
+
+  // ← انقله هنا جوه DOMContentLoaded
+  document.addEventListener('click', () => {
+    const menu = document.getElementById('contracts-dropdown');
+    if (menu) menu.style.display = 'none';
+  });
+});
 
 document.addEventListener('click', () => {
   const menu = document.getElementById('contracts-dropdown');
