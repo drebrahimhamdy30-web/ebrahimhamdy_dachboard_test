@@ -1,6 +1,6 @@
 function injectNavbar() {
   var currentPage    = window.location.pathname.split("/").pop();
-  var contractPages  = ['sales_contracts.html', 'claims.html', 'contracts.html'];
+  var contractPages = ['sales_contracts.html', 'claims.html', 'contracts.html', 'contracts_stats.html'];
   var csPages        = ['customer_service.html', 'shortages.html'];
   var isContractPage = contractPages.includes(currentPage);
   var isCSPage       = csPages.includes(currentPage);
@@ -72,11 +72,11 @@ function injectNavbar() {
     { href: 'shortages.html',        icon: 'fa-exclamation-triangle', label: 'نواقص',        active: currentPage === 'shortages.html' }
   ]);
 
-  createFloatingDropdown('contracts-dropdown', [
-    { href: 'sales_contracts.html', icon: 'fa-file-invoice',        label: 'فواتير التعاقد',      active: currentPage === 'sales_contracts.html' },
-    { href: 'claims.html',          icon: 'fa-file-invoice-dollar', label: 'مطالبات',             active: currentPage === 'claims.html' },
+createFloatingDropdown('contracts-dropdown', [
+    { href: 'sales_contracts.html', icon: 'fa-file-invoice',        label: 'فواتير التعاقد',         active: currentPage === 'sales_contracts.html' },
+    { href: 'claims.html',          icon: 'fa-file-invoice-dollar', label: 'مطالبات',                active: currentPage === 'claims.html' },
     { href: 'contracts.html',       icon: 'fa-file-contract',       label: 'لنا فواتير لدى العملاء', active: currentPage === 'contracts.html' },
-    { href: 'contracts_stats.html', icon: 'fa-chart-bar', label: 'إحصائيات', active: currentPage === 'contracts_stats.html' }
+    { href: 'contracts_stats.html', icon: 'fa-chart-bar',           label: 'إحصائيات',               active: currentPage === 'contracts_stats.html' }
   ]);
 
   // ربط الأزرار بعد الـ inject
