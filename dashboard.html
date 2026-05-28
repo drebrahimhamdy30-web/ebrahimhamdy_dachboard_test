@@ -205,29 +205,36 @@
       if (globalData.length) renderAll(globalData);
     }
 
-    async function loadDashboard() {
-      const dateFrom = document.getElementById('date-from').value;
-      const dateTo   = document.getElementById('date-to').value;
-      if (!dateFrom || !dateTo) { alert('برجاء اختيار الفترة'); return; }
+async function loadDashboard() {
+  const dateFrom = document.getElementById('date-from').value;
+  const dateTo   = document.getElementById('date-to').value;
+  if (!dateFrom || !dateTo) { alert('برجاء اختيار الفترة'); return; }
 
+  document.getElementById('dashboard-content').innerHTML =
+    '<div class="loading-overlay">⏳ جاري جلب البيانات...</div>';
+
+  try {
+    const resp = await fetch(DASH_URL + '?type=sales_summary');
+    const raw  = await resp.json();
+    const all  = Array.isArray(raw) ? raw : (raw.data || []);
+
+    // فلترة بالتاريخ في الـ JS
+    globalData = all.filter(r => {
+      const d = r.Report_Date ? r.Report_Date.slice(0, 10) : '';
+      return d >= dateFrom && d <= dateTo;
+    });
+
+    if (!globalData.length) {
       document.getElementById('dashboard-content').innerHTML =
-        '<div class="loading-overlay">⏳ جاري جلب البيانات...</div>';
-
-      try {
-        const resp = await fetch(DASH_URL + '?type=sales_summary&date_from=' + dateFrom + '&date_to=' + dateTo);
-        const raw  = await resp.json();
-        globalData = Array.isArray(raw) ? raw : (raw.data || []);
-        if (!globalData.length) {
-          document.getElementById('dashboard-content').innerHTML =
-            '<div class="loading-overlay">لا توجد بيانات في هذه الفترة</div>';
-          return;
-        }
-        renderAll(globalData);
-      } catch(e) {
-        document.getElementById('dashboard-content').innerHTML =
-          '<div class="loading-overlay" style="color:var(--danger);">❌ فشل الاتصال</div>';
-      }
+        '<div class="loading-overlay">لا توجد بيانات في هذه الفترة</div>';
+      return;
     }
+    renderAll(globalData);
+  } catch(e) {
+    document.getElementById('dashboard-content').innerHTML =
+      '<div class="loading-overlay" style="color:var(--danger);">❌ فشل الاتصال</div>';
+  }
+}
 
     function renderAll(data) {
       if (activeTab === 'overview') renderOverview(data);
