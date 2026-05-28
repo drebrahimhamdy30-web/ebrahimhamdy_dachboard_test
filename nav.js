@@ -57,7 +57,7 @@ function injectNavbar() {
         '<i class="fas fa-boxes"></i> حدود المخزون</a>' +
     '</nav>' +
     '<div class="user-info">' +
-      '<span id="nav-user">' + (localStorage.getItem('activeUser') || '') + '</span>' +
+      '<span id="nav-user">' + (localStorage.getItem('activeUser') || '').replace(/'/g, '') + '</span>' +
       '<button class="btn-logout" onclick="logout()">' +
         '<i class="fas fa-sign-out-alt"></i>' +
       '</button>' +
