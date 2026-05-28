@@ -212,14 +212,17 @@ function showNotifPopup(count) {
   const old = document.getElementById('notif-popup');
   if (old) old.remove();
 
+  const notifText = `لديك ${count} ${count > 1 ? 'إشعارات' : 'إشعار'} غير ${count > 1 ? 'مكتملة' : 'مكتمل'}`;
+
   const popup = document.createElement('div');
   popup.id = 'notif-popup';
   popup.innerHTML = `
-    <style>
-      @keyframes slideUp {
-        from { opacity:0; transform:translateX(-50%) translateY(20px); }
-        to   { opacity:1; transform:translateX(-50%) translateY(0); }
-      }
+    ...
+        <div style="font-weight:700;color:#f59e0b;font-size:0.95rem;margin-bottom:4px;">
+          ${notifText}
+        </div>
+    ...
+  `;
     </style>
     <div id="notif-popup-inner" style="
       position:fixed; bottom:24px; left:50%;
