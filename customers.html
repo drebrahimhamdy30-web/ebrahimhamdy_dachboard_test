@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>إدارة العملاء - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    .tabs-bar {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 16px;
+      border-bottom: 2px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .tab-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 18px;
+      border: none;
+      background: transparent;
+      font-family: var(--font);
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--text-secondary);
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      margin-bottom: -2px;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .tab-btn:hover { color: var(--accent-dark); }
+    .tab-btn.active { color: var(--accent-dark); border-bottom-color: var(--accent); }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .search-box-wrap {
+      position: relative;
+      max-width: 440px;
+      margin-bottom: 18px;
+    }
+    .search-box-wrap .search-ic {
+      position: absolute;
+      right: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      pointer-events: none;
+    }
+    .search-box-wrap input { padding-right: 38px; font-size: 0.95rem; }
+
+    .suggest-list {
+      position: absolute;
+      top: calc(100% + 4px);
+      right: 0; left: 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-lg);
+      z-index: 50;
+      max-height: 280px;
+      overflow-y: auto;
+      display: none;
+    }
+    .suggest-list.show { display: block; }
+    .suggest-item {
+      padding: 10px 14px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--surface-3);
+      font-size: 0.85rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    .suggest-item:last-child { border-bottom: none; }
+    .suggest-item:hover { background: var(--surface-2); }
+    .suggest-item .si-code { font-size: 0.75rem; color: var(--text-muted); font-family: monospace; }
+
+    .cust-detail-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 14px;
+    }
+    .detail-field {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+    }
+    .detail-field label {
+      display: block;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .detail-field .ro-value {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .detail-field .ro-value.bal-pos { color: var(--success); }
+    .detail-field .ro-value.bal-neg { color: var(--danger); }
+
+    .bal-breakdown {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+    .bal-chip {
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-weight: 700;
+      background: var(--surface-3);
+      color: var(--text-secondary);
+    }
+    .bal-chip.pos { background: #dcfce7; color: #15803d; }
+    .bal-chip.neg { background: #fee2e2; color: #b91c1c; }
+    .bal-chip.zero { background: var(--surface-3); color: var(--text-muted); }
+
+    .save-bar {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 18px;
+    }
+    .result-hint {
+      text-align: center;
+      padding: 48px 20px;
+      color: var(--text-muted);
+    }
+    .result-hint i { font-size: 2.4rem; display: block; margin-bottom: 12px; opacity: 0.25; }
+
+    .role-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      background: #e0f2fe;
+      color: #0369a1;
+    }
+  </style>
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+
+      <div class="page-header">
+        <div class="page-title">
+          <i class="fas fa-users"></i> إدارة العملاء
+          <span class="role-badge" id="role-badge"></span>
+        </div>
+        <button class="btn btn-primary" onclick="loadCustomers(true)">
+          <i class="fas fa-sync-alt"></i> تحديث
+        </button>
+      </div>
+
+      <!-- التابات -->
+      <div class="tabs-bar" id="tabs-bar">
+        <button class="tab-btn active" data-tab="search" onclick="switchTab('search')">
+          <i class="fas fa-search"></i> بحث وتعديل
+        </button>
+        <!-- تاب الموظفين: يظهر للـ admin و manager فقط -->
+        <button class="tab-btn" data-tab="employees" id="tab-employees" onclick="switchTab('employees')">
+          <i class="fas fa-user-tie"></i> أرصدة الموظفين
+        </button>
+        <button class="tab-btn" data-tab="clients" onclick="switchTab('clients')">
+          <i class="fas fa-wallet"></i> أرصدة العملاء
+        </button>
+      </div>
+
+      <!-- ===== تاب 1: بحث ===== -->
+      <div class="tab-panel active" id="panel-search">
+        <div class="search-box-wrap">
+          <input type="text" id="searchInput" class="form-input" autocomplete="off"
+            placeholder="ابحث بكود أو اسم العميل..."
+            oninput="onSearchInput()" onfocus="onSearchInput()">
+          <i class="fas fa-search search-ic"></i>
+          <div class="suggest-list" id="suggestList"></div>
+        </div>
+        <div id="searchResult">
+          <div class="result-hint">
+            <i class="fas fa-id-card-clip"></i>
+            ابحث بكود العميل أو اسمه لعرض بياناته وتعديلها
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== تاب 2: أرصدة الموظفين ===== -->
+      <div class="tab-panel" id="panel-employees">
+        <div class="stats-row" id="emp-stats"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>كود الموظف</th>
+                <th>اسم الموظف</th>
+                <th>المعمورة</th>
+                <th>سان ستيفانو</th>
+                <th>سيدى بشر</th>
+                <th>الإجمالي</th>
+              </tr>
+            </thead>
+            <tbody id="emp-list">
+              <tr class="loading-row"><td colspan="6">⏳ جاري التحميل...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ===== تاب 3: أرصدة العملاء ===== -->
+      <div class="tab-panel" id="panel-clients">
+        <div class="stats-row" id="cli-stats"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>كود العميل</th>
+                <th>اسم العميل</th>
+                <th>المعمورة</th>
+                <th>سان ستيفانو</th>
+                <th>سيدى بشر</th>
+                <th>الإجمالي</th>
+              </tr>
+            </thead>
+            <tbody id="cli-list">
+              <tr class="loading-row"><td colspan="6">⏳ جاري التحميل...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="nav.js" defer></script>
+  <script>
+    // ===== بيانات المستخدم =====
+    let allCustomers = [];
+    let selectedCust = null;
+    let userBranch   = '';
+    let userRole     = '';
+
+    // ===== خريطة الفروع =====
+    const BRANCH_MAP = {
+      'المعمورة':      { col: 'balance',       label: 'المعمورة' },
+      'سان ستيفانو':  { col: 'balance_san',    label: 'سان ستيفانو' },
+      'سيدى بشر':     { col: 'balance_bishr',  label: 'سيدى بشر' }
+    };
+
+    // ===== أدوات =====
+    function normType(t) {
+      const v = String(t || '').trim().toLowerCase();
+      if (v === 'employee') return 'employee';
+      if (v === 'special')  return 'special';
+      return 'customer';
+    }
+
+    function parseBal(b) {
+      const n = parseFloat(b);
+      return isNaN(n) ? 0 : n;
+    }
+
+    function fmtBal(b) {
+      return parseBal(b).toFixed(1);
+    }
+
+    // إجمالي الرصيد من الثلاثة أعمدة
+    function totalBalance(c) {
+      return parseBal(c.balance) + parseBal(c.balance_san) + parseBal(c.balance_bishr);
+    }
+
+    // تحديد فرع الشخص: العمود الأكبر قيمة مطلقة
+    function personBranch(c) {
+      const vals = [
+        { branch: 'المعمورة',     val: Math.abs(parseBal(c.balance)) },
+        { branch: 'سان ستيفانو', val: Math.abs(parseBal(c.balance_san)) },
+        { branch: 'سيدى بشر',    val: Math.abs(parseBal(c.balance_bishr)) }
+      ];
+      return vals.reduce((max, x) => x.val > max.val ? x : max, vals[0]).branch;
+    }
+
+    // هل الإجمالي خارج النطاق ±5
+    function outOfRange(c) {
+      const t = totalBalance(c);
+      return t > 5 || t < -5;
+    }
+
+    // هل الشخص ينتمي لفرع المستخدم الحالي
+    function isMyBranch(c) {
+      if (userRole === 'admin') return true;
+      // يتقبل 'manager' و 'manger' (typo في الـ backend)
+      if (userRole === 'manager' || userRole === 'manger') return personBranch(c) === userBranch;
+      // employee: فرعه بس
+      return personBranch(c) === userBranch;
+    }
+
+    function isManagerOrAbove() {
+      return userRole === 'admin' || userRole === 'manager' || userRole === 'manger';
+    }
+
+    function clean(v) {
+      if (v === null || v === undefined) return '';
+      const s = String(v).trim();
+      return (s === 'null' || s === 'Null' || s === 'NULL') ? '' : s;
+    }
+
+    function balColor(n) {
+      if (n > 0) return 'var(--success)';
+      if (n < 0) return 'var(--danger)';
+      return 'var(--text-muted)';
+    }
+
+    function balChip(val, label) {
+      const n = parseBal(val);
+      if (n === 0) return `<span class="bal-chip zero">${label}: 0</span>`;
+      const cls = n > 0 ? 'pos' : 'neg';
+      return `<span class="bal-chip ${cls}">${label}: ${fmtBal(val)}</span>`;
+    }
+
+    // ===== تهيئة =====
+    checkAuth().then(user => {
+      if (user) {
+        userBranch = (localStorage.getItem('userBranch') || '').trim();
+        userRole   = (localStorage.getItem('userRole')   || 'employee').trim();
+        initUI();
+        loadCustomers();
+      }
+    });
+
+    function initUI() {
+      // badge الصلاحية — يتقبل manger و manager
+      const roleLabels = {
+        admin:   '👑 مدير عام',
+        manager: '🏢 مدير فرع',
+        manger:  '🏢 مدير فرع',
+        employee:'👤 موظف'
+      };
+      document.getElementById('role-badge').textContent =
+        (roleLabels[userRole] || userRole) + (userBranch ? ` — ${userBranch}` : '');
+
+      // إخفاء تاب الموظفين من الـ employee فقط
+      if (!isManagerOrAbove()) {
+        document.getElementById('tab-employees').style.display = 'none';
+      }
+    }
+
+    // ===== تحميل البيانات =====
+    async function loadCustomers(force = false) {
+      if (allCustomers.length > 0 && !force) { renderActiveTab(); return; }
+      setLoading();
+      try {
+        const raw = await fetchCustomers();
+        allCustomers = Array.isArray(raw) ? raw : [];
+      } catch(e) {
+        allCustomers = [];
+        ['emp-list','cli-list'].forEach(id => {
+          document.getElementById(id).innerHTML =
+            `<tr><td colspan="6" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>`;
+        });
+        return;
+      }
+      renderEmployees();
+      renderClients();
+    }
+
+    function setLoading() {
+      ['emp-list','cli-list'].forEach(id => {
+        document.getElementById(id).innerHTML =
+          `<tr class="loading-row"><td colspan="6">⏳ جاري التحميل...</td></tr>`;
+      });
+    }
+
+    // ===== التابات =====
+    function switchTab(tab) {
+      document.querySelectorAll('.tab-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.tab === tab));
+      document.querySelectorAll('.tab-panel').forEach(p =>
+        p.classList.toggle('active', p.id === 'panel-' + tab));
+      renderActiveTab();
+    }
+
+    function renderActiveTab() {
+      const tab = (document.querySelector('.tab-btn.active') || {}).dataset?.tab;
+      if (tab === 'employees') renderEmployees();
+      else if (tab === 'clients') renderClients();
+    }
+
+    // ===== تاب 1: البحث =====
+    function onSearchInput() {
+      const q    = document.getElementById('searchInput').value.trim().toLowerCase();
+      const list = document.getElementById('suggestList');
+      if (!q) { list.classList.remove('show'); list.innerHTML = ''; return; }
+
+      const matches = allCustomers.filter(c =>
+        String(c.cust_code || '').toLowerCase().includes(q) ||
+        String(c.cust_name || '').toLowerCase().includes(q)
+      ).slice(0, 20);
+
+      if (!matches.length) {
+        list.innerHTML = '<div class="suggest-item" style="color:var(--text-muted);cursor:default;">لا توجد نتائج</div>';
+      } else {
+        list.innerHTML = matches.map(c => {
+          const code = String(c.cust_code || '');
+          const name = clean(c.cust_name) || '(بدون اسم)';
+          // نستخدم data-code عشان نتجنب مشاكل الأحرف الخاصة في onclick
+          const safeCode = code.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+          return `<div class="suggest-item" data-code="${safeCode}">
+            <span>${name}</span>
+            <span class="si-code">${code}</span>
+          </div>`;
+        }).join('');
+
+        // event delegation — click على أي suggest-item
+        list.querySelectorAll('.suggest-item[data-code]').forEach(el => {
+          el.addEventListener('click', () => selectCustomer(el.dataset.code));
+        });
+      }
+      list.classList.add('show');
+    }
+
+    function selectCustomer(code) {
+      selectedCust = allCustomers.find(c => String(c.cust_code) === String(code)) || null;
+      document.getElementById('suggestList').classList.remove('show');
+      if (selectedCust)
+        document.getElementById('searchInput').value =
+          clean(selectedCust.cust_name) || clean(selectedCust.cust_code);
+      renderCustDetail();
+    }
+
+    function renderCustDetail() {
+      const box = document.getElementById('searchResult');
+      if (!selectedCust) {
+        box.innerHTML = `<div class="result-hint">
+          <i class="fas fa-id-card-clip"></i>
+          ابحث بكود العميل أو اسمه لعرض بياناته وتعديلها</div>`;
+        return;
+      }
+      const c     = selectedCust;
+      const total = totalBalance(c);
+      const balClass = total > 0 ? 'bal-pos' : (total < 0 ? 'bal-neg' : '');
+      const ct    = normType(c.type);
+      const branch = personBranch(c);
+
+      box.innerHTML = `
+        <div class="cust-detail-grid">
+          <div class="detail-field">
+            <label><i class="fas fa-hashtag"></i> كود العميل</label>
+            <div class="ro-value">${clean(c.cust_code) || '---'}</div>
+          </div>
+          <div class="detail-field">
+            <label><i class="fas fa-user"></i> اسم العميل</label>
+            <div class="ro-value">${clean(c.cust_name) || '---'}</div>
+          </div>
+          <div class="detail-field">
+            <label><i class="fas fa-store"></i> الفرع الرئيسي</label>
+            <div class="ro-value"><span class="branch-tag">${branch}</span></div>
+          </div>
+          <div class="detail-field" style="grid-column: span 1;">
+            <label><i class="fas fa-scale-balanced"></i> الرصيد الإجمالي</label>
+            <div class="ro-value ${balClass}">${fmtBal(total)} ج</div>
+            <div class="bal-breakdown">
+              ${balChip(c.balance,       'المعمورة')}
+              ${balChip(c.balance_san,   'سان')}
+              ${balChip(c.balance_bishr, 'بشر')}
+            </div>
+          </div>
+          <div class="detail-field">
+            <label><i class="fas fa-tag"></i> النوع — قابل للتعديل</label>
+            <select id="edit-type" class="table-select">
+              <option value="customer" ${ct === 'customer' ? 'selected' : ''}>عميل (customer)</option>
+              <option value="employee" ${ct === 'employee' ? 'selected' : ''}>موظف (employee)</option>
+              <option value="special"  ${ct === 'special'  ? 'selected' : ''}>خاص (special)</option>
+            </select>
+          </div>
+          <div class="detail-field">
+            <label><i class="fas fa-folder"></i> التصنيف — قابل للتعديل</label>
+            <input type="text" id="edit-category" class="table-input"
+              value="${clean(c.category)}" placeholder="التصنيف...">
+          </div>
+          <div class="detail-field">
+            <label><i class="fas fa-sticky-note"></i> ملاحظة — قابلة للتعديل</label>
+            <input type="text" id="edit-note" class="table-input"
+              value="${clean(c.note)}" placeholder="ملاحظة...">
+          </div>
+        </div>
+        <div class="save-bar">
+          <button class="btn btn-success" id="saveBtn" onclick="saveCustomer(event)">
+            <i class="fas fa-save"></i> حفظ التعديلات
+          </button>
+        </div>`;
+    }
+
+    async function saveCustomer(event) {
+      if (!selectedCust) return;
+      const btn      = event.target.closest('button');
+      const cust_type = document.getElementById('edit-type').value;
+      const category  = document.getElementById('edit-category').value.trim();
+      const note      = document.getElementById('edit-note').value.trim();
+
+      btn.disabled  = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
+
+      const ok = await updateCustomer({
+        cust_code: selectedCust.cust_code,
+        cust_type,
+        note,
+        category
+      });
+
+      if (ok) {
+        const idx = allCustomers.findIndex(x =>
+          String(x.cust_code) === String(selectedCust.cust_code));
+        if (idx !== -1) {
+          allCustomers[idx].type     = cust_type;
+          allCustomers[idx].category = category;
+          allCustomers[idx].note     = note;
+          selectedCust = allCustomers[idx];
+        }
+        btn.innerHTML = '<i class="fas fa-check"></i> تم الحفظ ✓';
+        renderEmployees();
+        renderClients();
+        setTimeout(() => {
+          btn.disabled  = false;
+          btn.innerHTML = '<i class="fas fa-save"></i> حفظ التعديلات';
+        }, 1800);
+      } else {
+        alert('⚠️ فشل الحفظ، تحقق من الاتصال وحاول مرة أخرى');
+        btn.disabled  = false;
+        btn.innerHTML = '<i class="fas fa-save"></i> حفظ التعديلات';
+      }
+    }
+
+    // ===== تاب 2: الموظفين =====
+    // admin: كل الموظفين | manager: موظفي فرعه بس
+    function renderEmployees() {
+      const tbody = document.getElementById('emp-list');
+      const rows  = allCustomers
+        .filter(c => normType(c.type) === 'employee' && outOfRange(c) && isMyBranch(c))
+        .sort((a, b) => Math.abs(totalBalance(b)) - Math.abs(totalBalance(a)));
+
+      renderStats('emp-stats', rows);
+
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-muted);">
+          لا يوجد موظفون برصيد خارج النطاق (±5 ج)</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = rows.map(r => balRow(r)).join('');
+    }
+
+    // ===== تاب 3: العملاء =====
+    // admin: كل العملاء | manager: عملاء فرعه | employee: عملاء فرعه
+    function renderClients() {
+      const tbody = document.getElementById('cli-list');
+      const rows  = allCustomers
+        .filter(c => normType(c.type) === 'customer' && outOfRange(c) && isMyBranch(c))
+        .sort((a, b) => Math.abs(totalBalance(b)) - Math.abs(totalBalance(a)));
+
+      renderStats('cli-stats', rows);
+
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-muted);">
+          لا يوجد عملاء برصيد خارج النطاق (±5 ج)</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = rows.map(r => balRow(r)).join('');
+    }
+
+    function balRow(c) {
+      const total = totalBalance(c);
+      const col   = balColor(total);
+      const b     = parseBal(c.balance);
+      const bs    = parseBal(c.balance_san);
+      const bb    = parseBal(c.balance_bishr);
+      return `
+        <tr>
+          <td><code style="font-size:0.82rem;color:var(--text-secondary);">${clean(c.cust_code)||'---'}</code></td>
+          <td style="text-align:right;font-weight:700;">${clean(c.cust_name)||'---'}</td>
+          <td><b style="color:${balColor(b)};">${b !== 0 ? fmtBal(b)+' ج' : '—'}</b></td>
+          <td><b style="color:${balColor(bs)};">${bs !== 0 ? fmtBal(bs)+' ج' : '—'}</b></td>
+          <td><b style="color:${balColor(bb)};">${bb !== 0 ? fmtBal(bb)+' ج' : '—'}</b></td>
+          <td><b style="color:${col};font-size:0.95rem;">${fmtBal(total)} ج</b></td>
+        </tr>`;
+    }
+
+    function renderStats(elId, rows) {
+      const credit = rows.filter(c => totalBalance(c) >  0).length;
+      const debit  = rows.filter(c => totalBalance(c) <  0).length;
+      const sum    = rows.reduce((s, c) => s + totalBalance(c), 0);
+      document.getElementById(elId).innerHTML = `
+        <div class="stat-card">
+          <div class="stat-num">${rows.length}</div>
+          <div class="stat-lbl">إجمالي خارج النطاق</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" style="color:var(--success);">${credit}</div>
+          <div class="stat-lbl">رصيد موجب 📈</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" style="color:var(--danger);">${debit}</div>
+          <div class="stat-lbl">رصيد سالب 📉</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" style="color:var(--accent-dark);font-size:1.15rem;">${sum.toFixed(1)} ج</div>
+          <div class="stat-lbl">صافي الإجمالي</div>
+        </div>`;
+    }
+
+    // إغلاق الاقتراحات عند الضغط خارجها
+    document.addEventListener('click', e => {
+      if (!e.target.closest('.search-box-wrap'))
+        document.getElementById('suggestList').classList.remove('show');
+    });
+  </script>
+</body>
+</html>
