@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>الإشعارات - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    .notif-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-right: 4px solid var(--accent);
+      border-radius: var(--radius-md);
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      transition: box-shadow 0.2s;
+    }
+    .notif-card:hover { box-shadow: var(--shadow-md); }
+    .notif-card.done {
+      border-right-color: var(--border);
+      opacity: 0.6;
+    }
+
+    .notif-text {
+      font-weight: 700;
+      color: var(--text-primary);
+      font-size: 0.92rem;
+      margin-bottom: 10px;
+      line-height: 1.5;
+    }
+
+    .notif-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+
+    .notif-route {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--surface-3);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 2px 8px;
+      font-size: 0.72rem;
+      color: var(--text-secondary);
+      font-weight: 600;
+    }
+
+    .notif-dept {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #e0f2fe;
+      color: #0369a1;
+      border-radius: 20px;
+      padding: 2px 8px;
+      font-size: 0.72rem;
+      font-weight: 700;
+    }
+
+    .notif-date {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      margin-right: auto;
+    }
+
+    .notif-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .notif-comment {
+      padding: 7px 10px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 0.82rem;
+      font-family: var(--font);
+      flex: 1;
+      min-width: 0;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .notif-comment:focus { border-color: var(--accent); }
+
+    .done-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      color: var(--success);
+      font-weight: 700;
+      font-size: 0.8rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+      <div class="page-header">
+        <div class="page-title"><i class="fas fa-bell"></i> الإشعارات</div>
+        <button class="btn btn-primary" onclick="loadNotifications()">
+          <i class="fas fa-sync-alt"></i> تحديث
+        </button>
+      </div>
+
+      <div class="filter-bar">
+        <label class="check-label">
+          <input type="checkbox" id="showReceived" checked onchange="applyFilter()"> واردة 📥
+        </label>
+        <label class="check-label">
+          <input type="checkbox" id="showSent" onchange="applyFilter()"> مرسلة 📤
+        </label>
+        <label class="check-label" style="border-right:2px solid var(--border);padding-right:14px;margin-right:6px;">
+          <input type="checkbox" id="hideDone" checked onchange="applyFilter()"> قيد الانتظار فقط
+        </label>
+        <span class="filter-label">موجه إلى:</span>
+        <select id="assignedFilter" class="form-select" style="width:auto;" onchange="applyFilter()">
+          <option value="all">الكل</option>
+          <option value="مبيعات">مبيعات</option>
+          <option value="مشتريات">مشتريات</option>
+          <option value="حسابات">حسابات</option>
+          <option value="مدخل بيانات">مدخل بيانات</option>
+          <option value="ادارة الفرع">ادارة الفرع</option>
+          <option value="فرد">فرد</option>
+        </select>
+      </div>
+
+      <div id="notif-container">
+        <p style="text-align:center;padding:30px;color:var(--text-muted);">جاري التحميل...</p>
+      </div>
+    </div>
+  </div>
+
+<script src="api.js"></script>
+<script src="nav.js"></script>
+<script>
+  let activeUser = null;
+  let userBranch = '';
+  let allItems   = [];
+
+  checkAuth().then(user => {
+    activeUser = user;
+    if (user) {
+      userBranch = (localStorage.getItem('userBranch') || '').trim();
+      loadNotifications();
+    }
+  });
+
+  async function loadNotifications() {
+    const container = document.getElementById('notif-container');
+    container.innerHTML = '<p style="text-align:center;padding:20px;color:var(--text-muted);">⏳ جاري التحديث...</p>';
+    try {
+      const response = await fetchFromN8N('notifications');
+      allItems = (response[0]?.data) ? response[0].data : (response.data || response);
+      applyFilter();
+    } catch(e) {
+      container.innerHTML = '<p style="text-align:center;color:var(--danger);padding:20px;">❌ خطأ في الاتصال</p>';
+    }
+  }
+
+  function applyFilter() {
+    const current     = String(userBranch).trim();
+    const assignedVal = document.getElementById('assignedFilter').value;
+
+    const filtered = allItems.filter(item => {
+      const isDone     = (item.done === 'تم' || item.done === true || item.done === 'true');
+      if (document.getElementById('hideDone').checked && isDone) return false;
+
+      const isSent     = String(item.branch || '').trim()        === current;
+      const isReceived = String(item.target_branch || '').trim() === current;
+      const showSent     = document.getElementById('showSent').checked;
+      const showReceived = document.getElementById('showReceived').checked;
+      if (!(showSent && isSent) && !(showReceived && isReceived)) return false;
+
+      if (assignedVal !== 'all') {
+        if (assignedVal === 'فرد') {
+          if (String(item.target_type || '').trim() !== 'فرد') return false;
+        } else {
+          if (String(item.assigned_to || '').trim() !== assignedVal) return false;
+        }
+      }
+      return true;
+    });
+
+    renderNotifications(filtered);
+  }
+
+  function renderNotifications(items) {
+    const container = document.getElementById('notif-container');
+    if (!items.length) {
+      container.innerHTML = `
+        <div style="text-align:center;padding:50px;color:var(--text-muted);">
+          <i class="fas fa-inbox" style="font-size:2rem;display:block;margin-bottom:10px;opacity:0.3;"></i>
+          لا توجد إشعارات
+        </div>`;
+      return;
+    }
+
+    container.innerHTML = '';
+    items.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+
+    items.forEach(item => {
+      const isDone  = (item.done === 'تم' || item.done === true || item.done === 'true');
+      const dateStr = item.createdAt
+        ? new Date(item.createdAt).toLocaleString('ar-EG', {
+            hour:'2-digit', minute:'2-digit',
+            day:'numeric', month:'numeric'
+          })
+        : '؟';
+
+      const hasDept = item.assigned_to && item.assigned_to !== 'null' && item.assigned_to !== '';
+      const deptIcon = item.target_type === 'قسم' ? '🏢' : '👤';
+
+      const div = document.createElement('div');
+      div.className = `notif-card ${isDone ? 'done' : ''}`;
+      div.innerHTML = `
+        <div class="notif-text">📌 ${item.note || 'إشعار'}</div>
+
+        <div class="notif-meta">
+          <span class="notif-route">
+            <i class="fas fa-store" style="font-size:0.65rem;"></i>
+            ${item.branch || '—'}
+            <i class="fas fa-arrow-left" style="font-size:0.6rem;color:var(--text-muted);"></i>
+            ${item.target_branch || '—'}
+          </span>
+          ${hasDept ? `<span class="notif-dept">${deptIcon} ${item.assigned_to}</span>` : ''}
+          <span class="notif-date">${dateStr}</span>
+        </div>
+
+        <div class="notif-actions">
+          <input type="text" id="comm-${item.id}" class="notif-comment"
+            placeholder="تعليق أو رد..."
+            value="${(item.comment && item.comment !== 'null') ? item.comment : ''}">
+          ${!isDone
+            ? `<button onclick="handleDone(event, '${item.id}')" class="btn btn-success btn-sm">
+                <i class="fas fa-check"></i> تم
+               </button>`
+            : `<span class="done-badge"><i class="fas fa-check-circle"></i> مكتمل</span>`
+          }
+        </div>
+      `;
+      container.appendChild(div);
+    });
+  }
+
+  async function handleDone(event, id) {
+    const btn     = event.currentTarget;
+    const comment = document.getElementById(`comm-${id}`).value;
+    btn.disabled  = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+    const success = await updateData({
+      id,
+      type:      'إشعار',
+      action:    'update_status',
+      comment,
+      done:      'تم',
+      updatedAt: new Date().toISOString()
+    });
+
+    if (success) {
+      loadNotifications();
+    } else {
+      alert('⚠️ فشل في تحديث الحالة');
+      btn.disabled  = false;
+      btn.innerHTML = '<i class="fas fa-check"></i> تم';
+    }
+  }
+</script>
+</body>
+</html>
