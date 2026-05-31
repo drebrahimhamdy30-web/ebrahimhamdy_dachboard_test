@@ -99,10 +99,9 @@ function injectNavbar() {
   var purchasesItems = [
     { href: 'purchases.html',   icon: 'fa-shopping-cart',  label: 'مشتريات',        active: currentPage === 'purchases.html' }
   ];
-  if (isAdmin || isManager) {
-    purchasesItems.push(
-      { href: 'cosmo_order.html', icon: 'fa-shopping-basket', label: 'طلبيات الكوزمو', active: currentPage === 'cosmo_order.html' }
-    );
+purchasesItems.push(
+  { href: 'cosmo_order.html', icon: 'fa-shopping-basket', label: 'طلبيات الكوزمو', active: currentPage === 'cosmo_order.html' }
+);
   }
   createFloatingDropdown('purchases-dropdown', purchasesItems);
 
