@@ -372,51 +372,70 @@ rawData = rawData
       }
     }
 
-    async function handleAction(id, action) {
-      const doneBtn = document.getElementById(`done-btn-${id}`);
-      const skipBtn = document.getElementById(`skip-btn-${id}`);
-      const isDone  = action === 'done';
-      const isSkip  = action === 'skip';
+async function handleAction(id, action) {
+  const doneBtn = document.getElementById(`done-btn-${id}`);
+  const skipBtn = document.getElementById(`skip-btn-${id}`);
+  const isDone  = action === 'done';
+  const isSkip  = action === 'skip';
 
-      doneBtn.disabled = true;
-      skipBtn.disabled = true;
-      doneBtn.classList.toggle('active', isDone);
-      skipBtn.classList.toggle('active', isSkip);
+  doneBtn.disabled = true;
+  skipBtn.disabled = true;
+  doneBtn.classList.toggle('active', isDone);
+  skipBtn.classList.toggle('active', isSkip);
 
-      const success = await updateData({
-        id,
-        done:   isDone,
-        skip:   isSkip,
-        type:   "جرد",
-        action: "update_status"
-      });
+  // كل النسخ بنفس الكود ونفس القسم الحالي
+  const clicked = rawData.find(x => x.id == id);
+  const code    = String(clicked?.code || '').trim();
+  const sameCodeItems = (code && code !== '---')
+    ? rawData.filter(x =>
+        String(x.code || '').trim() === code &&
+        (x.type || '').toLowerCase() === currentTab.toLowerCase()
+      )
+    : [clicked];
 
-      doneBtn.disabled = false;
-      skipBtn.disabled = false;
+  console.log(`🔍 الكود ${code} — عدد النسخ: ${sameCodeItems.length}`, sameCodeItems.map(i => i.id));
 
-      if (success) {
-        const item  = rawData.find(x => x.id == id);
-        const fItem = filteredData.find(x => x.id == id);
-        if (item)  { item.done  = isDone; item.skip  = isSkip; }
-        if (fItem) { fItem.done = isDone; fItem.skip = isSkip; }
-        updateSummary();
+  // نحدّثهم واحد ورا التاني (بالتتابع — أأمن)
+  let success = true;
+  for (const it of sameCodeItems) {
+    const ok = await updateData({
+      id:     it.id,
+      done:   isDone,
+      skip:   isSkip,
+      type:   "جرد",
+      action: "update_status"
+    });
+    console.log(`  ${ok ? '✅' : '❌'} id=${it.id}`);
+    if (!ok) success = false;
+  }
 
-        if (showPending) {
-          setTimeout(() => {
-            filteredData = filteredData.filter(x => x.id != id);
-            updatePagination();
-            renderPage();
-          }, 800);
-        }
-      } else {
-        const oldItem = rawData.find(x => x.id == id);
-        if (oldItem) {
-          doneBtn.classList.toggle('active', oldItem.done === true || oldItem.done === 'true');
-          skipBtn.classList.toggle('active', oldItem.skip === true || oldItem.skip === 'true');
-        }
-        alert("⚠️ فشل الحفظ، يرجى المحاولة مجدداً");
-      }
+  doneBtn.disabled = false;
+  skipBtn.disabled = false;
+
+  if (success) {
+    sameCodeItems.forEach(it => { it.done = isDone; it.skip = isSkip; });
+    const ids = new Set(sameCodeItems.map(it => String(it.id)));
+    filteredData.forEach(f => {
+      if (ids.has(String(f.id))) { f.done = isDone; f.skip = isSkip; }
+    });
+    updateSummary();
+
+    if (showPending) {
+      setTimeout(() => {
+        filteredData = filteredData.filter(x => !ids.has(String(x.id)));
+        updatePagination();
+        renderPage();
+      }, 800);
     }
+  } else {
+    const oldItem = rawData.find(x => x.id == id);
+    if (oldItem) {
+      doneBtn.classList.toggle('active', oldItem.done === true || oldItem.done === 'true');
+      skipBtn.classList.toggle('active', oldItem.skip === true || oldItem.skip === 'true');
+    }
+    alert("⚠️ فشل الحفظ، يرجى المحاولة مجدداً");
+  }
+}
 
     function updateSummary() {
       const done    = rawData.filter(i => i.done === true || i.done === 'true').length;
