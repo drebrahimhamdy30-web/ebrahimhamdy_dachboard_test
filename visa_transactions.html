@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>معاملات الفيزا - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    /* ===== Header row ===== */
+    .visa-header {
+      display: flex; justify-content: space-between; align-items: center;
+      flex-wrap: wrap; gap: 10px; margin-bottom: 12px;
+    }
+    .visa-header-left { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .visa-header-right { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+
+    /* quick lookup bar */
+    .lookup-bar {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--surface-3); border: 1.5px solid var(--border);
+      border-radius: var(--radius-md); padding: 6px 10px;
+    }
+    .lookup-bar input {
+      border: none; background: transparent; outline: none;
+      font-family: var(--font); font-size: 0.85rem; width: 130px;
+      color: var(--text-primary);
+    }
+    .lookup-bar input::placeholder { color: var(--text-muted); }
+    .lookup-bar .lookup-btn {
+      background: var(--accent); color: var(--primary);
+      border: none; border-radius: var(--radius-sm);
+      padding: 5px 12px; font-family: var(--font);
+      font-size: 0.8rem; font-weight: 700; cursor: pointer;
+      white-space: nowrap; transition: background 0.15s;
+    }
+    .lookup-btn:hover { background: var(--accent-dark); color:#fff; }
+    .lookup-btn:disabled { background: var(--surface-3); color: var(--text-muted); cursor:not-allowed; }
+
+    /* ===== second row: tabs + machines ===== */
+    .tabs-machines-row {
+      display: flex; align-items: center; gap: 12px;
+      flex-wrap: wrap; margin-bottom: 12px;
+    }
+    .tabs-bar { display:flex; gap:6px; flex-wrap:wrap; }
+    .tab-btn {
+      padding: 7px 16px; border-radius: 20px; border: 1px solid var(--border);
+      background: var(--surface-3); color: var(--text-secondary);
+      font-size: 0.82rem; cursor: pointer; transition: all 0.2s; font-family: var(--font);
+    }
+    .tab-btn.active { background: var(--accent); color: var(--primary); border-color: var(--accent); font-weight: 700; }
+
+    .machine-summary { display:flex; flex-wrap:wrap; gap:6px; flex:1; }
+    .machine-card {
+      background: var(--surface); border: 1.5px solid var(--border);
+      border-radius: var(--radius-md); padding: 7px 12px;
+      position: relative; overflow: hidden; min-width: 110px;
+    }
+    .machine-card::before {
+      content:''; position:absolute; top:0; right:0;
+      width:3px; height:100%; background:var(--accent);
+    }
+    .machine-card .mc-name { font-size:0.68rem; font-weight:700; color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .machine-card .mc-total { font-size:0.92rem; font-weight:900; color:#dc2626; line-height:1.2; }
+    .machine-card .mc-bill  { font-size:0.78rem; font-weight:700; color:var(--accent-dark); }
+    .machine-card .mc-count { font-size:0.62rem; color:var(--text-muted); }
+
+    .editable-cell { cursor:pointer; padding:4px 6px; border-radius:4px; transition:background 0.15s; min-width:60px; display:inline-block; }
+    .editable-cell:hover { background:var(--surface-3); }
+    .cell-input { background:var(--surface-3); border:1.5px solid var(--accent); border-radius:4px; color:var(--text-primary); font-family:var(--font); font-size:0.82rem; padding:3px 6px; width:100%; outline:none; }
+    .cell-select { background:var(--surface-3); border:1.5px solid var(--accent); border-radius:4px; color:var(--text-primary); font-family:var(--font); font-size:0.82rem; padding:3px 4px; outline:none; }
+    .status-pending { background:#fef9c3; color:#a16207; }
+    .status-posted  { background:#dcfce7; color:#15803d; }
+
+    .search-wrap { position:relative; min-width:200px; flex:1; max-width:280px; }
+    .search-wrap i { position:absolute; right:11px; top:50%; transform:translateY(-50%); color:var(--text-muted); font-size:0.85rem; pointer-events:none; }
+    .search-wrap input { padding-right:34px; }
+
+    /* lookup feedback */
+    .lookup-msg {
+      font-size: 0.75rem; padding: 3px 8px; border-radius: 20px;
+      font-weight: 600; display: none;
+    }
+    .lookup-msg.ok  { background:#dcfce7; color:#15803d; display:inline-block; }
+    .lookup-msg.err { background:#fee2e2; color:#b91c1c; display:inline-block; }
+    .lookup-msg.loading { background:#e0f2fe; color:#0369a1; display:inline-block; }
+  </style>
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+
+      <!-- ===== سطر ١: عنوان + أدوات ===== -->
+      <div class="visa-header">
+        <div class="visa-header-left">
+          <div class="page-title" style="margin:0;">
+            <i class="fas fa-credit-card"></i> معاملات الفيزا
+            <span class="highlight" id="display-branch">...</span>
+          </div>
+        </div>
+        <div class="visa-header-right">
+          <!-- lookup بالرقم -->
+          <div class="lookup-bar">
+            <i class="fas fa-barcode" style="color:var(--text-muted);font-size:0.85rem;"></i>
+            <input type="text" id="lookup-input" placeholder="رقم الفاتورة..."
+              inputmode="numeric" onkeydown="if(event.key==='Enter') lookupAndAdd()">
+            <span id="lookup-msg" class="lookup-msg"></span>
+            <button class="lookup-btn" id="lookup-btn" onclick="lookupAndAdd()">
+              <i class="fas fa-plus"></i> إضافة
+            </button>
+          </div>
+          <!-- بحث -->
+          <div class="search-wrap">
+            <i class="fas fa-search"></i>
+            <input type="text" id="searchInput" class="form-input" placeholder="بحث... (±3%)" oninput="applyFilter()">
+          </div>
+          <button class="btn btn-primary" onclick="loadAll()">
+            <i class="fas fa-sync-alt"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- ===== سطر ٢: تابات + مربعات الماكينات ===== -->
+      <div class="tabs-machines-row">
+        <div class="tabs-bar">
+          <button class="tab-btn active" onclick="switchTab('pending', this)">⏳ لم يُرحَّل</button>
+          <button class="tab-btn" onclick="switchTab('posted', this)">✅ مرحَّل</button>
+          <button class="tab-btn" onclick="switchTab('all', this)">📋 الكل</button>
+          <button class="tab-btn" style="border-color:#f59e0b;color:#b45309;" onclick="switchTab('extra', this)">⚠️ زيادات</button>
+        </div>
+        <div class="machine-summary" id="machine-summary-wrap"></div>
+        <div id="bulk-post-wrap"></div>
+      </div>
+
+      <!-- فلتر ماكينة -->
+      <div class="filter-bar" style="margin-bottom:12px;">
+        <span class="filter-label" id="machine-filter-label"><i class="fas fa-credit-card"></i> الماكينة:</span>
+        <select id="machineFilter" class="form-select" style="width:auto;" onchange="applyFilter()">
+          <option value="all">كل الماكينات</option>
+        </select>
+        <span class="filter-label" id="extra-filter-label" style="display:none;margin-right:12px;">الحالة:</span>
+        <select id="extraStatusFilter" class="form-select" style="width:auto;display:none;" onchange="applyFilter()">
+          <option value="all">الكل</option>
+          <option value="no_machine">بدون ماكينة</option>
+          <option value="pending">لم يُرحَّل</option>
+          <option value="posted">مرحَّل</option>
+        </select>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>رقم الفاتورة</th>
+              <th>التاريخ</th>
+              <th>كود العميل</th>
+              <th>اسم العميل</th>
+              <th>إجمالي الفاتورة</th>
+              <th>صافي الفيزا</th>
+              <th>الماكينة</th>
+              <th>الموظف</th>
+              <th>تاريخ الحفظ</th>
+              <th>ملاحظات</th>
+              <th>الحالة</th>
+              <th>ترحيل</th>
+            </tr>
+          </thead>
+          <tbody id="table-body">
+            <tr class="loading-row"><td colspan="12">⏳ جاري التحميل...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="display:flex;gap:16px;flex-wrap:wrap;padding:10px 0;">
+        <div id="grand-total-bar" style="font-weight:700;color:var(--warning);font-size:0.9rem;"></div>
+        <div id="grand-bill-bar"  style="font-weight:700;color:var(--accent-dark);font-size:0.9rem;"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="nav.js" defer></script>
+  <script>
+    const BRANCH_MAP = {
+      'المعمورة':    'الصيدلية',
+      'سان ستيفانو': 'ابراهيم حمدي 2',
+      'سيدى بشر':   'ابراهيم حمدي 3',
+    };
+    const LOOKUP_TYPE = {
+      'المعمورة':    'bill_lookup_mamora',
+      'سان ستيفانو': 'bill_lookup_san',
+      'سيدى بشر':   'bill_lookup_bishr',
+    };
+
+    let activeUser   = null;
+    let userBranch   = '';
+    let allData      = [];
+    let machinesList = [];
+    let currentTab   = 'pending';
+
+    checkAuth().then(async user => {
+      activeUser = user;
+      if (user) {
+        userBranch = (localStorage.getItem('userBranch') || '').trim();
+        document.getElementById('display-branch').textContent = userBranch;
+        await populateMachineDropdowns();
+        await loadAll();
+      }
+    });
+
+    function branchMachines() { return machinesList; }
+
+    async function populateMachineDropdowns() {
+      try {
+        const resp   = await fetchMachines();
+        const mapped = BRANCH_MAP[userBranch] || userBranch;
+        machinesList = (Array.isArray(resp) ? resp : [])
+          .filter(m => String(m.store_name || '').trim() === mapped)
+          .map(m => m.machine_name);
+      } catch(e) { machinesList = []; }
+
+      const mf = document.getElementById('machineFilter');
+      mf.innerHTML = '<option value="all">كل الماكينات</option>';
+      machinesList.forEach(m => {
+        const o = document.createElement('option');
+        o.value = m; o.textContent = m; mf.appendChild(o);
+      });
+    }
+
+    async function loadAll() {
+      const tbody = document.getElementById('table-body');
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="12">⏳ جاري جلب البيانات...</td></tr>';
+      try {
+        const resp   = await fetchVisaTransactions();
+        const mapped = BRANCH_MAP[userBranch] || userBranch;
+        allData = (Array.isArray(resp) ? resp : []).filter(
+          item => String(item.store_name || '').trim() === mapped
+        );
+        applyFilter();
+      } catch(e) {
+        tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
+      }
+    }
+
+    // ===== Lookup & Add =====
+    async function postAndReturn(data) {
+      try {
+        const response = await fetch('https://agent.ebrahimhamdy.com/webhook/taskmanagement', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        if (!response.ok) return null;
+        const result = await response.json();
+        return Array.isArray(result) ? result[0] : result;
+      } catch(e) { return null; }
+    }
+
+    function setLookupMsg(text, type) {
+      const el = document.getElementById('lookup-msg');
+      el.textContent = text;
+      el.className = 'lookup-msg ' + type;
+    }
+
+    async function lookupAndAdd() {
+      const billNo = document.getElementById('lookup-input').value.trim();
+      if (!billNo) { alert('أدخل رقم الفاتورة'); return; }
+
+      const lookupType = LOOKUP_TYPE[userBranch];
+      if (!lookupType) { alert('الفرع غير محدد'); return; }
+
+      // تحقق لو موجودة بالفعل
+      const exists = allData.find(i => String(i.bill_no) === String(billNo));
+      if (exists) {
+        setLookupMsg('موجودة بالفعل ✋', 'err');
+        return;
+      }
+
+      const btn = document.getElementById('lookup-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+      setLookupMsg('جاري البحث...', 'loading');
+
+      try {
+        // جيب بيانات الفاتورة من الـ API
+        const bill = await postAndReturn({ type: lookupType, bill_no: billNo });
+
+        if (!bill || !bill.bill_no) {
+          setLookupMsg('مش موجودة في السيستم', 'err');
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-plus"></i> إضافة';
+          return;
+        }
+
+        // تأكد إنها فيزا
+        if (bill.bill_type && bill.bill_type !== 'فيزا') {
+          setLookupMsg('الفاتورة مش فيزا', 'err');
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-plus"></i> إضافة';
+          return;
+        }
+
+        // أضفها في الجدول
+        const success = await updateData({
+          type:           'visa_insert',
+          store_name:     BRANCH_MAP[userBranch] || userBranch,
+          bill_no:        bill.bill_no,
+          bill_date:      bill.bill_date       || null,
+          cust_code:      bill.cust_code       || null,
+          cust_name_ar:   bill.cust_name_ar    || null,
+          total_bill:     bill.total_bill      || 0,
+          total_bill_net: bill.total_bill_net  || 0,
+          machine_name:   null,
+          employee_name:  bill.employee_name   || null,
+          bill_save_date: bill.bill_save_date  || null,
+          bill_notes:     null,
+          bill_status:    'لم يُرحَّل'
+        });
+
+        if (success) {
+          setLookupMsg('✅ تمت الإضافة', 'ok');
+          document.getElementById('lookup-input').value = '';
+          await loadAll();
+        } else {
+          setLookupMsg('فشل الحفظ', 'err');
+        }
+      } catch(e) {
+        setLookupMsg('خطأ في الاتصال', 'err');
+      }
+
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-plus"></i> إضافة';
+
+      // مسح الرسالة بعد 4 ثواني
+      setTimeout(() => {
+        const el = document.getElementById('lookup-msg');
+        if (el) { el.textContent = ''; el.className = 'lookup-msg'; }
+      }, 4000);
+    }
+
+    function switchTab(tab, btn) {
+      currentTab = tab;
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const isExtra = (tab === 'extra');
+      document.getElementById('machineFilter').style.display       = isExtra ? 'none' : '';
+      document.getElementById('machine-filter-label').style.display = isExtra ? 'none' : '';
+      document.getElementById('extraStatusFilter').style.display   = isExtra ? '' : 'none';
+      document.getElementById('extra-filter-label').style.display  = isExtra ? '' : 'none';
+      applyFilter();
+    }
+
+    function matchSearch(item, search) {
+      const num = parseFloat(search);
+      if (!isNaN(num) && num > 0) {
+        const low = num * 0.97, high = num * 1.03;
+        const amountMatch = [item.total_bill, item.total_bill_net].some(v => {
+          const val = parseFloat(v);
+          return !isNaN(val) && val >= low && val <= high;
+        });
+        if (amountMatch) return true;
+      }
+      return [item.bill_no, item.cust_code, item.cust_name_ar, item.machine_name,
+              item.employee_name, item.store_name, item.bill_notes, item.bill_status, item.bill_date]
+        .some(v => String(v || '').toLowerCase().includes(search));
+    }
+
+    function applyFilter() {
+      const search      = document.getElementById('searchInput').value.trim().toLowerCase();
+      const machine     = document.getElementById('machineFilter').value;
+      const extraStatus = document.getElementById('extraStatusFilter').value;
+
+      const filtered = allData.filter(item => {
+        const isPosted   = (item.bill_status === 'مرحَّل' || item.bill_status === 'posted');
+        const isExtra    = (item.bill_status === 'زيادة');
+        const hasMachine = item.machine_name && item.machine_name !== 'null' && item.machine_name !== '';
+        if (currentTab === 'extra') {
+          if (!isExtra) return false;
+          if (extraStatus === 'no_machine' && hasMachine)  return false;
+          if (extraStatus === 'pending' && (isPosted || hasMachine)) return false;
+          if (extraStatus === 'posted'  && !isPosted) return false;
+          return !search || matchSearch(item, search);
+        }
+        if (isExtra) return false;
+        if (currentTab === 'pending' && isPosted)  return false;
+        if (currentTab === 'posted'  && !isPosted) return false;
+        if (machine !== 'all' && String(item.machine_name || '').trim() !== machine) return false;
+        return !search || matchSearch(item, search);
+      });
+
+      renderMachineSummary(filtered);
+      renderTable(filtered);
+    }
+
+    function renderMachineSummary(items) {
+      const wrap     = document.getElementById('machine-summary-wrap');
+      const bulkWrap = document.getElementById('bulk-post-wrap');
+      if (currentTab !== 'pending') { wrap.innerHTML = ''; bulkWrap.innerHTML = ''; return; }
+
+      const machines = branchMachines();
+      if (!machines.length) { wrap.innerHTML = ''; bulkWrap.innerHTML = ''; return; }
+
+      const totals = {};
+      machines.forEach(m => { totals[m] = { sum:0, bill:0, count:0 }; });
+      items.forEach(item => {
+        const m = String(item.machine_name || '').trim();
+        if (totals[m] !== undefined) {
+          totals[m].sum  += parseFloat(item.total_bill_net) || 0;
+          totals[m].bill += parseFloat(item.total_bill)     || 0;
+          totals[m].count++;
+        }
+      });
+
+      wrap.innerHTML = machines.map(m => `
+        <div class="machine-card">
+          <div class="mc-name"><i class="fas fa-credit-card" style="margin-left:3px;color:var(--accent);font-size:0.6rem;"></i>${m}</div>
+          <div class="mc-total">${totals[m].sum.toFixed(2)} <span style="font-size:0.58rem;color:var(--text-muted);">صافي</span></div>
+          <div class="mc-bill">${totals[m].bill.toFixed(2)} <span style="font-size:0.58rem;color:var(--text-muted);">إجمالي</span></div>
+          <div class="mc-count">${totals[m].count} معاملة</div>
+        </div>`).join('');
+
+      const canPost = items.filter(i =>
+        i.machine_name && i.machine_name !== 'null' && i.machine_name !== '' &&
+        i.bill_status !== 'مرحَّل' && i.bill_status !== 'posted' && i.bill_status !== 'زيادة'
+      ).length;
+
+      bulkWrap.innerHTML = canPost > 0
+        ? `<button class="btn btn-success" onclick="markAllPosted()" id="bulk-post-btn" style="white-space:nowrap;">
+             <i class="fas fa-check-double"></i> ترحيل الكل (${canPost})
+           </button>`
+        : '';
+    }
+
+    async function markAllPosted() {
+      const toPost = allData.filter(item => {
+        const isPosted   = (item.bill_status === 'مرحَّل' || item.bill_status === 'posted');
+        const isExtra    = (item.bill_status === 'زيادة');
+        const hasMachine = item.machine_name && item.machine_name !== 'null' && item.machine_name !== '';
+        return !isPosted && !isExtra && hasMachine;
+      });
+      if (!toPost.length) { alert('لا توجد معاملات قابلة للترحيل'); return; }
+      if (!confirm(`ترحيل ${toPost.length} معاملة؟`)) return;
+
+      const btn = document.getElementById('bulk-post-btn');
+      btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+      const now     = new Date().toISOString();
+      const results = await Promise.all(toPost.map(item => updateData({
+        type: 'visa_update', id: item.id, bill_status: 'مرحَّل', bill_save_date: now
+      })));
+
+      toPost.forEach((item, i) => {
+        if (results[i]) {
+          const local = allData.find(x => String(x.id) === String(item.id));
+          if (local) { local.bill_status = 'مرحَّل'; local.bill_save_date = now; }
+        }
+      });
+
+      const ok = results.filter(r => r).length;
+      if (ok < toPost.length) alert(`✅ تم ترحيل ${ok} من ${toPost.length}`);
+      applyFilter();
+    }
+
+    function renderTable(items) {
+      const tbody = document.getElementById('table-body');
+      if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج</td></tr>';
+        document.getElementById('grand-total-bar').textContent = '';
+        return;
+      }
+
+      items.sort((a, b) => new Date(b.bill_date || 0) - new Date(a.bill_date || 0));
+
+      let grandTotal = 0, grandBill = 0;
+      tbody.innerHTML = items.map(item => {
+        const net      = parseFloat(item.total_bill_net) || 0;
+        grandTotal    += net;
+        grandBill     += parseFloat(item.total_bill || 0);
+        const isPosted = (item.bill_status === 'مرحَّل' || item.bill_status === 'posted');
+        const isExtra  = (item.bill_status === 'زيادة');
+        const _d       = item.bill_date ? new Date(item.bill_date) : null;
+        const datePart = _d ? _d.toLocaleDateString('ar-EG') : '---';
+        const timePart = _d ? _d.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit', hour12:true}) : '';
+        const saveDate = item.bill_save_date ? new Date(item.bill_save_date).toLocaleDateString('ar-EG') : '---';
+        const hasMachine = item.machine_name && item.machine_name !== 'null' && item.machine_name !== '';
+
+        return `<tr id="row-${item.id}">
+          <td><code style="font-size:0.82rem;color:var(--text-secondary);">${item.bill_no || '---'}</code></td>
+          <td style="font-size:0.75rem;white-space:nowrap;">${datePart}<br><span style="color:var(--text-muted);font-size:0.7rem;">${timePart}</span></td>
+          <td><code style="font-size:0.78rem;color:var(--text-secondary);">${item.cust_code || '---'}</code></td>
+          <td style="font-weight:600;font-size:0.85rem;">${item.cust_name_ar || '---'}</td>
+          <td><b>${parseFloat(item.total_bill || 0).toFixed(2)}</b></td>
+          <td><span class="editable-cell" onclick="editNet('${item.id}', this, '${item.total_bill_net || 0}')">
+            <b style="color:var(--warning);">${net.toFixed(2)}</b></span></td>
+          <td><span class="editable-cell" onclick="editMachine('${item.id}', this, '${(item.machine_name||'').replace(/'/g,"&#39;")}')">
+            ${hasMachine
+              ? `<span class="badge badge-blue" style="font-size:0.72rem;">${item.machine_name}</span>`
+              : `<span style="color:var(--danger);font-size:0.75rem;">⚠️ بدون ماكينة</span>`}
+          </span></td>
+          <td style="font-size:0.82rem;">${item.employee_name || '---'}</td>
+          <td style="font-size:0.78rem;">${saveDate}</td>
+          <td style="font-size:0.78rem;color:var(--text-secondary);max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${item.bill_notes || ''}">${item.bill_notes || '---'}</td>
+          <td>${isExtra
+            ? '<span class="badge" style="background:#ffedd5;color:#c2410c;">⚠️ زيادة</span>'
+            : isPosted
+              ? '<span class="badge status-posted">✅ مرحَّل</span>'
+              : '<span class="badge status-pending">⏳ لم يُرحَّل</span>'}</td>
+          <td>${isExtra
+            ? (!isPosted ? `<button class="btn btn-sm" style="background:#f59e0b;color:#fff;" onclick="markPosted('${item.id}', this)"><i class="fas fa-check"></i> ترحيل</button>` : '<i class="fas fa-check-double" style="color:var(--success);"></i>')
+            : !isPosted && hasMachine
+              ? `<button class="btn btn-success btn-sm" onclick="markPosted('${item.id}', this)"><i class="fas fa-check"></i> ترحيل</button>`
+              : !isPosted && !hasMachine
+                ? `<span style="font-size:0.72rem;color:var(--text-muted);">اختر ماكينة أولاً</span>`
+                : `<i class="fas fa-check-double" style="color:var(--success);"></i>`}</td>
+        </tr>`;
+      }).join('');
+
+      document.getElementById('grand-total-bar').innerHTML = `إجمالي صافي الفيزا: <span style="color:var(--warning);">${grandTotal.toFixed(2)}</span> جنيه`;
+      document.getElementById('grand-bill-bar').innerHTML  = `إجمالي الفواتير: <span style="color:var(--accent-dark);">${grandBill.toFixed(2)}</span> جنيه`;
+    }
+
+    function editNet(id, el, current) {
+      const input = document.createElement('input');
+      input.type = 'number'; input.value = current;
+      input.className = 'cell-input'; input.style.width = '90px'; input.step = '0.01';
+      el.replaceWith(input); input.focus(); input.select();
+      const save = async () => {
+        const newVal = parseFloat(input.value) || 0;
+        const span = document.createElement('span');
+        span.className = 'editable-cell';
+        span.innerHTML = `<b style="color:var(--warning);">${newVal.toFixed(2)}</b>`;
+        span.onclick = () => editNet(id, span, newVal);
+        input.replaceWith(span);
+        if (String(newVal) !== String(parseFloat(current))) {
+          const item = allData.find(x => String(x.id) === String(id));
+          if (item) {
+            item.total_bill_net = newVal;
+            await updateData({ type:'visa_update', id, total_bill_net:newVal, machine_name:item.machine_name??null, bill_status:item.bill_status??null, bill_save_date:item.bill_save_date??null });
+          }
+          renderMachineSummary(getFiltered()); updateGrandTotal();
+        }
+      };
+      input.addEventListener('blur', save);
+      input.addEventListener('keydown', e => { if(e.key==='Enter') input.blur(); if(e.key==='Escape'){input.value=current;input.blur();} });
+    }
+
+    function editMachine(id, el, current) {
+      const select = document.createElement('select');
+      select.className = 'cell-select';
+      const empty = document.createElement('option'); empty.value=''; empty.textContent='— اختر —';
+      select.appendChild(empty);
+      branchMachines().forEach(m => {
+        const o = document.createElement('option');
+        o.value = m; o.textContent = m; if(m===current) o.selected=true;
+        select.appendChild(o);
+      });
+      el.replaceWith(select); select.focus();
+      const save = async () => {
+        const newVal = select.value;
+        const span = document.createElement('span');
+        span.className = 'editable-cell';
+        span.innerHTML = newVal ? `<span class="badge badge-blue" style="font-size:0.72rem;">${newVal}</span>` : `<span style="color:var(--danger);font-size:0.75rem;">⚠️ بدون ماكينة</span>`;
+        span.onclick = () => editMachine(id, span, newVal);
+        select.replaceWith(span);
+        if (newVal !== current) {
+          const item = allData.find(x => String(x.id) === String(id));
+          if (item) { item.machine_name = newVal; await updateData({ type:'visa_update', id, machine_name:newVal, total_bill_net:item.total_bill_net??null, bill_status:item.bill_status??null, bill_save_date:item.bill_save_date??null }); }
+          renderMachineSummary(getFiltered());
+        }
+      };
+      select.addEventListener('blur', save); select.addEventListener('change', save);
+    }
+
+    function getFiltered() {
+      const search = document.getElementById('searchInput').value.trim().toLowerCase();
+      const machine = document.getElementById('machineFilter').value;
+      const extraStatus = document.getElementById('extraStatusFilter').value;
+      return allData.filter(item => {
+        const isPosted = (item.bill_status==='مرحَّل'||item.bill_status==='posted');
+        const isExtra  = (item.bill_status==='زيادة');
+        const hasMachine = item.machine_name && item.machine_name!=='null' && item.machine_name!=='';
+        if (currentTab==='extra') {
+          if(!isExtra) return false;
+          if(extraStatus==='no_machine'&&hasMachine) return false;
+          if(extraStatus==='pending'&&(isPosted||hasMachine)) return false;
+          if(extraStatus==='posted'&&!isPosted) return false;
+          return !search||matchSearch(item,search);
+        }
+        if(isExtra) return false;
+        if(currentTab==='pending'&&isPosted) return false;
+        if(currentTab==='posted'&&!isPosted) return false;
+        if(machine!=='all'&&String(item.machine_name||'').trim()!==machine) return false;
+        return !search||matchSearch(item,search);
+      });
+    }
+
+    function updateGrandTotal() {
+      const items = getFiltered();
+      const total = items.reduce((s,i) => s+(parseFloat(i.total_bill_net)||0), 0);
+      const bill  = items.reduce((s,i) => s+(parseFloat(i.total_bill)||0), 0);
+      document.getElementById('grand-total-bar').innerHTML = `إجمالي صافي الفيزا: <span style="color:var(--warning);">${total.toFixed(2)}</span> جنيه`;
+      document.getElementById('grand-bill-bar').innerHTML  = `إجمالي الفواتير: <span style="color:var(--accent-dark);">${bill.toFixed(2)}</span> جنيه`;
+    }
+
+    async function markPosted(id, btn) {
+      if (!confirm('تأكيد ترحيل هذه العملية؟')) return;
+      btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+      const now = new Date().toISOString();
+      const success = await updateData({ type:'visa_update', id, bill_status:'مرحَّل', bill_save_date:now });
+      if (success) {
+        const item = allData.find(x => String(x.id)===String(id));
+        if (item) { item.bill_status='مرحَّل'; item.bill_save_date=now; }
+        applyFilter();
+      } else {
+        alert('❌ فشل التحديث');
+        btn.disabled=false; btn.innerHTML='<i class="fas fa-check"></i> ترحيل';
+      }
+    }
+  </script>
+</body>
+</html>
