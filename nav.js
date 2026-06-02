@@ -70,6 +70,8 @@ function injectNavbar() {
 
       '<a href="visa_transactions.html" class="' + (currentPage === 'visa_transactions.html' ? 'active' : '') + '">' +
         '<i class="fas fa-credit-card"></i> فيزا</a>' +
+    '<a href="bank_monitor.html" class="' + (currentPage === 'bank_monitor.html' ? 'active' : '') + '">' +
+  '<i class="fas fa-university"></i> البنك</a>' +
       '<a href="missing_items.html" class="' + (currentPage === 'missing_items.html' ? 'active' : '') + '">' +
         '<i class="fas fa-truck"></i> لم يصل من الشركات</a>' +
       '<a href="inventory_min.html" class="' + (currentPage === 'inventory_min.html' ? 'active' : '') + '">' +
