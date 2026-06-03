@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>متابعة الحساب البنكي - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    .kpi-row { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px; }
+    @media(max-width:700px){ .kpi-row{grid-template-columns:1fr 1fr;} }
+    .kpi-card { background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius-lg); padding:14px 16px; position:relative; overflow:hidden; }
+    .kpi-card::before { content:''; position:absolute; top:0; right:0; width:4px; height:100%; border-radius:0 var(--radius-lg) var(--radius-lg) 0; }
+    .kpi-card.blue::before  { background:#3b82f6; }
+    .kpi-card.green::before { background:#16a34a; }
+    .kpi-card.amber::before { background:#f59e0b; }
+    .kpi-card.red::before   { background:#dc2626; }
+    .kpi-label { font-size:0.72rem; font-weight:700; color:var(--text-secondary); margin-bottom:4px; }
+    .kpi-value { font-size:1.3rem; font-weight:900; line-height:1; }
+    .kpi-card.blue  .kpi-value { color:#3b82f6; }
+    .kpi-card.green .kpi-value { color:#16a34a; }
+    .kpi-card.amber .kpi-value { color:#f59e0b; }
+    .kpi-card.red   .kpi-value { color:#dc2626; }
+    .kpi-sub { font-size:0.68rem; color:var(--text-muted); margin-top:4px; }
+
+    .opening-row { display:flex; align-items:center; gap:10px; background:var(--surface-3); border:1.5px solid var(--border); border-radius:var(--radius-md); padding:10px 14px; margin-bottom:16px; flex-wrap:wrap; }
+    .opening-row label { font-size:0.8rem; font-weight:700; color:var(--text-secondary); white-space:nowrap; }
+    .opening-input { border:1.5px solid var(--border); border-radius:var(--radius-sm); padding:6px 10px; font-family:var(--font); font-size:0.9rem; font-weight:700; width:160px; outline:none; background:var(--surface); }
+    .opening-input:focus { border-color:var(--accent); }
+    .opening-input[readonly] { background:var(--surface-3); color:var(--text-muted); cursor:not-allowed; }
+
+    .add-row-wrap { background:var(--surface-2); border:1.5px dashed var(--accent); border-radius:var(--radius-md); padding:10px 12px; display:grid; grid-template-columns:1fr 120px 150px auto auto; gap:8px; align-items:center; margin-bottom:12px; }
+    @media(max-width:700px){ .add-row-wrap{grid-template-columns:1fr 1fr;} }
+    .add-row-wrap input, .add-row-wrap select { padding:7px 10px; border:1.5px solid var(--border); border-radius:var(--radius-sm); font-family:var(--font); font-size:0.82rem; outline:none; background:var(--surface); width:100%; }
+    .add-row-wrap input:focus, .add-row-wrap select:focus { border-color:var(--accent); }
+    .amount-input { font-weight:700; }
+    .amount-input.positive { color:#16a34a; }
+    .amount-input.negative { color:#dc2626; }
+
+    .bm-table { width:100%; border-collapse:collapse; }
+    .bm-table th { background:var(--primary); color:#fff; padding:9px 10px; font-size:0.72rem; font-weight:700; text-align:right; white-space:nowrap; }
+    .bm-table td { padding:9px 10px; font-size:0.8rem; border-bottom:1px solid var(--surface-3); vertical-align:middle; }
+    .bm-table tr.posted-row td { background:#f0fdf4; }
+    .bm-table tr.pending-row td { background:#fffbeb; }
+    .amount-pos { color:#16a34a; font-weight:700; }
+    .amount-neg { color:#dc2626; font-weight:700; }
+    .source-badge { display:inline-block; padding:2px 8px; border-radius:20px; font-size:0.65rem; font-weight:700; }
+    .src-instapay { background:#e0f2fe; color:#0369a1; }
+    .src-paymob   { background:#f0fdf4; color:#15803d; }
+    .src-abuqir   { background:#fef9c3; color:#a16207; }
+    .src-other    { background:#f1f5f9; color:#475569; }
+    .posted-badge  { background:#dcfce7; color:#15803d; font-size:0.65rem; font-weight:700; display:inline-block; padding:2px 8px; border-radius:20px; }
+    .pending-badge { background:#fef9c3; color:#a16207; font-size:0.65rem; font-weight:700; display:inline-block; padding:2px 8px; border-radius:20px; }
+    .filter-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+  </style>
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+
+      <div class="page-header">
+        <div class="page-title"><i class="fas fa-university"></i> متابعة الحساب البنكي</div>
+        <button class="btn btn-primary" onclick="loadAll()"><i class="fas fa-sync-alt"></i> تحديث</button>
+      </div>
+
+      <!-- رصيد البداية — admin فقط -->
+      <div class="opening-row" id="opening-row">
+        <label><i class="fas fa-coins" style="color:var(--accent);margin-left:4px;"></i> رصيد البداية:</label>
+        <input type="number" id="opening-input" class="opening-input" placeholder="0.00" step="0.01" readonly>
+        <button class="btn btn-primary" onclick="saveOpening()" id="opening-btn" style="white-space:nowrap;display:none;">
+          <i class="fas fa-save"></i> حفظ
+        </button>
+        <span id="opening-msg" style="font-size:0.75rem;color:var(--success);display:none;">✅ تم الحفظ</span>
+      </div>
+
+      <!-- KPIs -->
+      <div class="kpi-row">
+        <div class="kpi-card blue">
+          <div class="kpi-label">الرصيد الحالي (كلي)</div>
+          <div class="kpi-value" id="kpi-total">—</div>
+          <div class="kpi-sub">رصيد البداية + كل المعاملات</div>
+        </div>
+        <div class="kpi-card green">
+          <div class="kpi-label">المرحّل</div>
+          <div class="kpi-value" id="kpi-posted">—</div>
+          <div class="kpi-sub">مطابق للسيستم</div>
+        </div>
+        <div class="kpi-card amber">
+          <div class="kpi-label">غير مرحّل</div>
+          <div class="kpi-value" id="kpi-pending">—</div>
+          <div class="kpi-sub">في انتظار الترحيل</div>
+        </div>
+        <div class="kpi-card red">
+          <div class="kpi-label">عدد المعاملات</div>
+          <div class="kpi-value" id="kpi-count">—</div>
+          <div class="kpi-sub" id="kpi-count-sub">—</div>
+        </div>
+      </div>
+
+      <!-- إضافة معاملة inline — بدون تاريخ يدوي -->
+      <div class="add-row-wrap">
+        <input type="text" id="new-desc" placeholder="الوصف / البيان (اختياري)">
+        <input type="number" id="new-amount" class="amount-input" placeholder="المبلغ (+ وارد / - صادر)" step="0.01" oninput="colorAmount(this)">
+        <select id="new-source">
+          <option value="instapay" selected>انستاباي</option>
+          <option value="paymob">باي موب</option>
+          <option value="abuqir">أبو قير للأسمدة</option>
+          <option value="other">أخرى</option>
+        </select>
+        <button class="btn btn-primary" onclick="addTransaction()" id="add-btn" style="white-space:nowrap;">
+          <i class="fas fa-plus"></i> إضافة
+        </button>
+        <button class="btn" style="background:var(--surface-3);color:var(--text-secondary);" onclick="clearAddRow()">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <!-- فلاتر -->
+      <div class="filter-row">
+        <select id="filter-status" class="form-select" style="width:auto;" onchange="renderTable()">
+          <option value="all">الكل</option>
+          <option value="pending">غير مرحّل</option>
+          <option value="posted">مرحّل</option>
+        </select>
+        <select id="filter-source" class="form-select" style="width:auto;" onchange="renderTable()">
+          <option value="all">كل المصادر</option>
+          <option value="instapay">انستاباي</option>
+          <option value="paymob">باي موب</option>
+          <option value="abuqir">أبو قير</option>
+          <option value="other">أخرى</option>
+        </select>
+        <input type="month" id="filter-month" class="form-input" style="width:160px;" onchange="renderTable()">
+        <button class="btn" style="background:var(--surface-3);color:var(--text-secondary);font-size:0.78rem;" onclick="clearFilters()">
+          <i class="fas fa-times"></i> مسح الفلاتر
+        </button>
+      </div>
+
+      <!-- الجدول -->
+      <div class="table-wrap">
+        <table class="bm-table">
+          <thead>
+            <tr>
+              <th>التاريخ والوقت</th>
+              <th>الوصف</th>
+              <th>المبلغ</th>
+              <th>المصدر</th>
+              <th>أضافه</th>
+              <th>الحالة</th>
+              <th>ترحيل</th>
+            </tr>
+          </thead>
+          <tbody id="bm-tbody">
+            <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">⏳ جاري التحميل...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="nav.js" defer></script>
+  <script>
+    const BM_GET  = 'https://agent.ebrahimhamdy.com/webhook/bmonline';
+    const BM_POST = 'https://agent.ebrahimhamdy.com/webhook/bmonlinepost';
+
+    let allTx       = [];
+    let openingBal  = 0;
+    let isAdmin     = false;
+    let currentUser = '';
+
+    checkAuth().then(async user => {
+      if (!user) return;
+      currentUser = user.username || user.name || user || '';
+      isAdmin     = (user.role === 'admin');
+
+      // admin: اعرض الحفظ وخلي الحقل قابل للتعديل
+      if (isAdmin) {
+        document.getElementById('opening-input').removeAttribute('readonly');
+        document.getElementById('opening-btn').style.display = 'inline-flex';
+      }
+
+      document.getElementById('filter-month').value = new Date().toISOString().slice(0,7);
+      await loadAll();
+    });
+
+    async function loadAll() {
+      try {
+        const txResp = await fetch(BM_GET + '?type=get').then(r => r.json()).catch(() => []);
+        allTx = Array.isArray(txResp) ? txResp : (txResp.data || []);
+
+        try {
+          const settResp = await fetch(BM_GET + '?type=get_settings').then(r => r.json());
+          const settings = Array.isArray(settResp) ? settResp : (settResp.data || []);
+          const obRow    = settings.find(s => s.key === 'opening_balance');
+          openingBal     = obRow ? parseFloat(obRow.value) || 0 : 0;
+          document.getElementById('opening-input').value = openingBal || '';
+        } catch(e) { openingBal = 0; }
+
+        updateKPIs();
+        renderTable();
+      } catch(e) {
+        document.getElementById('bm-tbody').innerHTML =
+          '<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل التحميل</td></tr>';
+      }
+    }
+
+    function updateKPIs() {
+      const total  = allTx.reduce((s,t) => s+(parseFloat(t.amount)||0), 0);
+      const posted = allTx.filter(t => t.is_posted==='true'||t.is_posted===true).reduce((s,t) => s+(parseFloat(t.amount)||0), 0);
+      const count  = allTx.length;
+      const pCount = allTx.filter(t => t.is_posted==='true'||t.is_posted===true).length;
+
+      document.getElementById('kpi-total').textContent     = fmt(openingBal + total);
+      document.getElementById('kpi-posted').textContent    = fmt(openingBal + posted);
+      document.getElementById('kpi-pending').textContent   = fmt(total - posted);
+      document.getElementById('kpi-count').textContent     = count;
+      document.getElementById('kpi-count-sub').textContent = pCount + ' مرحّل · ' + (count-pCount) + ' غير مرحّل';
+    }
+
+    function fmt(n) {
+      return (parseFloat(n)||0).toLocaleString('ar-EG', {minimumFractionDigits:2, maximumFractionDigits:2});
+    }
+
+    function renderTable() {
+      const statusF = document.getElementById('filter-status').value;
+      const sourceF = document.getElementById('filter-source').value;
+      const monthF  = document.getElementById('filter-month').value;
+
+      const list = allTx.filter(t => {
+        const isPosted = t.is_posted==='true'||t.is_posted===true;
+        if (statusF==='pending' && isPosted)  return false;
+        if (statusF==='posted'  && !isPosted) return false;
+        if (sourceF!=='all' && t.source!==sourceF) return false;
+        if (monthF && t.date && !t.date.startsWith(monthF)) return false;
+        return true;
+      });
+
+      list.sort((a,b) => new Date(b.date||0) - new Date(a.date||0));
+
+      const tbody = document.getElementById('bm-tbody');
+      if (!list.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد معاملات</td></tr>';
+        return;
+      }
+
+      const srcMap   = { instapay:'انستاباي', paymob:'باي موب', abuqir:'أبو قير', other:'أخرى' };
+      const srcClass = { instapay:'src-instapay', paymob:'src-paymob', abuqir:'src-abuqir', other:'src-other' };
+
+      tbody.innerHTML = list.map(t => {
+        const isPosted = t.is_posted==='true'||t.is_posted===true;
+        const amt      = parseFloat(t.amount)||0;
+        const rowClass = isPosted ? 'posted-row' : 'pending-row';
+
+        // تاريخ ووقت
+        const _d      = t.date ? new Date(t.date) : null;
+        const dateStr = _d
+          ? _d.toLocaleDateString('ar-EG') +
+            '<br><span style="font-size:0.68rem;color:var(--text-muted);">' +
+            _d.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit', hour12:true}) +
+            '</span>'
+          : '---';
+
+        return `<tr class="${rowClass}">
+          <td style="white-space:nowrap;font-size:0.78rem;">${dateStr}</td>
+          <td style="font-weight:600;">${t.description||'---'}</td>
+          <td><span class="${amt>=0?'amount-pos':'amount-neg'}">${amt>=0?'+':''}${fmt(Math.abs(amt))}</span></td>
+          <td><span class="source-badge ${srcClass[t.source]||'src-other'}">${srcMap[t.source]||t.source||'---'}</span></td>
+          <td style="font-size:0.75rem;color:var(--text-muted);">${t.created_by||'---'}</td>
+          <td>${isPosted
+            ? '<span class="posted-badge">✅ مرحّل</span>'
+            : '<span class="pending-badge">⏳ لم يُرحَّل</span>'}</td>
+          <td>${isPosted
+            ? '<i class="fas fa-lock" style="color:var(--text-muted);font-size:0.8rem;" title="لا يمكن إلغاء الترحيل"></i>'
+            : `<button class="btn btn-success btn-sm" onclick="postTx('${t.id}',this)"><i class="fas fa-check"></i> ترحيل</button>`}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    function colorAmount(input) {
+      const v = parseFloat(input.value);
+      input.classList.remove('positive','negative');
+      if (!isNaN(v)) input.classList.add(v>=0?'positive':'negative');
+    }
+
+    async function addTransaction() {
+      const desc   = document.getElementById('new-desc').value.trim();
+      const amount = parseFloat(document.getElementById('new-amount').value);
+      const source = document.getElementById('new-source').value;
+
+      if (isNaN(amount)) { alert('اكتب المبلغ (موجب وارد / سالب صادر)'); return; }
+
+      const btn = document.getElementById('add-btn');
+      btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+      try {
+        const resp = await fetch(BM_POST, {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json' },
+          body: JSON.stringify({
+            type: 'insert',
+            date: new Date().toISOString(),   // تاريخ ووقت تلقائي
+            description: desc,
+            amount, source,
+            created_by: currentUser
+          })
+        });
+        if (resp.ok) { clearAddRow(); await loadAll(); }
+        else alert('❌ فشل الإضافة');
+      } catch(e) { alert('❌ خطأ في الاتصال'); }
+
+      btn.disabled = false; btn.innerHTML = '<i class="fas fa-plus"></i> إضافة';
+    }
+
+    function clearAddRow() {
+      document.getElementById('new-desc').value   = '';
+      document.getElementById('new-amount').value = '';
+      document.getElementById('new-amount').classList.remove('positive','negative');
+      document.getElementById('new-source').value = 'instapay';
+    }
+
+    async function postTx(id, btn) {
+      if (!confirm('تأكيد ترحيل هذه المعاملة؟ لا يمكن التراجع.')) return;
+      btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+      try {
+        const resp = await fetch(BM_POST, {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json' },
+          body: JSON.stringify({ type: 'post_transaction', id })
+        });
+        if (resp.ok) {
+          const t = allTx.find(x => String(x.id)===String(id));
+          if (t) t.is_posted = true;
+          updateKPIs(); renderTable();
+        } else {
+          alert('❌ فشل الترحيل');
+          btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> ترحيل';
+        }
+      } catch(e) {
+        alert('❌ خطأ في الاتصال');
+        btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> ترحيل';
+      }
+    }
+
+    async function saveOpening() {
+      const val = parseFloat(document.getElementById('opening-input').value);
+      if (isNaN(val)) { alert('أدخل رقم صحيح'); return; }
+      const btn = document.getElementById('opening-btn');
+      btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+      try {
+        const resp = await fetch(BM_POST, {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json' },
+          body: JSON.stringify({ type: 'set_opening', value: val })
+        });
+        if (resp.ok) {
+          openingBal = val; updateKPIs();
+          const msg = document.getElementById('opening-msg');
+          msg.style.display = 'inline';
+          setTimeout(() => msg.style.display = 'none', 3000);
+        } else alert('❌ فشل الحفظ');
+      } catch(e) { alert('❌ خطأ في الاتصال'); }
+      btn.disabled = false; btn.innerHTML = '<i class="fas fa-save"></i> حفظ';
+    }
+
+    function clearFilters() {
+      document.getElementById('filter-status').value = 'all';
+      document.getElementById('filter-source').value = 'all';
+      document.getElementById('filter-month').value  = '';
+      renderTable();
+    }
+  </script>
+</body>
+</html>
