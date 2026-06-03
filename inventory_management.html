@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>إدارة المخزون - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    /* ===== شريط الأدوات العلوي ===== */
+    .top-panel { margin-bottom:16px; }
+    .filter-panel { background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:0;overflow:hidden; }
+    .panel-head { display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 18px;background:var(--surface-3);border-bottom:1px solid var(--border); }
+    .panel-title { font-size:0.9rem;font-weight:800;color:var(--text-secondary);display:flex;align-items:center;gap:7px;margin:0; }
+    .panel-body { padding:16px 18px; }
+
+    /* صف البحث الرئيسي */
+    .search-row { display:flex;gap:12px;align-items:center;flex-wrap:wrap; }
+    .search-box { flex:1;min-width:220px;position:relative; }
+    .search-box .field-icon { position:absolute;top:50%;right:14px;transform:translateY(-50%);color:var(--text-muted);font-size:0.85rem;pointer-events:none; }
+    .search-box input { width:100%;padding:11px 40px 11px 14px;border:1.5px solid var(--border);border-radius:var(--radius-md);font-family:var(--font);font-size:0.9rem;outline:none;background:var(--surface);transition:border-color 0.15s,box-shadow 0.15s; }
+    .search-box input:focus { border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
+
+    /* segmented control لنوع الأصناف */
+    .type-toggle { display:inline-flex;background:var(--surface-3);border:1.5px solid var(--border);border-radius:var(--radius-md);padding:3px;gap:2px; }
+    .type-btn { padding:8px 16px;border-radius:calc(var(--radius-md) - 3px);border:none;background:transparent;color:var(--text-secondary);font-family:var(--font);font-size:0.82rem;font-weight:700;cursor:pointer;transition:all 0.18s;white-space:nowrap; }
+    .type-btn:hover { color:var(--accent-dark); }
+    .type-btn.active { background:var(--surface);color:var(--accent-dark);box-shadow:0 1px 4px rgba(0,0,0,0.12); }
+
+    /* زر احسب رئيسي + Excel */
+    .btn-calc { padding:11px 26px;font-size:0.9rem;font-weight:800;border:none;border-radius:var(--radius-md);background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;gap:7px;transition:filter 0.15s;white-space:nowrap; }
+    .btn-calc:hover { filter:brightness(1.08); }
+    .btn-excel { padding:11px 18px;font-size:0.88rem;font-weight:700;border:none;border-radius:var(--radius-md);background:#16a34a;color:#fff;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:filter 0.15s;white-space:nowrap; }
+    .btn-excel:hover { filter:brightness(1.08); }
+
+    /* شريط الإعدادات (chips) */
+    .settings-strip { display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px dashed var(--border); }
+    .filter-label { font-size:0.7rem;font-weight:700;color:var(--text-muted);margin-bottom:5px;display:flex;align-items:center;gap:3px; }
+    .mini-field { display:flex;flex-direction:column; }
+    .mini-field input, .mini-field select { width:108px;padding:8px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font);font-size:0.82rem;font-weight:600;outline:none;background:var(--surface);text-align:center;transition:border-color 0.15s; }
+    .mini-field input:focus, .mini-field select:focus { border-color:var(--accent); }
+    .mini-field.wide select { width:190px;text-align:right; }
+
+    /* علامة الاستفهام + tooltip */
+    .help-ic { display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--surface-3);border:1px solid var(--border);color:var(--text-muted);font-size:0.62rem;font-weight:800;cursor:help;position:relative; }
+    .help-ic:hover { background:var(--accent);color:#fff;border-color:var(--accent); }
+    .help-ic .tip {
+      display:none;position:absolute;bottom:calc(100% + 9px);right:50%;transform:translateX(50%);
+      background:#1e293b;color:#fff;font-size:0.72rem;font-weight:500;line-height:1.6;
+      padding:9px 12px;border-radius:9px;width:210px;text-align:right;z-index:9999;
+      box-shadow:0 8px 24px rgba(0,0,0,0.4);white-space:normal;
+    }
+    .help-ic .tip:after { content:"";position:absolute;top:100%;right:50%;transform:translateX(50%);border:6px solid transparent;border-top-color:#1e293b; }
+    .help-ic:hover .tip { display:block; }
+
+    /* ===== التابات (segmented) ===== */
+    .tabs-bar { display:inline-flex;gap:0;margin-bottom:16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:4px;flex-wrap:wrap; }
+    .tab-btn { padding:9px 18px;border-radius:var(--radius-sm);border:none;background:transparent;color:var(--text-secondary);font-size:0.85rem;font-weight:700;cursor:pointer;transition:all 0.18s;font-family:var(--font); }
+    .tab-btn:hover { color:var(--accent-dark); }
+    .tab-btn.active { background:var(--primary);color:#fff;box-shadow:0 2px 8px color-mix(in srgb, var(--primary) 35%, transparent); }
+
+    /* بطاقات تحديث الفروع */
+    .branch-updates { display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px; }
+    .branch-card { background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 14px;font-size:0.78rem;display:flex;align-items:center;gap:12px;box-shadow:0 1px 3px rgba(0,0,0,0.04); }
+    .branch-card .b-name { font-weight:800;color:var(--text-secondary); }
+    .branch-card .b-time { color:var(--text-muted);font-size:0.7rem;display:flex;align-items:center;gap:4px; }
+    .branch-card .b-time.stale { color:var(--danger);font-weight:700; }
+    .btn-refresh-branch { padding:4px 11px;font-size:0.7rem;font-weight:700;border-radius:7px;border:1px solid var(--accent);background:transparent;color:var(--accent-dark);cursor:pointer;white-space:nowrap;transition:all 0.15s; }
+    .btn-refresh-branch:hover { background:var(--accent);color:#fff; }
+
+    /* جداول النتائج */
+    .res-wrap { overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-md); }
+    .res-table { width:100%;border-collapse:collapse;min-width:720px; }
+    .res-table th { background:var(--primary);color:#fff;padding:11px 8px;font-size:0.74rem;font-weight:800;text-align:center;white-space:nowrap; }
+    .res-table td { padding:9px 8px;font-size:0.78rem;border-bottom:1px solid var(--surface-3);text-align:center;vertical-align:middle; }
+    .res-table tr:last-child td { border-bottom:none; }
+    .res-table tr:hover td { background:var(--surface-2); }
+    .res-table .name-cell { text-align:right; }
+    .price-high { color:var(--success);font-weight:800; }
+    .price-low { color:var(--danger);font-weight:800; }
+    .surplus-val { color:var(--success);font-weight:700; }
+    /* خلية الفرع المنظمة */
+    .branch-cell { display:flex;justify-content:space-around;gap:6px;min-width:160px; }
+    .bc-col { display:flex;flex-direction:column;align-items:center;gap:3px;flex:1;padding:2px 0; }
+    .bc-lbl { font-size:0.58rem;color:var(--text-muted);font-weight:700;text-transform:uppercase;letter-spacing:0.3px; }
+    .bc-num { font-size:0.92rem;font-weight:800; }
+    .zero-stock { color:var(--text-muted); }
+    .badge-med { display:inline-block;background:#dbeafe;color:#1e40af;border-radius:20px;padding:1px 8px;font-size:0.62rem;font-weight:700;margin-right:4px; }
+    .badge-cos { display:inline-block;background:#fce7f3;color:#9d174d;border-radius:20px;padding:1px 8px;font-size:0.62rem;font-weight:700;margin-right:4px; }
+
+    .summary-bar { display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px; }
+    .summary-item { background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 16px;font-size:0.8rem;font-weight:600;color:var(--text-secondary); }
+    .summary-item b { color:var(--accent-dark);font-size:1.05rem;margin-right:3px; }
+    .loading-overlay { text-align:center;padding:70px 20px;color:var(--text-muted);font-size:0.9rem; }
+
+    .pagination { display:flex;gap:6px;align-items:center;justify-content:center;margin-top:16px; }
+    .page-btn { padding:5px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface-3);color:var(--text-secondary);cursor:pointer;font-size:0.8rem;font-family:var(--font); }
+    .page-btn:hover { background:var(--primary);color:#fff;border-color:var(--primary); }
+    .page-btn:disabled { opacity:0.4;cursor:not-allowed; }
+  </style>
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+
+    <div class="top-panel">
+      <div class="filter-panel">
+        <div class="panel-head">
+          <div class="panel-title"><i class="fas fa-sliders-h" style="color:var(--accent);"></i> بحث وفلتر</div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button class="btn-excel" id="excel-btn" onclick="exportExcel()">
+              <i class="fas fa-file-excel"></i> Excel
+            </button>
+            <button class="btn-calc" onclick="calculate()">
+              <i class="fas fa-calculator"></i> احسب
+            </button>
+          </div>
+        </div>
+
+        <div class="panel-body">
+          <!-- صف البحث + نوع الأصناف -->
+          <div class="search-row">
+            <div class="search-box">
+              <i class="fas fa-search field-icon"></i>
+              <input type="text" id="search-input" placeholder="ابحث باسم الصنف أو الكود..." oninput="onFilterChange()">
+            </div>
+            <div class="type-toggle" id="type-toggle">
+              <button class="type-btn active" data-type="all" onclick="setItemType('all', this)">🧫 الكل</button>
+              <button class="type-btn"        data-type="med" onclick="setItemType('med', this)">💊 أدوية</button>
+              <button class="type-btn"        data-type="cos" onclick="setItemType('cos', this)">💄 تجميل</button>
+            </div>
+          </div>
+
+          <!-- شريط الإعدادات: الفرع المستهدف + إعدادات الفائض/الاحتياج (تحويل) -->
+          <div class="settings-strip" id="need-config-wrap">
+            <div class="mini-field wide" id="target-field">
+              <span class="filter-label">الفرع المستهدف <span class="help-ic">؟<span class="tip">الفرع الذي نريد إمداده — يُعرض ما يحتاجه من فائض الفروع الأخرى.</span></span></span>
+              <select id="target-branch" class="form-select" onchange="onFilterChange()">
+                <option value="mamora">المعمورة</option>
+                <option value="san">سان ستيفانو</option>
+                <option value="bishr">سيدى بشر</option>
+              </select>
+            </div>
+            <div class="mini-field">
+              <span class="filter-label">أقل رصيد <span class="help-ic">؟<span class="tip">تجاهل الفرع كمصدر فائض لو رصيده أقل من أو يساوي هذا الرقم. (يمنع التحويل من فرع رصيده ضعيف)</span></span></span>
+              <input type="number" id="min-stock" value="1" min="0" step="1" oninput="onFilterChange()">
+            </div>
+            <div class="mini-field">
+              <span class="filter-label">فترة الفائض (يوم) <span class="help-ic">؟<span class="tip">كل فرع يحتفظ بمخزون يكفي استهلاك هذا العدد من الأيام، وأي زيادة فوقه تُعتبر فائضاً قابلاً للتحويل.</span></span></span>
+              <input type="number" id="surplus-days" value="60" min="1" step="1" oninput="onFilterChange()">
+            </div>
+            <div class="mini-field">
+              <span class="filter-label">فترة الاحتياج (يوم) <span class="help-ic">؟<span class="tip">الفرع يُعتبر محتاجاً للصنف لو رصيده لا يكفي استهلاك هذا العدد من الأيام.</span></span></span>
+              <input type="number" id="need-days" value="30" min="1" step="1" oninput="onFilterChange()">
+            </div>
+            <div class="mini-field">
+              <span class="filter-label">يظهر الفائض ≥ <span class="help-ic">؟<span class="tip">لا تعرض الفائض إلا إذا بلغ هذا الرقم على الأقل، لتجنب تحويل كميات صغيرة لا تستحق.</span></span></span>
+              <input type="number" id="min-surplus" value="2" min="1" step="1" oninput="onFilterChange()">
+            </div>
+          </div>
+
+          <!-- شريط إعدادات تاب "ناقص من فرع" -->
+          <div class="settings-strip" id="missing-config-wrap" style="display:none;">
+            <div class="mini-field wide" id="target-field-missing">
+              <span class="filter-label">الفرع المستهدف <span class="help-ic">؟<span class="tip">الفرع الذي نبحث عن الأصناف الناقصة منه.</span></span></span>
+              <select id="target-branch-missing" class="form-select" onchange="syncMissingTarget()">
+                <option value="mamora">المعمورة</option>
+                <option value="san">سان ستيفانو</option>
+                <option value="bishr">سيدى بشر</option>
+              </select>
+            </div>
+            <div class="mini-field">
+              <span class="filter-label">رصيد الفروع الأخرى ≥ <span class="help-ic">؟<span class="tip">أظهر الصنف فقط إذا كان رصيده في فرع آخر مساوياً أو أكبر من هذا الرقم.</span></span></span>
+              <input type="number" id="missing-min-stock" value="1" min="0" step="1" oninput="onFilterChange()">
+            </div>
+            <div class="mini-field">
+              <span class="filter-label">معدل الاستهلاك ≥ <span class="help-ic">؟<span class="tip">أظهر الصنف فقط إذا كان معدل استهلاكه الشهري في الفرع الآخر مساوياً أو أكبر من هذا الرقم.</span></span></span>
+              <input type="number" id="missing-min-avg" value="1" min="0" step="0.5" oninput="onFilterChange()">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- بانل آخر تحديث للفروع -->
+    <div class="branch-updates" id="branch-updates"></div>
+
+    <!-- التابات -->
+    <div class="tabs-bar">
+      <button class="tab-btn active" data-tab="prices" onclick="switchTab('prices', this)">💲 فرق الأسعار بين الفروع</button>
+      <button class="tab-btn" data-tab="transfer" onclick="switchTab('transfer', this)">🔄 تحويل بين الفروع</button>
+      <button class="tab-btn" data-tab="missing" onclick="switchTab('missing', this)">📭 ناقص من فرع</button>
+    </div>
+
+    <!-- النتائج -->
+    <div class="card">
+      <div class="page-header">
+        <div class="page-title"><i class="fas fa-boxes-stacked"></i> <span id="result-title">اختلاف الأسعار بين الفروع</span></div>
+        <div id="result-count" style="font-size:0.8rem;color:var(--text-muted);"></div>
+      </div>
+      <div id="result-container"><div class="loading-overlay">اضغط "احسب" للبدء</div></div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    const INV_URL = 'https://agent.ebrahimhamdy.com/webhook/inventory';
+
+    // webhook تشغيل سحب الرصيد — يقرأ ?branch= في n8n عبر Switch node.
+    // غيّر الاسم 'refresh_stock' لو سمّيته باسم آخر في n8n.
+    const REFRESH_WEBHOOK = 'https://agent.ebrahimhamdy.com/webhook/refresh_stock';
+    const REFRESH_URLS = {
+      mamora: REFRESH_WEBHOOK,
+      san:    REFRESH_WEBHOOK,
+      bishr:  REFRESH_WEBHOOK
+    };
+
+    const BRANCHES = {
+      mamora: 'المعمورة',
+      san:    'سان ستيفانو',
+      bishr:  'سيدى بشر'
+    };
+    const STALE_HOURS = 12; // لو آخر تحديث أقدم من كده يتعلّم بالأحمر
+
+    var stockMamora=[], stockSan=[], stockBishr=[], salesData=[];
+    var dataLoaded=false;
+    var allResults=[], filteredResults=[];
+    var currentTab='prices';
+    var currentPage=1;
+    const PAGE_SIZE=30;
+    var branchUpdates={mamora:null, san:null, bishr:null};
+
+    // ===== حفظ/استرجاع الإعدادات =====
+    const LS_KEY='invmgmt_settings';
+    function saveSettings(){
+      var s={
+        itemType: itemType,
+        search: document.getElementById('search-input').value,
+        minStock: document.getElementById('min-stock').value,
+        surplusDays: document.getElementById('surplus-days').value,
+        needDays: document.getElementById('need-days').value,
+        minSurplus: document.getElementById('min-surplus').value,
+        missingMinStock: document.getElementById('missing-min-stock').value,
+        missingMinAvg: document.getElementById('missing-min-avg').value,
+        targetBranch: document.getElementById('target-branch').value,
+        tab: currentTab,
+        page: currentPage
+      };
+      localStorage.setItem(LS_KEY, JSON.stringify(s));
+    }
+    function loadSettings(){
+      var raw=localStorage.getItem(LS_KEY);
+      if(!raw) return;
+      try {
+        var s=JSON.parse(raw);
+        if(s.itemType){
+          itemType=s.itemType;
+          document.querySelectorAll('.type-btn').forEach(function(b){
+            b.classList.toggle('active', b.dataset.type===itemType);
+          });
+        }
+        if(s.search!=null) document.getElementById('search-input').value=s.search;
+        if(s.minStock!=null)    document.getElementById('min-stock').value=s.minStock;
+        if(s.surplusDays!=null) document.getElementById('surplus-days').value=s.surplusDays;
+        if(s.needDays!=null)    document.getElementById('need-days').value=s.needDays;
+        if(s.minSurplus!=null)  document.getElementById('min-surplus').value=s.minSurplus;
+        if(s.missingMinStock!=null) document.getElementById('missing-min-stock').value=s.missingMinStock;
+        if(s.missingMinAvg!=null)   document.getElementById('missing-min-avg').value=s.missingMinAvg;
+        if(s.targetBranch){
+          document.getElementById('target-branch').value=s.targetBranch;
+          var tbm=document.getElementById('target-branch-missing');
+          if(tbm) tbm.value=s.targetBranch;
+        }
+        if(s.tab) currentTab=s.tab;
+        if(s.page) currentPage=s.page;
+        // تحديث الواجهة حسب التاب المحفوظ
+        document.querySelectorAll('.tab-btn').forEach(function(b){
+          b.classList.toggle('active', b.dataset.tab===currentTab);
+        });
+        updateTabUI();
+      } catch(e){ console.log('loadSettings error', e); }
+    }
+
+    var hasCalculated=false; // هل ضغط المستخدم "احسب" مرة على الأقل؟
+    var itemType='all';      // all | med | cos
+
+    function onFilterChange(){
+      currentPage=1;
+      saveSettings();
+      if(hasCalculated) applyAndRender(); // لا نعرض/نعيد ترتيب قبل أول حساب
+    }
+    function setItemType(t, btn){
+      itemType=t;
+      currentPage=1;
+      document.querySelectorAll('.type-btn').forEach(function(b){b.classList.remove('active');});
+      if(btn) btn.classList.add('active');
+      saveSettings();
+      if(hasCalculated) calculate(); // إعادة الحساب فقط لو سبق وحسبنا
+    }
+
+    // ===== تشغيل =====
+    checkAuth().then(function(user){
+      if(user){
+        loadSettings();
+        updateTabUI();
+        loadBranchUpdatesOnly(); // خفيف: آخر تحديث للفروع فقط
+        document.getElementById('result-container').innerHTML='<div class="loading-overlay">اضغط "احسب" لعرض النتائج</div>';
+      }
+    });
+
+    // عند فتح الصفحة: نحمّل آخر تحديث للفروع فقط (خفيف) — بدون جداول المخزون ولا حساب
+    async function loadBranchUpdatesOnly(){
+      // محاولة استخدام type خفيف يرجّع آخر تحديث لكل فرع
+      try {
+        var res = await fetch(INV_URL+'?type=branch_updates');
+        var raw = await res.json();
+        var rows = Array.isArray(raw) ? raw : (raw.data||[]);
+        if(rows && rows.length){
+          rows.forEach(function(row){
+            var b = String(row.branch||'').trim();
+            var u = row.updatedAt||row.updated_at||row.updated||null;
+            var t = u ? new Date(u).getTime() : null;
+            if(b && branchUpdates.hasOwnProperty(b)) branchUpdates[b]= (t && !isNaN(t)) ? t : null;
+          });
+          renderBranchUpdates();
+          return; // نجح التحميل الخفيف
+        }
+      } catch(e){ /* غير متاح — ننتقل للبديل */ }
+
+      // بديل: لو الـ type الخفيف غير موجود، نجيب الجداول الكاملة لمعرفة آخر تحديث فقط
+      // (يحدث مرة واحدة عند الفتح، ونحتفظ بالبيانات لاستخدامها وقت "احسب" بدون إعادة جلب)
+      await loadStockData(true);
+    }
+
+    // تحميل جداول المخزون الكبيرة + المبيعات (يُستدعى عند "احسب" أو كبديل)
+    var stockLoaded=false;
+    async function loadStockData(silent){
+      if(stockLoaded) return true; // محمّلة بالفعل، لا نكرر
+      if(!silent) document.getElementById('result-container').innerHTML='<div class="loading-overlay">⏳ جاري تحميل البيانات...</div>';
+      try {
+        var r = await Promise.all([
+          fetch(INV_URL+'?type=stock_mamora_all').then(function(x){return x.json();}),
+          fetch(INV_URL+'?type=stock_san_all').then(function(x){return x.json();}),
+          fetch(INV_URL+'?type=stock_bishr_all').then(function(x){return x.json();}),
+          fetch(INV_URL+'?type=sales_monthly').then(function(x){return x.json();})
+        ]);
+        stockMamora=Array.isArray(r[0])?r[0]:(r[0].data||[]);
+        stockSan   =Array.isArray(r[1])?r[1]:(r[1].data||[]);
+        stockBishr =Array.isArray(r[2])?r[2]:(r[2].data||[]);
+        salesData  =Array.isArray(r[3])?r[3]:(r[3].data||[]);
+        dataLoaded=true;
+        stockLoaded=true;
+        computeBranchUpdates();
+        renderBranchUpdates();
+        return true;
+      } catch(e){
+        if(!silent) document.getElementById('result-container').innerHTML='<div class="loading-overlay" style="color:var(--danger);">❌ فشل التحميل</div>';
+        return false;
+      }
+    }
+
+    // ===== آخر تحديث للفروع =====
+    function latestUpdate(arr){
+      var max=null;
+      arr.forEach(function(it){
+        var u=it.updated_at||it.updatedAt||it.updated||null;
+        if(!u) return;
+        var t=new Date(u).getTime();
+        if(!isNaN(t) && (max===null || t>max)) max=t;
+      });
+      return max;
+    }
+    function computeBranchUpdates(){
+      branchUpdates.mamora=latestUpdate(stockMamora);
+      branchUpdates.san   =latestUpdate(stockSan);
+      branchUpdates.bishr =latestUpdate(stockBishr);
+    }
+    function timeAgo(ts){
+      if(!ts) return 'غير معروف';
+      var diff=Date.now()-ts;
+      var mins=Math.floor(diff/60000);
+      if(mins<1) return 'الآن';
+      if(mins<60) return 'منذ '+mins+' دقيقة';
+      var hrs=Math.floor(mins/60);
+      if(hrs<24) return 'منذ '+hrs+' ساعة';
+      var days=Math.floor(hrs/24);
+      return 'منذ '+days+' يوم';
+    }
+    function renderBranchUpdates(){
+      var wrap=document.getElementById('branch-updates');
+      var html='';
+      Object.keys(BRANCHES).forEach(function(key){
+        var ts=branchUpdates[key];
+        var stale = !ts || (Date.now()-ts > STALE_HOURS*3600000);
+        html+='<div class="branch-card">'+
+          '<span class="b-name">'+BRANCHES[key]+'</span>'+
+          '<span class="b-time '+(stale?'stale':'')+'">'+(stale?'⚠️ ':'🟢 ')+timeAgo(ts)+'</span>'+
+          '<button class="btn-refresh-branch" onclick="refreshBranch(\''+key+'\')"><i class="fas fa-sync-alt"></i> تحديث</button>'+
+        '</div>';
+      });
+      wrap.innerHTML=html;
+    }
+    async function refreshBranch(key){
+      var url=REFRESH_URLS[key];
+      if(!url){
+        alert('رابط تشغيل سحب رصيد '+BRANCHES[key]+' غير مضبوط بعد.');
+        return;
+      }
+      if(!confirm('سيتم تشغيل سحب رصيد '+BRANCHES[key]+' من جديد.\nقد يستغرق دقائق. متابعة؟')) return;
+      try {
+        await fetch(url + (url.indexOf('?')>-1 ? '&' : '?') + 'branch=' + encodeURIComponent(key));
+        alert('✅ تم إرسال أمر تحديث '+BRANCHES[key]+'.\nأعد تحميل الصفحة بعد دقائق لرؤية الأرصدة الجديدة.');
+      } catch(e){ alert('❌ فشل إرسال أمر التحديث'); }
+    }
+
+    function r1(n){ return Math.round(n*10)/10; }
+
+    // ===== بناء خريطة موحّدة للأصناف =====
+    // كل صنف: code, name, company, unit, isMedicine, و لكل فرع: {stock, price, avg, active, target}
+    function buildItemsMap(){
+      var map={};
+
+      function addStock(arr, branch){
+        arr.forEach(function(item){
+          var code=String(item.itm_code||'').trim();
+          if(!code) return;
+          if(!map[code]){
+            map[code]={
+              code:code,
+              name:item.itm_name_ar||'',
+              company:item.Company_Name_Ar||'',
+              unit:item.u_name_big||'',
+              isMedicine: String(item.itm_ismedicine||'0').trim()!=='0',
+              mamora:{stock:0,price:0,has:false,avg:0,active:0,target:0},
+              san:   {stock:0,price:0,has:false,avg:0,active:0,target:0},
+              bishr: {stock:0,price:0,has:false,avg:0,active:0,target:0}
+            };
+          }
+          // لو الاسم فاضي خده من أي فرع
+          if(!map[code].name && item.itm_name_ar) map[code].name=item.itm_name_ar;
+          if(!map[code].company && item.Company_Name_Ar) map[code].company=item.Company_Name_Ar;
+          map[code][branch].stock = parseFloat(item.sto_qty_big)||0;
+          map[code][branch].price = parseFloat(item.itm_sell_price_big)||0;
+          map[code][branch].has   = true; // الصنف مسجّل في جدول الفرع ده
+        });
+      }
+      addStock(stockMamora,'mamora');
+      addStock(stockSan,'san');
+      addStock(stockBishr,'bishr');
+
+      // معدلات الاستهلاك من sales_monthly
+      var salesMap={};
+      salesData.forEach(function(row){
+        var code=String(row.itm_code||'').trim();
+        if(!salesMap[code]) salesMap[code]={mamora:{},san:{},bishr:{}};
+        var m=String(row.month||'').trim();
+        salesMap[code].mamora[m]=(salesMap[code].mamora[m]||0)+(parseFloat(row.mamora)||0);
+        salesMap[code].san[m]   =(salesMap[code].san[m]   ||0)+(parseFloat(row.san)   ||0);
+        salesMap[code].bishr[m] =(salesMap[code].bishr[m] ||0)+(parseFloat(row.bishr) ||0);
+      });
+      function branchCalc(bs){
+        var active=Object.keys(bs).filter(function(m){return bs[m]>0;});
+        var total=active.reduce(function(sum,m){return sum+bs[m];},0);
+        var avg=active.length>0?total/active.length:0;
+        return {avg:avg, active:active.length};
+      }
+      Object.keys(map).forEach(function(code){
+        var sale=salesMap[code]||{mamora:{},san:{},bishr:{}};
+        ['mamora','san','bishr'].forEach(function(br){
+          var c=branchCalc(sale[br]||{});
+          map[code][br].avg=c.avg;           // المعدل الشهري للفرع
+          map[code][br].active=c.active;
+          map[code][br].daily=c.avg/30;      // الاستهلاك اليومي للفرع
+        });
+      });
+
+      return map;
+    }
+
+    // كمية تغطية فترة معينة بالأيام لفرع = الاستهلاك اليومي × عدد الأيام
+    function coverQty(branchObj, days){
+      return (branchObj.daily||0) * days;
+    }
+
+    // فائض الفرع = الرصيد − تغطية فترة الفائض، بشرط الرصيد > أقل رصيد
+    // يُقرَّب للأقل (floor) ولا يظهر إلا إذا بلغ الحد الأدنى المحدد
+    function branchSurplus(branchObj){
+      var minStock    = parseFloat(document.getElementById('min-stock').value)||0;
+      var surplusDays = parseFloat(document.getElementById('surplus-days').value)||0;
+      var minSurplus  = parseFloat(document.getElementById('min-surplus').value)||1;
+      if(branchObj.stock <= minStock) return 0;          // رصيد ضعيف — لا فائض
+      var surplus = Math.floor(branchObj.stock - coverQty(branchObj, surplusDays)); // تقريب للأقل
+      if(surplus < minSurplus) return 0;                 // أقل من الحد الأدنى — تجاهل
+      return surplus;
+    }
+
+    // الفرع محتاج = رصيده أقل من تغطية فترة الاحتياج
+    function branchNeeds(branchObj){
+      var needDays = parseFloat(document.getElementById('need-days').value)||0;
+      return branchObj.stock < coverQty(branchObj, needDays);
+    }
+
+    // الكمية التي يحتاجها الفرع للوصول لتغطية فترة الاحتياج (مقرّبة لأعلى، حد أدنى 1)
+    function neededQty(branchObj){
+      var needDays = parseFloat(document.getElementById('need-days').value)||0;
+      var q = Math.ceil(coverQty(branchObj, needDays) - branchObj.stock);
+      return q < 1 ? 1 : q;
+    }
+
+    // خطة التحويل لصنف نحو الفرع المستهدف:
+    // ترجّع { mamora:كمية, san:كمية, bishr:كمية } لكل فرع مصدر سيحوّل
+    function transferPlan(item, target){
+      var needQty = neededQty(item[target]);                 // ما يحتاجه المستهدف
+      var others = ['mamora','san','bishr'].filter(function(b){return b!==target;});
+      // الفروع المصدر مع فائضها، مرتّبة بالأعلى فائضاً أولاً
+      var sources = others
+        .map(function(b){ return { branch:b, surplus:branchSurplus(item[b]) }; })
+        .filter(function(s){ return s.surplus > 0; })
+        .sort(function(a,b){ return b.surplus - a.surplus; });
+
+      var plan = {};
+      var remaining = needQty;
+      sources.forEach(function(s){
+        if(remaining <= 0) return;
+        var take = Math.min(s.surplus, remaining);          // ما لا يتجاوز الفائض ولا الاحتياج
+        if(take > 0){ plan[s.branch] = take; remaining -= take; }
+      });
+      return plan;
+    }
+
+    // ===== الحساب الرئيسي =====
+    async function calculate(){
+      // أول ضغطة "احسب": نحمّل جداول المخزون الكبيرة (مرة واحدة)
+      if(!stockLoaded){
+        document.getElementById('result-container').innerHTML='<div class="loading-overlay">⏳ جاري تحميل البيانات...</div>';
+        var ok = await loadStockData(false);
+        if(!ok) return;
+      }
+      saveSettings();
+      var map=buildItemsMap();
+      var items=Object.keys(map).map(function(c){return map[c];})
+        .filter(function(it){
+          if(itemType==='med') return it.isMedicine;   // أدوية فقط
+          if(itemType==='cos') return !it.isMedicine;   // تجميل فقط
+          return true;                                  // الكل
+        });
+
+      allResults=items;
+      hasCalculated=true;
+      applyAndRender();
+    }
+
+    function applyAndRender(){
+      var search=document.getElementById('search-input').value.trim().toLowerCase();
+      var base=allResults.filter(function(it){
+        if(search && !it.name.toLowerCase().includes(search) && !it.code.includes(search)) return false;
+        return true;
+      });
+
+      var rows=[];
+      if(currentTab==='prices'){
+        // أصناف سعرها مختلف بين الفروع + رصيد>0 في فرع واحد على الأقل
+        base.forEach(function(it){
+          var prices=[];
+          ['mamora','san','bishr'].forEach(function(br){
+            if(it[br].has && it[br].price>0) prices.push(it[br].price);
+          });
+          var anyStock = it.mamora.stock>0 || it.san.stock>0 || it.bishr.stock>0;
+          if(!anyStock) return;
+          var uniq=[...new Set(prices)];
+          if(uniq.length>1) rows.push(it);
+        });
+      } else if(currentTab==='transfer'){
+        // الفرع المستهدف محتاج + فرع تاني عنده فائض
+        var target=document.getElementById('target-branch').value;
+        var others=['mamora','san','bishr'].filter(function(b){return b!==target;});
+        base.forEach(function(it){
+          if(!branchNeeds(it[target])) return;            // المستهدف لازم يكون محتاج
+          var hasSurplus=others.some(function(b){
+            return branchSurplus(it[b]) > 0;              // فرع تاني عنده فائض فعلي
+          });
+          if(hasSurplus) rows.push(it);
+        });
+      } else if(currentTab==='missing'){
+        // موجود في فروع تانية (برصيد ومعدل كافيين) وغير موجود/رصيد صفر في المستهدف
+        var target2=document.getElementById('target-branch').value;
+        var others2=['mamora','san','bishr'].filter(function(b){return b!==target2;});
+        var minOtherStock = parseFloat(document.getElementById('missing-min-stock').value)||0;
+        var minOtherAvg   = parseFloat(document.getElementById('missing-min-avg').value)||0;
+        base.forEach(function(it){
+          var inTarget = it[target2].has && it[target2].stock>0;
+          if(inTarget) return; // موجود فعلاً في المستهدف — تجاهل
+          // فرع تاني عنده رصيد ومعدل فوق الحد
+          var inOthers = others2.some(function(b){
+            return it[b].has && it[b].stock >= minOtherStock && it[b].avg >= minOtherAvg;
+          });
+          if(inOthers) rows.push(it);
+        });
+      }
+
+      filteredResults=rows;
+      renderResults();
+    }
+
+    // ===== العرض =====
+    function medBadge(it){
+      return it.isMedicine ? '<span class="badge-med">دواء</span>' : '<span class="badge-cos">تجميل</span>';
+    }
+    function priceCell(b, isHigh, isLow){
+      if(!b.has) return '<td class="zero-stock">—</td>';
+      var cls = isHigh?'price-high':(isLow?'price-low':'');
+      return '<td class="'+cls+'">'+b.price+'<div style="font-size:0.65rem;color:var(--text-muted);">رصيد: '+b.stock+'</div></td>';
+    }
+    function branchInfoCell(b){
+      if(!b.has) return '<td class="zero-stock">غير مسجّل</td>';
+      var surplus = branchSurplus(b);
+      var needs   = branchNeeds(b);
+
+      // قيمة العمود الثالث: فائض (أخضر) أو الرقم المحتاج (أحمر) أو شرطة
+      var thirdLabel, thirdVal, thirdColor;
+      if(surplus > 0){
+        thirdLabel='فائض'; thirdVal='+'+surplus; thirdColor='var(--success)';
+      } else if(needs){
+        thirdLabel='محتاج'; thirdVal=neededQty(b); thirdColor='var(--danger)';
+      } else {
+        thirdLabel='الحالة'; thirdVal='—'; thirdColor='var(--text-muted)';
+      }
+
+      return '<td>'+
+        '<div class="branch-cell">'+
+          '<div class="bc-col"><span class="bc-lbl">رصيد</span><span class="bc-num">'+b.stock+'</span></div>'+
+          '<div class="bc-col"><span class="bc-lbl">معدل</span><span class="bc-num">'+r1(b.avg)+'</span></div>'+
+          '<div class="bc-col"><span class="bc-lbl">'+thirdLabel+'</span><span class="bc-num" style="color:'+thirdColor+';font-weight:700;">'+thirdVal+'</span></div>'+
+        '</div>'+
+      '</td>';
+    }
+
+    function renderResults(){
+      var container=document.getElementById('result-container');
+      var total=filteredResults.length;
+      var totalPages=Math.max(1, Math.ceil(total/PAGE_SIZE));
+      if(currentPage>totalPages) currentPage=totalPages;
+      var start=(currentPage-1)*PAGE_SIZE;
+      var pageItems=filteredResults.slice(start, start+PAGE_SIZE);
+
+      document.getElementById('result-count').textContent= total+' صنف';
+
+      if(!total){ container.innerHTML='<div class="loading-overlay">لا توجد نتائج</div>'; return; }
+
+      var html='<div class="summary-bar"><div class="summary-item">النتائج: <b>'+total+'</b></div>'+
+        '<div class="summary-item">صفحة: <b>'+currentPage+' / '+totalPages+'</b></div></div>';
+      html+='<div class="res-wrap"><table class="res-table"><thead>';
+
+      if(currentTab==='prices'){
+        html+='<tr><th class="name-cell" style="text-align:right;">الصنف</th>'+
+          '<th>المعمورة</th><th>سان ستيفانو</th><th>سيدى بشر</th><th>الفرق</th></tr></thead><tbody>';
+        pageItems.forEach(function(it){
+          var ps=[];
+          ['mamora','san','bishr'].forEach(function(br){ if(it[br].has&&it[br].price>0) ps.push(it[br].price); });
+          var maxP=Math.max.apply(null,ps), minP=Math.min.apply(null,ps);
+          html+='<tr><td class="name-cell"><div style="font-weight:600;">'+it.name+' '+medBadge(it)+'</div>'+
+            '<div style="font-size:0.65rem;color:var(--text-muted);">'+it.code+' · '+it.company+'</div></td>'+
+            priceCell(it.mamora, it.mamora.price===maxP, it.mamora.price===minP)+
+            priceCell(it.san,    it.san.price===maxP,    it.san.price===minP)+
+            priceCell(it.bishr,  it.bishr.price===maxP,  it.bishr.price===minP)+
+            '<td style="font-weight:700;color:var(--accent-dark);">'+r1(maxP-minP)+'</td></tr>';
+        });
+      } else if(currentTab==='transfer'){
+        var target=document.getElementById('target-branch').value;
+        html+='<tr><th class="name-cell" style="text-align:right;">الصنف</th>'+
+          '<th>'+BRANCHES.mamora+'</th><th>'+BRANCHES.san+'</th><th>'+BRANCHES.bishr+'</th>'+
+          '<th>المستهدف</th></tr></thead><tbody>';
+        pageItems.forEach(function(it){
+          html+='<tr><td class="name-cell"><div style="font-weight:600;">'+it.name+' '+medBadge(it)+'</div>'+
+            '<div style="font-size:0.65rem;color:var(--text-muted);">'+it.code+' · '+it.company+'</div></td>'+
+            branchInfoCell(it.mamora)+branchInfoCell(it.san)+branchInfoCell(it.bishr)+
+            '<td style="font-weight:700;">'+BRANCHES[target]+'</td></tr>';
+        });
+      } else { // missing
+        var target2=document.getElementById('target-branch').value;
+        html+='<tr><th class="name-cell" style="text-align:right;">الصنف</th>'+
+          '<th>'+BRANCHES.mamora+'</th><th>'+BRANCHES.san+'</th><th>'+BRANCHES.bishr+'</th>'+
+          '<th>ناقص من</th></tr></thead><tbody>';
+        pageItems.forEach(function(it){
+          html+='<tr><td class="name-cell"><div style="font-weight:600;">'+it.name+' '+medBadge(it)+'</div>'+
+            '<div style="font-size:0.65rem;color:var(--text-muted);">'+it.code+' · '+it.company+'</div></td>'+
+            branchInfoCell(it.mamora)+branchInfoCell(it.san)+branchInfoCell(it.bishr)+
+            '<td style="font-weight:700;color:var(--danger);">'+BRANCHES[target2]+'</td></tr>';
+        });
+      }
+
+      html+='</tbody></table></div>';
+
+      // pagination
+      html+='<div class="pagination">'+
+        '<button class="page-btn" onclick="changePage(-1)" '+(currentPage<=1?'disabled':'')+'><i class="fas fa-chevron-right"></i> السابق</button>'+
+        '<span style="font-size:0.8rem;color:var(--text-secondary);">'+currentPage+' / '+totalPages+'</span>'+
+        '<button class="page-btn" onclick="changePage(1)" '+(currentPage>=totalPages?'disabled':'')+'>التالي <i class="fas fa-chevron-left"></i></button>'+
+      '</div>';
+
+      container.innerHTML=html;
+    }
+
+    function changePage(dir){
+      var totalPages=Math.ceil(filteredResults.length/PAGE_SIZE);
+      currentPage=Math.min(Math.max(1,currentPage+dir), totalPages);
+      saveSettings();
+      renderResults();
+    }
+
+    // ===== التابات =====
+    function switchTab(tab, btn){
+      currentTab=tab;
+      currentPage=1;
+      document.querySelectorAll('.tab-btn').forEach(function(b){b.classList.remove('active');});
+      btn.classList.add('active');
+      updateTabUI();
+      saveSettings();
+      if(hasCalculated) applyAndRender();
+    }
+    function updateTabUI(){
+      var titles={prices:'فرق الأسعار بين الفروع', transfer:'التحويل بين الفروع', missing:'أصناف ناقصة من فرع'};
+      document.getElementById('result-title').textContent=titles[currentTab]||'';
+
+      var isPrices   = (currentTab==='prices');
+      var isTransfer = (currentTab==='transfer');
+      var isMissing  = (currentTab==='missing');
+
+      // شريط إعدادات التحويل (فيه الفرع المستهدف + الفائض) يخص التحويل فقط
+      var needWrap = document.getElementById('need-config-wrap');
+      if(needWrap) needWrap.style.display = isTransfer ? 'flex' : 'none';
+
+      // شريط إعدادات النقص يخص تاب النقص فقط
+      var missWrap = document.getElementById('missing-config-wrap');
+      if(missWrap) missWrap.style.display = isMissing ? 'flex' : 'none';
+
+      // زر Excel غير مهم في تاب الأسعار
+      var excelBtn = document.getElementById('excel-btn');
+      if(excelBtn) excelBtn.style.display = isPrices ? 'none' : 'inline-flex';
+    }
+
+    // مزامنة اختيار الفرع المستهدف في تاب النقص مع المتغير الموحّد
+    function syncMissingTarget(){
+      var v = document.getElementById('target-branch-missing').value;
+      document.getElementById('target-branch').value = v;
+      onFilterChange();
+    }
+
+    // ===== Export Excel =====
+    function exportExcel(){
+      if(!filteredResults.length){ alert('احسب الأول'); return; }
+      var wb=XLSX.utils.book_new();
+      var today=new Date().toISOString().slice(0,10);
+
+      if(currentTab==='prices'){
+        var wsData=[['الكود','الصنف','الشركة','نوع','سعر المعمورة','سعر سان','سعر بشر','الفرق']];
+        filteredResults.forEach(function(it){
+          var ps=[];
+          ['mamora','san','bishr'].forEach(function(br){ if(it[br].has&&it[br].price>0) ps.push(it[br].price); });
+          var diff=r1(Math.max.apply(null,ps)-Math.min.apply(null,ps));
+          wsData.push([it.code,it.name,it.company,it.isMedicine?'دواء':'تجميل',
+            it.mamora.has?it.mamora.price:'', it.san.has?it.san.price:'', it.bishr.has?it.bishr.price:'', diff]);
+        });
+        var ws=XLSX.utils.aoa_to_sheet(wsData);
+        ws['!cols']=[{wch:12},{wch:40},{wch:20},{wch:8},{wch:12},{wch:12},{wch:12},{wch:8}];
+        XLSX.utils.book_append_sheet(wb, ws, 'فرق الأسعار');
+
+      } else if(currentTab==='transfer'){
+        // شيت لكل فرع مصدر: كود · اسم · كمية التحويل للفرع المستهدف
+        var target=document.getElementById('target-branch').value;
+        var others=['mamora','san','bishr'].filter(function(b){return b!==target;});
+        var sheets={}; // branch -> rows
+        others.forEach(function(b){ sheets[b]=[['الكود','الصنف','الكمية المطلوب تحويلها']]; });
+
+        filteredResults.forEach(function(it){
+          var plan=transferPlan(it, target); // { branch: qty }
+          others.forEach(function(b){
+            if(plan[b] && plan[b]>0){
+              sheets[b].push([it.code, it.name, plan[b]]);
+            }
+          });
+        });
+
+        var added=false;
+        others.forEach(function(b){
+          if(sheets[b].length>1){ // فيه أصناف فعلاً
+            var ws=XLSX.utils.aoa_to_sheet(sheets[b]);
+            ws['!cols']=[{wch:14},{wch:45},{wch:18}];
+            // اسم الشيت: من <المصدر> إلى <المستهدف>
+            var name=('من '+BRANCHES[b]+' ← '+BRANCHES[target]).slice(0,31);
+            XLSX.utils.book_append_sheet(wb, ws, name);
+            added=true;
+          }
+        });
+        if(!added){ alert('لا توجد كميات للتحويل'); return; }
+
+      } else { // missing
+        var target2=document.getElementById('target-branch').value;
+        var others2=['mamora','san','bishr'].filter(function(b){return b!==target2;});
+        var wsData2=[['الكود','الصنف','الشركة','نوع','متوفر في','الرصيد','المعدل/شهر']];
+        filteredResults.forEach(function(it){
+          // الفرع الأعلى رصيداً من الفروع الأخرى
+          var best=null;
+          others2.forEach(function(b){
+            if(it[b].has && (!best || it[b].stock>it[best].stock)) best=b;
+          });
+          if(!best) return;
+          wsData2.push([it.code,it.name,it.company,it.isMedicine?'دواء':'تجميل',
+            BRANCHES[best], it[best].stock, r1(it[best].avg)]);
+        });
+        var ws2=XLSX.utils.aoa_to_sheet(wsData2);
+        ws2['!cols']=[{wch:14},{wch:45},{wch:20},{wch:8},{wch:14},{wch:10},{wch:10}];
+        XLSX.utils.book_append_sheet(wb, ws2, 'ناقص من '+BRANCHES[target2]);
+      }
+
+      XLSX.writeFile(wb, 'inventory_mgmt_'+currentTab+'_'+today+'.xlsx');
+    }
+  </script>
+</body>
+</html>
