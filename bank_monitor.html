@@ -50,95 +50,97 @@
     .posted-badge  { background:#dcfce7; color:#15803d; font-size:0.65rem; font-weight:700; display:inline-block; padding:2px 8px; border-radius:20px; }
     .pending-badge { background:#fef9c3; color:#a16207; font-size:0.65rem; font-weight:700; display:inline-block; padding:2px 8px; border-radius:20px; }
     .filter-row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
-  </style>
-</head>
-<body>
-  <div class="nav-bar"></div>
-  <div class="container">
-    <div class="card">
-      <div class="page-header">
-        <div class="page-title"><i class="fas fa-university"></i> متابعة الحساب البنكي</div>
-        <button class="btn btn-primary" onclick="loadAll()"><i class="fas fa-sync-alt"></i> تحديث</button>
-      </div>
+<style>
+    /* إعادة شكل صف الإضافة للأصل */
+    .add-row-wrap { 
+        background: #f8fafc; 
+        border: 1px dashed #38bdf8; 
+        border-radius: 12px; 
+        padding: 12px; 
+        display: flex; /* تحويل لـ flex بدلاً من grid لشكل أفضل */
+        gap: 10px; 
+        align-items: center; 
+        margin-bottom: 20px;
+    }
+    .add-row-wrap input, .add-row-wrap select { 
+        height: 40px; 
+        border: 1px solid #e2e8f0; 
+        border-radius: 8px; 
+        padding: 0 12px; 
+    }
+    #new-desc { flex: 3; } /* الوصف يأخذ مساحة أكبر */
+    #new-amount { flex: 1; min-width: 120px; }
+    #new-source { flex: 1; min-width: 110px; }
+    
+    /* تصميم الفلاتر الجديد (أنيق وغير مزعج) */
+    .filter-section {
+        display: flex;
+        gap: 15px;
+        align-items: center;
+        background: #fff;
+        padding: 10px;
+        border-bottom: 1px solid #edf2f7;
+        margin-bottom: 15px;
+        flex-wrap: wrap;
+    }
+    .source-filter-group {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: #f1f5f9;
+        padding: 4px 10px;
+        border-radius: 20px;
+    }
+    .source-filter-group label {
+        font-size: 0.75rem;
+        cursor: pointer;
+        padding: 2px 8px;
+        border-radius: 12px;
+        transition: 0.3s;
+    }
+    .source-checkbox:checked + label {
+        background: #3b82f6;
+        color: white;
+    }
+    .source-checkbox { display: none; }
+</style>
 
-      <div class="opening-row" id="opening-row">
-        <label><i class="fas fa-coins" style="color:var(--accent);margin-left:4px;"></i> رصيد البداية:</label>
-        <input type="number" id="opening-input" class="opening-input" placeholder="0.00" step="0.01" readonly>
-        <button class="btn btn-primary" onclick="saveOpening()" id="opening-btn" style="white-space:nowrap;display:none;"><i class="fas fa-save"></i> حفظ</button>
-        <span id="opening-msg" style="font-size:0.75rem;color:var(--success);display:none;">✅ تم الحفظ</span>
-      </div>
+<div class="add-row-wrap">
+  <button class="btn" style="background:#f1f5f9; color:#64748b; width:40px;" onclick="clearAddRow()">×</button>
+  <button class="btn btn-primary" style="background:#38bdf8; border:none; padding:0 20px;" onclick="addTransaction()" id="add-btn">+ إضافة</button>
+  <select id="new-source">
+    <option value="instapay">انستاباي</option>
+    <option value="paymob">باي موب</option>
+    <option value="abuqir">أبو قير</option>
+    <option value="other">أخرى</option>
+  </select>
+  <input type="number" id="new-amount" class="amount-input" placeholder="المبلغ (+ وارد / - صادر)" step="0.01">
+  <input type="text" id="new-desc" placeholder="الوصف / البيان (اختياري)">
+</div>
 
-      <div class="kpi-row">
-        <div class="kpi-card blue"><div class="kpi-label">الرصيد الحالي (كلي)</div><div class="kpi-value" id="kpi-total">—</div><div class="kpi-sub">رصيد البداية + كل المعاملات</div></div>
-        <div class="kpi-card green"><div class="kpi-label">المرحّل</div><div class="kpi-value" id="kpi-posted">—</div><div class="kpi-sub">مطابق للسيستم</div></div>
-        <div class="kpi-card amber"><div class="kpi-label">غير مرحّل</div><div class="kpi-value" id="kpi-pending">—</div><div class="kpi-sub">في انتظار الترحيل</div></div>
-        <div class="kpi-card red"><div class="kpi-label">عدد المعاملات</div><div class="kpi-value" id="kpi-count">—</div><div class="kpi-sub" id="kpi-count-sub">—</div></div>
-      </div>
+<div class="filter-section">
+    <select id="filter-status" onchange="resetPageAndRender()" style="border:none; font-weight:bold; color:#475569;">
+        <option value="pending">⏳ غير مرحّل</option>
+        <option value="all">🌐 الكل</option>
+        <option value="posted">✅ مرحّل</option>
+    </select>
+    
+    <div style="height: 20px; width: 1px; background: #e2e8f0;"></div>
 
-      <div class="add-row-wrap">
-        <input type="text" id="new-desc" placeholder="الوصف / البيان (اختياري)">
-        <input type="number" id="new-amount" class="amount-input" placeholder="المبلغ" step="0.01" oninput="colorAmount(this)">
-        <select id="new-source">
-          <option value="instapay">انستاباي</option>
-          <option value="paymob">باي موب</option>
-          <option value="abuqir">أبو قير للأسمدة</option>
-          <option value="other">أخرى</option>
-        </select>
-        <button class="btn btn-primary" onclick="addTransaction()" id="add-btn">إضافة</button>
-        <button class="btn" style="background:var(--surface-3);" onclick="clearAddRow()"><i class="fas fa-times"></i></button>
-      </div>
-
-      <div class="filter-row">
-        <select id="filter-status" class="form-select" style="width:140px;" onchange="resetPageAndRender()">
-          <option value="pending" selected>⏳ غير مرحّل</option>
-          <option value="all">🌐 الكل</option>
-          <option value="posted">✅ مرحّل</option>
-        </select>
-
-        <div class="source-chips">
-          <span style="font-size:0.75rem; font-weight:bold; margin-left:5px;">المصادر:</span>
-          <input type="checkbox" id="src-instapay" class="source-checkbox" value="instapay" checked onchange="resetPageAndRender()">
-          <label for="src-instapay" class="source-label">انستاباي</label>
-          
-          <input type="checkbox" id="src-paymob" class="source-checkbox" value="paymob" checked onchange="resetPageAndRender()">
-          <label for="src-paymob" class="source-label">باي موب</label>
-          
-          <input type="checkbox" id="src-abuqir" class="source-checkbox" value="abuqir" checked onchange="resetPageAndRender()">
-          <label for="src-abuqir" class="source-label">أبو قير</label>
-          
-          <input type="checkbox" id="src-other" class="source-checkbox" value="other" checked onchange="resetPageAndRender()">
-          <label for="src-other" class="source-label">أخرى</label>
-        </div>
-
-        <input type="month" id="filter-month" class="form-input" style="width:150px;" onchange="resetPageAndRender()">
-        <button class="btn" style="background:var(--surface-3); font-size:0.75rem;" onclick="clearFilters()">مسح</button>
-      </div>
-
-      <div class="table-wrap">
-        <table class="bm-table">
-          <thead>
-            <tr>
-              <th>التاريخ</th>
-              <th>الوصف</th>
-              <th>المبلغ</th>
-              <th>المصدر</th>
-              <th>المسؤول</th>
-              <th>الحالة</th>
-              <th>الإجراء</th>
-            </tr>
-          </thead>
-          <tbody id="bm-tbody"></tbody>
-        </table>
-      </div>
-
-      <div class="pagination-row">
-        <button class="btn btn-sm" id="prev-page" onclick="changePage(-1)"><i class="fas fa-chevron-right"></i></button>
-        <span class="page-info" id="page-info">صفحة 1 من 1</span>
-        <button class="btn btn-sm" id="next-page" onclick="changePage(1)"><i class="fas fa-chevron-left"></i></button>
-      </div>
+    <div class="source-filter-group">
+        <span style="font-size: 0.7rem; color: #94a3b8; margin-left: 5px;">المصادر:</span>
+        <input type="checkbox" id="f-insta" class="source-checkbox" value="instapay" checked onchange="renderTable()">
+        <label for="f-insta">انستا</label>
+        
+        <input type="checkbox" id="f-pay" class="source-checkbox" value="paymob" checked onchange="renderTable()">
+        <label for="f-pay">باي موب</label>
+        
+        <input type="checkbox" id="f-abu" class="source-checkbox" value="abuqir" checked onchange="renderTable()">
+        <label for="f-abu">أبو قير</label>
     </div>
-  </div>
 
+    <input type="month" id="filter-month" onchange="renderTable()" style="border:none; font-size:0.85rem;">
+</div>
   <script src="api.js"></script>
   <script src="nav.js" defer></script>
   <script>
