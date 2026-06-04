@@ -64,6 +64,7 @@
         <button class="btn btn-primary" onclick="loadAll()"><i class="fas fa-sync-alt"></i> تحديث</button>
       </div>
 
+      <!-- رصيد البداية — admin فقط -->
       <div class="opening-row" id="opening-row">
         <label><i class="fas fa-coins" style="color:var(--accent);margin-left:4px;"></i> رصيد البداية:</label>
         <input type="number" id="opening-input" class="opening-input" placeholder="0.00" step="0.01" readonly>
@@ -73,11 +74,12 @@
         <span id="opening-msg" style="font-size:0.75rem;color:var(--success);display:none;">✅ تم الحفظ</span>
       </div>
 
+      <!-- KPIs -->
       <div class="kpi-row">
         <div class="kpi-card blue">
           <div class="kpi-label">الرصيد الحالي (كلي)</div>
           <div class="kpi-value" id="kpi-total">—</div>
-          <div class="kpi-sub">رصيد البداية + الظاهر بالجدول</div>
+          <div class="kpi-sub">رصيد البداية + كل المعاملات</div>
         </div>
         <div class="kpi-card green">
           <div class="kpi-label">المرحّل</div>
@@ -96,6 +98,7 @@
         </div>
       </div>
 
+      <!-- إضافة معاملة inline — بدون تاريخ يدوي -->
       <div class="add-row-wrap">
         <input type="text" id="new-desc" placeholder="الوصف / البيان (اختياري)">
         <input type="number" id="new-amount" class="amount-input" placeholder="المبلغ (+ وارد / - صادر)" step="0.01" oninput="colorAmount(this)">
@@ -105,7 +108,7 @@
           <option value="abuqir">أبو قير للأسمدة</option>
           <option value="other">أخرى</option>
         </select>
-        <button class="btn btn-primary" onclick="addTransaction()" id="add-btn">
+        <button class="btn btn-primary" onclick="addTransaction()" id="add-btn" style="white-space:nowrap;">
           <i class="fas fa-plus"></i> إضافة
         </button>
         <button class="btn" style="background:var(--surface-3);color:var(--text-secondary);" onclick="clearAddRow()">
@@ -113,25 +116,27 @@
         </button>
       </div>
 
+      <!-- فلاتر -->
       <div class="filter-row">
-        <select id="filter-status" class="form-select" onchange="renderTable()">
+        <select id="filter-status" class="form-select" style="width:auto;" onchange="renderTable()">
           <option value="all">الكل</option>
           <option value="pending">غير مرحّل</option>
           <option value="posted">مرحّل</option>
         </select>
-        <select id="filter-source" class="form-select" onchange="renderTable()">
+        <select id="filter-source" class="form-select" style="width:auto;" onchange="renderTable()">
           <option value="all">كل المصادر</option>
           <option value="instapay">انستاباي</option>
           <option value="paymob">باي موب</option>
           <option value="abuqir">أبو قير</option>
           <option value="other">أخرى</option>
         </select>
-        <input type="month" id="filter-month" class="form-input" onchange="renderTable()">
+        <input type="month" id="filter-month" class="form-input" style="width:160px;" onchange="renderTable()">
         <button class="btn" style="background:var(--surface-3);color:var(--text-secondary);font-size:0.78rem;" onclick="clearFilters()">
           <i class="fas fa-times"></i> مسح الفلاتر
         </button>
       </div>
 
+      <!-- الجدول -->
       <div class="table-wrap">
         <table class="bm-table">
           <thead>
@@ -162,7 +167,7 @@
 
     let allTx       = [];
     let openingBal  = 0;
-    let isAdmin      = false;
+    let isAdmin     = false;
     let currentUser = '';
 
     checkAuth().then(async user => {
@@ -170,6 +175,7 @@
       currentUser = user.username || user.name || user || '';
       isAdmin     = (user.role === 'admin');
 
+      // admin: اعرض الحفظ وخلي الحقل قابل للتعديل
       if (isAdmin) {
         document.getElementById('opening-input').removeAttribute('readonly');
         document.getElementById('opening-btn').style.display = 'inline-flex';
@@ -192,19 +198,19 @@
           document.getElementById('opening-input').value = openingBal || '';
         } catch(e) { openingBal = 0; }
 
-        renderTable(); // renderTable ستقوم باستدعاء updateKPIs تلقائياً
+        updateKPIs();
+        renderTable();
       } catch(e) {
         document.getElementById('bm-tbody').innerHTML =
           '<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل التحميل</td></tr>';
       }
     }
 
-    // تعديل: الدالة الآن تقبل قائمة البيانات المفلترة لحسابها
-    function updateKPIs(filteredData = allTx) {
-      const total  = filteredData.reduce((s,t) => s+(parseFloat(t.amount)||0), 0);
-      const posted = filteredData.filter(t => t.is_posted==='true'||t.is_posted===true).reduce((s,t) => s+(parseFloat(t.amount)||0), 0);
-      const count  = filteredData.length;
-      const pCount = filteredData.filter(t => t.is_posted==='true'||t.is_posted===true).length;
+    function updateKPIs() {
+      const total  = allTx.reduce((s,t) => s+(parseFloat(t.amount)||0), 0);
+      const posted = allTx.filter(t => t.is_posted==='true'||t.is_posted===true).reduce((s,t) => s+(parseFloat(t.amount)||0), 0);
+      const count  = allTx.length;
+      const pCount = allTx.filter(t => t.is_posted==='true'||t.is_posted===true).length;
 
       document.getElementById('kpi-total').textContent     = fmt(openingBal + total);
       document.getElementById('kpi-posted').textContent    = fmt(openingBal + posted);
@@ -231,9 +237,6 @@
         return true;
       });
 
-      // تعديل: تحديث الـ KPIs بناءً على القائمة المفلترة الحالية
-      updateKPIs(list);
-
       list.sort((a,b) => new Date(b.date||0) - new Date(a.date||0));
 
       const tbody = document.getElementById('bm-tbody');
@@ -250,6 +253,7 @@
         const amt      = parseFloat(t.amount)||0;
         const rowClass = isPosted ? 'posted-row' : 'pending-row';
 
+        // تاريخ ووقت
         const _d      = t.date ? new Date(t.date) : null;
         const dateStr = _d
           ? _d.toLocaleDateString('ar-EG') +
@@ -268,7 +272,7 @@
             ? '<span class="posted-badge">✅ مرحّل</span>'
             : '<span class="pending-badge">⏳ لم يُرحَّل</span>'}</td>
           <td>${isPosted
-            ? '<i class="fas fa-lock" style="color:var(--text-muted);font-size:0.8rem;"></i>'
+            ? '<i class="fas fa-lock" style="color:var(--text-muted);font-size:0.8rem;" title="لا يمكن إلغاء الترحيل"></i>'
             : `<button class="btn btn-success btn-sm" onclick="postTx('${t.id}',this)"><i class="fas fa-check"></i> ترحيل</button>`}</td>
         </tr>`;
       }).join('');
@@ -285,7 +289,7 @@
       const amount = parseFloat(document.getElementById('new-amount').value);
       const source = document.getElementById('new-source').value;
 
-      if (isNaN(amount)) { alert('اكتب المبلغ'); return; }
+      if (isNaN(amount)) { alert('اكتب المبلغ (موجب وارد / سالب صادر)'); return; }
 
       const btn = document.getElementById('add-btn');
       btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
@@ -296,7 +300,7 @@
           headers: { 'Content-Type':'application/json' },
           body: JSON.stringify({
             type: 'insert',
-            date: new Date().toISOString(),
+            date: new Date().toISOString(),   // تاريخ ووقت تلقائي
             description: desc,
             amount, source,
             created_by: currentUser
@@ -317,7 +321,7 @@
     }
 
     async function postTx(id, btn) {
-      if (!confirm('تأكيد ترحيل المعاملة؟')) return;
+      if (!confirm('تأكيد ترحيل هذه المعاملة؟ لا يمكن التراجع.')) return;
       btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
       try {
         const resp = await fetch(BM_POST, {
@@ -328,10 +332,15 @@
         if (resp.ok) {
           const t = allTx.find(x => String(x.id)===String(id));
           if (t) t.is_posted = true;
-          renderTable();
-        } else alert('❌ فشل الترحيل');
-      } catch(e) { alert('❌ خطأ في الاتصال'); }
-      btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> ترحيل';
+          updateKPIs(); renderTable();
+        } else {
+          alert('❌ فشل الترحيل');
+          btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> ترحيل';
+        }
+      } catch(e) {
+        alert('❌ خطأ في الاتصال');
+        btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> ترحيل';
+      }
     }
 
     async function saveOpening() {
@@ -346,8 +355,7 @@
           body: JSON.stringify({ type: 'set_opening', value: val })
         });
         if (resp.ok) {
-          openingBal = val;
-          renderTable(); // ستقوم بتحديث الـ KPIs بناء على رصيد البداية الجديد
+          openingBal = val; updateKPIs();
           const msg = document.getElementById('opening-msg');
           msg.style.display = 'inline';
           setTimeout(() => msg.style.display = 'none', 3000);
