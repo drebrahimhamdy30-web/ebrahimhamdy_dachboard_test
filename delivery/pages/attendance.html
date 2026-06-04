@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>إدارة الحضور</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="../delivery-style.css">
+<style>
+body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
+.req-grid{display:flex;flex-direction:column;gap:.75rem}
+.req-card{background:white;border-radius:12px;border:1.5px solid var(--border);padding:1rem;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.req-card.type-online{border-right:4px solid var(--green)}
+.req-card.type-offline{border-right:4px solid var(--red)}
+.req-card.type-break{border-right:4px solid var(--yellow)}
+.req-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:.625rem}
+.req-name{font-weight:700;font-size:.9rem}
+.req-branch{font-size:.7rem;color:var(--text-muted)}
+.req-type{font-size:.7rem;font-weight:700;padding:.2rem .5rem;border-radius:6px}
+.type-lbl-online{background:var(--green-light);color:#15803d}
+.type-lbl-offline{background:var(--red-light);color:#b91c1c}
+.type-lbl-break{background:var(--yellow-light);color:#92400e}
+.req-time{font-size:.72rem;color:var(--text-muted);margin-bottom:.75rem}
+.req-actions{display:flex;gap:.5rem}
+.btn-approve{background:var(--green);color:white;border:none;border-radius:8px;padding:.45rem .875rem;font-family:'Cairo',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;flex:1}
+.btn-reject{background:var(--red-light);color:#b91c1c;border:1px solid #fecaca;border-radius:8px;padding:.45rem .875rem;font-family:'Cairo',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;flex:1}
+
+/* LIVE STATUS */
+.live-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.75rem;margin-bottom:1.25rem}
+.live-card{background:white;border-radius:12px;border:1.5px solid var(--border);padding:.875rem;text-align:center}
+.live-card.online{border-top:3px solid var(--green)}
+.live-card.offline{border-top:3px solid #9ca3af}
+.live-card.break{border-top:3px solid var(--yellow)}
+.live-avatar{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1rem;color:white;margin:0 auto .5rem}
+.live-name{font-size:.82rem;font-weight:700;margin-bottom:.2rem}
+.live-status{font-size:.68rem;font-weight:700;padding:.15rem .45rem;border-radius:6px;display:inline-block}
+.ls-online{background:var(--green-light);color:#15803d}
+.ls-offline{background:var(--gray-light);color:#6b7280}
+.ls-break{background:var(--yellow-light);color:#92400e}
+.live-hours{font-size:.68rem;color:var(--text-muted);margin-top:.3rem}
+
+/* TABS */
+.att-tabs{display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap}
+.att-tab{padding:.35rem .875rem;border-radius:20px;font-size:.75rem;font-weight:600;cursor:pointer;border:1.5px solid var(--border);background:white;color:var(--text-muted);font-family:'Cairo',sans-serif}
+.att-tab.active{background:var(--primary);color:white;border-color:var(--primary)}
+
+.empty-state{text-align:center;padding:2.5rem;color:var(--text-muted);font-size:.82rem}
+.loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,.7);z-index:300;display:none;align-items:center;justify-content:center}
+.loading-overlay.show{display:flex}
+.spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<div class="flex-between" style="margin-bottom:1rem">
+  <div>
+    <div style="font-size:.9rem;font-weight:700">إدارة الحضور</div>
+    <div style="font-size:.75rem;color:var(--text-muted)" id="pageSubtitle">اليوم</div>
+  </div>
+  <button class="btn btn-outline" onclick="loadAll()" style="display:flex;align-items:center;gap:.3rem">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+    تحديث
+  </button>
+</div>
+
+<div class="att-tabs">
+  <button class="att-tab active" onclick="setView('live',this)">🟢 الحالة الحالية</button>
+  <button class="att-tab" onclick="setView('requests',this)">⏳ طلبات الموافقة <span id="req-count" style="background:var(--red);color:white;border-radius:10px;padding:.05rem .35rem;font-size:.65rem;margin-right:.2rem">0</span></button>
+  <button class="att-tab" onclick="setView('history',this)">📋 السجل اليومي</button>
+</div>
+
+<div id="liveView"></div>
+<div id="requestsView" style="display:none"></div>
+<div id="historyView" style="display:none"></div>
+
+<div class="loading-overlay" id="lo"><div class="spinner"></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../supabase-config.js"></script>
+<script src="../permissions.js"></script>
+<script>
+const COLORS=['#1a56db','#7c3aed','#16a34a','#ea580c','#0891b2','#ca8a04'];
+let allDrivers=[], attendanceRecords=[], currentView='live';
+
+async function init(){
+  const user=getCurrentUser();if(!user)return;
+  showLoading(true);
+  await loadAll();
+  showLoading(false);
+  setInterval(loadAll,15000);
+}
+
+async function loadAll(){
+  try{
+    const today=new Date().toISOString().split('T')[0];
+    document.getElementById('pageSubtitle').textContent=new Date().toLocaleDateString('ar-EG',{weekday:'long',day:'numeric',month:'long'});
+
+    const [dRes,aRes]=await Promise.all([
+      db.from('drivers').select('*,branches(name)').eq('is_active',true).order('full_name'),
+      db.from('driver_attendance').select('*').eq('date',today).order('created_at',{ascending:false})
+    ]);
+    allDrivers=dRes.data||[];
+    attendanceRecords=aRes.data||[];
+
+    const pending=attendanceRecords.filter(r=>r.status.endsWith('_request'));
+    document.getElementById('req-count').textContent=pending.length;
+    document.getElementById('req-count').style.display=pending.length?'inline':'none';
+
+    renderCurrentView();
+  }catch(e){console.error(e);}
+}
+
+function setView(view,el){
+  currentView=view;
+  document.querySelectorAll('.att-tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('liveView').style.display=view==='live'?'block':'none';
+  document.getElementById('requestsView').style.display=view==='requests'?'block':'none';
+  document.getElementById('historyView').style.display=view==='history'?'block':'none';
+  renderCurrentView();
+}
+
+function renderCurrentView(){
+  if(currentView==='live')renderLive();
+  else if(currentView==='requests')renderRequests();
+  else renderHistory();
+}
+
+function getDriverStatus(driverId){
+  const driverRecs=attendanceRecords.filter(r=>r.driver_id===driverId).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  if(!driverRecs.length)return{status:'offline',record:null};
+  const latest=driverRecs[0];
+  return{status:latest.status,record:latest};
+}
+
+function calcWorkMins(driverId){
+  const recs=attendanceRecords.filter(r=>r.driver_id===driverId&&r.status==='online'&&r.approved_at);
+  let mins=0;
+  for(const r of recs){
+    const end=r.ended_at?new Date(r.ended_at):new Date();
+    mins+=Math.floor((end-new Date(r.approved_at))/60000);
+  }
+  return mins;
+}
+
+function fmTime(mins){if(mins<60)return `${mins}د`;return `${Math.floor(mins/60)}س ${mins%60}د`;}
+
+function renderLive(){
+  const el=document.getElementById('liveView');
+  if(!allDrivers.length){el.innerHTML='<div class="empty-state">لا يوجد طيارين</div>';return;}
+  const online=allDrivers.filter(d=>getDriverStatus(d.id).status==='online');
+  const onBreak=allDrivers.filter(d=>getDriverStatus(d.id).status==='break');
+  const offline=allDrivers.filter(d=>!['online','break'].includes(getDriverStatus(d.id).status));
+
+  let html=`<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem">
+    <span style="background:var(--green-light);color:#15803d;padding:.3rem .75rem;border-radius:8px;font-size:.75rem;font-weight:700">🟢 حاضر: ${online.length}</span>
+    <span style="background:var(--yellow-light);color:#92400e;padding:.3rem .75rem;border-radius:8px;font-size:.75rem;font-weight:700">☕ استراحة: ${onBreak.length}</span>
+    <span style="background:var(--gray-light);color:#6b7280;padding:.3rem .75rem;border-radius:8px;font-size:.75rem;font-weight:700">⚫ غائب: ${offline.length}</span>
+  </div>`;
+
+  html+='<div class="live-grid">';
+  html+=allDrivers.map((d,i)=>{
+    const {status}=getDriverStatus(d.id);
+    const workMins=calcWorkMins(d.id);
+    const color=COLORS[i%COLORS.length];
+    const ini=(d.full_name||'?').split(' ').slice(0,2).map(w=>w[0]).join('');
+    const statusClass=status==='online'?'ls-online':status==='break'?'ls-break':'ls-offline';
+    const statusLabel=status==='online'?'🟢 حاضر':status==='break'?'☕ استراحة':status.endsWith('_request')?'⏳ طلب':'⚫ غائب';
+    const cardClass=status==='online'?'online':status==='break'?'break':'offline';
+    return `<div class="live-card ${cardClass}">
+      <div class="live-avatar" style="background:${color}">${ini}</div>
+      <div class="live-name">${d.full_name}</div>
+      <span class="live-status ${statusClass}">${statusLabel}</span>
+      ${workMins>0?`<div class="live-hours">عمل اليوم: ${fmTime(workMins)}</div>`:''}
+      <div class="live-hours">${d.branches?.name||'—'}</div>
+    </div>`;
+  }).join('');
+  html+='</div>';
+  el.innerHTML=html;
+}
+
+function renderRequests(){
+  const el=document.getElementById('requestsView');
+  const pending=attendanceRecords.filter(r=>r.status.endsWith('_request'));
+  if(!pending.length){el.innerHTML='<div class="empty-state">✅ لا توجد طلبات معلقة</div>';return;}
+
+  const typeLabels={'online_request':'طلب حضور','offline_request':'طلب انصراف','break_request':'طلب استراحة'};
+  const typeLblClass={'online_request':'type-lbl-online','offline_request':'type-lbl-offline','break_request':'type-lbl-break'};
+  const cardClass={'online_request':'type-online','offline_request':'type-offline','break_request':'type-break'};
+
+  el.innerHTML='<div class="req-grid">'+pending.map(r=>{
+    const driver=allDrivers.find(d=>d.id===r.driver_id);
+    const time=new Date(r.requested_at).toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'});
+    return `<div class="req-card ${cardClass[r.status]||''}">
+      <div class="req-head">
+        <div>
+          <div class="req-name">${driver?.full_name||'—'}</div>
+          <div class="req-branch">${driver?.branches?.name||'—'}</div>
+        </div>
+        <span class="req-type ${typeLblClass[r.status]||''}">${typeLabels[r.status]||r.status}</span>
+      </div>
+      <div class="req-time">⏰ ${time}</div>
+      <div class="req-actions">
+        <button class="btn-approve" onclick="approveRequest('${r.id}','${r.status}','${r.driver_id}')">✓ موافقة</button>
+        <button class="btn-reject" onclick="rejectRequest('${r.id}')">✕ رفض</button>
+      </div>
+    </div>`;
+  }).join('')+'</div>';
+}
+
+async function approveRequest(id,status,driverId){
+  showLoading(true);
+  const now=new Date().toISOString();
+  const today=new Date().toISOString().split('T')[0];
+  const targetStatus=status.replace('_request','');
+
+  await db.from('driver_attendance').update({
+    status:targetStatus,approved_at:now,
+    approved_by:getCurrentUser()?.id
+  }).eq('id',id);
+
+  // لو انصراف → ختم الـ online السابق
+  if(targetStatus==='offline'){
+    const prevOnline=attendanceRecords.find(r=>r.driver_id===driverId&&r.status==='online'&&!r.ended_at);
+    if(prevOnline)await db.from('driver_attendance').update({ended_at:now}).eq('id',prevOnline.id);
+  }
+
+  // لو استراحة → ختم الـ online السابق
+  if(targetStatus==='break'){
+    const prevOnline=attendanceRecords.find(r=>r.driver_id===driverId&&r.status==='online'&&!r.ended_at);
+    if(prevOnline)await db.from('driver_attendance').update({ended_at:now}).eq('id',prevOnline.id);
+  }
+
+  showToast('✓ تمت الموافقة');
+  await loadAll();
+  showLoading(false);
+}
+
+async function rejectRequest(id){
+  showLoading(true);
+  await db.from('driver_attendance').update({status:'offline',ended_at:new Date().toISOString()}).eq('id',id);
+  showToast('تم الرفض');
+  await loadAll();
+  showLoading(false);
+}
+
+function renderHistory(){
+  const el=document.getElementById('historyView');
+  if(!attendanceRecords.length){el.innerHTML='<div class="empty-state">لا يوجد سجل اليوم</div>';return;}
+
+  const statusLabels={online:'حضور',offline:'انصراف',break:'استراحة',break_ended:'إنهاء استراحة',online_request:'طلب حضور',offline_request:'طلب انصراف',break_request:'طلب استراحة'};
+  const statusColors={online:'#15803d',offline:'#b91c1c',break:'#92400e',break_ended:'#0e7490',online_request:'#ca8a04',offline_request:'#dc2626',break_request:'#ca8a04'};
+
+  el.innerHTML=`<div style="display:flex;flex-direction:column;gap:.4rem">
+  ${attendanceRecords.map(r=>{
+    const driver=allDrivers.find(d=>d.id===r.driver_id);
+    const time=new Date(r.created_at).toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'});
+    const color=statusColors[r.status]||'#6b7280';
+    return `<div style="background:white;border-radius:8px;border:1px solid var(--border);padding:.625rem .875rem;display:flex;align-items:center;justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:.625rem">
+        <div style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></div>
+        <div>
+          <div style="font-size:.8rem;font-weight:700">${driver?.full_name||'—'}</div>
+          <div style="font-size:.68rem;color:var(--text-muted)">${statusLabels[r.status]||r.status}</div>
+        </div>
+      </div>
+      <div style="font-size:.72rem;color:var(--text-muted)">${time}</div>
+    </div>`;
+  }).join('')}
+  </div>`;
+}
+
+function showLoading(s){document.getElementById('lo').classList.toggle('show',s);}
+function showToast(msg){
+  let t=document.getElementById('toast');
+  if(!t){t=document.createElement('div');t.id='toast';t.style.cssText='position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);background:#1e293b;color:white;padding:.6rem 1.25rem;border-radius:10px;font-size:.8rem;font-weight:600;z-index:400;display:none;box-shadow:0 8px 30px rgba(0,0,0,.2)';document.body.appendChild(t);}
+  t.textContent=msg;t.style.display='block';
+  setTimeout(()=>t.style.display='none',2500);
+}
+
+init();
+</script>
+</body>
+</html>
