@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>غرفة العمليات</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="../delivery-style.css">
+<style>
+body{padding:0;overflow-y:auto;height:100vh;background:#0f172a;color:#e2e8f0;font-family:'Cairo',sans-serif}
+.ops-header{background:#1e293b;border-bottom:1px solid #334155;padding:.75rem 1.25rem;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
+.ops-title{font-size:.9rem;font-weight:800;color:white;display:flex;align-items:center;gap:.5rem}
+.ops-subtitle{font-size:.65rem;color:#64748b;margin-top:.1rem}
+.live-dot{width:8px;height:8px;border-radius:50%;background:#4ade80;animation:pulse 2s infinite;flex-shrink:0}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.ops-meta{display:flex;align-items:center;gap:.75rem}
+.ops-time{font-size:.72rem;color:#64748b;font-variant-numeric:tabular-nums}
+.refresh-btn{background:rgba(255,255,255,.08);border:1px solid #334155;color:#94a3b8;padding:.3rem .75rem;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.72rem;cursor:pointer;display:flex;align-items:center;gap:.3rem}
+.refresh-btn:hover{background:rgba(255,255,255,.12);color:white}
+
+/* ALERT COUNTS */
+.alert-bar{display:flex;gap:.5rem;padding:.625rem 1.25rem;background:#1a2535;border-bottom:1px solid #334155;flex-wrap:wrap}
+.alert-pill{display:flex;align-items:center;gap:.35rem;padding:.25rem .75rem;border-radius:20px;font-size:.72rem;font-weight:700;cursor:pointer;border:1.5px solid transparent;transition:all .15s}
+.ap-red{background:rgba(220,38,38,.15);color:#f87171;border-color:rgba(220,38,38,.3)}
+.ap-yellow{background:rgba(202,138,4,.15);color:#fbbf24;border-color:rgba(202,138,4,.3)}
+.ap-orange{background:rgba(234,88,12,.15);color:#fb923c;border-color:rgba(234,88,12,.3)}
+.ap-blue{background:rgba(8,145,178,.15);color:#67e8f9;border-color:rgba(8,145,178,.3)}
+.ap-purple{background:rgba(124,58,237,.15);color:#c4b5fd;border-color:rgba(124,58,237,.3)}
+.alert-pill.active{opacity:1;transform:scale(1.02)}
+.alert-pill:not(.active){opacity:.65}
+
+/* MAIN GRID */
+.ops-grid{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;padding:.875rem 1.25rem}
+@media(max-width:900px){.ops-grid{grid-template-columns:1fr}}
+
+/* SECTION */
+.ops-section{background:#1e293b;border-radius:12px;border:1px solid #334155;overflow:hidden}
+.ops-section.full-width{grid-column:1/-1}
+.sec-head{padding:.625rem 1rem;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #334155}
+.sec-title{font-size:.78rem;font-weight:700;display:flex;align-items:center;gap:.4rem}
+.sec-count{font-size:.65rem;font-weight:700;padding:.15rem .5rem;border-radius:10px;min-width:22px;text-align:center}
+.sec-body{max-height:280px;overflow-y:auto}
+.sec-body::-webkit-scrollbar{width:4px}
+.sec-body::-webkit-scrollbar-thumb{background:#334155;border-radius:4px}
+
+/* ALERT ITEM */
+.alert-item{padding:.625rem 1rem;border-bottom:1px solid #1e293b;display:flex;align-items:flex-start;gap:.625rem;transition:background .1s}
+.alert-item:last-child{border-bottom:none}
+.alert-item:hover{background:rgba(255,255,255,.03)}
+.ai-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:.9rem;flex-shrink:0}
+.ai-content{flex:1;min-width:0}
+.ai-title{font-size:.78rem;font-weight:700;color:#e2e8f0;margin-bottom:.1rem}
+.ai-sub{font-size:.65rem;color:#64748b;line-height:1.4}
+.ai-time{font-size:.6rem;font-weight:700;padding:.1rem .35rem;border-radius:5px;flex-shrink:0;white-space:nowrap}
+.t-red{background:rgba(220,38,38,.2);color:#f87171}
+.t-yellow{background:rgba(202,138,4,.2);color:#fbbf24}
+.t-orange{background:rgba(234,88,12,.2);color:#fb923c}
+.t-green{background:rgba(22,163,74,.2);color:#4ade80}
+.t-blue{background:rgba(8,145,178,.2);color:#67e8f9}
+.ai-actions{display:flex;gap:.3rem;margin-top:.35rem;flex-wrap:wrap}
+.ai-btn{padding:.18rem .55rem;border-radius:6px;font-size:.62rem;font-weight:700;cursor:pointer;border:none;font-family:'Cairo',sans-serif;transition:all .12s}
+.btn-approve{background:#16a34a;color:white}
+.btn-view{background:rgba(26,86,219,.3);color:#93c5fd;border:1px solid rgba(26,86,219,.3)}
+.btn-add{background:rgba(124,58,237,.3);color:#c4b5fd;border:1px solid rgba(124,58,237,.3)}
+.btn-dismiss{background:rgba(255,255,255,.06);color:#64748b;border:1px solid #334155}
+
+/* EMPTY */
+.ops-empty{text-align:center;padding:2rem 1rem;color:#334155}
+.ops-empty-icon{font-size:2rem;margin-bottom:.5rem}
+.ops-empty p{font-size:.75rem;color:#475569}
+
+/* UNREGISTERED REGIONS */
+.region-item{padding:.5rem 1rem;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #1e293b}
+.region-item:last-child{border-bottom:none}
+.region-name{font-size:.78rem;font-weight:700;color:#fb923c}
+.region-count{font-size:.65rem;color:#64748b}
+
+/* STATS ROW */
+.stats-row{display:flex;gap:0;border-bottom:1px solid #334155}
+.ops-stat{flex:1;padding:.625rem .75rem;text-align:center;border-left:1px solid #334155}
+.ops-stat:last-child{border-left:none}
+.os-val{font-size:1.4rem;font-weight:800}
+.os-lbl{font-size:.58rem;color:#64748b;margin-top:.05rem}
+
+.loading-overlay{position:fixed;inset:0;background:rgba(15,23,42,.7);z-index:300;display:none;align-items:center;justify-content:center}
+.loading-overlay.show{display:flex}
+.spinner{width:32px;height:32px;border:3px solid rgba(255,255,255,.1);border-top-color:#60a5fa;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<div class="ops-header">
+  <div>
+    <div class="ops-title"><div class="live-dot"></div>🎯 غرفة العمليات</div>
+    <div class="ops-subtitle" id="opsSubtitle">جاري التحميل...</div>
+  </div>
+  <div class="ops-meta">
+    <span class="ops-time" id="opsTime"></span>
+    <button class="refresh-btn" onclick="loadAll()">↻ تحديث</button>
+  </div>
+</div>
+
+<!-- ALERT BAR -->
+<div class="alert-bar" id="alertBar"></div>
+
+<!-- STATS -->
+<div class="ops-section full-width" style="margin:.75rem 1.25rem 0;border-radius:12px">
+  <div class="stats-row" id="statsRow"></div>
+</div>
+
+<div class="ops-grid">
+
+  <!-- طلبات متأخرة -->
+  <div class="ops-section" id="sec-late-orders">
+    <div class="sec-head">
+      <span class="sec-title">🔴 طلبات متأخرة</span>
+      <span class="sec-count t-red" id="cnt-late">0</span>
+    </div>
+    <div class="sec-body" id="body-late-orders"></div>
+  </div>
+
+  <!-- طيارين تنبيهات -->
+  <div class="ops-section" id="sec-drivers">
+    <div class="sec-head">
+      <span class="sec-title">🚗 تنبيهات الطيارين</span>
+      <span class="sec-count t-orange" id="cnt-drivers">0</span>
+    </div>
+    <div class="sec-body" id="body-drivers"></div>
+  </div>
+
+  <!-- طلبات الحضور -->
+  <div class="ops-section" id="sec-attendance">
+    <div class="sec-head">
+      <span class="sec-title">⏳ طلبات الحضور والانصراف</span>
+      <span class="sec-count t-yellow" id="cnt-att">0</span>
+    </div>
+    <div class="sec-body" id="body-attendance"></div>
+  </div>
+
+  <!-- مناطق غير مسجلة -->
+  <div class="ops-section" id="sec-regions">
+    <div class="sec-head">
+      <span class="sec-title">⚠️ مناطق غير مسجلة</span>
+      <span class="sec-count t-orange" id="cnt-regions">0</span>
+    </div>
+    <div class="sec-body" id="body-regions"></div>
+  </div>
+
+  <!-- إلغاءات العملاء -->
+  <div class="ops-section" id="sec-cancels">
+    <div class="sec-head">
+      <span class="sec-title">❌ إلغاءات العملاء</span>
+      <span class="sec-count t-red" id="cnt-cancels">0</span>
+    </div>
+    <div class="sec-body" id="body-cancels"></div>
+  </div>
+
+  <!-- طيارين تعذر كثير -->
+  <div class="ops-section" id="sec-fail-drivers">
+    <div class="sec-head">
+      <span class="sec-title">📵 طيارين تعذر التوصيل</span>
+      <span class="sec-count t-yellow" id="cnt-fail">0</span>
+    </div>
+    <div class="sec-body" id="body-fail-drivers"></div>
+  </div>
+
+</div>
+
+<div class="loading-overlay" id="lo"><div class="spinner"></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../supabase-config.js"></script>
+<script src="../permissions.js"></script>
+<script>
+const COLORS=['#1a56db','#7c3aed','#16a34a','#ea580c','#0891b2','#ca8a04'];
+let allOrders=[], allDrivers=[], settings=null, attendanceToday=[], allTrips=[], knownRegions=new Set();
+let currentUser=null;
+
+async function init(){
+  currentUser=getCurrentUser();if(!currentUser)return;
+  await loadAll();
+  setInterval(loadAll,60000);
+  setInterval(()=>{
+    document.getElementById('opsTime').textContent=new Date().toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  },1000);
+}
+
+async function loadAll(){
+  showLoad(true);
+  try{
+    const today=new Date().toISOString().split('T')[0];
+    const branchId=currentUser?.branch_id;
+
+    const [oR,dR,tR,aR,regR,dsR]=await Promise.all([
+      db.from('orders').select('*').order('created_at',{ascending:false}).limit(500),
+      db.from('drivers').select('*,branches(name)').eq('is_active',true),
+      db.from('trips').select('*').eq('status','active'),
+      db.from('driver_attendance').select('*').eq('date',today).order('created_at',{ascending:false}),
+      db.from('regions').select('name').eq('is_active',true),
+      branchId?db.from('dispatch_settings').select('*').eq('branch_id',branchId):Promise.resolve({data:[]}),
+    ]);
+
+    allOrders=oR.data||[];
+    allDrivers=dR.data||[];
+    allTrips=tR.data||[];
+    attendanceToday=aR.data||[];
+    knownRegions=new Set((regR.data||[]).map(r=>r.name));
+    settings=dsR.data?.[0]||null;
+
+    document.getElementById('opsSubtitle').textContent=
+      new Date().toLocaleDateString('ar-EG',{weekday:'long',day:'numeric',month:'long'})+
+      ' · آخر تحديث: '+new Date().toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'});
+
+    renderStats();
+    renderLateOrders();
+    renderDriverAlerts();
+    renderAttendance();
+    renderUnregisteredRegions();
+    renderCancellations();
+    renderFailDrivers();
+    renderAlertBar();
+  }catch(e){console.error(e);}
+  showLoad(false);
+}
+
+function fm(mins){if(mins<0)mins=0;return mins<60?`${mins}د`:`${Math.floor(mins/60)}س${mins%60?mins%60+'د':''}`;}
+function dm(from,to=new Date()){if(!from)return 0;return Math.floor((new Date(to)-new Date(from))/60000);}
+function fdt(dt){if(!dt)return '—';return new Date(dt).toLocaleString('ar-EG',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}
+
+function getDriverAttStatus(driverId){
+  const recs=attendanceToday.filter(r=>r.driver_id===driverId).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  return recs[0]?.status||'offline';
+}
+function getDriverWorkMins(driverId){
+  const recs=attendanceToday.filter(r=>r.driver_id===driverId&&r.status==='online'&&r.approved_at);
+  let mins=0;
+  for(const r of recs){const end=r.ended_at?new Date(r.ended_at):new Date();mins+=Math.floor((end-new Date(r.approved_at))/60000);}
+  return mins;
+}
+function getBreakMins(driverId){
+  const recs=attendanceToday.filter(r=>r.driver_id===driverId&&r.status==='break'&&r.approved_at);
+  let mins=0;
+  for(const r of recs){const end=r.ended_at?new Date(r.ended_at):new Date();mins+=Math.floor((end-new Date(r.approved_at))/60000);}
+  return mins;
+}
+
+function renderStats(){
+  const today=new Date();today.setHours(0,0,0,0);
+  const pending=allOrders.filter(o=>o.status==='pending'&&!o.driver_id).length;
+  const inTrip=allOrders.filter(o=>['assigned','picked'].includes(o.status)).length;
+  const delivered=allOrders.filter(o=>['delivered','completed'].includes(o.status)&&new Date(o.delivered_at||o.created_at)>=today).length;
+  const cancelled=allOrders.filter(o=>o.status==='cancelled'&&new Date(o.updated_at||o.created_at)>=today).length;
+  const onlineDrivers=allDrivers.filter(d=>getDriverAttStatus(d.id)==='online').length;
+
+  document.getElementById('statsRow').innerHTML=`
+    <div class="ops-stat"><div class="os-val" style="color:#fbbf24">${pending}</div><div class="os-lbl">ينتظر توزيع</div></div>
+    <div class="ops-stat"><div class="os-val" style="color:#60a5fa">${inTrip}</div><div class="os-lbl">في الطريق</div></div>
+    <div class="ops-stat"><div class="os-val" style="color:#4ade80">${delivered}</div><div class="os-lbl">وصّل اليوم</div></div>
+    <div class="ops-stat"><div class="os-val" style="color:#f87171">${cancelled}</div><div class="os-lbl">ملغي اليوم</div></div>
+    <div class="ops-stat"><div class="os-val" style="color:#4ade80">${onlineDrivers}</div><div class="os-lbl">طيار حاضر</div></div>
+    <div class="ops-stat"><div class="os-val" style="color:#a78bfa">${allTrips.length}</div><div class="os-lbl">رحلة جارية</div></div>`;
+}
+
+function renderLateOrders(){
+  const maxAssigned=settings?.max_assigned_minutes||10;
+  const maxPicked=settings?.max_picked_minutes||30;
+  const maxPending=settings?.max_pending_minutes||10;
+  const late=[];
+
+  allOrders.forEach(o=>{
+    if(o.status==='pending'&&!o.driver_id){
+      const mins=dm(o.bill_date?new Date(new Date(o.bill_date).getTime()-7200000):o.created_at);
+      if(mins>maxPending) late.push({order:o,mins,type:'pending',label:'ينتظر توزيع'});
+    }
+    if(o.status==='assigned'){
+      const mins=dm(o.assigned_at||o.created_at);
+      if(mins>maxAssigned) late.push({order:o,mins,type:'assigned',label:'ما استلمش'});
+    }
+    if(o.status==='picked'){
+      const mins=dm(o.picked_at||o.created_at);
+      if(mins>maxPicked) late.push({order:o,mins,type:'picked',label:'مع الطيار'});
+    }
+  });
+
+  late.sort((a,b)=>b.mins-a.mins);
+  document.getElementById('cnt-late').textContent=late.length;
+
+  if(!late.length){
+    document.getElementById('body-late-orders').innerHTML=emptyState('✅','كل الطلبات في الوقت المناسب');
+    return;
+  }
+
+  document.getElementById('body-late-orders').innerHTML=late.slice(0,20).map(({order:o,mins,type,label})=>{
+    const color=mins>maxPicked*2?'#f87171':mins>maxPicked?'#fb923c':'#fbbf24';
+    return `<div class="alert-item">
+      <div class="ai-icon" style="background:rgba(220,38,38,.15)">📦</div>
+      <div class="ai-content">
+        <div class="ai-title">${o.customer_name||o.cust_name||'—'} · #${o.bill_no||o.id?.slice(0,8)}</div>
+        <div class="ai-sub">📍 ${o.cust_region||'—'} · ${label} · ${o.deliveryman||'بدون طيار'}</div>
+      </div>
+      <div>
+        <div class="ai-time" style="background:rgba(220,38,38,.2);color:${color}">${fm(mins)}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderDriverAlerts(){
+  const maxBreak=settings?.max_break_minutes||15;
+  const maxOnline=settings?.max_online_hours||10;
+  const maxReturn=settings?.max_return_minutes||30;
+  const maxTrip=settings?.max_trip_duration_minutes||180;
+  const alerts=[];
+
+  allDrivers.forEach(d=>{
+    const attStatus=getDriverAttStatus(d.id);
+    const workMins=getDriverWorkMins(d.id);
+    const breakMins=getBreakMins(d.id);
+
+    // استراحة طويلة
+    const activeBreak=attendanceToday.find(r=>r.driver_id===d.id&&r.status==='break'&&r.approved_at&&!r.ended_at);
+    if(activeBreak){
+      const bMins=dm(activeBreak.approved_at);
+      if(bMins>maxBreak) alerts.push({driver:d,mins:bMins,type:'long_break',label:`استراحة طويلة (${fm(bMins)})`,color:'#fbbf24',icon:'☕'});
+    }
+
+    // ساعات عمل تجاوزت الحد
+    if(workMins>maxOnline*60) alerts.push({driver:d,mins:workMins,type:'long_online',label:`تجاوز ساعات العمل (${fm(workMins)})`,color:'#f87171',icon:'⏰'});
+
+    // طيار سلّم كل طلباته وبيتأخر
+    const driverOrders=allOrders.filter(o=>o.driver_id===d.id&&['assigned','picked'].includes(o.status));
+    const deliveredToday=allOrders.filter(o=>o.driver_id===d.id&&o.status==='delivered');
+    if(driverOrders.length===0&&deliveredToday.length>0&&attStatus==='online'){
+      const lastDelivered=deliveredToday.sort((a,b)=>new Date(b.delivered_at)-new Date(a.delivered_at))[0];
+      if(lastDelivered?.delivered_at){
+        const returnMins=dm(lastDelivered.delivered_at);
+        if(returnMins>maxReturn) alerts.push({driver:d,mins:returnMins,type:'late_return',label:`تأخر في الرجوع (${fm(returnMins)})`,color:'#fb923c',icon:'🔙'});
+      }
+    }
+  });
+
+  // رحلة طويلة
+  allTrips.forEach(t=>{
+    const tripMins=dm(t.created_at);
+    if(tripMins>maxTrip){
+      const driver=allDrivers.find(d=>d.id===t.driver_id);
+      if(driver) alerts.push({driver,mins:tripMins,type:'long_trip',label:`رحلة طويلة (${fm(tripMins)})`,color:'#f87171',icon:'🗺️',trip:t});
+    }
+  });
+
+  alerts.sort((a,b)=>b.mins-a.mins);
+  document.getElementById('cnt-drivers').textContent=alerts.length;
+
+  if(!alerts.length){
+    document.getElementById('body-drivers').innerHTML=emptyState('✅','كل الطيارين في الوضع الطبيعي');
+    return;
+  }
+
+  document.getElementById('body-drivers').innerHTML=alerts.map(({driver:d,mins,label,color,icon})=>{
+    const ini=(d.full_name||'?').split(' ').slice(0,2).map(w=>w[0]).join('');
+    const i=allDrivers.indexOf(d);
+    const c=COLORS[i%COLORS.length];
+    return `<div class="alert-item">
+      <div class="ai-icon" style="background:${c}33;font-weight:800;font-size:.75rem;color:${c}">${ini}</div>
+      <div class="ai-content">
+        <div class="ai-title">${d.full_name}</div>
+        <div class="ai-sub">${icon} ${label}</div>
+      </div>
+      <div class="ai-time" style="background:rgba(234,88,12,.2);color:${color}">${fm(mins)}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderAttendance(){
+  const pending=attendanceToday.filter(r=>r.status.endsWith('_request'));
+  document.getElementById('cnt-att').textContent=pending.length;
+
+  if(!pending.length){
+    document.getElementById('body-attendance').innerHTML=emptyState('✅','لا توجد طلبات معلقة');
+    return;
+  }
+
+  const typeLabels={'online_request':'طلب حضور','offline_request':'طلب انصراف','break_request':'طلب استراحة'};
+  const typeColors={'online_request':'#4ade80','offline_request':'#f87171','break_request':'#fbbf24'};
+  const typeIcons={'online_request':'🟢','offline_request':'🔴','break_request':'☕'};
+
+  document.getElementById('body-attendance').innerHTML=pending.map(r=>{
+    const driver=allDrivers.find(d=>d.id===r.driver_id)||{full_name:'—'};
+    const color=typeColors[r.status]||'#94a3b8';
+    const time=fdt(r.requested_at||r.created_at);
+    return `<div class="alert-item">
+      <div class="ai-icon" style="background:${color}22;font-size:1rem">${typeIcons[r.status]||'⏳'}</div>
+      <div class="ai-content">
+        <div class="ai-title">${driver.full_name}</div>
+        <div class="ai-sub">${typeLabels[r.status]||r.status} · ${time}</div>
+        <div class="ai-actions">
+          <button class="ai-btn btn-approve" onclick="approveAtt('${r.id}','${r.status}','${r.driver_id}')">✓ موافقة</button>
+          <button class="ai-btn btn-dismiss" onclick="rejectAtt('${r.id}','${r.driver_id}')">✕ رفض</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderUnregisteredRegions(){
+  const unregistered={};
+  allOrders.filter(o=>o.status==='pending'&&!o.driver_id&&o.cust_region&&!knownRegions.has(o.cust_region))
+    .forEach(o=>{
+      unregistered[o.cust_region]=(unregistered[o.cust_region]||0)+1;
+    });
+
+  const entries=Object.entries(unregistered).sort((a,b)=>b[1]-a[1]);
+  document.getElementById('cnt-regions').textContent=entries.length;
+
+  if(!entries.length){
+    document.getElementById('body-regions').innerHTML=emptyState('✅','كل المناطق مسجلة');
+    return;
+  }
+
+  document.getElementById('body-regions').innerHTML=entries.map(([name,count])=>`
+    <div class="region-item">
+      <div>
+        <div class="region-name">⚠️ ${name}</div>
+        <div class="region-count">${count} طلب ينتظر</div>
+      </div>
+      <button class="ai-btn btn-add" onclick="openAddRegion('${name}')">+ إضافة</button>
+    </div>`).join('');
+}
+
+function renderCancellations(){
+  const today=new Date();today.setHours(0,0,0,0);
+  const cancelled=allOrders.filter(o=>o.status==='cancelled'&&new Date(o.updated_at||o.created_at)>=today);
+
+  // تجميع حسب العميل
+  const byCustomer={};
+  cancelled.forEach(o=>{
+    const name=o.customer_name||o.cust_name||'—';
+    if(!byCustomer[name]) byCustomer[name]={count:0,orders:[],lastReason:''};
+    byCustomer[name].count++;
+    byCustomer[name].orders.push(o);
+    byCustomer[name].lastReason=o.cancelled_reason||o.postpone_reason||'—';
+  });
+
+  const entries=Object.entries(byCustomer).sort((a,b)=>b[1].count-a[1].count);
+  document.getElementById('cnt-cancels').textContent=cancelled.length;
+
+  if(!entries.length){
+    document.getElementById('body-cancels').innerHTML=emptyState('✅','لا توجد إلغاءات اليوم');
+    return;
+  }
+
+  const maxCancels=settings?.max_customer_cancellations||3;
+  document.getElementById('body-cancels').innerHTML=entries.map(([name,data])=>`
+    <div class="alert-item">
+      <div class="ai-icon" style="background:rgba(220,38,38,.15)">❌</div>
+      <div class="ai-content">
+        <div class="ai-title">${name} ${data.count>=maxCancels?'🚨':''}</div>
+        <div class="ai-sub">إلغاء ${data.count} مرة · ${data.lastReason}</div>
+      </div>
+      <div class="ai-time t-red">${data.count}×</div>
+    </div>`).join('');
+}
+
+function renderFailDrivers(){
+  const today=new Date();today.setHours(0,0,0,0);
+  const maxFailRate=settings?.max_driver_fail_rate||20;
+  const driverStats={};
+
+  allOrders.filter(o=>new Date(o.updated_at||o.created_at)>=today).forEach(o=>{
+    if(o.deliveryman||o.driver_id){
+      const key=o.driver_id||o.deliveryman;
+      if(!driverStats[key]) driverStats[key]={name:o.deliveryman||'—',total:0,failed:0,driver_id:o.driver_id};
+      driverStats[key].total++;
+      if(o.status==='postponed'&&o.postpone_reason) driverStats[key].failed++;
+    }
+  });
+
+  const alerts=Object.values(driverStats)
+    .filter(d=>d.total>0&&(d.failed/d.total*100)>=maxFailRate&&d.failed>=2)
+    .sort((a,b)=>b.failed-a.failed);
+
+  document.getElementById('cnt-fail').textContent=alerts.length;
+
+  if(!alerts.length){
+    document.getElementById('body-fail-drivers').innerHTML=emptyState('✅','لا توجد معدلات تعذر مرتفعة');
+    return;
+  }
+
+  document.getElementById('body-fail-drivers').innerHTML=alerts.map(d=>{
+    const rate=Math.round(d.failed/d.total*100);
+    const color=rate>=50?'#f87171':rate>=30?'#fb923c':'#fbbf24';
+    return `<div class="alert-item">
+      <div class="ai-icon" style="background:rgba(220,38,38,.15)">📵</div>
+      <div class="ai-content">
+        <div class="ai-title">${d.name}</div>
+        <div class="ai-sub">تعذر ${d.failed} من ${d.total} طلب (${rate}%)</div>
+      </div>
+      <div class="ai-time" style="background:rgba(220,38,38,.2);color:${color}">${rate}%</div>
+    </div>`;
+  }).join('');
+}
+
+function renderAlertBar(){
+  const late=parseInt(document.getElementById('cnt-late').textContent)||0;
+  const drivers=parseInt(document.getElementById('cnt-drivers').textContent)||0;
+  const att=parseInt(document.getElementById('cnt-att').textContent)||0;
+  const regions=parseInt(document.getElementById('cnt-regions').textContent)||0;
+  const cancels=parseInt(document.getElementById('cnt-cancels').textContent)||0;
+  const fail=parseInt(document.getElementById('cnt-fail').textContent)||0;
+  const total=late+drivers+att+regions+cancels+fail;
+
+  document.getElementById('alertBar').innerHTML=`
+    <span style="font-size:.7rem;color:#64748b;font-weight:700;white-space:nowrap">إجمالي التنبيهات: <span style="color:${total>0?'#f87171':'#4ade80'}">${total}</span></span>
+    ${late>0?`<span class="alert-pill ap-red active">🔴 ${late} طلب متأخر</span>`:''}
+    ${drivers>0?`<span class="alert-pill ap-orange active">🚗 ${drivers} تنبيه طيار</span>`:''}
+    ${att>0?`<span class="alert-pill ap-yellow active">⏳ ${att} طلب حضور</span>`:''}
+    ${regions>0?`<span class="alert-pill ap-orange active">⚠️ ${regions} منطقة غير مسجلة</span>`:''}
+    ${cancels>0?`<span class="alert-pill ap-red active">❌ ${cancels} إلغاء</span>`:''}
+    ${fail>0?`<span class="alert-pill ap-yellow active">📵 ${fail} طيار تعذر</span>`:''}
+    ${total===0?`<span style="font-size:.72rem;color:#4ade80;font-weight:700">✅ كل شيء على ما يرام</span>`:''}`;
+}
+
+// ===== ACTIONS =====
+async function approveAtt(id,status,driverId){
+  showLoad(true);
+  const now=new Date().toISOString();
+  const targetStatus=status.replace('_request','');
+  await db.from('driver_attendance').update({status:targetStatus,approved_at:now}).eq('id',id);
+  if(targetStatus==='offline'||targetStatus==='break'){
+    const prevOnline=attendanceToday.find(r=>r.driver_id===driverId&&r.status==='online'&&!r.ended_at);
+    if(prevOnline) await db.from('driver_attendance').update({ended_at:now}).eq('id',prevOnline.id);
+  }
+  showToast('✓ تمت الموافقة');
+  await loadAll();
+  showLoad(false);
+}
+
+async function rejectAtt(id,driverId){
+  showLoad(true);
+  await db.from('driver_attendance').delete().eq('id',id);
+  showToast('تم الرفض');
+  await loadAll();
+  showLoad(false);
+}
+
+async function openAddRegion(name){
+  const confirmed=confirm(`إضافة منطقة "${name}"؟`);
+  if(!confirmed)return;
+  showLoad(true);
+  try{
+    await db.from('regions').insert({name,is_active:true});
+    showToast(`✓ تم إضافة منطقة "${name}"`);
+    await loadAll();
+  }catch(e){alert('خطأ: '+e.message);}
+  showLoad(false);
+}
+
+function emptyState(icon,msg){
+  return `<div class="ops-empty"><div class="ops-empty-icon">${icon}</div><p>${msg}</p></div>`;
+}
+
+function showLoad(s){document.getElementById('lo').classList.toggle('show',s);}
+function showToast(msg){
+  let t=document.getElementById('_toast');
+  if(!t){t=document.createElement('div');t.id='_toast';t.style.cssText='position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);background:#1e293b;color:white;padding:.6rem 1.25rem;border-radius:10px;font-size:.8rem;font-weight:600;z-index:400;display:none;border:1px solid #334155';document.body.appendChild(t);}
+  t.textContent=msg;t.style.display='block';
+  setTimeout(()=>t.style.display='none',2500);
+}
+
+init();
+</script>
+</body>
+</html>
