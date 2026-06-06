@@ -337,81 +337,81 @@
       renderTable(filtered);
     }
 
-    function renderMachineSummary(items) {
-      const wrap     = document.getElementById('machine-summary-wrap');
-      const bulkWrap = document.getElementById('bulk-post-wrap');
-      if (currentTab !== 'pending') { wrap.innerHTML = ''; bulkWrap.innerHTML = ''; return; }
-      const machines = branchMachines();
-      if (!machines.length) { wrap.innerHTML = ''; bulkWrap.innerHTML = ''; return; }
+function renderMachineSummary(items) {
+  const wrap     = document.getElementById('machine-summary-wrap');
+  const bulkWrap = document.getElementById('bulk-post-wrap');
+  if (currentTab !== 'pending') { wrap.innerHTML = ''; bulkWrap.innerHTML = ''; return; }
+  const machines = branchMachines();
+  if (!machines.length) { wrap.innerHTML = ''; bulkWrap.innerHTML = ''; return; }
 
-      const totals = {};
-      machines.forEach(m => { totals[m] = { sum:0, bill:0, count:0 }; });
-      items.forEach(item => {
-        const m = String(item.machine_name || '').trim();
-        if (totals[m] !== undefined) {
-          totals[m].sum  += parseFloat(item.total_bill_net) || 0;
-          totals[m].bill += parseFloat(item.total_bill)     || 0;
-          totals[m].count++;
-        }
-      });
-
-      wrap.innerHTML = machines.map(m => `
-        <div class="machine-card">
-          <div class="mc-name"><i class="fas fa-credit-card" style="margin-left:3px;color:var(--accent);font-size:0.6rem;"></i>${m}</div>
-          <div class="mc-total">${totals[m].sum.toFixed(2)} <span style="font-size:0.58rem;color:var(--text-muted);">صافي</span></div>
-          <div class="mc-bill">${totals[m].bill.toFixed(2)} <span style="font-size:0.58rem;color:var(--text-muted);">إجمالي</span></div>
-          <div class="mc-count">${totals[m].count} معاملة</div>
-        </div>`).join('');
-
-      const canPost = items.filter(i =>
-        i.machine_name && i.machine_name !== 'null' && i.machine_name !== '' &&
-        i.bill_status !== 'مرحَّل' && i.bill_status !== 'posted' && i.bill_status !== 'زيادة'
-      ).length;
-
-      bulkWrap.innerHTML = canPost > 0
-        ? `<button class="btn btn-success" onclick="markAllPosted()" id="bulk-post-btn" style="white-space:nowrap;">
-             <i class="fas fa-check-double"></i> ترحيل الكل (${canPost})
-           </button>`
-        : '';
+  const totals = {};
+  machines.forEach(m => { totals[m] = { sum:0, bill:0, count:0 }; });
+  items.forEach(item => {
+    const m = String(item.machine_name || '').trim();
+    if (totals[m] !== undefined) {
+      totals[m].sum  += parseFloat(item.total_bill_net) || 0;
+      totals[m].bill += parseFloat(item.total_bill)     || 0;
+      totals[m].count++;
     }
+  });
 
-    async function markAllPosted() {
-      const toPost = allData.filter(item => {
-        const isPosted   = (item.bill_status === 'مرحَّل' || item.bill_status === 'posted');
-        const isExtra    = (item.bill_status === 'زيادة');
-        const hasMachine = item.machine_name && item.machine_name !== 'null' && item.machine_name !== '';
-        return !isPosted && !isExtra && hasMachine;
-      });
-      if (!toPost.length) { alert('لا توجد معاملات قابلة للترحيل'); return; }
-      if (!confirm(`ترحيل ${toPost.length} معاملة؟`)) return;
+  wrap.innerHTML = machines.map(m => `
+    <div class="machine-card">
+      <div class="mc-name"><i class="fas fa-credit-card" style="margin-left:3px;color:var(--accent);font-size:0.6rem;"></i>${m}</div>
+      <div class="mc-total">${totals[m].sum.toFixed(2)} <span style="font-size:0.58rem;color:var(--text-muted);">صافي</span></div>
+      <div class="mc-bill">${totals[m].bill.toFixed(2)} <span style="font-size:0.58rem;color:var(--text-muted);">إجمالي</span></div>
+      <div class="mc-count">${totals[m].count} معاملة</div>
+    </div>`).join('');
 
-      const btn = document.getElementById('bulk-post-btn');
-      btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+  const canPost = items.filter(i =>
+    i.machine_name && i.machine_name !== 'null' && i.machine_name !== '' &&
+    i.bill_status !== 'مرحَّل' && i.bill_status !== 'posted' && i.bill_status !== 'زيادة'
+  ).length;
 
-      const now = new Date().toISOString();
-      const ref = String(getNextRef());
+  bulkWrap.innerHTML = canPost > 0
+    ? `<button class="btn btn-success" onclick="markAllPosted()" id="bulk-post-btn" style="white-space:nowrap;">
+         <i class="fas fa-check-double"></i> ترحيل الكل (${canPost})
+       </button>`
+    : '';
+}
 
-      const results = await Promise.all(toPost.map(item => updateData({
-        type:           'visa_update',
-        id:             item.id,
-        bill_status:    'مرحَّل',
-        bill_save_date: now,
-        machine_name:   item.machine_name   ?? null,
-        total_bill_net: item.total_bill_net ?? null,
-        bill_notes:     ref
-      })));
+async function markAllPosted() {
+  const toPost = getFiltered().filter(item => {
+    const isPosted   = (item.bill_status === 'مرحَّل' || item.bill_status === 'posted');
+    const isExtra    = (item.bill_status === 'زيادة');
+    const hasMachine = item.machine_name && item.machine_name !== 'null' && item.machine_name !== '';
+    return !isPosted && !isExtra && hasMachine;
+  });
+  if (!toPost.length) { alert('لا توجد معاملات قابلة للترحيل'); return; }
+  if (!confirm(`ترحيل ${toPost.length} معاملة؟`)) return;
 
-      toPost.forEach((item, i) => {
-        if (results[i]) {
-          const local = allData.find(x => String(x.id) === String(item.id));
-          if (local) { local.bill_status = 'مرحَّل'; local.bill_save_date = now; local.bill_notes = ref; }
-        }
-      });
+  const btn = document.getElementById('bulk-post-btn');
+  btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
-      const ok = results.filter(r => r).length;
-      if (ok < toPost.length) alert(`✅ تم ترحيل ${ok} من ${toPost.length}`);
-      applyFilter();
+  const now = new Date().toISOString();
+  const ref = String(getNextRef());
+
+  const results = await Promise.all(toPost.map(item => updateData({
+    type:           'visa_update',
+    id:             item.id,
+    bill_status:    'مرحَّل',
+    bill_save_date: now,
+    machine_name:   item.machine_name   ?? null,
+    total_bill_net: item.total_bill_net ?? null,
+    bill_notes:     ref
+  })));
+
+  toPost.forEach((item, i) => {
+    if (results[i]) {
+      const local = allData.find(x => String(x.id) === String(item.id));
+      if (local) { local.bill_status = 'مرحَّل'; local.bill_save_date = now; local.bill_notes = ref; }
     }
+  });
+
+  const ok = results.filter(r => r).length;
+  if (ok < toPost.length) alert(`✅ تم ترحيل ${ok} من ${toPost.length}`);
+  applyFilter();
+}
 
     function renderTable(items) {
       const tbody = document.getElementById('table-body');
