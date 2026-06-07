@@ -13,6 +13,7 @@ function injectNavbar() {
   var userRole         = localStorage.getItem('userRole') || '';
   var isAdmin          = userRole === 'admin';
   var isManager        = userRole === 'manager';
+  var visaPages = ['visa_transactions.html', 'bank_monitor.html', 'paymob.html'];
 
   var navContent =
     '<div class="nav-logo">' +
@@ -131,10 +132,11 @@ function injectNavbar() {
   ]);
 
   // Dropdown: فيزا
-  createFloatingDropdown('visa-dropdown', [
-    { href: 'visa_transactions.html', icon: 'fa-credit-card', label: 'معاملات الفيزا', active: currentPage === 'visa_transactions.html' },
-    { href: 'bank_monitor.html',      icon: 'fa-university',  label: 'متابعة البنك',   active: currentPage === 'bank_monitor.html' }
-  ]);
+createFloatingDropdown('visa-dropdown', [
+  { href: 'visa_transactions.html', icon: 'fa-credit-card', label: 'معاملات الفيزا', active: currentPage === 'visa_transactions.html' },
+  { href: 'bank_monitor.html',      icon: 'fa-university',  label: 'متابعة البنك',   active: currentPage === 'bank_monitor.html' },
+  { href: 'paymob.html',            icon: 'fa-mobile-screen-button', label: 'معاملات باي موب', active: currentPage === 'paymob.html' }
+]);
 
   bindToggle('purchases-toggle', 'purchases-dropdown');
   bindToggle('cs-toggle',        'cs-dropdown');
