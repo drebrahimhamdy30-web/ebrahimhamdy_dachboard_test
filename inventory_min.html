@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>المخزون - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    .below-min { background: #fef2f2 !important; }
+    .below-min td { color: #991b1b; }
+    .stock-badge { display:inline-block; padding:2px 10px; border-radius:20px; font-size:0.75rem; font-weight:700; }
+    .badge-danger { background:#fee2e2; color:#991b1b; }
+    .badge-ok     { background:#dcfce7; color:#15803d; }
+    .lookup-box { background:var(--surface-2); border:1.5px solid var(--border); border-radius:var(--radius-md); padding:16px; margin-bottom:20px; }
+    .min-input { width:70px; padding:4px 8px; border-radius:6px; border:1.5px solid var(--border); background:var(--surface-3); color:var(--text-primary); font-family:var(--font); font-size:0.85rem; text-align:center; }
+    .min-input:focus { border-color:var(--accent); outline:none; }
+    .save-min-btn { background:var(--success); color:#fff; border:none; border-radius:6px; padding:3px 8px; cursor:pointer; font-size:0.85rem; font-weight:700; line-height:1.6; }
+    .save-min-btn:hover { opacity:0.85; }
+  </style>
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+      <div class="page-header">
+        <div class="page-title"><i class="fas fa-boxes"></i> حدود المخزون</div>
+        <button class="btn btn-primary" onclick="loadAll()"><i class="fas fa-sync-alt"></i> تحديث</button>
+      </div>
+
+      <!-- بحث بكود الصنف -->
+      <div class="lookup-box">
+        <div style="font-size:0.85rem;font-weight:700;color:var(--text-secondary);margin-bottom:12px;">
+          <i class="fas fa-search"></i> إضافة صنف جديد
+        </div>
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+          <div>
+            <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">كود الصنف</label>
+            <input type="text" id="lookup-code" class="form-input" style="width:160px;"
+              placeholder="أدخل الكود..."
+              oninput="this.value = this.value.replace(/[^0-9]/g, '')"
+              onkeydown="if(event.key==='Enter') lookupItem()">
+          </div>
+          <div id="lookup-result" style="flex:1;min-width:200px;"></div>
+          <button class="btn btn-primary" onclick="lookupItem()" id="lookup-btn">
+            <i class="fas fa-search"></i> جلب البيانات
+          </button>
+        </div>
+
+        <!-- نتيجة البحث -->
+        <div id="lookup-details" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;align-items:flex-end;">
+            <div>
+              <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">اسم الصنف</label>
+              <input type="text" id="lookup-name" class="form-input" readonly style="background:var(--surface-3);color:var(--text-muted);">
+            </div>
+            <div>
+              <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">الرصيد الحالي</label>
+              <input type="text" id="lookup-stock" class="form-input" readonly style="background:var(--surface-3);color:var(--text-muted);">
+            </div>
+            <div>
+              <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">نوع الصنف</label>
+              <input type="text" id="lookup-type" class="form-input" readonly style="background:var(--surface-3);color:var(--text-muted);">
+            </div>
+            <div>
+              <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">الحد الأدنى</label>
+              <input type="number" id="lookup-min" class="form-input" min="0" placeholder="0">
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;">
+            <button class="btn btn-primary" onclick="saveNewItem()" id="save-btn">
+              <i class="fas fa-save"></i> حفظ الصنف
+            </button>
+            <button class="btn" onclick="resetLookup()" style="background:var(--surface-3);color:var(--text-muted);border:none;">إلغاء</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- فلتر -->
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:16px;flex-wrap:wrap;">
+        <div class="field-icon-wrap" style="min-width:220px;">
+          <i class="fas fa-search field-icon"></i>
+          <input type="text" id="searchInput" class="form-input"
+            placeholder="بحث بالكود أو الاسم..." oninput="applyFilter()" style="padding-right:34px;">
+        </div>
+        <select id="branchFilter" class="form-select" style="width:auto;" onchange="applyFilter()">
+          <option value="all">كل الفروع</option>
+          <option value="المعمورة">المعمورة</option>
+          <option value="سان ستيفانو">سان ستيفانو</option>
+          <option value="سيدي بشر">سيدي بشر</option>
+        </select>
+        <select id="typeFilter" class="form-select" style="width:auto;" onchange="applyFilter()">
+          <option value="all">كل الأنواع</option>
+          <option value="دواء">💊 دواء</option>
+          <option value="غير دواء">🧴 غير دواء</option>
+        </select>
+        <label class="check-label">
+          <input type="checkbox" id="belowOnly" onchange="applyFilter()">
+          تحت الحد الأدنى فقط ⚠️
+        </label>
+        <div id="stats-bar" style="display:flex;gap:8px;align-items:center;font-size:0.82rem;margin-right:auto;"></div>
+      </div>
+
+      <!-- الجدول -->
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>كود الصنف</th>
+              <th>اسم الصنف</th>
+              <th>النوع</th>
+              <th>الفرع</th>
+              <th>الرصيد الحالي</th>
+              <th>الحد الأدنى</th>
+              <th>الحالة</th>
+              <th>إجراء</th>
+            </tr>
+          </thead>
+          <tbody id="table-body">
+            <tr class="loading-row"><td colspan="8">⏳ جاري التحميل...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="nav.js" defer></script>
+  <script>
+    let activeUser = null;
+    let userBranch = '';
+    let allData    = [];
+
+    checkAuth().then(user => {
+      activeUser = user;
+      if (user) {
+        userBranch = (localStorage.getItem('userBranch') || '').trim();
+        loadAll();
+      }
+    });
+
+    async function loadAll() {
+      const tbody = document.getElementById('table-body');
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="8">⏳ جاري جلب البيانات...</td></tr>';
+      try {
+        const response = await fetchFromN8N('stock_limit');
+        allData = Array.isArray(response) ? response : (response.data || []);
+        applyFilter();
+      } catch(e) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
+      }
+    }
+
+    function applyFilter() {
+      const searchVal = document.getElementById('searchInput').value.trim().toLowerCase();
+      const belowOnly = document.getElementById('belowOnly').checked;
+      const branchVal = document.getElementById('branchFilter').value;
+      const typeVal   = document.getElementById('typeFilter').value;
+
+      const filtered = allData.filter(item => {
+        const searchMatch = !searchVal || [item.item_code, item.item_name]
+          .some(v => String(v || '').toLowerCase().includes(searchVal));
+        const belowMatch  = !belowOnly || (parseFloat(item.current_stock) < parseFloat(item.min_stock));
+        const branchMatch = branchVal === 'all' || String(item.branch    || '').trim() === branchVal;
+        const typeMatch   = typeVal   === 'all' || String(item.item_type || '').trim() === typeVal;
+        return searchMatch && belowMatch && branchMatch && typeMatch;
+      });
+
+      renderStats();
+      renderTable(filtered);
+    }
+
+    function renderStats() {
+      const total = allData.length;
+      const below = allData.filter(i => parseFloat(i.current_stock) < parseFloat(i.min_stock)).length;
+      document.getElementById('stats-bar').innerHTML = `
+        <span style="background:var(--surface-3);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-weight:700;color:var(--text-secondary);">📦 الكل: ${total}</span>
+        ${below > 0 ? `<span style="background:#fee2e2;border-radius:20px;padding:4px 12px;font-weight:700;color:#991b1b;">⚠️ تحت الحد: ${below}</span>` : ''}`;
+    }
+
+    function renderTable(items) {
+      const tbody = document.getElementById('table-body');
+      if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج</td></tr>';
+        return;
+      }
+      items.sort((a, b) => {
+        const aB = parseFloat(a.current_stock) < parseFloat(a.min_stock);
+        const bB = parseFloat(b.current_stock) < parseFloat(b.min_stock);
+        if (aB && !bB) return -1;
+        if (!aB && bB) return 1;
+        return String(a.item_code).localeCompare(String(b.item_code));
+      });
+      tbody.innerHTML = items.map(item => {
+        const stock     = parseFloat(item.current_stock) || 0;
+        const minS      = parseFloat(item.min_stock)     || 0;
+        const isBelow   = stock < minS;
+        const typeColor = item.item_type === 'دواء' ? '#0ea5e9' : '#8b5cf6';
+        return `
+          <tr class="${isBelow ? 'below-min' : ''}" id="row-${item.id}">
+            <td><code style="font-size:0.82rem;">${item.item_code || '---'}</code></td>
+            <td style="font-weight:600;font-size:0.85rem;">${item.item_name || '---'}</td>
+            <td><span style="font-size:0.78rem;font-weight:700;color:${typeColor};">${item.item_type === 'دواء' ? '💊' : '🧴'} ${item.item_type || '---'}</span></td>
+            <td><span class="branch-tag">${item.branch || '---'}</span></td>
+            <td><b id="stock-${item.id}" style="color:${isBelow ? 'var(--danger)' : 'var(--success)'};">${stock}</b></td>
+            <td>
+              <div style="display:flex;gap:4px;align-items:center;">
+                <input type="number" class="min-input" value="${minS}" min="0" id="min-${item.id}"
+                  onkeydown="if(event.key==='Enter') saveMinStock('${item.id}', this.value)">
+                <button class="save-min-btn" onclick="saveMinStock('${item.id}', document.getElementById('min-${item.id}').value)" title="حفظ">✓</button>
+              </div>
+            </td>
+            <td><span class="stock-badge ${isBelow ? 'badge-danger' : 'badge-ok'}" id="badge-${item.id}">${isBelow ? '⚠️ تحت الحد' : '✅ كافي'}</span></td>
+            <td>
+              <div style="display:flex;gap:4px;">
+                <button class="btn btn-sm" onclick="refreshItem('${item.id}', '${item.item_code}')" style="background:var(--accent);color:#fff;padding:5px 8px;" title="تحديث الرصيد"><i class="fas fa-sync-alt"></i></button>
+                <button class="btn btn-sm" onclick="deleteItem('${item.id}', '${item.item_name}')" style="background:var(--danger);color:#fff;padding:5px 8px;" title="حذف"><i class="fas fa-trash"></i></button>
+              </div>
+            </td>
+          </tr>`;
+      }).join('');
+    }
+
+    // ===== lookup بنفس مسار main.html =====
+    async function lookupItem() {
+      const code = document.getElementById('lookup-code').value.trim();
+      if (!code) { alert('برجاء إدخال كود الصنف'); return; }
+
+      const btn = document.getElementById('lookup-btn');
+      btn.disabled  = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+      try {
+        // جلب اسم الصنف من item_lookup — نفس مسار main.html
+        const nameResp = await fetch(FETCH_URL + '?type=item_lookup&code=' + encodeURIComponent(code));
+        const nameRaw  = await nameResp.json();
+        const nameItem = Array.isArray(nameRaw) ? nameRaw[0] : nameRaw;
+        const itemName = nameItem?.itm_name_ar || nameItem?.data?.[0]?.itm_name_ar || '';
+        const itemType = nameItem?.item_type   || nameItem?.data?.[0]?.item_type   || '';
+
+        if (!itemName) {
+          document.getElementById('lookup-result').innerHTML =
+            `<span style="color:var(--danger);font-size:0.85rem;">❌ لم يتم العثور على الصنف</span>`;
+          document.getElementById('lookup-details').style.display = 'none';
+          return;
+        }
+
+        // جلب الرصيد من get_balance
+        let balance = 0;
+        try {
+          const balResp = await fetch(
+            'https://agent.ebrahimhamdy.com/webhook/get_balance?code=' +
+            encodeURIComponent(code) + '&branch=' + encodeURIComponent(userBranch)
+          );
+          const balRaw  = await balResp.json();
+          const balData = Array.isArray(balRaw) ? balRaw[0] : balRaw;
+          balance = balData?.balance ?? 0;
+        } catch(e) {}
+
+        // تحقق لو موجود بالفعل
+        const alreadyExists = allData.some(x =>
+          String(x.item_code).trim() === String(code).trim() &&
+          String(x.branch).trim()    === String(userBranch).trim()
+        );
+        if (alreadyExists) {
+          document.getElementById('lookup-result').innerHTML =
+            `<span style="color:var(--warning);font-size:0.85rem;">⚠️ الصنف موجود بالفعل لفرع ${userBranch}</span>`;
+          document.getElementById('lookup-details').style.display = 'none';
+          return;
+        }
+
+        document.getElementById('lookup-name').value  = itemName;
+        document.getElementById('lookup-stock').value = balance;
+        document.getElementById('lookup-type').value  = itemType;
+        document.getElementById('lookup-min').value   = '';
+        document.getElementById('lookup-result').innerHTML = '';
+        document.getElementById('lookup-details').style.display = '';
+
+      } catch(e) {
+        document.getElementById('lookup-result').innerHTML =
+          `<span style="color:var(--danger);font-size:0.85rem;">❌ خطأ في الاتصال</span>`;
+      } finally {
+        btn.disabled  = false;
+        btn.innerHTML = '<i class="fas fa-search"></i> جلب البيانات';
+      }
+    }
+
+    async function saveNewItem() {
+      const code  = document.getElementById('lookup-code').value.trim();
+      const name  = document.getElementById('lookup-name').value.trim();
+      const stock = document.getElementById('lookup-stock').value;
+      const type  = document.getElementById('lookup-type').value.trim();
+      const minS  = document.getElementById('lookup-min').value.trim();
+      if (!minS) { alert('برجاء إدخال الحد الأدنى'); return; }
+
+      const btn = document.getElementById('save-btn');
+      btn.disabled  = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
+
+      const success = await updateData({
+        type: 'inventory_insert', item_code: code, item_name: name,
+        current_stock: stock, min_stock: minS, item_type: type, branch: userBranch
+      });
+
+      if (success) { resetLookup(); await loadAll(); }
+      else alert('❌ فشل الحفظ');
+
+      btn.disabled  = false;
+      btn.innerHTML = '<i class="fas fa-save"></i> حفظ الصنف';
+    }
+
+    function resetLookup() {
+      document.getElementById('lookup-code').value       = '';
+      document.getElementById('lookup-name').value       = '';
+      document.getElementById('lookup-stock').value      = '';
+      document.getElementById('lookup-type').value       = '';
+      document.getElementById('lookup-min').value        = '';
+      document.getElementById('lookup-result').innerHTML = '';
+      document.getElementById('lookup-details').style.display = 'none';
+    }
+
+    async function saveMinStock(id, newMin) {
+      const item = allData.find(x => String(x.id) === String(id));
+      const success = await updateData({
+        type: 'inventory_update', id, min_stock: newMin, current_stock: item?.current_stock ?? 0
+      });
+      if (success) {
+        if (item) {
+          item.min_stock = parseFloat(newMin);
+          const stock = parseFloat(item.current_stock) || 0;
+          const minS  = parseFloat(newMin) || 0;
+          const isBelow = stock < minS;
+          const row   = document.getElementById(`row-${id}`);
+          const badge = document.getElementById(`badge-${id}`);
+          const stockEl = document.getElementById(`stock-${id}`);
+          if (row)    row.className = isBelow ? 'below-min' : '';
+          if (badge)  { badge.className = `stock-badge ${isBelow ? 'badge-danger' : 'badge-ok'}`; badge.textContent = isBelow ? '⚠️ تحت الحد' : '✅ كافي'; }
+          if (stockEl) stockEl.style.color = isBelow ? 'var(--danger)' : 'var(--success)';
+          renderStats();
+        }
+      } else { alert('❌ فشل التحديث'); loadAll(); }
+    }
+
+    async function refreshItem(id, itemCode) {
+      try {
+        const item = allData.find(x => String(x.id) === String(id));
+
+        // نفس مسار item_lookup
+        const nameResp = await fetch(FETCH_URL + '?type=item_lookup&code=' + encodeURIComponent(itemCode));
+        const nameRaw  = await nameResp.json();
+        const nameItem = Array.isArray(nameRaw) ? nameRaw[0] : nameRaw;
+
+        // جلب الرصيد
+        const balResp = await fetch(
+          'https://agent.ebrahimhamdy.com/webhook/get_balance?code=' +
+          encodeURIComponent(itemCode) + '&branch=' + encodeURIComponent(item?.branch || userBranch)
+        );
+        const balRaw  = await balResp.json();
+        const balData = Array.isArray(balRaw) ? balRaw[0] : balRaw;
+        const balance = balData?.balance ?? 0;
+
+        await updateData({
+          type: 'inventory_update', id, current_stock: balance, min_stock: item?.min_stock ?? 0
+        });
+
+        if (item) {
+          item.current_stock = balance;
+          const stock   = parseFloat(balance) || 0;
+          const minS    = parseFloat(item.min_stock) || 0;
+          const isBelow = stock < minS;
+          const row     = document.getElementById(`row-${id}`);
+          const badge   = document.getElementById(`badge-${id}`);
+          const stockEl = document.getElementById(`stock-${id}`);
+          if (row)    row.className = isBelow ? 'below-min' : '';
+          if (badge)  { badge.className = `stock-badge ${isBelow ? 'badge-danger' : 'badge-ok'}`; badge.textContent = isBelow ? '⚠️ تحت الحد' : '✅ كافي'; }
+          if (stockEl) { stockEl.textContent = stock; stockEl.style.color = isBelow ? 'var(--danger)' : 'var(--success)'; }
+          renderStats();
+        }
+      } catch(e) { alert('❌ خطأ في الاتصال'); }
+    }
+
+    async function deleteItem(id, itemName) {
+      if (!confirm(`هل تريد حذف "${itemName}" من قائمة حدود المخزون؟`)) return;
+      const success = await updateData({ type: 'inventory_delete', id });
+      if (success) { allData = allData.filter(x => String(x.id) !== String(id)); renderStats(); applyFilter(); }
+      else alert('❌ فشل الحذف');
+    }
+  </script>
+</body>
+</html>
