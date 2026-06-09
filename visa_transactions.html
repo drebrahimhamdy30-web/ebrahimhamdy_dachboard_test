@@ -589,11 +589,12 @@
 
     // ===== المطابقة مع باي موب — بيبحث عن معاملتين (netMain و split) =====
     async function verifyPaymobBeforeSet(id, machineName, item) {
-      const net     = parseFloat(item?.total_bill_net) || 0;
-      const split   = parseFloat(item?.split_amount)   || 0;
-      const netMain = net - split;
+      const net   = parseFloat(item?.total_bill_net) || 0;
+      const split = parseFloat(item?.split_amount)   || 0;
+      // بنبحث عن معاملة بقيمة net (الصافي الكلي) ومعاملة بقيمة split (لو موجود)
+      // مش الفرق بينهم
 
-      if (netMain <= 0) {
+      if (net <= 0) {
         alert('⚠️ صافي الفيزا = 0 — أدخل القيمة الصحيحة قبل الربط بباي موب');
         return false;
       }
@@ -602,12 +603,12 @@
       const pmAll    = await fetchPaymob();
       const pmList   = Array.isArray(pmAll) ? pmAll : [];
 
-      // بحث عن معاملة بقيمة netMain
+      // بحث عن معاملة بقيمة net
       const matchesNet = pmList.filter(p => {
         const pTerminal = String(p.terminal_id||'').trim();
         const pAmount   = parseFloat(p.amount);
         const noBill    = !String(p.bill_no||'').trim() || String(p.bill_no||'').trim()==='null';
-        return pTerminal===terminal && pAmount===netMain && noBill;
+        return pTerminal===terminal && pAmount===net && noBill;
       });
 
       // بحث عن معاملة بقيمة split (لو فيه تقسيم)
@@ -622,7 +623,7 @@
       }
 
       if (matchesNet.length === 0) {
-        alert(`❌ لا توجد معاملة باي موب بقيمة ${netMain.toFixed(2)} على ماكينة "${machineName}" غير مربوطة.`);
+        alert(`❌ لا توجد معاملة باي موب بقيمة ${net.toFixed(2)} على ماكينة "${machineName}" غير مربوطة.`);
         return false;
       }
 
@@ -631,12 +632,11 @@
         return false;
       }
 
-      // اختيار معاملة الصافي الأساسي
       let pmTrxNet;
       if (matchesNet.length === 1) {
         pmTrxNet = matchesNet[0];
       } else {
-        pmTrxNet = await choosePaymobMatch(id, machineName, item, matchesNet, `اختر معاملة الصافي (${netMain.toFixed(2)})`);
+        pmTrxNet = await choosePaymobMatch(id, machineName, item, matchesNet, `اختر معاملة الصافي (${net.toFixed(2)})`);
         if (!pmTrxNet) return false;
       }
 
