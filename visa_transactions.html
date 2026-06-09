@@ -448,7 +448,7 @@
         const refNo=item.bill_notes?`<span class="ref-badge">#${item.bill_notes}</span>`:'---';
 
         // خلية التقسيم — لما تكتب رقم يطرحه من total_bill_net
-        const splitCell=`<span class="editable-cell" onclick="editSplit('${item.id}',this,'${split||0}','${net}')">
+        const splitCell=`<span class="editable-cell" onclick="editSplit('${item.id}',this,'${split||0}')">
           ${split>0?`<span class="split-badge">${split.toFixed(2)}</span>`:`<span style="color:var(--text-muted);font-size:0.72rem;">—</span>`}
         </span>`;
 
@@ -479,8 +479,8 @@
         `<span style="color:var(--text-muted);">عدد المعاملات: <b>${items.length}</b></span>`;
     }
 
-    // ===== تعديل التقسيم — يطرح من total_bill_net =====
-    function editSplit(id, el, currentSplit, currentNet) {
+    // ===== تعديل التقسيم — بيحفظ split_amount فقط بدون تغيير total_bill_net =====
+    function editSplit(id, el, currentSplit) {
       const input=document.createElement('input');
       input.type='number'; input.value=currentSplit||'';
       input.className='cell-input'; input.style.width='80px'; input.step='0.01'; input.min='0';
@@ -489,28 +489,28 @@
 
       const save=async()=>{
         const splitVal=parseFloat(input.value)||0;
-        const netVal=parseFloat(currentNet)||0;
-
-        if(splitVal>=netVal&&splitVal>0){alert(`⚠️ قيمة التقسيم (${splitVal}) لازم تكون أقل من الصافي (${netVal})`);input.focus();return;}
-
-        // الصافي الجديد = الصافي الأصلي (قبل أي تقسيم) - التقسيم الجديد
-        // الصافي الأصلي = currentNet + currentSplit (لو كان فيه تقسيم قديم نضيفه أولاً)
         const item=allData.find(x=>String(x.id)===String(id));
-        const originalNet=(parseFloat(item?.total_bill_net)||0)+(parseFloat(item?.split_amount)||0);
-        const newNet=originalNet-splitVal;
+        const net=parseFloat(item?.total_bill_net)||0;
+
+        if(splitVal>=net&&splitVal>0){
+          alert(`⚠️ قيمة التقسيم (${splitVal}) لازم تكون أقل من الصافي (${net})`);
+          input.focus(); return;
+        }
 
         const span=document.createElement('span');
         span.className='editable-cell';
-        span.innerHTML=splitVal>0?`<span class="split-badge">${splitVal.toFixed(2)}</span>`:`<span style="color:var(--text-muted);font-size:0.72rem;">—</span>`;
-        span.onclick=()=>editSplit(id,span,splitVal,newNet);
+        span.innerHTML=splitVal>0
+          ?`<span class="split-badge">${splitVal.toFixed(2)}</span>`
+          :`<span style="color:var(--text-muted);font-size:0.72rem;">—</span>`;
+        span.onclick=()=>editSplit(id,span,splitVal);
         input.replaceWith(span);
 
         if(item){
           item.split_amount=splitVal||null;
-          item.total_bill_net=newNet;
+          // نحفظ split_amount فقط — total_bill_net مش بيتغير
           await updateData({
-            type:'visa_update',id,
-            total_bill_net: newNet,
+            type:'visa_update', id,
+            total_bill_net: item.total_bill_net??null,
             split_amount:   splitVal||null,
             machine_name:   item.machine_name??null,
             bill_status:    item.bill_status??null,
@@ -582,12 +582,13 @@
       select.addEventListener('change',save);
     }
 
-    // ===== المطابقة مع باي موب — بيبحث عن معاملتين (total_bill_net و split_amount) =====
+    // ===== المطابقة مع باي موب — بيبحث عن معاملتين (netMain و split) =====
     async function verifyPaymobBeforeSet(id, machineName, item) {
-      const net   = parseFloat(item?.total_bill_net) || 0;
-      const split = parseFloat(item?.split_amount)   || 0;
+      const net     = parseFloat(item?.total_bill_net) || 0;
+      const split   = parseFloat(item?.split_amount)   || 0;
+      const netMain = net - split;  // الصافي الأساسي = total_bill_net - split_amount
 
-      if (net <= 0) {
+      if (netMain <= 0) {
         alert('⚠️ صافي الفيزا = 0 — أدخل القيمة الصحيحة قبل الربط بباي موب');
         return false;
       }
@@ -596,12 +597,12 @@
       const pmAll    = await fetchPaymob();
       const pmList   = Array.isArray(pmAll) ? pmAll : [];
 
-      // بحث عن معاملة بقيمة net (الصافي الأساسي)
+      // بحث عن معاملة بقيمة netMain
       const matchesNet = pmList.filter(p => {
         const pTerminal = String(p.terminal_id||'').trim();
         const pAmount   = parseFloat(p.amount);
         const noBill    = !String(p.bill_no||'').trim() || String(p.bill_no||'').trim()==='null';
-        return pTerminal===terminal && pAmount===net && noBill;
+        return pTerminal===terminal && pAmount===netMain && noBill;
       });
 
       // بحث عن معاملة بقيمة split (لو فيه تقسيم)
@@ -616,7 +617,7 @@
       }
 
       if (matchesNet.length === 0) {
-        alert(`❌ لا توجد معاملة باي موب بقيمة ${net.toFixed(2)} على ماكينة "${machineName}" غير مربوطة.`);
+        alert(`❌ لا توجد معاملة باي موب بقيمة ${netMain.toFixed(2)} على ماكينة "${machineName}" غير مربوطة.`);
         return false;
       }
 
@@ -630,7 +631,7 @@
       if (matchesNet.length === 1) {
         pmTrxNet = matchesNet[0];
       } else {
-        pmTrxNet = await choosePaymobMatch(id, machineName, item, matchesNet, `اختر معاملة الصافي (${net.toFixed(2)})`);
+        pmTrxNet = await choosePaymobMatch(id, machineName, item, matchesNet, `اختر معاملة الصافي (${netMain.toFixed(2)})`);
         if (!pmTrxNet) return false;
       }
 
