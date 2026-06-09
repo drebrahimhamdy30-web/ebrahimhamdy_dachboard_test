@@ -385,15 +385,21 @@
       const totals={};
       machines.forEach(m=>{totals[m]={sum:0,bill:0,count:0};});
       items.forEach(item=>{
-        const m=String(item.machine_name||'').trim();
         const isReturn=(item.bill_status==='مرتجع');
-        if(totals[m]!==undefined){
+        // لو مرتجع — نجيب ماكينة الفاتورة الأصلية (رقمها بدون الـ 0 في الأول)
+        let machineName = String(item.machine_name||'').trim();
+        if (isReturn && (!machineName || machineName==='null')) {
+          const origBillNo = String(item.bill_no||'').replace(/^0+/,'');
+          const orig = allData.find(x => String(x.bill_no||'') === origBillNo && x.bill_status !== 'مرتجع');
+          machineName = orig ? String(orig.machine_name||'').trim() : '';
+        }
+        if(totals[machineName]!==undefined){
           const net   = parseFloat(item.total_bill_net)||0;
           const split = parseFloat(item.split_amount)||0;
           const sign  = isReturn ? -1 : 1;
-          totals[m].sum  += sign * (net + split);
-          totals[m].bill += sign * (parseFloat(item.total_bill)||0);
-          totals[m].count++;
+          totals[machineName].sum  += sign * (net + split);
+          totals[machineName].bill += sign * (parseFloat(item.total_bill)||0);
+          totals[machineName].count++;
         }
       });
 
