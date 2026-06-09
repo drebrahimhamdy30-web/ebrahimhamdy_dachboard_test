@@ -271,8 +271,8 @@
             bill_date:     exists.bill_date     || null,
             cust_code:     exists.cust_code     || null,
             cust_name_ar:  exists.cust_name_ar  || null,
-            total_bill:    -(parseFloat(exists.total_bill||0)),
-            total_bill_net:-(parseFloat(exists.total_bill_net||0)),
+            total_bill:    parseFloat(exists.total_bill||0),
+            total_bill_net:parseFloat(exists.total_bill_net||0),
             machine_name:  null,
             employee_name: exists.employee_name || null,
             bill_save_date:null,
@@ -386,9 +386,13 @@
       machines.forEach(m=>{totals[m]={sum:0,bill:0,count:0};});
       items.forEach(item=>{
         const m=String(item.machine_name||'').trim();
+        const isReturn=(item.bill_status==='مرتجع');
         if(totals[m]!==undefined){
-          totals[m].sum += parseFloat(item.total_bill_net)||0;
-          totals[m].bill+= parseFloat(item.total_bill)||0;
+          const net   = parseFloat(item.total_bill_net)||0;
+          const split = parseFloat(item.split_amount)||0;
+          const sign  = isReturn ? -1 : 1;
+          totals[m].sum  += sign * (net + split);
+          totals[m].bill += sign * (parseFloat(item.total_bill)||0);
           totals[m].count++;
         }
       });
@@ -435,8 +439,9 @@
         const net=parseFloat(item.total_bill_net)||0;
         const split=parseFloat(item.split_amount)||0;
         const splitAbs=Math.abs(split);
-        grandTotal+=net;
-        grandBill+=parseFloat(item.total_bill||0);
+        const isReturn=(item.bill_status==='مرتجع');
+        grandTotal += isReturn ? -(net + split) : net;
+        grandBill  += isReturn ? -(parseFloat(item.total_bill||0)) : parseFloat(item.total_bill||0);
         const isPosted=(item.bill_status==='مرحَّل'||item.bill_status==='posted');
         const isExtra=(item.bill_status==='زيادة');
         const isReturn=(item.bill_status==='مرتجع');
@@ -491,7 +496,7 @@
       const save=async()=>{
         const splitVal=parseFloat(input.value)||0;
         const item=allData.find(x=>String(x.id)===String(id));
-        const net=parseFloat(item?.total_bill_net)||0;
+        const net=Math.abs(parseFloat(item?.total_bill_net)||0);
 
         if(splitVal>=net&&splitVal>0){
           alert(`⚠️ قيمة التقسيم (${splitVal}) لازم تكون أقل من الصافي (${net})`);
@@ -585,8 +590,8 @@
 
     // ===== المطابقة مع باي موب — بيبحث عن معاملتين (netMain و split) =====
     async function verifyPaymobBeforeSet(id, machineName, item) {
-      const net     = Math.abs(parseFloat(item?.total_bill_net) || 0);
-      const split   = Math.abs(parseFloat(item?.split_amount)   || 0);
+      const net     = parseFloat(item?.total_bill_net) || 0;
+      const split   = parseFloat(item?.split_amount)   || 0;
       const netMain = net - split;
 
       if (netMain <= 0) {
