@@ -94,27 +94,38 @@
         <div id="bulk-post-wrap"></div>
       </div>
 
-      <div class="filter-bar" style="margin-bottom:12px;align-items:center;flex-wrap:wrap;gap:8px;">
-        <span class="filter-label" id="machine-filter-label"><i class="fas fa-credit-card"></i> الماكينة:</span>
-        <select id="machineFilter" class="form-select" style="width:auto;" onchange="applyFilter()">
-          <option value="all">كل الماكينات</option>
-        </select>
-        <label id="no-machine-label" style="display:flex;align-items:center;gap:5px;font-size:0.8rem;font-weight:600;color:var(--danger);cursor:pointer;">
-          <input type="checkbox" id="noMachineFilter" onchange="applyFilter()" style="width:15px;height:15px;accent-color:var(--danger);">
-          بدون ماكينة فقط
-        </label>
-        <span class="filter-label" id="extra-filter-label" style="display:none;">الحالة:</span>
-        <select id="extraStatusFilter" class="form-select" style="width:auto;display:none;" onchange="applyFilter()">
-          <option value="all">الكل</option>
-          <option value="no_machine">بدون ماكينة</option>
-          <option value="pending">لم يُرحَّل</option>
-          <option value="posted">مرحَّل</option>
-        </select>
-        <input type="text" id="refFilter" class="form-input" style="width:120px;" placeholder="رقم الترحيلة" oninput="applyFilter()">
-        <input type="date" id="saveDateFilter" class="form-input" style="width:150px;" onchange="applyFilter()">
-        <button class="btn" style="background:var(--surface-3);color:var(--text-secondary);font-size:0.78rem;" onclick="clearFilters()">
-          <i class="fas fa-times"></i> مسح
-        </button>
+      <div style="background:var(--surface-3);border:1.5px solid var(--border);border-radius:12px;padding:10px 14px;margin-bottom:12px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="font-size:0.72rem;font-weight:700;color:var(--text-muted);white-space:nowrap;"><i class="fas fa-filter" style="color:var(--accent);"></i> فلاتر:</span>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;flex:1;">
+            <span id="machine-filter-label" style="font-size:0.75rem;font-weight:700;color:var(--text-secondary);white-space:nowrap;"><i class="fas fa-credit-card"></i> ماكينة:</span>
+            <select id="machineFilter" class="form-select" style="width:auto;font-size:0.78rem;" onchange="applyFilter()">
+              <option value="all">كل الماكينات</option>
+            </select>
+            <label id="no-machine-label" style="display:flex;align-items:center;gap:4px;font-size:0.75rem;font-weight:700;color:var(--danger);cursor:pointer;background:#fee2e2;border-radius:20px;padding:3px 8px;">
+              <input type="checkbox" id="noMachineFilter" onchange="applyFilter()" style="width:13px;height:13px;accent-color:var(--danger);">
+              بدون ماكينة
+            </label>
+            <span id="extra-filter-label" style="display:none;font-size:0.75rem;font-weight:700;color:var(--text-secondary);">الحالة:</span>
+            <select id="extraStatusFilter" class="form-select" style="width:auto;font-size:0.78rem;display:none;" onchange="applyFilter()">
+              <option value="all">الكل</option>
+              <option value="no_machine">بدون ماكينة</option>
+              <option value="pending">لم يُرحَّل</option>
+              <option value="posted">مرحَّل</option>
+            </select>
+            <div style="display:flex;align-items:center;gap:4px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:3px 8px;">
+              <i class="fas fa-hashtag" style="font-size:0.68rem;color:var(--text-muted);"></i>
+              <input type="text" id="refFilter" class="form-input" style="width:90px;border:none;background:transparent;padding:0;font-size:0.78rem;" placeholder="رقم الترحيلة" oninput="applyFilter()">
+            </div>
+            <div style="display:flex;align-items:center;gap:4px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:3px 8px;">
+              <i class="fas fa-calendar" style="font-size:0.68rem;color:var(--text-muted);"></i>
+              <input type="date" id="saveDateFilter" class="form-input" style="width:130px;border:none;background:transparent;padding:0;font-size:0.78rem;" onchange="applyFilter()">
+            </div>
+            <button style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:4px 10px;font-size:0.72rem;color:var(--text-muted);cursor:pointer;" onclick="clearFilters()">
+              <i class="fas fa-times"></i> مسح
+            </button>
+          </div>
+        </div>
       </div>
 
       <div class="table-wrap">
@@ -390,46 +401,73 @@
 
       const totals={};
       machines.forEach(m=>{totals[m]={sum:0,bill:0,count:0};});
-      // الفواتير العادية من items
+
       items.forEach(item=>{
-        if(item.bill_status==='مرتجع') return;
+        if(item.bill_status==='مرتجع'||item.bill_status==='مرتجع-مرحَّل') return;
         const m=String(item.machine_name||'').trim();
         if(totals[m]!==undefined){
-          totals[m].sum  += parseFloat(item.total_bill_net)||0;
+          totals[m].sum  += (parseFloat(item.total_bill_net)||0) + (parseFloat(item.split_amount)||0);
           totals[m].bill += parseFloat(item.total_bill)||0;
           totals[m].count++;
         }
       });
 
-      // المرتجعات من نفس الفلتر (saveDateFilter + refFilter)
-      const saveDateF = document.getElementById('saveDateFilter').value;
-      const refFilter = document.getElementById('refFilter').value.trim();
-      allData.filter(x => {
-        if(x.bill_status !== 'مرتجع') return false;
-        if(saveDateF && x.bill_save_date && !x.bill_save_date.startsWith(saveDateF)) return false;
-        if(refFilter && String(x.bill_notes||'') !== refFilter) return false;
+      const saveDateF=document.getElementById('saveDateFilter').value;
+      const refFilter=document.getElementById('refFilter').value.trim();
+      allData.filter(x=>{
+        if(x.bill_status!=='مرتجع'&&x.bill_status!=='مرتجع-مرحَّل') return false;
+        if(saveDateF&&x.bill_save_date&&!x.bill_save_date.startsWith(saveDateF)) return false;
+        if(refFilter&&String(x.bill_notes||'')!==refFilter) return false;
         return true;
       }).forEach(item=>{
         const m=String(item.machine_name||'').trim();
         if(totals[m]!==undefined){
-          const net   = parseFloat(item.total_bill_net)||0;
-          const split = parseFloat(item.split_amount)||0;
-          totals[m].sum  -= (net + split);
+          totals[m].sum  -= (parseFloat(item.total_bill_net)||0)+(parseFloat(item.split_amount)||0);
           totals[m].bill -= parseFloat(item.total_bill)||0;
         }
       });
 
-      wrap.innerHTML=machines.map(m=>`
-        <div class="machine-card">
-          <div class="mc-name"><i class="fas fa-credit-card" style="margin-left:3px;color:var(--accent);font-size:0.6rem;"></i>${m}</div>
-          <div class="mc-total">${totals[m].sum.toFixed(2)} <span style="font-size:0.58rem;color:var(--text-muted);">صافي</span></div>
-          <div class="mc-bill">${totals[m].bill.toFixed(2)} <span style="font-size:0.58rem;color:var(--text-muted);">إجمالي</span></div>
-          <div class="mc-count">${totals[m].count} معاملة</div>
-        </div>`).join('');
+      // ألوان لكل ماكينة
+      const colors = ['#6366f1','#0ea5e9','#10b981','#f59e0b','#ec4899','#8b5cf6'];
 
-      const canPost=items.filter(i=>i.machine_name&&i.machine_name!=='null'&&i.machine_name!==''&&i.bill_status!=='مرحَّل'&&i.bill_status!=='posted'&&i.bill_status!=='زيادة').length;
+      wrap.innerHTML=machines.map((m,i)=>{
+        const color = colors[i % colors.length];
+        const sum   = totals[m].sum;
+        const isNeg = sum < 0;
+        return `
+        <div style="
+          background:var(--surface);
+          border:1.5px solid var(--border);
+          border-top:3px solid ${color};
+          border-radius:10px;
+          padding:10px 14px;
+          flex:1;
+          min-width:110px;
+          position:relative;
+          overflow:hidden;
+        ">
+          <div style="display:flex;align-items:center;gap:5px;margin-bottom:6px;">
+            <span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block;flex-shrink:0;"></span>
+            <span style="font-size:0.68rem;font-weight:800;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${m}</span>
+          </div>
+          <div style="font-size:1rem;font-weight:900;color:${isNeg?'#ef4444':color};line-height:1.1;">
+            ${sum.toFixed(2)}
+            <span style="font-size:0.55rem;font-weight:600;color:var(--text-muted);"> ج</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;">
+            <span style="font-size:0.62rem;color:var(--text-muted);">${totals[m].count} معاملة</span>
+            <span style="font-size:0.6rem;color:var(--text-muted);">${totals[m].bill.toFixed(0)} إجمالي</span>
+          </div>
+        </div>`;
+      }).join('');
+
+      const canPost=items.filter(i=>i.machine_name&&i.machine_name!=='null'&&i.machine_name!==''&&i.bill_status!=='مرحَّل'&&i.bill_status!=='posted'&&i.bill_status!=='زيادة'&&i.bill_status!=='مرتجع-مرحَّل').length;
       bulkWrap.innerHTML=canPost>0
-        ?`<button class="btn btn-success" onclick="markAllPosted()" id="bulk-post-btn" style="white-space:nowrap;"><i class="fas fa-check-double"></i> ترحيل الكل (${canPost})</button>`:'';
+        ?`<button class="btn btn-success" onclick="markAllPosted()" id="bulk-post-btn"
+            style="white-space:nowrap;padding:10px 16px;font-size:0.82rem;border-radius:10px;box-shadow:0 2px 8px rgba(16,185,129,0.3);">
+            <i class="fas fa-check-double"></i> ترحيل الكل
+            <span style="background:rgba(255,255,255,0.25);border-radius:20px;padding:1px 8px;margin-right:4px;font-size:0.78rem;">${canPost}</span>
+          </button>`:'';
     }
 
     async function markAllPosted() {
