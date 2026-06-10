@@ -354,13 +354,12 @@
       const saveDateF=document.getElementById('saveDateFilter').value;
 
       const filtered = allData.filter(item => {
-        const isPosted=(item.bill_status==='مرحَّل'||item.bill_status==='posted');
+        const isPosted=(item.bill_status==='مرحَّل'||item.bill_status==='posted'||item.bill_status==='مرتجع-مرحَّل');
         const isExtra=(item.bill_status==='زيادة');
-        const isReturn=(item.bill_status==='مرتجع');
+        const isReturn=(item.bill_status==='مرتجع'||item.bill_status==='مرتجع-مرحَّل');
         const hasMachine=item.machine_name&&item.machine_name!=='null'&&item.machine_name!=='';
         if(currentTab==='return') { if(!isReturn) return false; return !search||matchSearch(item,search); }
-        if(isReturn) return false;
-        if (currentTab==='extra') {
+        if(currentTab==='extra') {
           if(!isExtra) return false;
           if(extraStatus==='no_machine'&&hasMachine) return false;
           if(extraStatus==='pending'&&(isPosted||hasMachine)) return false;
@@ -368,6 +367,7 @@
           return !search||matchSearch(item,search);
         }
         if(isExtra) return false;
+        // المرتجعات تظهر مع المعاملات العادية في pending وposted
         if(currentTab==='pending'&&isPosted) return false;
         if(currentTab==='posted'&&!isPosted) return false;
         if(noMachine&&hasMachine) return false;
@@ -390,22 +390,32 @@
 
       const totals={};
       machines.forEach(m=>{totals[m]={sum:0,bill:0,count:0};});
+      // الفواتير العادية من items
       items.forEach(item=>{
-        const isReturn=(item.bill_status==='مرتجع');
-        // لو مرتجع — نجيب ماكينة الفاتورة الأصلية (رقمها بدون الـ 0 في الأول)
-        let machineName = String(item.machine_name||'').trim();
-        if (isReturn && (!machineName || machineName==='null')) {
-          const origBillNo = String(item.bill_no||'').replace(/^0+/,'');
-          const orig = allData.find(x => String(x.bill_no||'') === origBillNo && x.bill_status !== 'مرتجع');
-          machineName = orig ? String(orig.machine_name||'').trim() : '';
+        if(item.bill_status==='مرتجع') return;
+        const m=String(item.machine_name||'').trim();
+        if(totals[m]!==undefined){
+          totals[m].sum  += parseFloat(item.total_bill_net)||0;
+          totals[m].bill += parseFloat(item.total_bill)||0;
+          totals[m].count++;
         }
-        if(totals[machineName]!==undefined){
+      });
+
+      // المرتجعات من نفس الفلتر (saveDateFilter + refFilter)
+      const saveDateF = document.getElementById('saveDateFilter').value;
+      const refFilter = document.getElementById('refFilter').value.trim();
+      allData.filter(x => {
+        if(x.bill_status !== 'مرتجع') return false;
+        if(saveDateF && x.bill_save_date && !x.bill_save_date.startsWith(saveDateF)) return false;
+        if(refFilter && String(x.bill_notes||'') !== refFilter) return false;
+        return true;
+      }).forEach(item=>{
+        const m=String(item.machine_name||'').trim();
+        if(totals[m]!==undefined){
           const net   = parseFloat(item.total_bill_net)||0;
           const split = parseFloat(item.split_amount)||0;
-          const sign  = isReturn ? -1 : 1;
-          totals[machineName].sum  += sign * (net + split);
-          totals[machineName].bill += sign * (parseFloat(item.total_bill)||0);
-          totals[machineName].count++;
+          totals[m].sum  -= (net + split);
+          totals[m].bill -= parseFloat(item.total_bill)||0;
         }
       });
 
@@ -424,9 +434,9 @@
 
     async function markAllPosted() {
       const toPost=getFiltered().filter(item=>{
-        const isPosted=(item.bill_status==='مرحَّل'||item.bill_status==='posted');
+        const isPosted=(item.bill_status==='مرحَّل'||item.bill_status==='posted'||item.bill_status==='مرتجع-مرحَّل');
         const isExtra=(item.bill_status==='زيادة');
-        const isReturn=(item.bill_status==='مرتجع');
+        const isReturn=(item.bill_status==='مرتجع'||item.bill_status==='مرتجع-مرحَّل');
         const hasMachine=item.machine_name&&item.machine_name!=='null'&&item.machine_name!=='';
         return !isPosted&&!isExtra&&!isReturn&&hasMachine;
       });
@@ -435,8 +445,8 @@
       const btn=document.getElementById('bulk-post-btn');
       btn.disabled=true;btn.innerHTML='<i class="fas fa-spinner fa-spin"></i>';
       const now=new Date().toISOString(), ref=String(getNextRef());
-      const results=await Promise.all(toPost.map(item=>updateData({type:'visa_update',id:item.id,bill_status:'مرحَّل',bill_save_date:now,machine_name:item.machine_name??null,total_bill_net:item.total_bill_net??null,split_amount:item.split_amount??null,bill_notes:ref})));
-      toPost.forEach((item,i)=>{if(results[i]){const l=allData.find(x=>String(x.id)===String(item.id));if(l){l.bill_status='مرحَّل';l.bill_save_date=now;l.bill_notes=ref;}}});
+      const results=await Promise.all(toPost.map(item=>updateData({type:'visa_update',id:item.id,bill_status:item.bill_status==='مرتجع'?'مرتجع-مرحَّل':'مرحَّل',bill_save_date:now,machine_name:item.machine_name??null,total_bill_net:item.total_bill_net??null,split_amount:item.split_amount??null,bill_notes:ref})));
+      toPost.forEach((item,i)=>{if(results[i]){const l=allData.find(x=>String(x.id)===String(item.id));if(l){l.bill_status=l.bill_status==='مرتجع'?'مرتجع-مرحَّل':'مرحَّل';l.bill_save_date=now;l.bill_notes=ref;}}});
       const ok=results.filter(r=>r).length;
       if(ok<toPost.length)alert(`✅ تم ترحيل ${ok} من ${toPost.length}`);
       applyFilter();
@@ -451,10 +461,10 @@
         const net=parseFloat(item.total_bill_net)||0;
         const split=parseFloat(item.split_amount)||0;
         const splitAbs=Math.abs(split);
-        const isReturn=(item.bill_status==='مرتجع');
+        const isReturn=(item.bill_status==='مرتجع'||item.bill_status==='مرتجع-مرحَّل');
         grandTotal += isReturn ? -(net + split) : net;
         grandBill  += isReturn ? -(parseFloat(item.total_bill||0)) : parseFloat(item.total_bill||0);
-        const isPosted=(item.bill_status==='مرحَّل'||item.bill_status==='posted');
+        const isPosted=(item.bill_status==='مرحَّل'||item.bill_status==='posted'||item.bill_status==='مرتجع-مرحَّل');
         const isExtra=(item.bill_status==='زيادة');
         const hasMachine=item.machine_name&&item.machine_name!=='null'&&item.machine_name!=='';
         const _d=item.bill_date?new Date(item.bill_date):null;
@@ -734,12 +744,11 @@
       const refFilter=document.getElementById('refFilter').value.trim();
       const saveDateF=document.getElementById('saveDateFilter').value;
       return allData.filter(item=>{
-        const isPosted=(item.bill_status==='مرحَّل'||item.bill_status==='posted');
+        const isPosted=(item.bill_status==='مرحَّل'||item.bill_status==='posted'||item.bill_status==='مرتجع-مرحَّل');
         const isExtra=(item.bill_status==='زيادة');
-        const isReturn=(item.bill_status==='مرتجع');
+        const isReturn=(item.bill_status==='مرتجع'||item.bill_status==='مرتجع-مرحَّل');
         const hasMachine=item.machine_name&&item.machine_name!=='null'&&item.machine_name!=='';
         if(currentTab==='return'){if(!isReturn)return false;return !search||matchSearch(item,search);}
-        if(isReturn)return false;
         if(currentTab==='extra'){if(!isExtra)return false;if(extraStatus==='no_machine'&&hasMachine)return false;if(extraStatus==='pending'&&(isPosted||hasMachine))return false;if(extraStatus==='posted'&&!isPosted)return false;return !search||matchSearch(item,search);}
         if(isExtra)return false;
         if(currentTab==='pending'&&isPosted)return false;
@@ -767,8 +776,9 @@
       btn.disabled=true;btn.innerHTML='<i class="fas fa-spinner fa-spin"></i>';
       const now=new Date().toISOString(), ref=String(getNextRef());
       const item=allData.find(x=>String(x.id)===String(id));
-      const success=await updateData({type:'visa_update',id,bill_status:'مرحَّل',bill_save_date:now,machine_name:item?.machine_name??null,total_bill_net:item?.total_bill_net??null,split_amount:item?.split_amount??null,bill_notes:ref});
-      if(success){if(item){item.bill_status='مرحَّل';item.bill_save_date=now;item.bill_notes=ref;}applyFilter();}
+      const newStatus = item?.bill_status==='مرتجع' ? 'مرتجع-مرحَّل' : 'مرحَّل';
+      const success=await updateData({type:'visa_update',id,bill_status:newStatus,bill_save_date:now,machine_name:item?.machine_name??null,total_bill_net:item?.total_bill_net??null,split_amount:item?.split_amount??null,bill_notes:ref});
+      if(success){if(item){item.bill_status=newStatus;item.bill_save_date=now;item.bill_notes=ref;}applyFilter();}
       else{alert('❌ فشل التحديث');btn.disabled=false;btn.innerHTML='<i class="fas fa-check"></i> ترحيل';}
     }
 
