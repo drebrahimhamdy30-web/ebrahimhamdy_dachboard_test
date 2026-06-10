@@ -915,6 +915,7 @@ function renderOrders(){
       actions+=`<button class="ab ab-cancel" onclick="openCancel('${o.id}',event)">إلغاء</button>`;
     }
     if(o.status==='postponed'){
+      actions+=`<button class="ab ab-assign" onclick="activatePostponed('${o.id}',event)" style="background:#f0fdf4;color:#15803d;border-color:#bbf7d0;font-weight:800">▶ تشغيل</button>`;
       actions+=`<button class="ab ab-assign" onclick="quickAssign('${o.id}',event)">تعيين</button>`;
       actions+=`<button class="ab ab-urgent" onclick="markUrgent('${o.id}',event)">عاجل</button>`;
       actions+=`<button class="ab ab-cancel" onclick="openCancel('${o.id}',event)">إلغاء</button>`;
@@ -1096,10 +1097,14 @@ function openDeliver(id,e){
   e?.stopPropagation();
   const o=allOrders.find(x=>x.id===id);if(!o)return;
   document.getElementById('dlv-id').value=id;
-  document.getElementById('dlv-pay').value='';
-  document.getElementById('dlv-amt').value=o.total_bill_net||'';
   document.getElementById('dlv-note').value='';
+  document.getElementById('dlv-amt').value=o.collected_amount||o.total_bill_net||'';
   document.querySelectorAll('.pay-opt').forEach(b=>b.className='pay-opt');
+  // تحديد طريقة الدفع المسبقة من الصيدلية
+  const preselectedPay = o.payment_method || 'cash';
+  document.getElementById('dlv-pay').value=preselectedPay;
+  const payBtn=document.querySelector(`.pay-opt[onclick*="selPay('${preselectedPay}'"]`);
+  if(payBtn) payBtn.classList.add(`po-${preselectedPay}`);
   document.getElementById('deliverModal').classList.add('open');
 }
 function selPay(m,btn){document.querySelectorAll('.pay-opt').forEach(b=>b.className='pay-opt');btn.classList.add(`po-${m}`);document.getElementById('dlv-pay').value=m;}
@@ -1518,6 +1523,27 @@ async function openCancelByCustomer(orderId){
   }).eq('id',orderId);
   await addOrderLog(orderId,'order_cancelled',{reason:'العميل ألغى الطلب'});
   showToast('تم الإلغاء');await loadAll();showLoading(false);
+}
+
+// تشغيل طلب مؤجل
+async function activatePostponed(orderId, e){
+  e?.stopPropagation();
+  if(!confirm('تشغيل الطلب المؤجل وإعادته للتوزيع؟'))return;
+  showLoading(true);
+  const now=new Date().toISOString();
+  await db.from('orders').update({
+    status:'pending',
+    postpone_reason:null,
+    driver_id:null,
+    deliveryman:null,
+    assigned_at:null,
+    picked_at:null,
+    updated_at:now
+  }).eq('id',orderId);
+  await addOrderLog(orderId,'order_edited',{action:'reactivated_from_postponed'});
+  showToast('✓ تم تشغيل الطلب — سيتم توزيعه تلقائياً');
+  await loadAll();
+  showLoading(false);
 }
 
 // Trip complete
