@@ -69,9 +69,47 @@ class DispatchEngine {
         if (ok) assigned++;
       }
       this.log('✅ تم توزيع ' + assigned + ' طلب');
+
+      // تشغيل الطلبات المؤجلة التي حان وقتها
+      await this.activateDuePostponed();
+
     } catch(e) {
       console.error('Engine error:', e);
       this.log('❌ خطأ: ' + e.message);
+    }
+  }
+
+  async activateDuePostponed() {
+    try {
+      const now = new Date().toISOString();
+      // جيب الطلبات المؤجلة التي حان وقتها أو مالهاش وقت محدد وعدد محاولاتها أقل من الحد
+      const result = await this.db
+        .from('orders')
+        .select('id, bill_no, postpone_time, attempt_count')
+        .eq('status', 'postponed')
+        .or(`postpone_time.lte.${now},postpone_time.is.null`);
+
+      const maxAttempts = this.settings.max_attempts || 3;
+      const orders = (result.data || []).filter(o =>
+        !o.attempt_count || o.attempt_count < maxAttempts
+      );
+
+      if (!orders.length) return;
+
+      const ids = orders.map(o => o.id);
+      await this.db.from('orders').update({
+        status: 'pending',
+        postpone_reason: null,
+        driver_id: null,
+        deliveryman: null,
+        assigned_at: null,
+        picked_at: null,
+        updated_at: now
+      }).in('id', ids);
+
+      this.log('🔄 تم تشغيل ' + orders.length + ' طلب مؤجل');
+    } catch(e) {
+      console.error('activateDuePostponed error:', e);
     }
   }
 
