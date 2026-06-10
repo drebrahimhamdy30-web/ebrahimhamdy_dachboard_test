@@ -195,6 +195,7 @@ textarea.form-ctrl{height:80px;padding:.75rem;resize:none}
   </div>
   <div style="display:flex;align-items:center;gap:.5rem">
     <span class="att-timer" id="attTimer"></span>
+    <span id="driverRankBadge" style="display:none;font-size:.65rem;font-weight:700;padding:.15rem .5rem;border-radius:8px;background:rgba(26,86,219,.1);color:var(--primary)"></span>
     <div class="att-actions" id="attActions"></div>
   </div>
 </div>
@@ -352,6 +353,7 @@ async function loadAttendance(){
       .limit(20);
     renderAttendance(data||[]);
     renderHoursCard(data||[]);
+    await renderDriverRank();
   }catch(e){console.error(e);}
 }
 
@@ -601,6 +603,107 @@ async function loadHistory(){
     console.error(e);
     el.innerHTML='<div style="text-align:center;padding:2rem;color:var(--red)">خطأ في التحميل</div>';
   }
+}
+
+async function renderDriverRank(){
+  const badge=document.getElementById('driverRankBadge');
+  if(!badge||!driverRecord)return;
+  try{
+    const today=new Date().toISOString().split('T')[0];
+    const priority=settings?.driver_priority||'least_orders';
+
+    // جيب الطيارين الحاضرين اليوم
+    const {data:attData}=await db.from('driver_attendance')
+      .select('driver_id,status,approved_at,created_at')
+      .eq('date',today)
+      .order('created_at',{ascending:false});
+
+    // آخر حالة لكل طيار
+    const attStatus={};
+    (attData||[]).forEach(r=>{if(!attStatus[r.driver_id])attStatus[r.driver_id]=r;});
+
+    // فقط الحاضرين (online)
+    const onlineDriverIds=Object.entries(attStatus)
+      .filter(([,r])=>r.status==='online')
+      .map(([id])=>id);
+
+    if(!onlineDriverIds.includes(driverRecord.id)){
+      badge.style.display='none';
+      return;
+    }
+
+    const total=onlineDriverIds.length;
+    let rank=1;
+
+    if(priority==='least_orders'){
+      // الأقل طلبات أولاً — لو تساوى → الأقدم حضوراً
+      const {data:orders}=await db.from('orders')
+        .select('driver_id')
+        .in('status',['assigned','picked'])
+        .in('driver_id',onlineDriverIds);
+
+      const orderCount={};
+      onlineDriverIds.forEach(id=>orderCount[id]=0);
+      (orders||[]).forEach(o=>{if(o.driver_id)orderCount[o.driver_id]=(orderCount[o.driver_id]||0)+1;});
+
+      const myCount=orderCount[driverRecord.id]||0;
+      const myArrival=new Date(attStatus[driverRecord.id]?.approved_at||0);
+
+      rank=onlineDriverIds.filter(id=>{
+        const theirCount=orderCount[id]||0;
+        if(theirCount<myCount) return true; // عنده أقل → هو قبلي
+        if(theirCount===myCount){
+          // تساوى → الأقدم حضوراً أولاً
+          const theirArrival=new Date(attStatus[id]?.approved_at||0);
+          return theirArrival < myArrival;
+        }
+        return false;
+      }).length + 1;
+
+    } else {
+      // longest_idle — الأطول فراغاً أولاً
+      // نحسب آخر وقت اتوزع عليه طلب
+      const {data:lastOrders}=await db.from('orders')
+        .select('driver_id,assigned_at')
+        .in('driver_id',onlineDriverIds)
+        .not('assigned_at','is',null)
+        .order('assigned_at',{ascending:false});
+
+      // آخر تعيين لكل طيار
+      const lastAssigned={};
+      (lastOrders||[]).forEach(o=>{
+        if(!lastAssigned[o.driver_id]) lastAssigned[o.driver_id]=new Date(o.assigned_at);
+      });
+
+      // لو ما اتوزعلوش أي طلب → وقت الحضور
+      onlineDriverIds.forEach(id=>{
+        if(!lastAssigned[id]) lastAssigned[id]=new Date(attStatus[id]?.approved_at||0);
+      });
+
+      const myLastAssigned=lastAssigned[driverRecord.id]||new Date(0);
+
+      rank=onlineDriverIds.filter(id=>{
+        const theirLast=lastAssigned[id]||new Date(0);
+        // آخر تعيينه أقدم مني → هو قبلي (فراغه أطول)
+        return theirLast < myLastAssigned;
+      }).length + 1;
+    }
+
+    badge.style.display='inline';
+    if(rank===1){
+      badge.textContent='دورك #1 — التالي في التوزيع';
+      badge.style.background='rgba(22,163,74,.15)';
+      badge.style.color='var(--green)';
+    } else if(rank===2){
+      badge.textContent=`دورك #2 من ${total}`;
+      badge.style.background='rgba(234,88,12,.1)';
+      badge.style.color='var(--orange)';
+    } else {
+      badge.textContent=`دورك #${rank} من ${total}`;
+      badge.style.background='rgba(26,86,219,.1)';
+      badge.style.color='var(--primary)';
+    }
+  }catch(e){badge.style.display='none';}
 }
 
 async function loadAll(){
