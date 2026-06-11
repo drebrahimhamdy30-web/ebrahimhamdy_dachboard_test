@@ -1653,6 +1653,7 @@ async function initBranchSelector(){
     // موظف الفرع → فرعه بس
     activeBranchId = currentUser?.branch_id || null;
     loadAll();
+    setTimeout(initDispatchEngine, 2000);
     return;
   }
   // Admin → اعرض اختيار الفرع
@@ -1678,7 +1679,10 @@ function selectBranch(id, name){
   activeBranchId = id;
   document.getElementById('branchOverlay').style.display='none';
   document.getElementById('branchLabel').textContent = '· ' + name;
+  // أوقف الـ engine القديم وابدأ الجديد للفرع المختار
+  if(dispatchEngine){ dispatchEngine.stop?.(); dispatchEngine=null; }
   loadAll();
+  setTimeout(initDispatchEngine, 1000);
 }
 
 function selectBranchAll(){
@@ -1693,35 +1697,43 @@ initBranchSelector();
 // ===== AUTO DISPATCH ENGINE =====
 let dispatchEngine = null;
 async function initDispatchEngine() {
-  if (!currentUser?.branch_id) return;
-  // تحقق من إعداد auto_dispatch أولاً
-  const {data:ds} = await db.from('dispatch_settings').select('auto_dispatch').eq('branch_id',currentUser.branch_id);
+  // استخدم الفرع المختار (admin) أو فرع المستخدم
+  const branchId = currentUser?.role==='admin' ? activeBranchId : currentUser?.branch_id;
+  if (!branchId) {
+    console.log('[AutoDispatch] لم يتم اختيار فرع بعد');
+    return;
+  }
+  // تحقق من إعداد auto_dispatch
+  const {data:ds} = await db.from('dispatch_settings').select('auto_dispatch').eq('branch_id', branchId);
   const autoDispatch = ds?.[0]?.auto_dispatch;
   if (!autoDispatch) {
     console.log('[AutoDispatch] التوزيع التلقائي معطّل من الإعدادات');
     return;
   }
-  dispatchEngine = new DispatchEngine(db, currentUser.branch_id);
+  // لو فيه engine قديم على فرع مختلف → وقّفه
+  if (dispatchEngine) { dispatchEngine.stop?.(); dispatchEngine=null; }
+  dispatchEngine = new DispatchEngine(db, branchId);
   dispatchEngine.onLog = (msg) => {
     if (msg.includes('✅') || msg.includes('❌') || msg.includes('⚠️')) showToast(msg);
     console.log('[AutoDispatch]', msg);
   };
   await dispatchEngine.start();
 }
-setTimeout(initDispatchEngine, 2000);
 
-// إعادة تشغيل الـ engine لو تغير الإعداد (كل دقيقة)
+// إعادة تشغيل الـ engine لو تغير الإعداد أو الفرع (كل دقيقة)
 setInterval(async()=>{
-  if(!currentUser?.branch_id)return;
-  const {data:ds}=await db.from('dispatch_settings').select('auto_dispatch').eq('branch_id',currentUser.branch_id);
+  const branchId = currentUser?.role==='admin' ? activeBranchId : currentUser?.branch_id;
+  if(!branchId) return;
+  const {data:ds}=await db.from('dispatch_settings').select('auto_dispatch').eq('branch_id',branchId);
   const autoDispatch=ds?.[0]?.auto_dispatch;
-  if(autoDispatch&&!dispatchEngine){
-    // كان معطّل وأتفعّل
+  // لو الفرع اتغير → وقّف الـ engine القديم
+  if(dispatchEngine && dispatchEngine.branchId !== branchId){
+    dispatchEngine.stop?.(); dispatchEngine=null;
+  }
+  if(autoDispatch && !dispatchEngine){
     await initDispatchEngine();
-  } else if(!autoDispatch&&dispatchEngine){
-    // كان شغال وأتعطّل
-    dispatchEngine.stop?.();
-    dispatchEngine=null;
+  } else if(!autoDispatch && dispatchEngine){
+    dispatchEngine.stop?.(); dispatchEngine=null;
     console.log('[AutoDispatch] تم إيقاف التوزيع التلقائي');
   }
 },60000);
