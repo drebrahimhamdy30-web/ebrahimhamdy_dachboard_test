@@ -106,7 +106,7 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
         </div>
         <div class="form-group">
           <label>الفرع *</label>
-          <select class="form-control" id="d-branch" onchange="onBranchChange()">
+          <select class="form-control" id="d-branch">
             <option value="">اختر الفرع...</option>
           </select>
         </div>
@@ -124,9 +124,24 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
         </label>
       </div>
 
-      <div class="section-label-sm" style="margin-top:.75rem">المناطق المغطاة <span style="font-size:.7rem;font-weight:400;color:var(--text-muted)" id="branchRegionsHint">(اختر الفرع أولاً)</span></div>
-      <div id="regionsCheckboxes" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.35rem;max-height:180px;overflow-y:auto;border:1.5px solid var(--border);border-radius:10px;padding:.625rem">
-        <div style="color:var(--text-muted);font-size:.78rem;grid-column:1/-1">اختر الفرع لعرض المناطق</div>
+      <div class="section-label-sm" style="margin-top:.75rem">التصنيفات المغطاة</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
+        <label class="checkbox-item" style="font-size:.82rem;padding:.5rem .75rem;border:1.5px solid var(--border);border-radius:10px;cursor:pointer">
+          <input type="checkbox" id="cov-inside" style="accent-color:#16a34a;width:15px;height:15px">
+          <span style="display:flex;align-items:center;gap:.3rem"><span style="width:10px;height:10px;border-radius:50%;background:#16a34a;flex-shrink:0"></span>داخل الزون</span>
+        </label>
+        <label class="checkbox-item" style="font-size:.82rem;padding:.5rem .75rem;border:1.5px solid var(--border);border-radius:10px;cursor:pointer">
+          <input type="checkbox" id="cov-outside" style="accent-color:#ca8a04;width:15px;height:15px">
+          <span style="display:flex;align-items:center;gap:.3rem"><span style="width:10px;height:10px;border-radius:50%;background:#ca8a04;flex-shrink:0"></span>خارج الزون</span>
+        </label>
+        <label class="checkbox-item" style="font-size:.82rem;padding:.5rem .75rem;border:1.5px solid var(--border);border-radius:10px;cursor:pointer">
+          <input type="checkbox" id="cov-permit" style="accent-color:#7c3aed;width:15px;height:15px">
+          <span style="display:flex;align-items:center;gap:.3rem"><span style="width:10px;height:10px;border-radius:50%;background:#7c3aed;flex-shrink:0"></span>يحتاج ترخيص</span>
+        </label>
+        <label class="checkbox-item" style="font-size:.82rem;padding:.5rem .75rem;border:1.5px solid var(--border);border-radius:10px;cursor:pointer">
+          <input type="checkbox" id="cov-hard" style="accent-color:#dc2626;width:15px;height:15px">
+          <span style="display:flex;align-items:center;gap:.3rem"><span style="width:10px;height:10px;border-radius:50%;background:#dc2626;flex-shrink:0"></span>صعب الوصول</span>
+        </label>
       </div>
 
       <div class="section-label-sm" style="margin-top:.75rem">بيانات المركبة</div>
@@ -281,12 +296,11 @@ function renderDrivers(){
     if(d.has_vehicle_license) licenses.push('🚗 رخصة مركبة');
     if(d.has_drive_license) licenses.push('📋 رخصة قيادة');
 
-    // المناطق المغطاة
-    const coveredRegions=allRegions.filter(r=>(d.covered_regions||[]).includes(r.id));
-    const regionTags=coveredRegions.slice(0,3).map(r=>{
-      const t=(r.types||[])[0];
-      return `<span class="zone-tag ${TYPE_CLASS[t]||''}" style="background:#f1f5f9;color:#475569">${r.name}</span>`;
-    }).join('')+(coveredRegions.length>3?`<span class="zone-tag" style="background:#f1f5f9;color:#64748b">+${coveredRegions.length-3}</span>`:'');
+    // التصنيفات المغطاة
+    const covTypes=d.covered_types||[];
+    const covColors={inside:'#16a34a',outside:'#ca8a04',permit:'#7c3aed',hard:'#dc2626'};
+    const covNames={inside:'داخل الزون',outside:'خارج الزون',permit:'ترخيص',hard:'صعب'};
+    const regionTags=covTypes.map(t=>`<span class="zone-tag" style="background:${covColors[t]}22;color:${covColors[t]};border:1px solid ${covColors[t]}44">${covNames[t]||t}</span>`).join('');
 
     return `<div class="driver-card ${isOnline?'online':'offline'} ${!d.is_active?'inactive':''}">
       <div class="online-dot ${isOnline?'dot-online':'dot-offline'}"></div>
@@ -302,7 +316,7 @@ function renderDrivers(){
           <div class="dc-info-row"><span class="dc-info-label">الفرع</span><span class="dc-info-value">${branchName}</span></div>
           ${d.vehicle_type?`<div class="dc-info-row"><span class="dc-info-label">المركبة</span><span class="dc-info-value">${d.vehicle_type}${d.vehicle_plate?' · '+d.vehicle_plate:''}</span></div>`:''}
           ${licenses.length?`<div class="dc-info-row"><span class="dc-info-label">الرخص</span><span class="dc-info-value" style="font-size:.65rem">${licenses.join(' · ')}</span></div>`:''}
-          ${coveredRegions.length?`<div class="dc-info-row"><span class="dc-info-label">يغطي</span><div class="zones-wrap">${regionTags}</div></div>`:''}
+          ${covTypes.length?`<div class="dc-info-row"><span class="dc-info-label">يغطي</span><div class="zones-wrap">${regionTags}</div></div>`:''}
         </div>
       </div>
       <div class="dc-footer">
@@ -314,39 +328,7 @@ function renderDrivers(){
   }).join('');
 }
 
-// ===== BRANCH CHANGE → LOAD REGIONS =====
-async function onBranchChange(){
-  const branchId=document.getElementById('d-branch').value;
-  const box=document.getElementById('regionsCheckboxes');
-  const hint=document.getElementById('branchRegionsHint');
-  if(!branchId){
-    box.innerHTML='<div style="color:var(--text-muted);font-size:.78rem;grid-column:1/-1">اختر الفرع لعرض المناطق</div>';
-    hint.textContent='(اختر الفرع أولاً)';
-    return;
-  }
-  // جيب مناطق الفرع المختار
-  const {data:branchRegions}=await db.from('regions').select('id,name,types').eq('branch_id',branchId).eq('is_active',true).order('name');
-  const regions=branchRegions||[];
-  hint.textContent=`(${regions.length} منطقة)`;
-  if(!regions.length){
-    box.innerHTML='<div style="color:var(--text-muted);font-size:.78rem;grid-column:1/-1">لا توجد مناطق مسجلة لهذا الفرع</div>';
-    return;
-  }
-  // الحصول على المناطق المحددة مسبقاً (في حالة التعديل)
-  const dId=document.getElementById('d-id').value;
-  const driver=dId?allDrivers.find(d=>d.id===dId):null;
-  const coveredIds=driver?.covered_regions||[];
-  box.innerHTML=regions.map(r=>{
-    const t=(r.types||[])[0];
-    const typeLabel=TYPE_LABELS[t]||'';
-    const typeClass=TYPE_CLASS[t]||'';
-    return `<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;cursor:pointer;padding:.2rem">
-      <input type="checkbox" value="${r.id}" ${coveredIds.includes(r.id)?'checked':''} style="accent-color:var(--primary);width:14px;height:14px">
-      <span>${r.name}</span>
-      ${typeLabel?`<span class="zone-tag ${typeClass}" style="font-size:.55rem">${typeLabel}</span>`:''}
-    </label>`;
-  }).join('');
-}
+
 
 // ===== ADD/EDIT =====
 function openAddModal(){
@@ -361,8 +343,7 @@ function openAddModal(){
   document.getElementById('d-lic-drive').checked=false;
   document.getElementById('usernameGroup').style.display='';
   document.getElementById('passwordGroup').style.display='';
-  document.getElementById('regionsCheckboxes').innerHTML='<div style="color:var(--text-muted);font-size:.78rem;grid-column:1/-1">اختر الفرع لعرض المناطق</div>';
-  document.getElementById('branchRegionsHint').textContent='(اختر الفرع أولاً)';
+  ['cov-inside','cov-outside','cov-permit','cov-hard'].forEach(id=>document.getElementById(id).checked=false);
   document.getElementById('driverModal').classList.add('open');
 }
 
@@ -384,8 +365,12 @@ async function openEdit(id){
   document.getElementById('d-password').value='';
   document.getElementById('usernameGroup').style.display='none';
   document.getElementById('passwordGroup').style.display='none';
-  // حمّل مناطق الفرع
-  await onBranchChange();
+  // تصنيفات المغطاة
+  const cov=d.covered_types||[];
+  document.getElementById('cov-inside').checked=cov.includes('inside');
+  document.getElementById('cov-outside').checked=cov.includes('outside');
+  document.getElementById('cov-permit').checked=cov.includes('permit');
+  document.getElementById('cov-hard').checked=cov.includes('hard');
   document.getElementById('driverModal').classList.add('open');
 }
 
@@ -399,8 +384,8 @@ async function saveDriver(){
   if(!branchId){alert('الفرع مطلوب');return;}
   if(!id&&(!username||!password)){alert('اسم المستخدم وكلمة المرور مطلوبان');return;}
 
-  // جيب المناطق المحددة
-  const coveredRegions=[...document.querySelectorAll('#regionsCheckboxes input[type=checkbox]:checked')].map(cb=>cb.value);
+  // التصنيفات المغطاة
+  const coveredTypes=['inside','outside','permit','hard'].filter(t=>document.getElementById(`cov-${t}`).checked);
 
   showLoading(true);
   try{
@@ -415,7 +400,7 @@ async function saveDriver(){
       is_online:document.getElementById('d-online').checked,
       has_vehicle_license:document.getElementById('d-lic-vehicle').checked,
       has_drive_license:document.getElementById('d-lic-drive').checked,
-      covered_regions:coveredRegions,
+      covered_types:coveredTypes,
     };
     if(id){
       await db.from('drivers').update(payload).eq('id',id);
