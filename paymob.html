@@ -26,6 +26,33 @@
     .pm-modal h3 { color:#f1f5f9; font-size:1rem; margin:0 0 16px; display:flex; align-items:center; gap:8px; }
     .pm-field { margin-bottom:12px; }
     .pm-field label { display:block; font-size:0.78rem; font-weight:700; color:#94a3b8; margin-bottom:5px; }
+
+    /* ===== وضع المقارنة ===== */
+    .cmp-panel { display:none; border:2px dashed var(--accent); border-radius:14px; padding:16px; margin-bottom:14px; background:var(--surface-3); }
+    .cmp-panel.open { display:block; }
+    .cmp-step-title { font-size:0.9rem; font-weight:800; color:var(--text-primary); margin:0 0 8px; display:flex; align-items:center; gap:7px; }
+    .cmp-days-grid { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+    .cmp-day-chip { padding:7px 14px; border-radius:20px; border:1.5px solid var(--border); background:var(--surface); color:var(--text-secondary); font-size:0.8rem; cursor:pointer; user-select:none; transition:all 0.15s; font-weight:700; }
+    .cmp-day-chip.sel { background:var(--accent); color:var(--primary); border-color:var(--accent); }
+    .cmp-day-chip .cnt { opacity:0.7; font-size:0.68rem; }
+    .cmp-upload-row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:6px; }
+    .cmp-summary { display:flex; gap:10px; flex-wrap:wrap; margin:14px 0; }
+    .cmp-sum-card { border-radius:12px; padding:10px 16px; font-size:0.82rem; font-weight:800; border:1.5px solid; }
+    .cmp-sum-ok      { background:#dcfce7; color:#15803d; border-color:#86efac; }
+    .cmp-sum-missing { background:#fee2e2; color:#b91c1c; border-color:#fca5a5; }
+    .cmp-sum-extra   { background:#fef9c3; color:#a16207; border-color:#fde047; }
+    .cmp-sum-diff    { background:#ffedd5; color:#c2410c; border-color:#fdba74; }
+    .cmp-result-day { border:1px solid var(--border); border-radius:12px; margin-bottom:12px; overflow:hidden; }
+    .cmp-result-day-head { background:var(--surface); padding:9px 14px; font-weight:800; font-size:0.86rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; }
+    .cmp-row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:7px 14px; border-top:1px solid var(--border); font-size:0.8rem; flex-wrap:wrap; }
+    .cmp-row .left { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .cmp-tag { font-size:0.66rem; padding:2px 9px; border-radius:20px; font-weight:800; white-space:nowrap; }
+    .cmp-tag-missing { background:#fee2e2; color:#b91c1c; }
+    .cmp-tag-extra   { background:#fef9c3; color:#a16207; }
+    .cmp-tag-diff    { background:#ffedd5; color:#c2410c; }
+    .cmp-tag-ok      { background:#dcfce7; color:#15803d; }
+    .cmp-mono { font-family:monospace; font-size:0.74rem; color:var(--text-secondary); }
+    .cmp-empty-day { padding:10px 14px; font-size:0.78rem; color:var(--text-muted); border-top:1px solid var(--border); }
   </style>
 </head>
 <body>
@@ -43,9 +70,26 @@
             <i class="fas fa-search"></i>
             <input type="text" id="searchInput" class="form-input" placeholder="بحث بالقيمة أو رقم الفاتورة..." oninput="applyFilter()">
           </div>
+          <button class="btn" id="cmp-toggle-btn" style="background:var(--primary);color:#fff;" onclick="toggleCompareMode()"><i class="fas fa-scale-balanced"></i> وضع المقارنة</button>
           <button class="btn btn-primary" onclick="openAddModal()"><i class="fas fa-plus"></i> إضافة يدوي</button>
           <button class="btn btn-primary" onclick="loadAll()"><i class="fas fa-sync-alt"></i></button>
         </div>
+      </div>
+
+      <!-- ===== لوحة وضع المقارنة ===== -->
+      <div class="cmp-panel" id="cmp-panel">
+        <div class="cmp-step-title"><i class="fas fa-calendar-check" style="color:var(--accent);"></i> ١) اختر الأيام اللي عايز تقارنها</div>
+        <div class="cmp-days-grid" id="cmp-days-grid"></div>
+
+        <div class="cmp-step-title"><i class="fas fa-file-excel" style="color:var(--accent);"></i> ٢) ارفع شيت باي موب (CSV / Excel)</div>
+        <div class="cmp-upload-row">
+          <input type="file" id="cmp-file" accept=".csv,.xlsx,.xls" class="form-input" style="max-width:320px;">
+          <button class="btn btn-primary" onclick="runCompare()"><i class="fas fa-play"></i> قارن</button>
+          <button class="btn" style="background:var(--surface);color:var(--text-secondary);border:1px solid var(--border);" onclick="resetCompare()"><i class="fas fa-eraser"></i> مسح</button>
+        </div>
+        <div style="font-size:0.72rem;color:var(--text-muted);">المطابقة تتم برقم الطلب (order_id)، ولو مش موجود يحاول بالقيمة. الأيام اللي تختارها بتتقارن بنفس الأيام في الشيت بس.</div>
+
+        <div id="cmp-output"></div>
       </div>
 
       <div class="tabs-bar" id="status-tabs-row">
@@ -120,6 +164,8 @@
 
   <script src="api.js"></script>
   <script src="nav.js" defer></script>
+  <!-- مكتبة قراءة Excel (xlsx) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script>
     const BRANCH_MAP = {
       'المعمورة':    'الصيدلية',
@@ -197,6 +243,7 @@
           branchTerminals.includes(String(p.terminal_id || '').trim())
         );
         applyFilter();
+        if (document.getElementById('cmp-panel').classList.contains('open')) buildCompareDays();
       } catch(e) {
         tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
       }
@@ -503,6 +550,262 @@
       document.getElementById('searchInput').value = '';
       document.getElementById('dayFilter').value   = '';
       applyFilter();
+    }
+
+    /* ==================================================================
+       ============== وضع المقارنة (Compare Mode) =======================
+       ================================================================== */
+
+    let cmpSelectedDays = new Set();
+
+    function toggleCompareMode() {
+      const panel = document.getElementById('cmp-panel');
+      const btn   = document.getElementById('cmp-toggle-btn');
+      const open  = panel.classList.toggle('open');
+      if (open) {
+        btn.style.background = 'var(--accent)';
+        btn.innerHTML = '<i class="fas fa-xmark"></i> إغلاق المقارنة';
+        buildCompareDays();
+      } else {
+        btn.style.background = 'var(--primary)';
+        btn.innerHTML = '<i class="fas fa-scale-balanced"></i> وضع المقارنة';
+      }
+    }
+
+    // بناء شيبس الأيام من بيانات السيستم
+    function buildCompareDays() {
+      const grid = document.getElementById('cmp-days-grid');
+      const dayCount = {};
+      allData.forEach(p => {
+        const k = dayKey(p); if (!k) return;
+        dayCount[k] = (dayCount[k] || 0) + 1;
+      });
+      const keys = Object.keys(dayCount).sort().reverse();
+      if (!keys.length) { grid.innerHTML = '<span style="color:var(--text-muted);font-size:0.8rem;">لا توجد أيام في السيستم</span>'; return; }
+      grid.innerHTML = keys.map(k => {
+        const sel = cmpSelectedDays.has(k) ? 'sel' : '';
+        return `<span class="cmp-day-chip ${sel}" data-day="${k}" onclick="toggleCmpDay('${k}', this)">
+          ${fmtDayTitle(k)} <span class="cnt">(${dayCount[k]})</span>
+        </span>`;
+      }).join('');
+    }
+
+    function toggleCmpDay(k, el) {
+      if (cmpSelectedDays.has(k)) { cmpSelectedDays.delete(k); el.classList.remove('sel'); }
+      else { cmpSelectedDays.add(k); el.classList.add('sel'); }
+    }
+
+    function resetCompare() {
+      cmpSelectedDays.clear();
+      document.getElementById('cmp-file').value = '';
+      document.getElementById('cmp-output').innerHTML = '';
+      buildCompareDays();
+    }
+
+    // تطبيع رقم لمقارنة القيم (تقريب لخانتين)
+    function normAmt(v) { return Math.round((parseFloat(v) || 0) * 100) / 100; }
+
+    // تحويل تاريخ الشيت (d/m/yyyy) لمفتاح يوم YYYY-MM-DD
+    function sheetDayKey(paidAt) {
+      if (!paidAt) return '';
+      const datePart = String(paidAt).trim().split(' ')[0];
+      const parts = datePart.split('/');
+      if (parts.length < 3) return '';
+      const d  = parseInt(parts[0], 10);
+      const mo = parseInt(parts[1], 10);
+      const y  = parseInt(parts[2], 10);
+      if (!d || !mo || !y) return '';
+      return `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    }
+
+    // قراءة الملف المرفوع (CSV أو Excel) وإرجاع صفوف موحّدة
+    async function parseSheet(file) {
+      const buf  = await file.arrayBuffer();
+      const wb   = XLSX.read(buf, { type: 'array' });
+      const ws   = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+      // توحيد أسماء الأعمدة المهمة
+      return rows.map(r => {
+        // ندوّر على الأعمدة بأي حروف (case-insensitive)
+        const get = (names) => {
+          for (const key of Object.keys(r)) {
+            const lk = key.toLowerCase().trim();
+            if (names.includes(lk)) return r[key];
+          }
+          return '';
+        };
+        return {
+          order_id: String(get(['order_id','order id','orderid']) || '').trim(),
+          amount:   get(['gross_amount','amount','gross amount','converted_gross_amount']) || '',
+          paid_at:  get(['paid_at','paid at','date','transaction_time']) || '',
+          branch:   String(get(['terminal_branch_id','terminal branch id','branch']) || '').trim(),
+        };
+      }).filter(r => r.order_id || r.amount); // نتجاهل الصفوف الفاضية
+    }
+
+    async function runCompare() {
+      const out  = document.getElementById('cmp-output');
+      const file = document.getElementById('cmp-file').files[0];
+
+      if (!cmpSelectedDays.size) { alert('اختر يوم واحد على الأقل للمقارنة'); return; }
+      if (!file) { alert('ارفع شيت باي موب الأول'); return; }
+
+      out.innerHTML = '<div style="padding:14px;color:var(--text-muted);">⏳ جاري قراءة الشيت والمقارنة...</div>';
+
+      let sheetRows;
+      try {
+        sheetRows = await parseSheet(file);
+      } catch(e) {
+        out.innerHTML = '<div style="padding:14px;color:var(--danger);">❌ تعذّر قراءة الملف. تأكد إنه CSV أو Excel صحيح.</div>';
+        return;
+      }
+
+      const selDays = cmpSelectedDays;
+
+      // === بيانات السيستم: الأيام المختارة فقط ===
+      const sysByDay = {};
+      allData.forEach(p => {
+        const k = dayKey(p);
+        if (!selDays.has(k)) return;
+        if (!sysByDay[k]) sysByDay[k] = [];
+        sysByDay[k].push({
+          order_id: String(p.order_id || '').trim(),
+          amount:   normAmt(p.amount),
+          bill_no:  String(p.bill_no || '').trim(),
+          machine:  machineNameOf(p.terminal_id),
+          time:     fmtTime(p.transaction_time),
+          raw: p
+        });
+      });
+
+      // === بيانات الشيت: الأيام المختارة فقط ===
+      const sheetByDay = {};
+      sheetRows.forEach(r => {
+        const k = sheetDayKey(r.paid_at);
+        if (!selDays.has(k)) return;
+        if (!sheetByDay[k]) sheetByDay[k] = [];
+        sheetByDay[k].push({
+          order_id: r.order_id,
+          amount:   normAmt(r.amount),
+          paid_at:  r.paid_at
+        });
+      });
+
+      // === المقارنة لكل يوم ===
+      let totMissing = 0, totExtra = 0, totDiff = 0, totOk = 0;
+      const dayBlocks = [];
+
+      const allSelSorted = Array.from(selDays).sort().reverse();
+
+      allSelSorted.forEach(k => {
+        const sysRows   = sysByDay[k]   || [];
+        const sheetList = sheetByDay[k] || [];
+
+        // فهرسة الشيت بالـ order_id
+        const sheetByOrder = {};
+        sheetList.forEach(s => { if (s.order_id) sheetByOrder[s.order_id] = s; });
+
+        // فهرسة الشيت بالقيمة (احتياط لو order_id مش موجود)
+        const sheetByAmt = {};
+        sheetList.forEach(s => {
+          const key = s.amount.toFixed(2);
+          if (!sheetByAmt[key]) sheetByAmt[key] = [];
+          sheetByAmt[key].push(s);
+        });
+
+        const usedSheet = new Set();
+        const rowsHtml  = [];
+
+        // مرّ على معاملات السيستم
+        sysRows.forEach(sys => {
+          let match = null;
+
+          // ١) مطابقة بالـ order_id
+          if (sys.order_id && sheetByOrder[sys.order_id] && !usedSheet.has(sheetByOrder[sys.order_id])) {
+            match = sheetByOrder[sys.order_id];
+          }
+          // ٢) مطابقة بالقيمة (احتياط)
+          if (!match) {
+            const key = sys.amount.toFixed(2);
+            const cands = (sheetByAmt[key] || []).filter(s => !usedSheet.has(s));
+            if (cands.length) match = cands[0];
+          }
+
+          if (match) {
+            usedSheet.add(match);
+            if (normAmt(match.amount) === normAmt(sys.amount)) {
+              totOk++;
+              // المطابقة التامة منعرضهاش بالتفصيل عشان منزحمش (نعدّها بس)
+            } else {
+              totDiff++;
+              rowsHtml.push(`<div class="cmp-row">
+                <div class="left">
+                  <span class="cmp-tag cmp-tag-diff">⚠️ قيمة مختلفة</span>
+                  <span class="cmp-mono">order: ${sys.order_id || '—'}</span>
+                  <span style="color:var(--text-muted);">${sys.machine}</span>
+                </div>
+                <div>السيستم: <b style="color:var(--accent-dark);">${sys.amount.toFixed(2)}</b> | الشيت: <b style="color:#c2410c;">${match.amount.toFixed(2)}</b></div>
+              </div>`);
+            }
+          } else {
+            // في السيستم ومش في الشيت
+            totExtra++;
+            rowsHtml.push(`<div class="cmp-row">
+              <div class="left">
+                <span class="cmp-tag cmp-tag-extra">🟠 في السيستم فقط</span>
+                <span class="cmp-mono">order: ${sys.order_id || '—'}</span>
+                <span style="color:var(--text-muted);">${sys.machine} · ${sys.time}</span>
+                ${sys.bill_no ? `<span class="ref-badge">#${sys.bill_no}</span>` : ''}
+              </div>
+              <div><b style="color:var(--accent-dark);">${sys.amount.toFixed(2)}</b></div>
+            </div>`);
+          }
+        });
+
+        // ما تبقى في الشيت ولم يُطابَق = في الشيت ومش في السيستم
+        sheetList.forEach(s => {
+          if (usedSheet.has(s)) return;
+          totMissing++;
+          rowsHtml.push(`<div class="cmp-row">
+            <div class="left">
+              <span class="cmp-tag cmp-tag-missing">🔴 في الشيت فقط</span>
+              <span class="cmp-mono">order: ${s.order_id || '—'}</span>
+              <span style="color:var(--text-muted);">${s.paid_at}</span>
+            </div>
+            <div><b style="color:#b91c1c;">${s.amount.toFixed(2)}</b></div>
+          </div>`);
+        });
+
+        const dayOkCount = sysRows.length - rowsHtml.filter(h => h.includes('في السيستم فقط') || h.includes('قيمة مختلفة')).length;
+
+        const head = `<div class="cmp-result-day-head">
+          <span><i class="fas fa-calendar-day" style="color:var(--accent);margin-left:5px;"></i> ${fmtDayTitle(k)}</span>
+          <span style="font-size:0.72rem;font-weight:700;color:var(--text-muted);">
+            سيستم: ${sysRows.length} · شيت: ${sheetList.length}
+          </span>
+        </div>`;
+
+        const body = rowsHtml.length
+          ? rowsHtml.join('')
+          : '<div class="cmp-empty-day">✅ كل المعاملات متطابقة في هذا اليوم — لا يوجد أي فرق</div>';
+
+        dayBlocks.push(`<div class="cmp-result-day">${head}${body}</div>`);
+      });
+
+      // === ملخص علوي ===
+      const summary = `<div class="cmp-summary">
+        <div class="cmp-sum-card cmp-sum-ok">✅ متطابق: ${totOk}</div>
+        <div class="cmp-sum-card cmp-sum-missing">🔴 في الشيت فقط: ${totMissing}</div>
+        <div class="cmp-sum-card cmp-sum-extra">🟠 في السيستم فقط: ${totExtra}</div>
+        <div class="cmp-sum-card cmp-sum-diff">⚠️ قيمة مختلفة: ${totDiff}</div>
+      </div>`;
+
+      const allClear = (totMissing === 0 && totExtra === 0 && totDiff === 0);
+      const banner = allClear
+        ? '<div style="padding:12px 16px;background:#dcfce7;color:#15803d;border-radius:12px;font-weight:800;margin-bottom:12px;">🎉 كل الأيام المختارة متطابقة تمامًا مع الشيت — مفيش أي فرق</div>'
+        : '';
+
+      out.innerHTML = banner + summary + dayBlocks.join('');
     }
   </script>
 </body>
