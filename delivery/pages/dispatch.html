@@ -980,7 +980,7 @@ function renderOrders(){
       ${o.cust_region?`<span class="oc-region" style="${!knownRegions.has(o.cust_region)?'background:#fee2e2;color:#b91c1c;border:1px solid #fecaca':''}">${o.cust_region}${!knownRegions.has(o.cust_region)?' ⚠️':''}</span>`:''}
       <div class="oc-bottom">
         <span class="oc-amount">${Number(o.total_bill_net||0).toLocaleString()} ج</span>
-        <span class="oc-pay ${pmC}" style="cursor:pointer" onclick="cyclePayment('${o.id}',event)" title="انقر لتغيير طريقة الدفع">${pmL} ✎</span>
+        <span class="oc-pay ${pmC}" style="cursor:pointer;user-select:none" onclick="cyclePayment('${o.id}',event)" title="تغيير طريقة الدفع">${pmL} ▾</span>
         <span class="oc-st ${stC}">${SL[o.status]||o.status}</span>
       </div>
       ${o.deliveryman?`<div style="font-size:.62rem;color:var(--text-muted);margin-bottom:.28rem">🚗 ${o.deliveryman}</div>`:''}
@@ -1236,18 +1236,43 @@ async function confirmEdit(){
   closeModal('editModal');showToast('تم الحفظ');await loadAll();showLoading(false);
 }
 
-// تغيير طريقة الدفع من الكارت
-async function cyclePayment(id, e){
+// تغيير طريقة الدفع - dropdown
+function cyclePayment(id, e){
   e?.stopPropagation();
+  // لو فيه dropdown مفتوح → اقفله
+  const existing=document.getElementById('pay-dd');
+  if(existing){existing.remove();return;}
   const o=allOrders.find(x=>x.id===id);if(!o)return;
-  const methods=['cash','visa','transfer','deferred'];
-  const labels={'cash':'كاش','visa':'فيزا','transfer':'تحويل','deferred':'آجل'};
-  const current=o.payment_method||'cash';
-  const idx=methods.indexOf(current);
-  const next=methods[(idx+1)%methods.length];
+  const methods=[
+    {val:'cash',label:'💵 كاش',cls:'p-cash'},
+    {val:'visa',label:'💳 فيزا',cls:'p-visa'},
+    {val:'transfer',label:'🏦 تحويل',cls:'p-transfer'},
+    {val:'deferred',label:'📋 آجل',cls:'p-deferred'},
+  ];
+  const dd=document.createElement('div');
+  dd.id='pay-dd';
+  dd.style.cssText='position:fixed;z-index:500;background:white;border-radius:10px;border:1.5px solid var(--border);box-shadow:0 8px 24px rgba(0,0,0,.15);padding:.3rem;min-width:130px';
+  dd.innerHTML=methods.map(m=>`
+    <div onclick="selectPayment('${id}','${m.val}')" style="padding:.45rem .75rem;border-radius:7px;cursor:pointer;font-size:.78rem;font-weight:700;transition:background .1s;${o.payment_method===m.val?'background:var(--primary-light);color:var(--primary)':''}" onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background='${o.payment_method===m.val?'var(--primary-light)':'white'}'">
+      ${m.label}${o.payment_method===m.val?' ✓':''}
+    </div>`).join('');
+  // position near click
+  const rect=e.target.getBoundingClientRect();
+  dd.style.top=(rect.bottom+4)+'px';
+  dd.style.right=(window.innerWidth-rect.right)+'px';
+  document.body.appendChild(dd);
+  // close on outside click
+  setTimeout(()=>document.addEventListener('click',function closeDD(ev){
+    if(!dd.contains(ev.target)){dd.remove();document.removeEventListener('click',closeDD);}
+  }),50);
+}
+
+async function selectPayment(id, method){
+  document.getElementById('pay-dd')?.remove();
   showLoading(true);
-  await db.from('orders').update({payment_method:next,updated_at:new Date().toISOString()}).eq('id',id);
-  showToast(`✓ طريقة الدفع: ${labels[next]}`);
+  const labels={cash:'كاش',visa:'فيزا',transfer:'تحويل',deferred:'آجل'};
+  await db.from('orders').update({payment_method:method,updated_at:new Date().toISOString()}).eq('id',id);
+  showToast(`✓ طريقة الدفع: ${labels[method]}`);
   await loadAll();
   showLoading(false);
 }
