@@ -281,7 +281,17 @@ class DispatchEngine {
     var maxOrders = this.settings.max_orders_per_trip || 10;
 
     var eligible = drivers.filter(function(driver) {
-      if (needsLicense && !driver.has_license) return false;
+      // تحقق من التصنيفات المغطاة
+      if (!noRegion && !unregisteredRegion && regionData) {
+        var regionTypes = regionData.types || [];
+        var coveredTypes = driver.covered_types || [];
+        // لو المنطقة عندها تصنيف → الطيار لازم يغطيه
+        if (regionTypes.length > 0 && coveredTypes.length > 0) {
+          var hasMatch = regionTypes.some(function(t){ return coveredTypes.includes(t); });
+          if (!hasMatch) return false;
+        }
+      }
+      if (needsLicense && !driver.has_vehicle_license && !driver.has_drive_license) return false;
       var trip = driverActiveTrip[driver.id];
       if (trip && trip.order_count >= maxOrders) return false;
       // لو منطقة مسجلة → تحقق من خط السير
