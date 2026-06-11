@@ -259,12 +259,23 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
 </head>
 <body>
 
+<!-- Branch Selector Overlay (admin only) -->
+<div id="branchOverlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.85);z-index:500;align-items:center;justify-content:center">
+  <div style="background:#1e293b;border-radius:16px;border:1px solid #334155;padding:2rem;width:340px;box-shadow:0 20px 60px rgba(0,0,0,.5)">
+    <div style="font-size:1rem;font-weight:800;color:white;margin-bottom:.5rem;text-align:center">🏢 اختر الفرع</div>
+    <div style="font-size:.75rem;color:#64748b;text-align:center;margin-bottom:1.25rem">اختر الفرع اللي عايز تشوف شاشة التوزيع بتاعته</div>
+    <div id="branchOverlayList" style="display:flex;flex-direction:column;gap:.5rem;margin-bottom:1rem"></div>
+    <button onclick="selectBranchAll()" style="width:100%;padding:.625rem;background:rgba(255,255,255,.08);border:1px solid #334155;color:#94a3b8;border-radius:10px;font-family:'Cairo',sans-serif;font-size:.8rem;font-weight:600;cursor:pointer">👁 عرض كل الفروع</button>
+  </div>
+</div>
+
 <header class="dispatch-header">
   <div class="dh-title">🚚 <span>شاشة</span> التوزيع <span id="branchLabel" style="font-size:.7rem;color:#94a3b8;font-weight:500"></span></div>
   <div class="dh-stats" id="headerStats"></div>
   <div class="dh-right">
     <div class="refresh-dot"></div>
     <span class="dh-time" id="clockTime"></span>
+    <button class="icon-btn" id="switchBranchBtn" onclick="showBranchOverlay()" style="display:none">🏢 تغيير الفرع</button>
     <button class="icon-btn" onclick="loadAll()">↻ تحديث</button>
   </div>
 </header>
@@ -535,10 +546,9 @@ let dispatchSettings = null;
 async function loadAll(){
   showLoading(true);
   try{
-    const branchId=currentUser?.branch_id;
-    const isAdmin=currentUser?.role==='admin'&&!branchId;
+    // فلتر حسب الفرع المختار
+    const branchId = currentUser?.role==='admin' ? activeBranchId : (currentUser?.branch_id||null);
 
-    // فلتر حسب الفرع
     let ordersQ=db.from('orders').select('*').order('created_at',{ascending:false});
     let driversQ=db.from('drivers').select('*,branches(name)').eq('is_active',true).order('full_name');
     let tripsQ=db.from('trips').select('*').eq('status','active').order('created_at',{ascending:false});
@@ -561,6 +571,9 @@ async function loadAll(){
       const dsRes=await db.from('dispatch_settings').select('*').eq('branch_id',branchId);
       dispatchSettings=dsRes.data?.[0]||null;
     }
+    // تحديث لابل الفرع
+    const bl=document.getElementById('branchLabel');
+    if(bl&&!bl.textContent) bl.textContent=branchId?'':'· كل الفروع';
     tripOrdersMap={};
     (rrR.data||[]).forEach(r=>{if(!tripOrdersMap[r.trip_id])tripOrdersMap[r.trip_id]=[];tripOrdersMap[r.trip_id].push(r.order_id);});
     // جيب المناطق المسجلة
@@ -1591,7 +1604,50 @@ document.querySelectorAll('.modal-overlay').forEach(m=>m.addEventListener('click
 function showLoading(show){document.getElementById('loadingOverlay').classList.toggle('show',show);}
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
 
-loadAll();
+// ===== BRANCH SELECTOR =====
+let activeBranchId = null; // null = كل الفروع
+
+async function initBranchSelector(){
+  if(currentUser?.role !== 'admin'){
+    // موظف الفرع → فرعه بس
+    activeBranchId = currentUser?.branch_id || null;
+    loadAll();
+    return;
+  }
+  // Admin → اعرض اختيار الفرع
+  document.getElementById('switchBranchBtn').style.display='flex';
+  await showBranchOverlay();
+}
+
+async function showBranchOverlay(){
+  const overlay = document.getElementById('branchOverlay');
+  overlay.style.display='flex';
+  // جيب الفروع
+  const {data:branches} = await db.from('branches').select('id,name').order('name');
+  document.getElementById('branchOverlayList').innerHTML = (branches||[]).map(b=>`
+    <button onclick="selectBranch('${b.id}','${b.name}')"
+      style="width:100%;padding:.75rem 1rem;background:${activeBranchId===b.id?'rgba(26,86,219,.3)':'rgba(255,255,255,.05)'};
+      border:1px solid ${activeBranchId===b.id?'#3b82f6':'#334155'};color:${activeBranchId===b.id?'#93c5fd':'#e2e8f0'};
+      border-radius:10px;font-family:'Cairo',sans-serif;font-size:.85rem;font-weight:700;cursor:pointer;text-align:right">
+      🏢 ${b.name}
+    </button>`).join('');
+}
+
+function selectBranch(id, name){
+  activeBranchId = id;
+  document.getElementById('branchOverlay').style.display='none';
+  document.getElementById('branchLabel').textContent = '· ' + name;
+  loadAll();
+}
+
+function selectBranchAll(){
+  activeBranchId = null;
+  document.getElementById('branchOverlay').style.display='none';
+  document.getElementById('branchLabel').textContent = '· كل الفروع';
+  loadAll();
+}
+
+initBranchSelector();
 
 // ===== AUTO DISPATCH ENGINE =====
 let dispatchEngine = null;
