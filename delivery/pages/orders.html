@@ -129,6 +129,9 @@ body{padding:0;overflow:hidden;height:100vh;background:var(--bg);display:flex;fl
     <option value="deferred">آجل</option>
   </select>
 
+  <select class="date-input" id="branchFilter" onchange="loadAll()" style="width:120px;display:none">
+    <option value="">كل الفروع</option>
+  </select>
   <button class="btn btn-outline btn-sm" onclick="loadAll()" style="margin-right:auto">↻ تحديث</button>
   <span id="resultCount" style="font-size:.72rem;color:var(--text-muted);white-space:nowrap"></span>
 </div>
@@ -196,6 +199,16 @@ async function init(){
   const today=new Date().toISOString().split('T')[0];
   document.getElementById('dateFrom').value=today;
   document.getElementById('dateTo').value=today;
+  // لو admin → حمّل الفروع
+  if(currentUser?.role==='admin'){
+    const {data:branches}=await db.from('branches').select('id,name').order('name');
+    const sel=document.getElementById('branchFilter');
+    sel.style.display='block';
+    sel.innerHTML='<option value="">كل الفروع</option>'+
+      (branches||[]).map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
+    // لو الأدمن عنده فرع افتراضي → اختاره
+    if(currentUser?.branch_id) sel.value=currentUser.branch_id;
+  }
   await loadAll();
   setInterval(loadAll, 120000);
 }
@@ -205,8 +218,12 @@ async function loadAll(){
   try{
     let q=db.from('orders').select('*').order('created_at',{ascending:false});
     // فلتر الفرع
-    if(currentUser?.role !== 'admin' && currentUser?.branch_id) 
-  q=q.eq('branch_id',currentUser.branch_id);
+    const activeBranch=document.getElementById('branchFilter')?.value;
+    if(activeBranch){
+      q=q.eq('branch_id',activeBranch);
+    } else if(currentUser?.role!=='admin' && currentUser?.branch_id){
+      q=q.eq('branch_id',currentUser.branch_id);
+    }
     const {data}=await q;
     allOrders=data||[];
     updateCounts();
