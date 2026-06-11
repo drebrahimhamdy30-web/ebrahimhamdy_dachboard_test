@@ -515,7 +515,7 @@ function buildTimers(o){
   // إنشاء منذ — وقت من إنشاء الطلب لحد دلوقتي
   const t1=dm(base);
   const t1cls=late?'t-late':alert?'t2':'t1';
-  html+=`<span class="oc-t ${t1cls}" title="إنشاء منذ"><span class="ti">إنشاء منذ</span> ${fm(t1)}</span>`;
+  html+=`<span class="oc-t ${t1cls}"><span class="ti">منذ</span> ${fm(t1)}</span>`;
 
   // تعيين منذ — وقت من التعيين لحد دلوقتي (لو assigned وما استلمش)
   if(o.assigned_at && !o.picked_at){
@@ -980,7 +980,7 @@ function renderOrders(){
       ${o.cust_region?`<span class="oc-region" style="${!knownRegions.has(o.cust_region)?'background:#fee2e2;color:#b91c1c;border:1px solid #fecaca':''}">${o.cust_region}${!knownRegions.has(o.cust_region)?' ⚠️':''}</span>`:''}
       <div class="oc-bottom">
         <span class="oc-amount">${Number(o.total_bill_net||0).toLocaleString()} ج</span>
-        <span class="oc-pay ${pmC}">${pmL}</span>
+        <span class="oc-pay ${pmC}" style="cursor:pointer" onclick="cyclePayment('${o.id}',event)" title="انقر لتغيير طريقة الدفع">${pmL} ✎</span>
         <span class="oc-st ${stC}">${SL[o.status]||o.status}</span>
       </div>
       ${o.deliveryman?`<div style="font-size:.62rem;color:var(--text-muted);margin-bottom:.28rem">🚗 ${o.deliveryman}</div>`:''}
@@ -1234,6 +1234,22 @@ async function confirmEdit(){
   if(staff!==o?.staff_notes)changes.staff_notes=staff;
   await addOrderLog(id,'order_edited',changes);
   closeModal('editModal');showToast('تم الحفظ');await loadAll();showLoading(false);
+}
+
+// تغيير طريقة الدفع من الكارت
+async function cyclePayment(id, e){
+  e?.stopPropagation();
+  const o=allOrders.find(x=>x.id===id);if(!o)return;
+  const methods=['cash','visa','transfer','deferred'];
+  const labels={'cash':'كاش','visa':'فيزا','transfer':'تحويل','deferred':'آجل'};
+  const current=o.payment_method||'cash';
+  const idx=methods.indexOf(current);
+  const next=methods[(idx+1)%methods.length];
+  showLoading(true);
+  await db.from('orders').update({payment_method:next,updated_at:new Date().toISOString()}).eq('id',id);
+  showToast(`✓ طريقة الدفع: ${labels[next]}`);
+  await loadAll();
+  showLoading(false);
 }
 
 // Urgent
