@@ -260,7 +260,7 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
 <body>
 
 <header class="dispatch-header">
-  <div class="dh-title">🚚 <span>شاشة</span> التوزيع</div>
+  <div class="dh-title">🚚 <span>شاشة</span> التوزيع <span id="branchLabel" style="font-size:.7rem;color:#94a3b8;font-weight:500"></span></div>
   <div class="dh-stats" id="headerStats"></div>
   <div class="dh-right">
     <div class="refresh-dot"></div>
@@ -535,16 +535,30 @@ let dispatchSettings = null;
 async function loadAll(){
   showLoading(true);
   try{
+    const branchId=currentUser?.branch_id;
+    const isAdmin=currentUser?.role==='admin'&&!branchId;
+
+    // فلتر حسب الفرع
+    let ordersQ=db.from('orders').select('*').order('created_at',{ascending:false});
+    let driversQ=db.from('drivers').select('*,branches(name)').eq('is_active',true).order('full_name');
+    let tripsQ=db.from('trips').select('*').eq('status','active').order('created_at',{ascending:false});
+
+    if(branchId){
+      ordersQ=ordersQ.eq('branch_id',branchId);
+      driversQ=driversQ.eq('branch_id',branchId);
+      tripsQ=tripsQ.eq('branch_id',branchId);
+    }
+
     const [oR,dR,tR,rrR]=await Promise.all([
-      db.from('orders').select('*').order('created_at',{ascending:false}),
-      db.from('drivers').select('*,branches(name)').eq('is_active',true).eq('is_online',true).order('full_name'),
-      db.from('trips').select('*').eq('status','active').order('created_at',{ascending:false}),
+      ordersQ,
+      driversQ,
+      tripsQ,
       db.from('trip_orders').select('*')
     ]);
     allOrders=oR.data||[];allDrivers=dR.data||[];activeTrips=tR.data||[];
     // Load dispatch settings
-    if(currentUser?.branch_id){
-      const dsRes=await db.from('dispatch_settings').select('*').eq('branch_id',currentUser.branch_id);
+    if(branchId){
+      const dsRes=await db.from('dispatch_settings').select('*').eq('branch_id',branchId);
       dispatchSettings=dsRes.data?.[0]||null;
     }
     tripOrdersMap={};
@@ -562,6 +576,17 @@ setInterval(loadAll,30000);
 
 // ===== HEADER =====
 function renderHeader(){
+  // عرض اسم الفرع في الهيدر
+  const bl=document.getElementById('branchLabel');
+  if(bl){
+    if(currentUser?.branch_id){
+      const branchName=allDrivers[0]?.branches?.name||'';
+      bl.textContent=branchName?'· '+branchName:'';
+    } else {
+      bl.textContent='· كل الفروع';
+    }
+  }
+
   // طلبات بمناطق غير مسجلة
   const unknownRegionOrders=allOrders.filter(o=>o.status==='pending'&&!o.driver_id&&o.cust_region&&!knownRegions.has(o.cust_region));
   const u=allOrders.filter(o=>!o.driver_id&&['pending','postponed'].includes(o.status)).length;
@@ -1073,6 +1098,7 @@ async function confirmAssign(){
       const {data:trip}=await db.from('trips').insert({
         driver_id:driverId,
         driver_name:driver?.full_name,
+        branch_id:currentUser?.branch_id||null,
         status:'active',
         orders_count:orderIds.length,
         total_amount:newTotal,
