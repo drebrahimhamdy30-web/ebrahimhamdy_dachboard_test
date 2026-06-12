@@ -51,6 +51,9 @@
     .cmp-tag-extra   { background:#fef9c3; color:#a16207; }
     .cmp-tag-diff    { background:#ffedd5; color:#c2410c; }
     .cmp-tag-ok      { background:#dcfce7; color:#15803d; }
+    .cmp-tag-refund  { background:#ede9fe; color:#7c3aed; }
+    .cmp-sum-refund  { background:#ede9fe; color:#7c3aed; border-color:#c4b5fd; }
+    .cmp-branch { font-size:0.66rem; padding:2px 9px; border-radius:20px; font-weight:700; background:var(--surface); border:1px solid var(--border); color:var(--text-secondary); white-space:nowrap; }
     .cmp-mono { font-family:monospace; font-size:0.74rem; color:var(--text-secondary); }
     .cmp-empty-day { padding:10px 14px; font-size:0.78rem; color:var(--text-muted); border-top:1px solid var(--border); }
   </style>
@@ -642,15 +645,21 @@
           amount:   get(['gross_amount','amount','gross amount','converted_gross_amount']) || '',
           paid_at:  get(['paid_at','paid at','date','transaction_time']) || '',
           branch:   String(get(['terminal_branch_id','terminal branch id','branch']) || '').trim(),
+          trx_type: String(get(['trx_type','transaction_type','type']) || '').trim(),
         };
       }).filter(r => r.order_id || r.amount); // نتجاهل الصفوف الفاضية
     }
+
+    // ربط رقم فرع الشيت (1/2/3) باسم الفرع
+    const SHEET_BRANCH_MAP = { '1':'الصيدلية', '2':'ابراهيم حمدي 2', '3':'ابراهيم حمدي 3' };
+    function sheetBranchName(b) { return SHEET_BRANCH_MAP[String(b||'').trim()] || ('فرع ' + (b||'؟')); }
+    function isRefundRow(r) { return String(r.trx_type||'').trim().toLowerCase() === 'refund'; }
 
     async function runCompare() {
       const out  = document.getElementById('cmp-output');
       const file = document.getElementById('cmp-file').files[0];
 
-      if (!cmpSelectedDays.size) { alert('اختر يوم واحد على الأقل للمقارنة'); return; }
+      if (!cmpSelectedDays.size) { alert('اختر يوم واحد على الأقل للمقارنة (للمعاملات اللي في السيستم)'); return; }
       if (!file) { alert('ارفع شيت باي موب الأول'); return; }
 
       out.innerHTML = '<div style="padding:14px;color:var(--text-muted);">⏳ جاري قراءة الشيت والمقارنة...</div>';
@@ -665,133 +674,141 @@
 
       const selDays = cmpSelectedDays;
 
-      // === بيانات السيستم: الأيام المختارة فقط ===
-      const sysByDay = {};
+      // === فهرسة كل معاملات السيستم بالـ order_id (لكل الأيام، عشان نلاقي مطابقات الشيت) ===
+      const sysAllByOrder = {};
+      allData.forEach(p => {
+        const oid = String(p.order_id || '').trim();
+        if (oid) sysAllByOrder[oid] = p;
+      });
+
+      // === معاملات السيستم في الأيام المختارة (للطرف: في السيستم فقط) ===
+      const sysSelByDay = {};
       allData.forEach(p => {
         const k = dayKey(p);
         if (!selDays.has(k)) return;
-        if (!sysByDay[k]) sysByDay[k] = [];
-        sysByDay[k].push({
+        if (!sysSelByDay[k]) sysSelByDay[k] = [];
+        sysSelByDay[k].push({
           order_id: String(p.order_id || '').trim(),
           amount:   normAmt(p.amount),
           bill_no:  String(p.bill_no || '').trim(),
           machine:  machineNameOf(p.terminal_id),
+          store:    storeOf(p.terminal_id),
           time:     fmtTime(p.transaction_time),
-          raw: p
         });
       });
 
-      // === بيانات الشيت: الأيام المختارة فقط ===
-      const sheetByDay = {};
-      sheetRows.forEach(r => {
-        const k = sheetDayKey(r.paid_at);
-        if (!selDays.has(k)) return;
-        if (!sheetByDay[k]) sheetByDay[k] = [];
-        sheetByDay[k].push({
-          order_id: r.order_id,
-          amount:   normAmt(r.amount),
-          paid_at:  r.paid_at
-        });
-      });
+      // === فهرسة الشيت كله بالـ order_id ===
+      const sheetByOrder = {};
+      sheetRows.forEach(r => { if (r.order_id) sheetByOrder[r.order_id] = r; });
 
-      // === المقارنة لكل يوم ===
-      let totMissing = 0, totExtra = 0, totDiff = 0, totOk = 0;
-      const dayBlocks = [];
+      let totOk = 0, totDiff = 0, totExtra = 0, totMissing = 0, totRefund = 0;
+      const diffRows    = [];   // قيمة مختلفة
+      const extraRows   = [];   // في السيستم فقط
+      const missingRows = [];   // في الشيت ومش في السيستم (كل الشيت)
+      const refundRows  = [];   // مرتجعات في الشيت
 
-      const allSelSorted = Array.from(selDays).sort().reverse();
+      // ========== ١) المرور على كل الشيت: مرتجع / مفقود / مطابق ==========
+      sheetRows.forEach(s => {
+        const sysMatch = s.order_id ? sysAllByOrder[s.order_id] : null;
+        const sAmt     = normAmt(s.amount);
+        const brName   = sheetBranchName(s.branch);
 
-      allSelSorted.forEach(k => {
-        const sysRows   = sysByDay[k]   || [];
-        const sheetList = sheetByDay[k] || [];
+        if (isRefundRow(s)) {
+          // مرتجع — نعرضه دايمًا ونعلّمه (سواء في السيستم أو لأ)
+          totRefund++;
+          refundRows.push(`<div class="cmp-row">
+            <div class="left">
+              <span class="cmp-tag cmp-tag-refund">🔄 مرتجع</span>
+              <span class="cmp-mono">order: ${s.order_id || '—'}</span>
+              <span class="cmp-branch">${brName}</span>
+              <span style="color:var(--text-muted);">${s.paid_at}</span>
+            </div>
+            <div><b style="color:#7c3aed;">${sAmt.toFixed(2)}</b></div>
+          </div>`);
+          return;
+        }
 
-        // فهرسة الشيت بالـ order_id فقط
-        const sheetByOrder = {};
-        sheetList.forEach(s => { if (s.order_id) sheetByOrder[s.order_id] = s; });
-
-        // فهرسة السيستم بالـ order_id (للمرور على صفوف الشيت بعد كده)
-        const sysByOrder = {};
-        sysRows.forEach(sys => { if (sys.order_id) sysByOrder[sys.order_id] = sys; });
-
-        const usedSheet = new Set();
-        const rowsHtml  = [];
-
-        // مرّ على معاملات السيستم — المطابقة بالـ order_id فقط
-        sysRows.forEach(sys => {
-          const match = sys.order_id ? sheetByOrder[sys.order_id] : null;
-
-          if (match) {
-            usedSheet.add(match.order_id);
-            if (normAmt(match.amount) === normAmt(sys.amount)) {
-              totOk++;  // متطابق تمامًا — نعدّه بس
-            } else {
-              // نفس order_id بس القيمة مختلفة → تنبيه فقط
-              totDiff++;
-              rowsHtml.push(`<div class="cmp-row">
-                <div class="left">
-                  <span class="cmp-tag cmp-tag-diff">⚠️ قيمة مختلفة</span>
-                  <span class="cmp-mono">order: ${sys.order_id}</span>
-                  <span style="color:var(--text-muted);">${sys.machine}</span>
-                </div>
-                <div>السيستم: <b style="color:var(--accent-dark);">${sys.amount.toFixed(2)}</b> | الشيت: <b style="color:#c2410c;">${match.amount.toFixed(2)}</b></div>
-              </div>`);
-            }
+        if (sysMatch) {
+          // موجود في السيستم — نتأكد من القيمة
+          if (normAmt(sysMatch.amount) === sAmt) {
+            totOk++;
           } else {
-            // order_id في السيستم ومش موجود في الشيت
-            totExtra++;
-            rowsHtml.push(`<div class="cmp-row">
+            totDiff++;
+            diffRows.push(`<div class="cmp-row">
               <div class="left">
-                <span class="cmp-tag cmp-tag-extra">🟠 في السيستم فقط</span>
-                <span class="cmp-mono">order: ${sys.order_id || '—'}</span>
-                <span style="color:var(--text-muted);">${sys.machine} · ${sys.time}</span>
-                ${sys.bill_no ? `<span class="ref-badge">#${sys.bill_no}</span>` : ''}
+                <span class="cmp-tag cmp-tag-diff">⚠️ قيمة مختلفة</span>
+                <span class="cmp-mono">order: ${s.order_id}</span>
+                <span class="cmp-branch">${storeOf(sysMatch.terminal_id)}</span>
               </div>
-              <div><b style="color:var(--accent-dark);">${sys.amount.toFixed(2)}</b></div>
+              <div>السيستم: <b style="color:var(--accent-dark);">${normAmt(sysMatch.amount).toFixed(2)}</b> | الشيت: <b style="color:#c2410c;">${sAmt.toFixed(2)}</b></div>
             </div>`);
           }
-        });
-
-        // order_id في الشيت ومش موجود في السيستم
-        sheetList.forEach(s => {
-          if (s.order_id && sysByOrder[s.order_id]) return; // اتطابق فعلاً
+        } else {
+          // في الشيت ومش في السيستم — يظهر مهما كان تاريخه
           totMissing++;
-          rowsHtml.push(`<div class="cmp-row">
+          missingRows.push(`<div class="cmp-row">
             <div class="left">
               <span class="cmp-tag cmp-tag-missing">🔴 في الشيت فقط</span>
               <span class="cmp-mono">order: ${s.order_id || '—'}</span>
+              <span class="cmp-branch">${brName}</span>
               <span style="color:var(--text-muted);">${s.paid_at}</span>
             </div>
-            <div><b style="color:#b91c1c;">${s.amount.toFixed(2)}</b></div>
+            <div><b style="color:#b91c1c;">${sAmt.toFixed(2)}</b></div>
+          </div>`);
+        }
+      });
+
+      // ========== ٢) المرور على معاملات السيستم (الأيام المختارة): في السيستم فقط ==========
+      Object.keys(sysSelByDay).sort().reverse().forEach(k => {
+        sysSelByDay[k].forEach(sys => {
+          const inSheet = sys.order_id && sheetByOrder[sys.order_id];
+          if (inSheet) return; // اتطابق (أو هيظهر كقيمة مختلفة من جهة الشيت)
+          totExtra++;
+          extraRows.push(`<div class="cmp-row">
+            <div class="left">
+              <span class="cmp-tag cmp-tag-extra">🟠 في السيستم فقط</span>
+              <span class="cmp-mono">order: ${sys.order_id || '—'}</span>
+              <span class="cmp-branch">${sys.store}</span>
+              <span style="color:var(--text-muted);">${sys.machine} · ${sys.time}</span>
+              ${sys.bill_no ? `<span class="ref-badge">#${sys.bill_no}</span>` : ''}
+            </div>
+            <div><b style="color:var(--accent-dark);">${sys.amount.toFixed(2)}</b></div>
           </div>`);
         });
-
-        const head = `<div class="cmp-result-day-head">
-          <span><i class="fas fa-calendar-day" style="color:var(--accent);margin-left:5px;"></i> ${fmtDayTitle(k)}</span>
-          <span style="font-size:0.72rem;font-weight:700;color:var(--text-muted);">
-            سيستم: ${sysRows.length} · شيت: ${sheetList.length}
-          </span>
-        </div>`;
-
-        const body = rowsHtml.length
-          ? rowsHtml.join('')
-          : '<div class="cmp-empty-day">✅ كل المعاملات متطابقة في هذا اليوم — لا يوجد أي فرق</div>';
-
-        dayBlocks.push(`<div class="cmp-result-day">${head}${body}</div>`);
       });
+
+      // ========== ٣) بناء الأقسام ==========
+      const section = (title, rows, emptyMsg) => {
+        if (!rows.length) return emptyMsg ? `<div class="cmp-result-day"><div class="cmp-result-day-head">${title}</div><div class="cmp-empty-day">${emptyMsg}</div></div>` : '';
+        return `<div class="cmp-result-day"><div class="cmp-result-day-head">${title} <span style="font-size:0.72rem;color:var(--text-muted);">(${rows.length})</span></div>${rows.join('')}</div>`;
+      };
+
+      const blocks = [
+        section('<span><i class="fas fa-circle" style="color:#b91c1c;font-size:0.6rem;margin-left:5px;"></i> في الشيت ومش في السيستم</span>', missingRows),
+        section('<span><i class="fas fa-rotate-left" style="color:#7c3aed;margin-left:5px;"></i> مرتجعات (Refund)</span>', refundRows),
+        section('<span><i class="fas fa-circle" style="color:#a16207;font-size:0.6rem;margin-left:5px;"></i> في السيستم ومش في الشيت</span>', extraRows),
+        section('<span><i class="fas fa-triangle-exclamation" style="color:#c2410c;margin-left:5px;"></i> قيمة مختلفة</span>', diffRows),
+      ].filter(Boolean).join('');
 
       // === ملخص علوي ===
       const summary = `<div class="cmp-summary">
         <div class="cmp-sum-card cmp-sum-ok">✅ متطابق: ${totOk}</div>
         <div class="cmp-sum-card cmp-sum-missing">🔴 في الشيت فقط: ${totMissing}</div>
+        <div class="cmp-sum-card cmp-sum-refund">🔄 مرتجعات: ${totRefund}</div>
         <div class="cmp-sum-card cmp-sum-extra">🟠 في السيستم فقط: ${totExtra}</div>
         <div class="cmp-sum-card cmp-sum-diff">⚠️ قيمة مختلفة: ${totDiff}</div>
       </div>`;
 
       const allClear = (totMissing === 0 && totExtra === 0 && totDiff === 0);
       const banner = allClear
-        ? '<div style="padding:12px 16px;background:#dcfce7;color:#15803d;border-radius:12px;font-weight:800;margin-bottom:12px;">🎉 كل الأيام المختارة متطابقة تمامًا مع الشيت — مفيش أي فرق</div>'
+        ? '<div style="padding:12px 16px;background:#dcfce7;color:#15803d;border-radius:12px;font-weight:800;margin-bottom:12px;">🎉 كل معاملات الدفع متطابقة — مفيش أي فرق' + (totRefund ? ' (مع وجود مرتجعات معلّمة بالأسفل)' : '') + '</div>'
         : '';
 
-      out.innerHTML = banner + summary + dayBlocks.join('');
+      const note = `<div style="font-size:0.72rem;color:var(--text-muted);margin:6px 0 12px;">
+        <i class="fas fa-info-circle"></i> «في الشيت فقط» و«المرتجعات» بتظهر من <b>كل الشيت</b> مهما كان التاريخ. «في السيستم فقط» بتظهر للأيام المختارة بس.
+      </div>`;
+
+      out.innerHTML = banner + summary + note + (blocks || '<div class="cmp-empty-day">لا توجد فروقات</div>');
     }
   </script>
 </body>
