@@ -701,54 +701,39 @@
         const sysRows   = sysByDay[k]   || [];
         const sheetList = sheetByDay[k] || [];
 
-        // فهرسة الشيت بالـ order_id
+        // فهرسة الشيت بالـ order_id فقط
         const sheetByOrder = {};
         sheetList.forEach(s => { if (s.order_id) sheetByOrder[s.order_id] = s; });
 
-        // فهرسة الشيت بالقيمة (احتياط لو order_id مش موجود)
-        const sheetByAmt = {};
-        sheetList.forEach(s => {
-          const key = s.amount.toFixed(2);
-          if (!sheetByAmt[key]) sheetByAmt[key] = [];
-          sheetByAmt[key].push(s);
-        });
+        // فهرسة السيستم بالـ order_id (للمرور على صفوف الشيت بعد كده)
+        const sysByOrder = {};
+        sysRows.forEach(sys => { if (sys.order_id) sysByOrder[sys.order_id] = sys; });
 
         const usedSheet = new Set();
         const rowsHtml  = [];
 
-        // مرّ على معاملات السيستم
+        // مرّ على معاملات السيستم — المطابقة بالـ order_id فقط
         sysRows.forEach(sys => {
-          let match = null;
-
-          // ١) مطابقة بالـ order_id
-          if (sys.order_id && sheetByOrder[sys.order_id] && !usedSheet.has(sheetByOrder[sys.order_id])) {
-            match = sheetByOrder[sys.order_id];
-          }
-          // ٢) مطابقة بالقيمة (احتياط)
-          if (!match) {
-            const key = sys.amount.toFixed(2);
-            const cands = (sheetByAmt[key] || []).filter(s => !usedSheet.has(s));
-            if (cands.length) match = cands[0];
-          }
+          const match = sys.order_id ? sheetByOrder[sys.order_id] : null;
 
           if (match) {
-            usedSheet.add(match);
+            usedSheet.add(match.order_id);
             if (normAmt(match.amount) === normAmt(sys.amount)) {
-              totOk++;
-              // المطابقة التامة منعرضهاش بالتفصيل عشان منزحمش (نعدّها بس)
+              totOk++;  // متطابق تمامًا — نعدّه بس
             } else {
+              // نفس order_id بس القيمة مختلفة → تنبيه فقط
               totDiff++;
               rowsHtml.push(`<div class="cmp-row">
                 <div class="left">
                   <span class="cmp-tag cmp-tag-diff">⚠️ قيمة مختلفة</span>
-                  <span class="cmp-mono">order: ${sys.order_id || '—'}</span>
+                  <span class="cmp-mono">order: ${sys.order_id}</span>
                   <span style="color:var(--text-muted);">${sys.machine}</span>
                 </div>
                 <div>السيستم: <b style="color:var(--accent-dark);">${sys.amount.toFixed(2)}</b> | الشيت: <b style="color:#c2410c;">${match.amount.toFixed(2)}</b></div>
               </div>`);
             }
           } else {
-            // في السيستم ومش في الشيت
+            // order_id في السيستم ومش موجود في الشيت
             totExtra++;
             rowsHtml.push(`<div class="cmp-row">
               <div class="left">
@@ -762,9 +747,9 @@
           }
         });
 
-        // ما تبقى في الشيت ولم يُطابَق = في الشيت ومش في السيستم
+        // order_id في الشيت ومش موجود في السيستم
         sheetList.forEach(s => {
-          if (usedSheet.has(s)) return;
+          if (s.order_id && sysByOrder[s.order_id]) return; // اتطابق فعلاً
           totMissing++;
           rowsHtml.push(`<div class="cmp-row">
             <div class="left">
@@ -775,8 +760,6 @@
             <div><b style="color:#b91c1c;">${s.amount.toFixed(2)}</b></div>
           </div>`);
         });
-
-        const dayOkCount = sysRows.length - rowsHtml.filter(h => h.includes('في السيستم فقط') || h.includes('قيمة مختلفة')).length;
 
         const head = `<div class="cmp-result-day-head">
           <span><i class="fas fa-calendar-day" style="color:var(--accent);margin-left:5px;"></i> ${fmtDayTitle(k)}</span>
