@@ -391,16 +391,21 @@
             )
           : '';
 
-        // إحصائيات اليوم مقسمة على الفروع — من كل معاملات اليوم
+        // إحصائيات اليوم مقسمة على الفروع، وكل فرع مقسّم على ماكيناته
         const allDayItems = allData.filter(p => dayKey(p) === k);
         const storeStats  = {};
         allDayItems.forEach(p => {
           const store = storeOf(p.terminal_id) || '---';
-          if (!storeStats[store]) storeStats[store] = { total:0, net:0, tax:0 };
+          const mch   = machineNameOf(p.terminal_id) || '---';
+          if (!storeStats[store]) storeStats[store] = { total:0, net:0, tax:0, machines:{} };
           const { amt, tax, netFinal } = calcTax(p);
           storeStats[store].total += amt;
           storeStats[store].tax   += tax;
           storeStats[store].net   += netFinal;
+          if (!storeStats[store].machines[mch]) storeStats[store].machines[mch] = { total:0, tax:0, net:0 };
+          storeStats[store].machines[mch].total += amt;
+          storeStats[store].machines[mch].tax   += tax;
+          storeStats[store].machines[mch].net   += netFinal;
         });
 
         const dayTotal   = Object.values(storeStats).reduce((s,x) => s+x.total, 0);
@@ -410,11 +415,29 @@
 
         const storeDetails = Object.entries(storeStats).map(([store, v]) => {
           const taxPct = v.total > 0 ? ((v.tax / v.total) * 100).toFixed(2) : '0.00';
-          return `<span style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:3px 8px;font-size:0.72rem;">
-            <b style="color:var(--text-primary);">${store}</b>:
-            <span style="color:var(--warning);">${v.total.toFixed(2)}</span>
-            <span style="color:var(--text-muted);font-size:0.65rem;"> | ضريبة: ${v.tax.toFixed(2)} (${taxPct}%) | صافي: ${v.net.toFixed(2)}</span>
-          </span>`;
+          // الماكينات جوه الفرع
+          const machineLines = Object.entries(v.machines).map(([mch, mv]) => {
+            const mTaxPct = mv.total > 0 ? ((mv.tax / mv.total) * 100).toFixed(2) : '0.00';
+            return `<div style="display:flex;justify-content:space-between;gap:8px;padding:2px 0;border-top:1px dashed var(--border);">
+              <span style="color:var(--text-secondary);font-size:0.68rem;">
+                <i class="fas fa-mobile-screen-button" style="font-size:0.6rem;color:var(--accent);margin-left:3px;"></i> ${mch}
+              </span>
+              <span style="font-size:0.68rem;white-space:nowrap;">
+                <b style="color:var(--warning);">${mv.total.toFixed(2)}</b>
+                <span style="color:var(--text-muted);font-size:0.6rem;"> | ض: ${mv.tax.toFixed(2)} | ص: ${mv.net.toFixed(2)}</span>
+              </span>
+            </div>`;
+          }).join('');
+          return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:6px 10px;font-size:0.72rem;min-width:200px;">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
+              <b style="color:var(--text-primary);font-size:0.78rem;">${store}</b>
+              <span style="white-space:nowrap;">
+                <b style="color:var(--warning);">${v.total.toFixed(2)}</b>
+                <span style="color:var(--text-muted);font-size:0.62rem;"> | ضريبة: ${v.tax.toFixed(2)} (${taxPct}%) | صافي: ${v.net.toFixed(2)}</span>
+              </span>
+            </div>
+            <div style="margin-top:4px;">${machineLines}</div>
+          </div>`;
         }).join('');
 
         html += `<tr style="background:var(--surface-3);">
@@ -423,9 +446,9 @@
               <span style="font-weight:800;font-size:0.9rem;color:var(--text-primary);">
                 <i class="fas fa-calendar-day" style="color:var(--accent);margin-left:5px;"></i> ${dateStr}
               </span>
-              <span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                ${storeDetails}
-                <span style="background:var(--primary);color:#fff;border-radius:8px;padding:3px 10px;font-size:0.75rem;font-weight:800;">
+              <span style="display:flex;align-items:flex-start;gap:6px;flex-wrap:wrap;">
+                <span style="display:flex;gap:6px;flex-wrap:wrap;">${storeDetails}</span>
+                <span style="background:var(--primary);color:#fff;border-radius:8px;padding:3px 10px;font-size:0.75rem;font-weight:800;align-self:center;">
                   الكل: ${dayTotal.toFixed(2)}
                   <span style="opacity:0.8;font-size:0.65rem;"> | ضريبة: ${dayTax.toFixed(2)} (${dayTaxPct}%) | صافي: ${dayNet.toFixed(2)}</span>
                 </span>
