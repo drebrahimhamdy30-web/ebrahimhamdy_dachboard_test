@@ -527,6 +527,24 @@ async function approveAtt(id,status,driverId){
   showLoad(true);
   const now=new Date().toISOString();
   const targetStatus=status.replace('_request','');
+
+  if(targetStatus==='offline'){
+    const {data:activeTrips}=await db.from('trips')
+      .select('id').eq('driver_id',driverId).eq('status','active');
+    if(activeTrips?.length>0){
+      showToast('❌ لا يمكن الموافقة — الطيار لديه رحلة جارية');
+      await db.from('driver_attendance').delete().eq('id',id);
+      await loadAll();showLoad(false);return;
+    }
+    const {data:activeOrders}=await db.from('orders')
+      .select('id').eq('driver_id',driverId).in('status',['assigned','picked']);
+    if(activeOrders?.length>0){
+      showToast('❌ لا يمكن الموافقة — الطيار لديه طلبات جارية');
+      await db.from('driver_attendance').delete().eq('id',id);
+      await loadAll();showLoad(false);return;
+    }
+  }
+
   await db.from('driver_attendance').update({status:targetStatus,approved_at:now}).eq('id',id);
   if(targetStatus==='offline'||targetStatus==='break'){
     const prevOnline=attendanceToday.find(r=>r.driver_id===driverId&&r.status==='online'&&!r.ended_at);
