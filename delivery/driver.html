@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>بورتال الطيار</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1a56db">
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -340,6 +342,8 @@ function enableSoundAndEnter(){
   soundEnabled = true;
   initAudio();
   document.getElementById('soundPermOverlay').style.display = 'none';
+  // سجّل Push Notifications
+  setTimeout(registerPush, 1000);
 }
 
 
@@ -1248,6 +1252,51 @@ function closeModal(id){document.getElementById(id).classList.remove('open');}
 document.querySelectorAll('.modal-overlay').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');}));
 function load(s){document.getElementById('lo').classList.toggle('show',s);}
 function doLogout(){sessionStorage.removeItem('delivery_user');window.location.href='auth.html';}
+
+// ===== PWA PUSH NOTIFICATIONS =====
+const VAPID_PUBLIC_KEY = 'BJqUVlQ7MgU2tFTVUPybao9FnrBgUmKUKj82OMETB-PLfNpbYG1ZwUe86iCEicr1tUvo3P3VgseVFPEH3Xr4iAg';
+
+function urlBase64ToUint8Array(base64String){
+  const padding='='.repeat((4-base64String.length%4)%4);
+  const base64=(base64String+padding).replace(/-/g,'+').replace(/_/g,'/');
+  const raw=window.atob(base64);
+  return new Uint8Array([...raw].map(c=>c.charCodeAt(0)));
+}
+
+async function registerPush(){
+  if(!('serviceWorker' in navigator)||!('PushManager' in window)) return;
+  try{
+    // سجّل الـ Service Worker
+    const reg = await navigator.serviceWorker.register('sw.js', {scope:'/ebrahimhamdy_dachboard_test/delivery/'});
+    await navigator.serviceWorker.ready;
+
+    // اطلب إذن الـ notifications
+    const permission = await Notification.requestPermission();
+    if(permission !== 'granted'){
+      console.log('Push notifications not permitted');
+      return;
+    }
+
+    // اشترك في الـ Push
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+    });
+
+    // احفظ الـ subscription في Supabase
+    if(driverRecord){
+      const subJson = sub.toJSON();
+      await db.from('driver_push_subscriptions').upsert({
+        driver_id: driverRecord.id,
+        endpoint: subJson.endpoint,
+        p256dh: subJson.keys?.p256dh,
+        auth: subJson.keys?.auth,
+        updated_at: new Date().toISOString()
+      }, {onConflict: 'driver_id'});
+      console.log('✅ Push subscription saved');
+    }
+  }catch(e){ console.error('Push registration error:', e); }
+}
 </script>
 </body>
 </html>
