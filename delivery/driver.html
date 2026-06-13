@@ -459,6 +459,24 @@ async function endBreakManual(){
 
 async function requestAttendance(type){
   if(!driverRecord)return;
+
+  // تحقق من وجود رحلة جارية قبل الانصراف
+  if(type==='offline'){
+    const {data:activeTrips}=await db.from('trips')
+      .select('id').eq('driver_id',driverRecord.id).eq('status','active');
+    if(activeTrips?.length>0){
+      alert('لا يمكن طلب الانصراف — لديك رحلة جارية لم تنته بعد');
+      return;
+    }
+    // تحقق من طلبات assigned أو picked
+    const {data:activeOrders}=await db.from('orders')
+      .select('id').eq('driver_id',driverRecord.id).in('status',['assigned','picked']);
+    if(activeOrders?.length>0){
+      alert('لا يمكن طلب الانصراف — لديك طلبات لم يتم توصيلها بعد');
+      return;
+    }
+  }
+
   const requireApproval=settings?.require_attendance_approval!==false;
   load(true);
   const today=new Date().toISOString().split('T')[0];
