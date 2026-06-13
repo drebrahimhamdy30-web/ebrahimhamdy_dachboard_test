@@ -453,7 +453,37 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
   <div class="dp-status" id="dp-status"></div>
   <div class="dp-section">ملخص الرحلات اليوم</div>
   <div id="dp-trips"></div>
+  <div style="margin-top:1rem;display:flex;gap:.5rem">
+    <button onclick="callDriver(currentPopupDriverId)" style="flex:1;padding:.5rem;background:#1a56db;color:white;border:none;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer">📞 استدعاء</button>
+    <button onclick="openSendMessage(currentPopupDriverId)" style="flex:1;padding:.5rem;background:#334155;color:white;border:none;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer">💬 رسالة</button>
+  </div>
 </div>
+<!-- Modal: Send Message -->
+<div class="modal-overlay" id="msgModal">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <span class="modal-title">💬 إرسال رسالة للطيار</span>
+      <button class="modal-close" onclick="closeModal('msgModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="msg-driver-id">
+      <div class="form-group" style="margin-bottom:0">
+        <label>الرسالة</label>
+        <textarea class="form-control" id="msg-text" placeholder="اكتب الرسالة..." style="height:80px"></textarea>
+      </div>
+      <div style="display:flex;gap:.4rem;margin-top:.75rem;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" onclick="setMsg('تعال للصيدلية فوراً')">تعال فوراً</button>
+        <button class="btn btn-outline btn-sm" onclick="setMsg('في انتظارك — يرجى الإسراع')">أسرع</button>
+        <button class="btn btn-outline btn-sm" onclick="setMsg('الطلب عاجل جداً')">عاجل</button>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('msgModal')">إلغاء</button>
+      <button class="btn btn-primary" onclick="sendMessage()">إرسال</button>
+    </div>
+  </div>
+</div>
+
 <div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div></div>
 <div class="toast" id="toast"></div>
 
@@ -474,6 +504,7 @@ const LOG_I={order_created:'📦',driver_assigned:'🚗',order_picked:'▶️',o
 const LOG_A={order_created:'تم إنشاء الطلب',driver_assigned:'تم تعيين طيار',order_picked:'الطيار استلم',order_delivered:'تم التسليم',order_completed:'مكتمل',order_postponed:'تم التأجيل',order_cancelled:'تم الإلغاء',order_edited:'تم التعديل',order_urgent:'تحديد كعاجل',trip_created:'إنشاء رحلة',trip_completed:'إنهاء الرحلة'};
 
 let allOrders=[],allDrivers=[],activeTrips=[],tripOrdersMap={};
+let currentPopupDriverId=null;
 let knownRegions=new Set();
 let selectedOrders=new Set(),currentFilter='all',filterDriver=null;
 let currentUser=null;
@@ -841,6 +872,7 @@ async function openDriverPopup(driverId){
       </div>`).join('');
   }
 
+  currentPopupDriverId = driverId;
   document.getElementById('driverPopup').classList.add('open');
 }
 
@@ -1671,6 +1703,41 @@ async function completeTrip(tripId){
   await addTripLog(tripId,'trip_completed',{orders:oIds.length});
   for(const id of oIds)await addOrderLog(id,'order_completed',{trip_id:tripId});
   showToast('✓ تم إنهاء الرحلة');await loadAll();showLoading(false);
+}
+
+// ===== CALL & MESSAGE =====
+async function callDriver(driverId){
+  if(!driverId)return;
+  try{
+    await db.channel(`driver-calls-${driverId}`).send({
+      type:'broadcast', event:'call',
+      payload:{message:'الإدارة تطلبك — تواصل معنا فوراً'}
+    });
+    showToast('📞 تم إرسال نداء الاستدعاء');
+    closeDriverPopup();
+  }catch(e){showToast('خطأ في الإرسال');}
+}
+
+function openSendMessage(driverId){
+  document.getElementById('msg-driver-id').value=driverId||'';
+  document.getElementById('msg-text').value='';
+  closeDriverPopup();
+  document.getElementById('msgModal').classList.add('open');
+}
+
+function setMsg(txt){document.getElementById('msg-text').value=txt;}
+
+async function sendMessage(){
+  const driverId=document.getElementById('msg-driver-id').value;
+  const msg=document.getElementById('msg-text').value.trim();
+  if(!msg){showToast('اكتب رسالة أولاً');return;}
+  try{
+    await db.channel(`driver-calls-${driverId}`).send({
+      type:'broadcast', event:'call', payload:{message:msg}
+    });
+    closeModal('msgModal');
+    showToast('✓ تم إرسال الرسالة');
+  }catch(e){showToast('خطأ في الإرسال');}
 }
 
 // Utils
