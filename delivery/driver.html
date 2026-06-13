@@ -190,7 +190,7 @@ textarea.form-ctrl{height:80px;padding:.75rem;resize:none}
 </div>
 
 <!-- ATTENDANCE BAR -->
-<div class="att-bar offline" id="attBar">
+<div class="att-bar offline" id="attBar" onclick="initAudio()">
   <div class="att-status">
     <div class="att-dot dot-gray" id="attDot"></div>
     <span id="attText">جاري التحميل...</span>
@@ -320,53 +320,60 @@ let attRecord=null, attTimerInterval=null;
 let soundEnabled = true;
 let lastOrderIds = new Set();
 let callChannel = null;
+let audioCtx = null;
+
+// تفعيل الـ AudioContext بعد أول تفاعل
+function initAudio(){
+  if(audioCtx) return;
+  try{
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // تشغيل صوت صامت عشان يفعّل الـ context
+    const buf = audioCtx.createBuffer(1,1,22050);
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(audioCtx.destination);
+    src.start(0);
+  }catch(e){}
+}
+
+// تفعيل الصوت عند أول لمسة
+document.addEventListener('touchstart', initAudio, {once:true});
+document.addEventListener('click', initAudio, {once:true});
 
 function toggleSound(){
   soundEnabled = !soundEnabled;
   document.getElementById('soundToggle').textContent = soundEnabled ? '🔔' : '🔕';
+  if(soundEnabled) initAudio();
 }
 
 function playSound(type){
   if(!soundEnabled) return;
   try{
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
+    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if(audioCtx.state === 'suspended') audioCtx.resume();
 
-    if(type === 'new_order'){
-      // صوت تنبيه طلب جديد - نغمتين صاعدتين
-      osc.frequency.setValueAtTime(600, ctx.currentTime);
-      osc.frequency.setValueAtTime(800, ctx.currentTime + 0.15);
-      osc.frequency.setValueAtTime(600, ctx.currentTime + 0.3);
-      osc.frequency.setValueAtTime(900, ctx.currentTime + 0.45);
-      gain.gain.setValueAtTime(0.4, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.6);
-    } else if(type === 'order_removed'){
-      // صوت تنبيه إزالة - نغمة نازلة
-      osc.frequency.setValueAtTime(500, ctx.currentTime);
-      osc.frequency.setValueAtTime(300, ctx.currentTime + 0.2);
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.4);
-    } else if(type === 'call'){
-      // صوت استدعاء - متكرر
-      for(let i=0; i<3; i++){
-        const o2 = ctx.createOscillator();
-        const g2 = ctx.createGain();
-        o2.connect(g2); g2.connect(ctx.destination);
-        o2.frequency.value = 750;
-        g2.gain.setValueAtTime(0.4, ctx.currentTime + i*0.3);
-        g2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i*0.3 + 0.25);
-        o2.start(ctx.currentTime + i*0.3);
-        o2.stop(ctx.currentTime + i*0.3 + 0.25);
-      }
-    }
-  }catch(e){}
+    const freqs = {
+      new_order: [[600,0],[800,0.15],[600,0.3],[1000,0.45]],
+      order_removed: [[500,0],[300,0.2]],
+      call: [[750,0],[750,0.3],[750,0.6]]
+    };
+
+    const notes = freqs[type] || freqs.new_order;
+    const duration = type==='call' ? 0.9 : 0.7;
+
+    notes.forEach(([freq, time]) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.frequency.value = freq;
+      osc.type = type==='call' ? 'sine' : 'sine';
+      gain.gain.setValueAtTime(0.5, audioCtx.currentTime + time);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + time + 0.25);
+      osc.start(audioCtx.currentTime + time);
+      osc.stop(audioCtx.currentTime + time + 0.25);
+    });
+  }catch(e){ console.error('sound error:', e); }
 }
 
 function checkNewOrders(){
