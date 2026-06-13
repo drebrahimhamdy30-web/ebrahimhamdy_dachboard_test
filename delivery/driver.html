@@ -338,7 +338,6 @@ let audioCtx = null;
 // ===== SOUND PERMISSION =====
 function enableSoundAndEnter(){
   soundEnabled = true;
-  localStorage.setItem('driverSoundEnabled','1');
   initAudio();
   document.getElementById('soundPermOverlay').style.display = 'none';
 }
@@ -446,6 +445,42 @@ function checkNewOrders(){
   lastOrderIds = currentIds;
 }
 
+// ===== REALTIME SUBSCRIPTIONS =====
+let ordersChannel = null;
+
+function subscribeToOrders(){
+  if(!driverRecord) return;
+
+  // إلغاء الاشتراك القديم
+  if(ordersChannel){ db.removeChannel(ordersChannel); ordersChannel=null; }
+
+  ordersChannel = db.channel(`driver-orders-${driverRecord.id}`)
+    .on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'orders',
+      filter: `driver_id=eq.${driverRecord.id}`
+    }, async (payload) => {
+      // طلب جديد اتعيّن
+      if(payload.eventType === 'UPDATE' && payload.new?.status === 'assigned' && payload.old?.status !== 'assigned'){
+        await loadAll();
+        startContinuousSound('new_order');
+        showBanner('📦 طلب جديد وصلك! اضغط للإيقاف', '#16a34a', true);
+      }
+      // طلب اتشال
+      else if(payload.eventType === 'UPDATE' && !payload.new?.driver_id && payload.old?.driver_id){
+        await loadAll();
+        playSound('order_removed');
+        showBanner('طلب تم إزالته من رحلتك', '#6b7280');
+      }
+      // أي تغيير تاني
+      else {
+        await loadAll();
+      }
+    })
+    .subscribe();
+}
+
 // Realtime subscription للاستدعاء
 function subscribeToCallNotifications(){
   if(!driverRecord) return;
@@ -486,12 +521,7 @@ window.addEventListener('DOMContentLoaded', async()=>{
   if(currentUser.role!=='driver'){window.location.href='app.html';return;}
   document.getElementById('driverName').textContent=currentUser.full_name||'طيار';
 
-  // لو سبق وفعّل الصوت → اخفي الـ overlay تلقائياً
-  if(localStorage.getItem('driverSoundEnabled')==='1'){
-    soundEnabled=true;
-    document.getElementById('soundPermOverlay').style.display='none';
-    initAudio();
-  }
+  // دايماً بيطلب تفعيل الصوت عند الدخول
 
   load(true);
   await loadDriver();
@@ -499,10 +529,12 @@ window.addEventListener('DOMContentLoaded', async()=>{
   await loadAttendance();
   await loadAll();
   load(false);
+  subscribeToOrders();
   subscribeToCallNotifications();
-  setInterval(loadAttendance, 15000);
-  setInterval(loadAll, 30000);
+  setInterval(loadAttendance, 30000);
   setInterval(updateAllTimers, 60000);
+  // Realtime subscription للطلبات
+  subscribeToOrders();
 });
 
 async function loadDriver(){
