@@ -1649,9 +1649,22 @@ async function activatePostponed(orderId, e){
 
 // Trip complete
 async function completeTrip(tripId){
+  // تحقق من الطلبات قبل الإنهاء
+  const oIds=tripOrdersMap[tripId]||[];
+  const tripOrders=oIds.map(id=>allOrders.find(o=>o.id===id)).filter(Boolean);
+  const assigned=tripOrders.filter(o=>o.status==='assigned');
+  const picked=tripOrders.filter(o=>o.status==='picked');
+
+  if(assigned.length>0){
+    showToast(`❌ يوجد ${assigned.length} طلب لم يُستلم بعد`);
+    return;
+  }
+  if(picked.length>0){
+    showToast(`❌ يوجد ${picked.length} طلب لم يُوصّل بعد`);
+    return;
+  }
   if(!confirm('إنهاء الرحلة؟'))return;
   showLoading(true);
-  const oIds=tripOrdersMap[tripId]||[];
   const nowC=new Date().toISOString();
   await db.from('trips').update({status:'completed',updated_at:nowC}).eq('id',tripId);
   if(oIds.length)await db.from('orders').update({status:'completed',completed_at:nowC,updated_at:nowC}).in('id',oIds);
