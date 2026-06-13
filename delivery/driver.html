@@ -338,6 +338,7 @@ let audioCtx = null;
 // ===== SOUND PERMISSION =====
 function enableSoundAndEnter(){
   soundEnabled = true;
+  localStorage.setItem('driverSoundEnabled','1');
   initAudio();
   document.getElementById('soundPermOverlay').style.display = 'none';
 }
@@ -362,34 +363,65 @@ function initAudio(){
 
 
 
+let soundInterval = null;
+
 function playSound(type){
   if(!soundEnabled) return;
   try{
     if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if(audioCtx.state === 'suspended') audioCtx.resume();
-
-    const freqs = {
-      new_order: [[600,0],[800,0.15],[600,0.3],[1000,0.45]],
-      order_removed: [[500,0],[300,0.2]],
-      call: [[750,0],[750,0.3],[750,0.6]]
-    };
-
-    const notes = freqs[type] || freqs.new_order;
-    const duration = type==='call' ? 0.9 : 0.7;
-
-    notes.forEach(([freq, time]) => {
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.frequency.value = freq;
-      osc.type = type==='call' ? 'sine' : 'sine';
-      gain.gain.setValueAtTime(0.5, audioCtx.currentTime + time);
-      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + time + 0.25);
-      osc.start(audioCtx.currentTime + time);
-      osc.stop(audioCtx.currentTime + time + 0.25);
-    });
+    _playOnce(type);
   }catch(e){ console.error('sound error:', e); }
+}
+
+function _playOnce(type){
+  if(!audioCtx) return;
+  const t = audioCtx.currentTime;
+
+  if(type === 'new_order'){
+    // نغمة واضحة وعالية - 3 نبضات
+    [[880,0],[1100,0.2],[880,0.4],[1100,0.6],[880,0.8],[1320,1.0]].forEach(([f,d])=>{
+      const o=audioCtx.createOscillator();
+      const g=audioCtx.createGain();
+      o.connect(g);g.connect(audioCtx.destination);
+      o.type='square';
+      o.frequency.value=f;
+      g.gain.setValueAtTime(0.8,t+d);
+      g.gain.exponentialRampToValueAtTime(0.001,t+d+0.18);
+      o.start(t+d);o.stop(t+d+0.18);
+    });
+  } else if(type === 'order_removed'){
+    [[440,0],[330,0.2],[220,0.4]].forEach(([f,d])=>{
+      const o=audioCtx.createOscillator();
+      const g=audioCtx.createGain();
+      o.connect(g);g.connect(audioCtx.destination);
+      o.type='sine';o.frequency.value=f;
+      g.gain.setValueAtTime(0.5,t+d);
+      g.gain.exponentialRampToValueAtTime(0.001,t+d+0.2);
+      o.start(t+d);o.stop(t+d+0.2);
+    });
+  } else if(type === 'call'){
+    [[880,0],[880,0.3],[880,0.6],[1100,0.9],[880,1.2]].forEach(([f,d])=>{
+      const o=audioCtx.createOscillator();
+      const g=audioCtx.createGain();
+      o.connect(g);g.connect(audioCtx.destination);
+      o.type='square';o.frequency.value=f;
+      g.gain.setValueAtTime(0.9,t+d);
+      g.gain.exponentialRampToValueAtTime(0.001,t+d+0.25);
+      o.start(t+d);o.stop(t+d+0.25);
+    });
+  }
+}
+
+// صوت مستمر لحد ما الطيار يشوف الطلب
+function startContinuousSound(type){
+  stopContinuousSound();
+  playSound(type);
+  soundInterval = setInterval(()=>playSound(type), 4000);
+}
+
+function stopContinuousSound(){
+  if(soundInterval){ clearInterval(soundInterval); soundInterval=null; }
 }
 
 function checkNewOrders(){
@@ -403,11 +435,12 @@ function checkNewOrders(){
   const removedOrders = [...lastOrderIds].filter(id => !currentIds.has(id));
 
   if(newOrders.length > 0){
-    playSound('new_order');
-    showBanner(`📦 طلب جديد عليك! (${newOrders.length})`, 'var(--green)');
+    startContinuousSound('new_order');
+    showBanner(`📦 طلب جديد عليك! (${newOrders.length}) — اضغط للإيقاف`, 'var(--green)', true);
   }
   if(removedOrders.length > 0 && lastOrderIds.size > 0){
     playSound('order_removed');
+    stopContinuousSound();
   }
 
   lastOrderIds = currentIds;
@@ -421,27 +454,29 @@ function subscribeToCallNotifications(){
       const msg = payload.payload?.message || 'الإدارة تطلبك';
       document.getElementById('callMessage').textContent = msg;
       document.getElementById('callNotice').style.display = 'block';
-      playSound('call');
+      startContinuousSound('call');
     })
     .subscribe();
 }
 
 function dismissCall(){
+  stopContinuousSound();
   document.getElementById('callNotice').style.display = 'none';
 }
 
-function showBanner(msg, color){
+function showBanner(msg, color, persistent=false){
   let banner = document.getElementById('orderBanner');
   if(!banner){
     banner = document.createElement('div');
     banner.id = 'orderBanner';
-    banner.style.cssText = `position:fixed;top:0;left:0;right:0;z-index:100;padding:.75rem;text-align:center;font-size:.85rem;font-weight:700;color:white;transition:all .3s`;
+    banner.style.cssText = `position:fixed;top:0;left:0;right:0;z-index:100;padding:.875rem;text-align:center;font-size:.85rem;font-weight:700;color:white;cursor:pointer`;
+    banner.onclick = ()=>{ stopContinuousSound(); banner.style.display='none'; };
     document.body.appendChild(banner);
   }
   banner.style.background = color;
   banner.textContent = msg;
   banner.style.display = 'block';
-  setTimeout(() => banner.style.display = 'none', 3000);
+  if(!persistent) setTimeout(() => banner.style.display = 'none', 3000);
 }
 
 window.addEventListener('DOMContentLoaded', async()=>{
@@ -450,6 +485,14 @@ window.addEventListener('DOMContentLoaded', async()=>{
   currentUser=JSON.parse(stored);
   if(currentUser.role!=='driver'){window.location.href='app.html';return;}
   document.getElementById('driverName').textContent=currentUser.full_name||'طيار';
+
+  // لو سبق وفعّل الصوت → اخفي الـ overlay تلقائياً
+  if(localStorage.getItem('driverSoundEnabled')==='1'){
+    soundEnabled=true;
+    document.getElementById('soundPermOverlay').style.display='none';
+    initAudio();
+  }
+
   load(true);
   await loadDriver();
   await loadSettings();
