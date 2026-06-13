@@ -707,8 +707,29 @@ function toggleAttPopup(){
 
 async function approveAtt(id,status,driverId){
   const now=new Date().toISOString();
-  const today=new Date().toISOString().split('T')[0];
   const targetStatus=status.replace('_request','');
+
+  // تحقق من الرحلات الجارية قبل الموافقة على الانصراف
+  if(targetStatus==='offline'){
+    const {data:activeTrips}=await db.from('trips')
+      .select('id').eq('driver_id',driverId).eq('status','active');
+    if(activeTrips?.length>0){
+      showToast('❌ لا يمكن الموافقة — الطيار لديه رحلة جارية');
+      // ارفض الطلب تلقائياً
+      await db.from('driver_attendance').delete().eq('id',id);
+      await loadAttendanceData();
+      return;
+    }
+    const {data:activeOrders}=await db.from('orders')
+      .select('id').eq('driver_id',driverId).in('status',['assigned','picked']);
+    if(activeOrders?.length>0){
+      showToast('❌ لا يمكن الموافقة — الطيار لديه طلبات جارية');
+      await db.from('driver_attendance').delete().eq('id',id);
+      await loadAttendanceData();
+      return;
+    }
+  }
+
   await db.from('driver_attendance').update({status:targetStatus,approved_at:now}).eq('id',id);
   if(targetStatus==='offline'||targetStatus==='break'){
     const prevOnline=attendanceToday.find(r=>r.driver_id===driverId&&r.status==='online'&&!r.ended_at);
