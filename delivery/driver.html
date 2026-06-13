@@ -173,6 +173,7 @@ textarea.form-ctrl{height:80px;padding:.75rem;resize:none}
 .loading-overlay.show{display:flex}
 .spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+@keyframes flashBg{0%,100%{opacity:1}50%{opacity:.7}}
 </style>
 </head>
 <body>
@@ -183,6 +184,7 @@ textarea.form-ctrl{height:80px;padding:.75rem;resize:none}
     <div class="h-sub" id="driverBranch">جاري التحميل...</div>
   </div>
   <div class="h-actions">
+    <span id="soundToggle" onclick="toggleSound()" style="cursor:pointer;font-size:1.1rem" title="تشغيل/إيقاف الصوت">🔔</span>
     <button class="h-btn" onclick="doLogout()">خروج</button>
   </div>
 </div>
@@ -202,6 +204,12 @@ textarea.form-ctrl{height:80px;padding:.75rem;resize:none}
 
 <div class="pending-notice" id="pendingNotice" style="display:none">⏳ طلبك قيد الموافقة من الإدارة...</div>
 
+<!-- تنبيه الاستدعاء -->
+<div id="callNotice" style="display:none;background:#1a56db;color:white;padding:.75rem 1.25rem;text-align:center;font-size:.85rem;font-weight:700;animation:flashBg 1s infinite">
+  📞 <span id="callMessage">الإدارة تطلبك</span>
+  <button onclick="dismissCall()" style="background:rgba(255,255,255,.2);border:none;color:white;padding:.25rem .75rem;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.75rem;cursor:pointer;margin-right:.75rem">تم ✓</button>
+</div>
+
 <!-- STATS -->
 <div class="stats">
   <div class="stat"><div class="stat-val" id="s-assigned">0</div><div class="stat-lbl">على رحلة</div></div>
@@ -216,7 +224,7 @@ textarea.form-ctrl{height:80px;padding:.75rem;resize:none}
   <div class="hc-row"><span class="hc-lbl">وقت العمل الفعلي</span><span class="hc-val" id="hc-work">0 د</span></div>
   <div class="hc-row"><span class="hc-lbl">وقت الاستراحة</span><span class="hc-val" id="hc-break">0 د</span></div>
   <div class="hc-row"><span class="hc-lbl">الاستراحة المسموحة</span><span class="hc-val" id="hc-allowed">15 د</span></div>
-  <div class="hc-row"><span class="hc-lbl">الحد الأقصى للعمل</span><span class="hc-val" id="hc-max">10 س</span></div>
+
   <div class="hc-bar"><div class="hc-fill" id="hc-fill" style="width:0%;background:var(--green)"></div></div>
 </div>
 
@@ -308,6 +316,111 @@ let currentUser=null, driverRecord=null, settings=null;
 let allTrips=[], tripOrders={}, currentTripId=null;
 let attRecord=null, attTimerInterval=null;
 
+// ===== SOUND SYSTEM =====
+let soundEnabled = true;
+let lastOrderIds = new Set();
+let callChannel = null;
+
+function toggleSound(){
+  soundEnabled = !soundEnabled;
+  document.getElementById('soundToggle').textContent = soundEnabled ? '🔔' : '🔕';
+}
+
+function playSound(type){
+  if(!soundEnabled) return;
+  try{
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    if(type === 'new_order'){
+      // صوت تنبيه طلب جديد - نغمتين صاعدتين
+      osc.frequency.setValueAtTime(600, ctx.currentTime);
+      osc.frequency.setValueAtTime(800, ctx.currentTime + 0.15);
+      osc.frequency.setValueAtTime(600, ctx.currentTime + 0.3);
+      osc.frequency.setValueAtTime(900, ctx.currentTime + 0.45);
+      gain.gain.setValueAtTime(0.4, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.6);
+    } else if(type === 'order_removed'){
+      // صوت تنبيه إزالة - نغمة نازلة
+      osc.frequency.setValueAtTime(500, ctx.currentTime);
+      osc.frequency.setValueAtTime(300, ctx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.4);
+    } else if(type === 'call'){
+      // صوت استدعاء - متكرر
+      for(let i=0; i<3; i++){
+        const o2 = ctx.createOscillator();
+        const g2 = ctx.createGain();
+        o2.connect(g2); g2.connect(ctx.destination);
+        o2.frequency.value = 750;
+        g2.gain.setValueAtTime(0.4, ctx.currentTime + i*0.3);
+        g2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i*0.3 + 0.25);
+        o2.start(ctx.currentTime + i*0.3);
+        o2.stop(ctx.currentTime + i*0.3 + 0.25);
+      }
+    }
+  }catch(e){}
+}
+
+function checkNewOrders(){
+  if(!driverRecord) return;
+  const allOrds = Object.values(tripOrders).flat();
+  const currentIds = new Set(allOrds.filter(o=>['assigned','picked'].includes(o.status)).map(o=>o.id));
+
+  // طلبات جديدة
+  const newOrders = [...currentIds].filter(id => !lastOrderIds.has(id));
+  // طلبات اتشالت
+  const removedOrders = [...lastOrderIds].filter(id => !currentIds.has(id));
+
+  if(newOrders.length > 0){
+    playSound('new_order');
+    showBanner(`📦 طلب جديد عليك! (${newOrders.length})`, 'var(--green)');
+  }
+  if(removedOrders.length > 0 && lastOrderIds.size > 0){
+    playSound('order_removed');
+  }
+
+  lastOrderIds = currentIds;
+}
+
+// Realtime subscription للاستدعاء
+function subscribeToCallNotifications(){
+  if(!driverRecord) return;
+  callChannel = db.channel(`driver-calls-${driverRecord.id}`)
+    .on('broadcast', {event: 'call'}, (payload) => {
+      const msg = payload.payload?.message || 'الإدارة تطلبك';
+      document.getElementById('callMessage').textContent = msg;
+      document.getElementById('callNotice').style.display = 'block';
+      playSound('call');
+    })
+    .subscribe();
+}
+
+function dismissCall(){
+  document.getElementById('callNotice').style.display = 'none';
+}
+
+function showBanner(msg, color){
+  let banner = document.getElementById('orderBanner');
+  if(!banner){
+    banner = document.createElement('div');
+    banner.id = 'orderBanner';
+    banner.style.cssText = `position:fixed;top:0;left:0;right:0;z-index:100;padding:.75rem;text-align:center;font-size:.85rem;font-weight:700;color:white;transition:all .3s`;
+    document.body.appendChild(banner);
+  }
+  banner.style.background = color;
+  banner.textContent = msg;
+  banner.style.display = 'block';
+  setTimeout(() => banner.style.display = 'none', 3000);
+}
+
 window.addEventListener('DOMContentLoaded', async()=>{
   const stored=sessionStorage.getItem('delivery_user');
   if(!stored){window.location.href='auth.html';return;}
@@ -320,6 +433,7 @@ window.addEventListener('DOMContentLoaded', async()=>{
   await loadAttendance();
   await loadAll();
   load(false);
+  subscribeToCallNotifications();
   setInterval(loadAttendance, 15000);
   setInterval(loadAll, 30000);
   setInterval(updateAllTimers, 60000);
@@ -532,7 +646,7 @@ function renderHoursCard(records){
   document.getElementById('hc-work').textContent=fmTime(effectiveWork);
   document.getElementById('hc-break').textContent=fmTime(breakMins)+(excessBreak>0?` (زيادة ${fmTime(excessBreak)})`:'');
   document.getElementById('hc-allowed').textContent=fmTime(maxBreakMins);
-  document.getElementById('hc-max').textContent=`${maxWorkHours} س`;
+  // حد الساعات مش مطلوب في بورتال الطيار
   document.getElementById('hc-fill').style.width=pct+'%';
   document.getElementById('hc-fill').style.background=pct>90?'var(--red)':pct>70?'var(--yellow)':'var(--green)';
 }
@@ -759,6 +873,7 @@ async function loadAll(){
     renderTabs();
     if(!currentTripId&&allTrips.length)currentTripId=allTrips[0].id;
     renderContent();
+    checkNewOrders();
     document.getElementById('lastRefresh')||null;
   }catch(e){console.error(e);}
 }
