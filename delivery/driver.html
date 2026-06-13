@@ -369,11 +369,13 @@ function initAudio(){
 let soundInterval = null;
 
 function playSound(type){
-  if(!soundEnabled) return;
+  if(!soundEnabled || !audioCtx) return;
   try{
-    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if(audioCtx.state === 'suspended') audioCtx.resume();
-    _playOnce(type);
+    if(audioCtx.state === 'suspended'){
+      audioCtx.resume().then(()=>_playOnce(type));
+    } else {
+      _playOnce(type);
+    }
   }catch(e){ console.error('sound error:', e); }
 }
 
@@ -1286,14 +1288,15 @@ async function registerPush(){
     // احفظ الـ subscription في Supabase
     if(driverRecord){
       const subJson = sub.toJSON();
-      await db.from('driver_push_subscriptions').upsert({
-        driver_id: driverRecord.id,
-        endpoint: subJson.endpoint,
-        p256dh: subJson.keys?.p256dh,
-        auth: subJson.keys?.auth,
-        updated_at: new Date().toISOString()
-      }, {onConflict: 'driver_id'});
-      console.log('✅ Push subscription saved');
+      // استخدم SQL function عشان تتجاوز RLS
+      const {error} = await db.rpc('save_push_subscription', {
+        p_driver_id: driverRecord.id,
+        p_endpoint: subJson.endpoint,
+        p_p256dh: subJson.keys?.p256dh || '',
+        p_auth: subJson.keys?.auth || ''
+      });
+      if(error) console.error('Push save error:', error);
+      else console.log('✅ Push subscription saved');
     }
   }catch(e){ console.error('Push registration error:', e); }
 }
