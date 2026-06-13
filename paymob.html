@@ -99,6 +99,7 @@
         <button class="tab-btn active" onclick="switchTab('nolink', this)">🔴 غير مطابَقة</button>
         <button class="tab-btn" onclick="switchTab('linked', this)">🔗 مطابَقة</button>
         <button class="tab-btn" onclick="switchTab('all', this)">📋 الكل</button>
+        <button class="tab-btn" id="show-paid-btn" onclick="toggleShowPaid(this)" style="margin-right:auto;">👁️ إظهار المحوَّل</button>
       </div>
 
       <div class="filter-bar" style="margin-bottom:12px;align-items:center;flex-wrap:wrap;gap:8px;">
@@ -132,7 +133,6 @@
             </tbody>
           </table>
         </div>
-        <div style="display:flex;gap:16px;flex-wrap:wrap;padding:10px 0;font-size:0.88rem;font-weight:700;" id="total-bar"></div>
       </div>
 
     </div>
@@ -176,6 +176,9 @@
       'سيدى بشر':   'ابراهيم حمدي 3',
     };
 
+    // ترتيب ثابت للفروع (للأدمن): الصيدلية ← ابراهيم حمدي 2 ← ابراهيم حمدي 3
+    const STORE_ORDER = ['الصيدلية', 'ابراهيم حمدي 2', 'ابراهيم حمدي 3'];
+
     let activeUser      = null;
     let userBranch      = '';
     let userRole        = '';
@@ -185,6 +188,7 @@
     let branchTerminals = [];
     let terminalInfo    = {};
     let currentTab      = 'nolink';
+    let showPaid        = false;
 
     checkAuth().then(async user => {
       activeUser = user;
@@ -239,7 +243,7 @@
 
     async function loadAll() {
       const tbody = document.getElementById('table-body');
-      tbody.innerHTML = '<tr class="loading-row"><td colspan="6">⏳ جاري جلب البيانات...</td></tr>';
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="7">⏳ جاري جلب البيانات...</td></tr>';
       try {
         const resp = await fetchPaymob();
         allData = (Array.isArray(resp) ? resp : []).filter(p =>
@@ -248,14 +252,28 @@
         applyFilter();
         if (document.getElementById('cmp-panel').classList.contains('open')) buildCompareDays();
       } catch(e) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
       }
     }
 
     function switchTab(tab, btn) {
       currentTab = tab;
-      document.querySelectorAll('#status-tabs-row .tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('#status-tabs-row .tab-btn').forEach(b => {
+        if (b.id !== 'show-paid-btn') b.classList.remove('active');
+      });
       btn.classList.add('active');
+      applyFilter();
+    }
+
+    function toggleShowPaid(btn) {
+      showPaid = !showPaid;
+      if (showPaid) {
+        btn.classList.add('active');
+        btn.innerHTML = '🙈 إخفاء المحوَّل';
+      } else {
+        btn.classList.remove('active');
+        btn.innerHTML = '👁️ إظهار المحوَّل';
+      }
       applyFilter();
     }
 
@@ -309,6 +327,8 @@
         const linked = isLinked(p);
         if (currentTab === 'nolink' && linked)  return false;
         if (currentTab === 'linked' && !linked) return false;
+        // إخفاء المحوَّل افتراضياً (إلا لو فعّلنا إظهاره)
+        if (!showPaid && isPaid(p)) return false;
         // فلتر التاريخ بعد تحويله لتوقيت مصر
         if (dayF && dayKey(p) !== dayF) return false;
         if (search) {
@@ -341,7 +361,6 @@
 
       if (!items.length) {
         tbody.innerHTML = `<tr><td colspan="${colCount}" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد معاملات</td></tr>`;
-        document.getElementById('total-bar').innerHTML = '';
         const grandVal = document.getElementById('grand-total-val');
         if (grandVal) grandVal.textContent = '0.00';
         return;
@@ -368,7 +387,6 @@
         dayGroups[k].push(p);
       });
 
-      let grand = 0;
       let html  = '';
 
       dayOrder.forEach(k => {
@@ -413,7 +431,15 @@
         const dayNet     = Object.values(storeStats).reduce((s,x) => s+x.net,   0);
         const dayTaxPct  = dayTotal > 0 ? ((dayTax / dayTotal) * 100).toFixed(2) : '0.00';
 
-        const storeDetails = Object.entries(storeStats).map(([store, v]) => {
+        // ترتيب ثابت للفروع: الصيدلية ← ابراهيم حمدي 2 ← ابراهيم حمدي 3 (وأي فرع تاني في الآخر)
+        const orderedStores = Object.keys(storeStats).sort((a, b) => {
+          let ia = STORE_ORDER.indexOf(a); if (ia === -1) ia = 999;
+          let ib = STORE_ORDER.indexOf(b); if (ib === -1) ib = 999;
+          return ia - ib;
+        });
+
+        const storeDetails = orderedStores.map(store => {
+          const v = storeStats[store];
           const taxPct = v.total > 0 ? ((v.tax / v.total) * 100).toFixed(2) : '0.00';
           // الماكينات جوه الفرع
           const machineLines = Object.entries(v.machines).map(([mch, mv]) => {
@@ -460,7 +486,6 @@
 
         dayItems.forEach(p => {
           const amt    = parseFloat(p.amount) || 0;
-          grand       += amt;
           const dStr   = fmtDate(p.transaction_time);
           const tStr   = fmtTime(p.transaction_time);
           const linked = isLinked(p);
@@ -497,11 +522,6 @@
           </span>`
         ).join('');
       }
-      const unpaidTotal = Object.values(machineUnpaid).reduce((s,v) => s+v, 0);
-      document.getElementById('total-bar').innerHTML =
-        `<span>الإجمالي: <b style="color:var(--accent-dark);">${grand.toFixed(2)}</b> جنيه</span>` +
-        `<span style="color:var(--warning);">المعلّق: <b>${unpaidTotal.toFixed(2)}</b> جنيه</span>` +
-        `<span style="color:var(--text-muted);">عدد المعاملات: <b>${items.length}</b></span>`;
     }
 
     async function markDayPaid(dayStr, btn, paid) {
