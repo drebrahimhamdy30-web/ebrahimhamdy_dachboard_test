@@ -1351,30 +1351,32 @@ async function markPicked(id,e){
   showToast('✓ تم تسجيل الاستلام');await loadAll();showLoading(false);
 }
 
-// إزالة أوردر من رحلة (يرجع للقائمة)
+// إزالة أوردر من رحلة (يتأجل 5 دقائق ثم يعود للتوزيع)
 async function removeFromTrip(orderId, tripId, e){
   e?.stopPropagation();
-  if(!confirm('إزالة الطلب من الرحلة؟ سيرجع لقائمة الطلبات.')) return;
+  if(!confirm('إزالة الطلب من الرحلة؟ سيتأجل 5 دقائق ثم يعود للتوزيع تلقائياً.')) return;
   showLoading(true);
   const now = new Date().toISOString();
+  const reactivateAt = new Date(Date.now() + 5*60000).toISOString();
   // شيل من trip_orders
   await db.from('trip_orders').delete().eq('trip_id', tripId).eq('order_id', orderId);
-  // رجّع الطلب لـ pending بدون طيار
+  // أجّل الطلب 5 دقائق بدل ما يرجع pending فوراً
   await db.from('orders').update({
     driver_id: null, deliveryman: null,
     status: 'postponed',
-postpone_time: <دلوقتي + 5 دقائق>,
+    postpone_time: reactivateAt,
+    postpone_reason: 'أُزيل من الرحلة — إعادة توزيع بعد 5 دقائق',
+    assigned_at: null, picked_at: null,
     updated_at: now
   }).eq('id', orderId);
   // حدّث عدد الطلبات في الرحلة
   const {data:to} = await db.from('trip_orders').select('id').eq('trip_id', tripId);
   await db.from('trips').update({orders_count: (to||[]).length, updated_at: now}).eq('id', tripId);
-  await addOrderLog(orderId, 'order_edited', {action: 'removed_from_trip', trip_id: tripId});
-  showToast('✓ تم إزالة الطلب من الرحلة');
+  await addOrderLog(orderId, 'order_postponed', {action: 'removed_from_trip', trip_id: tripId, reactivate_at: reactivateAt});
+  showToast('✓ تم تأجيل الطلب 5 دقائق');
   await loadAll();
   showLoading(false);
 }
-
 // Trip Order Actions Modal
 function openTripOrderActions(orderId, tripId){
   const o=allOrders.find(x=>x.id===orderId);if(!o)return;
