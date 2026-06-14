@@ -32,6 +32,7 @@
     .cell-select { background:var(--surface-3); border:1.5px solid var(--accent); border-radius:4px; color:var(--text-primary); font-family:var(--font); font-size:0.82rem; padding:3px 4px; outline:none; }
     .status-pending { background:#fef9c3; color:#a16207; }
     .status-posted  { background:#dcfce7; color:#15803d; }
+    .status-cancel  { background:#e2e8f0; color:#475569; }
     .search-wrap { position:relative; min-width:200px; flex:1; max-width:280px; }
     .search-wrap i { position:absolute; right:11px; top:50%; transform:translateY(-50%); color:var(--text-muted); font-size:0.85rem; pointer-events:none; }
     .search-wrap input { padding-right:34px; }
@@ -49,6 +50,29 @@
     .pm-trx-row:hover { border-color:var(--accent); background:#0f172a; }
     .pm-trx-info { font-size:0.82rem; color:var(--text-primary); line-height:1.7; }
     .pm-trx-amount { font-size:1rem; font-weight:900; color:var(--warning); white-space:nowrap; }
+
+    /* ===== أيقونة الشرح (ⓘ) في رؤوس الأعمدة ===== */
+    .help-icon { display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px; border-radius:50%; background:var(--accent); color:#fff; font-size:0.62rem; font-weight:900; cursor:pointer; margin-right:4px; vertical-align:middle; }
+    .help-icon:hover { background:var(--accent-dark); }
+    .th-with-help { display:inline-flex; align-items:center; gap:2px; }
+
+    /* ===== Modal الشرح ===== */
+    .info-modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:100000; align-items:center; justify-content:center; }
+    .info-modal { background:#1e293b; border:2px solid #334155; border-radius:16px; padding:22px; width:92%; max-width:460px; direction:rtl; font-family:var(--font); box-shadow:0 20px 60px rgba(0,0,0,0.6); }
+    .info-modal h3 { color:#f1f5f9; font-size:1.02rem; margin:0 0 12px; display:flex; align-items:center; gap:8px; }
+    .info-modal .info-body { color:#cbd5e1; font-size:0.9rem; line-height:1.9; }
+    .info-modal .info-body b { color:#fbbf24; }
+    .info-modal .info-warn { background:#422006; border:1px solid #92400e; border-radius:10px; padding:10px 12px; margin-top:10px; color:#fcd34d; font-size:0.85rem; line-height:1.8; }
+    .info-modal .info-ok-btn { background:var(--accent); color:#fff; border:none; border-radius:10px; padding:9px 22px; font-family:var(--font); font-weight:700; cursor:pointer; margin-top:14px; float:left; }
+
+    /* ===== فلاتر checkbox بدل المربعات ===== */
+    .filter-chips { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+    .chip-check { display:flex; align-items:center; gap:5px; font-size:0.75rem; font-weight:700; color:var(--text-secondary); cursor:pointer; background:var(--surface); border:1.5px solid var(--border); border-radius:20px; padding:4px 11px; transition:all 0.15s; user-select:none; }
+    .chip-check:hover { border-color:var(--accent); }
+    .chip-check input { width:14px; height:14px; accent-color:var(--accent); cursor:pointer; margin:0; }
+    .chip-check.checked { background:#ede9fe; border-color:var(--accent); color:var(--accent-dark); }
+    .chip-check.danger.checked { background:#fee2e2; border-color:var(--danger); color:var(--danger); }
+    .chip-check.danger input { accent-color:var(--danger); }
   </style>
 </head>
 <body>
@@ -87,6 +111,7 @@
         <button class="tab-btn" onclick="switchTab('all', this)">📋 الكل</button>
         <button class="tab-btn" style="border-color:#f59e0b;color:#b45309;" onclick="switchTab('extra', this)">⚠️ زيادات</button>
         <button class="tab-btn" style="border-color:#dc2626;color:#dc2626;" onclick="switchTab('return', this)">↩️ مرتجعات</button>
+        <button class="tab-btn" style="border-color:#64748b;color:#475569;" onclick="switchTab('cancel', this)">🚫 ملغاة</button>
       </div>
 
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
@@ -97,15 +122,18 @@
       <div style="background:var(--surface-3);border:1.5px solid var(--border);border-radius:12px;padding:10px 14px;margin-bottom:12px;">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <span style="font-size:0.72rem;font-weight:700;color:var(--text-muted);white-space:nowrap;"><i class="fas fa-filter" style="color:var(--accent);"></i> فلاتر:</span>
-          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;flex:1;">
+          <div class="filter-chips" style="flex:1;">
             <span id="machine-filter-label" style="font-size:0.75rem;font-weight:700;color:var(--text-secondary);white-space:nowrap;"><i class="fas fa-credit-card"></i> ماكينة:</span>
             <select id="machineFilter" class="form-select" style="width:auto;font-size:0.78rem;" onchange="applyFilter()">
               <option value="all">كل الماكينات</option>
             </select>
-            <label id="no-machine-label" style="display:flex;align-items:center;gap:4px;font-size:0.75rem;font-weight:700;color:var(--danger);cursor:pointer;background:#fee2e2;border-radius:20px;padding:3px 8px;">
-              <input type="checkbox" id="noMachineFilter" onchange="applyFilter()" style="width:13px;height:13px;accent-color:var(--danger);">
-              بدون ماكينة
+
+            <!-- فلتر بدون ماكينة كـ chip checkbox -->
+            <label id="no-machine-label" class="chip-check danger">
+              <input type="checkbox" id="noMachineFilter" onchange="applyFilter()">
+              ⚠️ بدون ماكينة
             </label>
+
             <span id="extra-filter-label" style="display:none;font-size:0.75rem;font-weight:700;color:var(--text-secondary);">الحالة:</span>
             <select id="extraStatusFilter" class="form-select" style="width:auto;font-size:0.78rem;display:none;" onchange="applyFilter()">
               <option value="all">الكل</option>
@@ -113,14 +141,21 @@
               <option value="pending">لم يُرحَّل</option>
               <option value="posted">مرحَّل</option>
             </select>
-            <div style="display:flex;align-items:center;gap:4px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:3px 8px;">
-              <i class="fas fa-hashtag" style="font-size:0.68rem;color:var(--text-muted);"></i>
-              <input type="text" id="refFilter" class="form-input" style="width:90px;border:none;background:transparent;padding:0;font-size:0.78rem;" placeholder="رقم الترحيلة" oninput="applyFilter()">
-            </div>
-            <div style="display:flex;align-items:center;gap:4px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:3px 8px;">
-              <i class="fas fa-calendar" style="font-size:0.68rem;color:var(--text-muted);"></i>
-              <input type="date" id="saveDateFilter" class="form-input" style="width:130px;border:none;background:transparent;padding:0;font-size:0.78rem;" onchange="applyFilter()">
-            </div>
+
+            <!-- فلتر رقم الترحيلة كـ chip checkbox + خانة رقم -->
+            <label class="chip-check" id="ref-chip">
+              <input type="checkbox" id="refFilterEnable" onchange="toggleRefFilter()">
+              <i class="fas fa-hashtag" style="font-size:0.68rem;"></i> رقم الترحيلة
+              <input type="text" id="refFilter" style="display:none;width:70px;border:none;background:transparent;outline:none;font-size:0.78rem;color:inherit;font-family:var(--font);" placeholder="..." inputmode="numeric" oninput="applyFilter()">
+            </label>
+
+            <!-- فلتر تاريخ الحفظ كـ chip checkbox + خانة تاريخ -->
+            <label class="chip-check" id="date-chip">
+              <input type="checkbox" id="saveDateEnable" onchange="toggleDateFilter()">
+              <i class="fas fa-calendar" style="font-size:0.68rem;"></i> تاريخ الحفظ
+              <input type="date" id="saveDateFilter" style="display:none;width:120px;border:none;background:transparent;outline:none;font-size:0.78rem;color:inherit;font-family:var(--font);" onchange="applyFilter()">
+            </label>
+
             <button style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:4px 10px;font-size:0.72rem;color:var(--text-muted);cursor:pointer;" onclick="clearFilters()">
               <i class="fas fa-times"></i> مسح
             </button>
@@ -137,8 +172,8 @@
               <th>كود العميل</th>
               <th>اسم العميل</th>
               <th>إجمالي الفاتورة</th>
-              <th>صافي الفيزا</th>
-              <th>تقسيم</th>
+              <th><span class="th-with-help">صافي الفيزا <span class="help-icon" onclick="showHelp('net')">i</span></span></th>
+              <th><span class="th-with-help">تقسيم <span class="help-icon" onclick="showHelp('split')">i</span></span></th>
               <th>الماكينة</th>
               <th>الموظف</th>
               <th>تاريخ الحفظ</th>
@@ -170,6 +205,16 @@
     </div>
   </div>
 
+  <!-- Modal الشرح -->
+  <div class="info-modal-overlay" id="info-modal-overlay" onclick="if(event.target===this)closeInfo()">
+    <div class="info-modal">
+      <h3 id="info-modal-title"></h3>
+      <div class="info-body" id="info-modal-body"></div>
+      <button class="info-ok-btn" onclick="closeInfo()">فهمت</button>
+      <div style="clear:both;"></div>
+    </div>
+  </div>
+
   <script src="api.js"></script>
   <script src="nav.js" defer></script>
   <script>
@@ -184,12 +229,45 @@
       'سيدى بشر':   'bill_lookup_bishr',
     };
 
+    // قيمة الحالة المستخدمة للإلغاء (أوردر خاطئ من بي كونكت)
+    const CANCEL_OPTION = '__CANCEL__';
+
     let activeUser   = null;
     let userBranch   = '';
     let allData      = [];
     let machinesList = [];
     let machineObjs  = [];
     let currentTab   = 'pending';
+
+    // ===== شروحات الأعمدة والمرتجع =====
+    const HELP_TEXTS = {
+      net: {
+        title: '💳 صافي الفيزا',
+        body: `<p>دي القيمة اللي اتدفعت فعلياً على الفيزا أو اتحوّلت على المحفظة.</p>
+               <p><b>برجاء كتابة القيمة المدفوعة أو المحوّلة بالضبط</b> — مش إجمالي الفاتورة لو فيه فرق أو خصم.</p>
+               <div class="info-warn">⚠️ القيمة دي هي اللي بتتطابق مع معاملة باي موب عند ربط الماكينة، فلازم تكون مظبوطة للقرش.</div>`
+      },
+      split: {
+        title: '✂️ التقسيم',
+        body: `<p>استخدم الخانة دي <b>في حال دفع العميل الفاتورة على مرتين</b> (مثلاً جزء على فيزا وجزء تاني على فيزا منفصلة).</p>
+               <p>اكتب هنا قيمة الدفعة التانية (الجزء المقسوم). لازم تكون <b>أقل من صافي الفيزا</b>.</p>
+               <div class="info-warn">💡 عند الربط بباي موب، النظام بيدوّر على معاملتين: واحدة بقيمة الصافي وواحدة بقيمة التقسيم.</div>`
+      },
+      cancel: {
+        title: '🚫 إلغاء (أوردر خاطئ)',
+        body: `<p>اختار <b>إلغاء</b> في حالة إن الأوردر اتحفظ من بي كونكت كـ <b>فيزا بالخطأ</b>.</p>
+               <p>المعاملة الملغاة هتتشال من الحسابات والإجماليات، وهتلاقيها في تبويب <b>"🚫 ملغاة"</b>.</p>
+               <div class="info-warn">⚠️ ده مش مرتجع ولا زيادة — ده بس بيعلّم إن الفاتورة اتسجّلت غلط من الأساس.</div>`
+      }
+    };
+
+    function showHelp(key) {
+      const h = HELP_TEXTS[key]; if(!h) return;
+      document.getElementById('info-modal-title').innerHTML = h.title;
+      document.getElementById('info-modal-body').innerHTML  = h.body;
+      document.getElementById('info-modal-overlay').style.display='flex';
+    }
+    function closeInfo(){ document.getElementById('info-modal-overlay').style.display='none'; }
 
     checkAuth().then(async user => {
       activeUser = user;
@@ -273,7 +351,12 @@
           setTimeout(()=>{ const el=document.getElementById('lookup-msg'); if(el){el.textContent='';el.className='lookup-msg';} },4000);
           return;
         }
-        if (confirm(`الفاتورة ${billNo} موجودة بالفعل.\nهل تريد إنشاء مرتجع بقيمة ${parseFloat(exists.total_bill_net||0).toFixed(2)} جنيه؟`)) {
+        // ===== تنبيه المرتجع =====
+        const returnWarn = `الفاتورة ${billNo} موجودة بالفعل.\n\n`+
+          `↩️ إنشاء مرتجع معناه إن العميل استرد المبلغ على الفيزا أو المحفظة.\n\n`+
+          `⚠️ لو العميل استبدل المرتجع بفاتورة أخرى — فلا داعي لعمل مرتجع.\n\n`+
+          `هل تريد إنشاء مرتجع بقيمة ${parseFloat(exists.total_bill_net||0).toFixed(2)} جنيه؟`;
+        if (confirm(returnWarn)) {
           const returnBillNo = '0' + billNo;
           const alreadyReturn = allData.find(i => String(i.bill_no) === String(returnBillNo));
           if (alreadyReturn) {
@@ -336,9 +419,11 @@
       btn.classList.add('active');
       const isExtra=(tab==='extra');
       const isReturn=(tab==='return');
-      document.getElementById('machineFilter').style.display        = (isExtra||isReturn)?'none':'';
-      document.getElementById('machine-filter-label').style.display = (isExtra||isReturn)?'none':'';
-      document.getElementById('no-machine-label').style.display     = (isExtra||isReturn)?'none':'flex';
+      const isCancel=(tab==='cancel');
+      const hideMachine = isExtra||isReturn||isCancel;
+      document.getElementById('machineFilter').style.display        = hideMachine?'none':'';
+      document.getElementById('machine-filter-label').style.display = hideMachine?'none':'';
+      document.getElementById('no-machine-label').style.display     = hideMachine?'none':'flex';
       document.getElementById('extraStatusFilter').style.display    = isExtra?'':'none';
       document.getElementById('extra-filter-label').style.display   = isExtra?'':'none';
       applyFilter();
@@ -361,14 +446,18 @@
       const machine=document.getElementById('machineFilter').value;
       const extraStatus=document.getElementById('extraStatusFilter').value;
       const noMachine=document.getElementById('noMachineFilter').checked;
-      const refFilter=document.getElementById('refFilter').value.trim();
-      const saveDateF=document.getElementById('saveDateFilter').value;
+      const refFilter=document.getElementById('refFilterEnable').checked ? document.getElementById('refFilter').value.trim() : '';
+      const saveDateF=document.getElementById('saveDateEnable').checked ? document.getElementById('saveDateFilter').value : '';
 
       const filtered = allData.filter(item => {
+        const isCancel=(item.bill_status==='ملغي');
         const isPosted=(item.bill_status==='مرحَّل'||item.bill_status==='posted'||item.bill_status==='مرتجع-مرحَّل');
         const isExtra=(item.bill_status==='زيادة');
         const isReturn=(item.bill_status==='مرتجع'||item.bill_status==='مرتجع-مرحَّل');
         const hasMachine=item.machine_name&&item.machine_name!=='null'&&item.machine_name!=='';
+        if(currentTab==='cancel'){ if(!isCancel) return false; return !search||matchSearch(item,search); }
+        // الملغاة متختفي من باقي التبويبات
+        if(isCancel) return false;
         if(currentTab==='return') { if(!isReturn) return false; return !search||matchSearch(item,search); }
         if(currentTab==='extra') {
           if(!isExtra) return false;
@@ -403,7 +492,7 @@
       machines.forEach(m=>{totals[m]={sum:0,bill:0,count:0};});
 
       items.forEach(item=>{
-        if(item.bill_status==='مرتجع'||item.bill_status==='مرتجع-مرحَّل') return;
+        if(item.bill_status==='مرتجع'||item.bill_status==='مرتجع-مرحَّل'||item.bill_status==='ملغي') return;
         const m=String(item.machine_name||'').trim();
         if(totals[m]!==undefined){
           totals[m].sum  += (parseFloat(item.total_bill_net)||0) + (parseFloat(item.split_amount)||0);
@@ -412,8 +501,8 @@
         }
       });
 
-      const saveDateF=document.getElementById('saveDateFilter').value;
-      const refFilter=document.getElementById('refFilter').value.trim();
+      const saveDateF=document.getElementById('saveDateEnable').checked ? document.getElementById('saveDateFilter').value : '';
+      const refFilter=document.getElementById('refFilterEnable').checked ? document.getElementById('refFilter').value.trim() : '';
       allData.filter(x=>{
         if(x.bill_status!=='مرتجع'&&x.bill_status!=='مرتجع-مرحَّل') return false;
         if(saveDateF&&x.bill_save_date&&!x.bill_save_date.startsWith(saveDateF)) return false;
@@ -461,7 +550,7 @@
         </div>`;
       }).join('');
 
-      const canPost=items.filter(i=>i.machine_name&&i.machine_name!=='null'&&i.machine_name!==''&&i.bill_status!=='مرحَّل'&&i.bill_status!=='posted'&&i.bill_status!=='زيادة'&&i.bill_status!=='مرتجع-مرحَّل').length;
+      const canPost=items.filter(i=>i.machine_name&&i.machine_name!=='null'&&i.machine_name!==''&&i.bill_status!=='مرحَّل'&&i.bill_status!=='posted'&&i.bill_status!=='زيادة'&&i.bill_status!=='مرتجع-مرحَّل'&&i.bill_status!=='ملغي').length;
       bulkWrap.innerHTML=canPost>0
         ?`<button class="btn btn-success" onclick="markAllPosted()" id="bulk-post-btn"
             style="white-space:nowrap;padding:10px 16px;font-size:0.82rem;border-radius:10px;box-shadow:0 2px 8px rgba(16,185,129,0.3);">
@@ -475,8 +564,9 @@
         const isPosted=(item.bill_status==='مرحَّل'||item.bill_status==='posted'||item.bill_status==='مرتجع-مرحَّل');
         const isExtra=(item.bill_status==='زيادة');
         const isReturn=(item.bill_status==='مرتجع'||item.bill_status==='مرتجع-مرحَّل');
+        const isCancel=(item.bill_status==='ملغي');
         const hasMachine=item.machine_name&&item.machine_name!=='null'&&item.machine_name!=='';
-        return !isPosted&&!isExtra&&!isReturn&&hasMachine;
+        return !isPosted&&!isExtra&&!isReturn&&!isCancel&&hasMachine;
       });
       if(!toPost.length){alert('لا توجد معاملات قابلة للترحيل');return;}
       if(!confirm(`ترحيل ${toPost.length} معاملة؟`))return;
@@ -499,9 +589,12 @@
         const net=parseFloat(item.total_bill_net)||0;
         const split=parseFloat(item.split_amount)||0;
         const splitAbs=Math.abs(split);
+        const isCancel=(item.bill_status==='ملغي');
         const isReturn=(item.bill_status==='مرتجع'||item.bill_status==='مرتجع-مرحَّل');
-        grandTotal += isReturn ? -(net + split) : net;
-        grandBill  += isReturn ? -(parseFloat(item.total_bill||0)) : parseFloat(item.total_bill||0);
+        if(!isCancel){
+          grandTotal += isReturn ? -(net + split) : net;
+          grandBill  += isReturn ? -(parseFloat(item.total_bill||0)) : parseFloat(item.total_bill||0);
+        }
         const isPosted=(item.bill_status==='مرحَّل'||item.bill_status==='posted'||item.bill_status==='مرتجع-مرحَّل');
         const isExtra=(item.bill_status==='زيادة');
         const hasMachine=item.machine_name&&item.machine_name!=='null'&&item.machine_name!=='';
@@ -517,7 +610,34 @@
           ${splitAbs>0?`<span class="split-badge">${splitAbs.toFixed(2)}</span>`:`<span style="color:var(--text-muted);font-size:0.72rem;">—</span>`}
         </span>`;
 
-        return `<tr id="row-${item.id}">
+        // عمود الحالة
+        let statusBadge;
+        if(isCancel) statusBadge='<span class="badge status-cancel">🚫 ملغي</span>';
+        else if(isReturn) statusBadge='<span class="badge" style="background:#fee2e2;color:#dc2626;">↩️ مرتجع</span>';
+        else if(isExtra) statusBadge='<span class="badge" style="background:#ffedd5;color:#c2410c;">⚠️ زيادة</span>';
+        else if(isPosted) statusBadge='<span class="badge status-posted">✅ مرحَّل</span>';
+        else statusBadge='<span class="badge status-pending">⏳ لم يُرحَّل</span>';
+
+        // عمود الترحيل
+        let postCell;
+        if(isCancel) postCell='<span style="font-size:0.72rem;color:var(--text-muted);">—</span>';
+        else if(isReturn) postCell='<span style="font-size:0.72rem;color:var(--text-muted);">—</span>';
+        else if(isExtra) postCell=(!isPosted?`<button class="btn btn-sm" style="background:#f59e0b;color:#fff;" onclick="markPosted('${item.id}',this)"><i class="fas fa-check"></i> ترحيل</button>`:'<i class="fas fa-check-double" style="color:var(--success);"></i>');
+        else if(!isPosted&&hasMachine) postCell=`<button class="btn btn-success btn-sm" onclick="markPosted('${item.id}',this)"><i class="fas fa-check"></i> ترحيل</button>`;
+        else if(!isPosted&&!hasMachine) postCell=`<span style="font-size:0.72rem;color:var(--text-muted);">اختر ماكينة أولاً</span>`;
+        else postCell=`<i class="fas fa-check-double" style="color:var(--success);"></i>`;
+
+        // خلية الماكينة — لو ملغي نعرض بادج رمادي ثابت
+        let machineCell;
+        if(isCancel){
+          machineCell=`<span class="editable-cell" onclick="editMachine('${item.id}',this,'${(item.machine_name||'').replace(/'/g,"&#39;")}')"><span class="badge status-cancel" style="font-size:0.72rem;">🚫 ملغي</span></span>`;
+        } else {
+          machineCell=`<span class="editable-cell" onclick="editMachine('${item.id}',this,'${(item.machine_name||'').replace(/'/g,"&#39;")}')">
+            ${hasMachine?`<span class="badge badge-blue" style="font-size:0.72rem;">${item.machine_name}</span>`:`<span style="color:var(--danger);font-size:0.75rem;">⚠️ بدون ماكينة</span>`}
+          </span>`;
+        }
+
+        return `<tr id="row-${item.id}" ${isCancel?'style="opacity:0.6;"':''}>
           <td><code style="font-size:0.82rem;color:var(--text-secondary);">${item.bill_no||'---'}</code></td>
           <td style="font-size:0.75rem;white-space:nowrap;">${datePart}<br><span style="color:var(--text-muted);font-size:0.7rem;">${timePart}</span></td>
           <td><code style="font-size:0.78rem;color:var(--text-secondary);">${item.cust_code||'---'}</code></td>
@@ -528,14 +648,12 @@
             ${split>0?`<br><span style="font-size:0.65rem;color:var(--text-muted);">(+${split.toFixed(2)})</span>`:''}
           </span></td>
           <td style="text-align:center;">${splitCell}</td>
-          <td><span class="editable-cell" onclick="editMachine('${item.id}',this,'${(item.machine_name||'').replace(/'/g,"&#39;")}')">
-            ${hasMachine?`<span class="badge badge-blue" style="font-size:0.72rem;">${item.machine_name}</span>`:`<span style="color:var(--danger);font-size:0.75rem;">⚠️ بدون ماكينة</span>`}
-          </span></td>
+          <td>${machineCell}</td>
           <td style="font-size:0.82rem;">${item.employee_name||'---'}</td>
           <td style="font-size:0.78rem;white-space:nowrap;">${saveDate}</td>
           <td style="text-align:center;">${refNo}</td>
-          <td>${isReturn?'<span class="badge" style="background:#fee2e2;color:#dc2626;">↩️ مرتجع</span>':isExtra?'<span class="badge" style="background:#ffedd5;color:#c2410c;">⚠️ زيادة</span>':isPosted?'<span class="badge status-posted">✅ مرحَّل</span>':'<span class="badge status-pending">⏳ لم يُرحَّل</span>'}</td>
-          <td>${isReturn?'<span style="font-size:0.72rem;color:var(--text-muted);">—</span>':isExtra?(!isPosted?`<button class="btn btn-sm" style="background:#f59e0b;color:#fff;" onclick="markPosted('${item.id}',this)"><i class="fas fa-check"></i> ترحيل</button>`:'<i class="fas fa-check-double" style="color:var(--success);"></i>'):!isPosted&&hasMachine?`<button class="btn btn-success btn-sm" onclick="markPosted('${item.id}',this)"><i class="fas fa-check"></i> ترحيل</button>`:!isPosted&&!hasMachine?`<span style="font-size:0.72rem;color:var(--text-muted);">اختر ماكينة أولاً</span>`:`<i class="fas fa-check-double" style="color:var(--success);"></i>`}</td>
+          <td>${statusBadge}</td>
+          <td>${postCell}</td>
         </tr>`;
       }).join('');
       document.getElementById('total-bar').innerHTML=
@@ -620,6 +738,13 @@
       const empty=document.createElement('option');empty.value='';empty.textContent='— اختر —';
       select.appendChild(empty);
       branchMachines().forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;if(m===current)o.selected=true;select.appendChild(o);});
+      // ===== خيار الإلغاء (أوردر خاطئ من بي كونكت) =====
+      const cancelOpt=document.createElement('option');
+      cancelOpt.value=CANCEL_OPTION;
+      cancelOpt.textContent='🚫 إلغاء (أوردر خاطئ)';
+      cancelOpt.style.color='#dc2626';
+      select.appendChild(cancelOpt);
+
       el.replaceWith(select);select.focus();
       let handled=false;
       const restoreSpan=(machineName)=>{
@@ -629,10 +754,32 @@
         span.onclick=()=>editMachine(id,span,machineName);
         if(select.parentNode)select.replaceWith(span);
       };
+      const restoreCancelSpan=()=>{
+        const span=document.createElement('span');
+        span.className='editable-cell';
+        span.innerHTML='<span class="badge status-cancel" style="font-size:0.72rem;">🚫 ملغي</span>';
+        span.onclick=()=>editMachine(id,span,'');
+        if(select.parentNode)select.replaceWith(span);
+      };
       const save=async()=>{
         if(handled)return; handled=true;
         const newVal=select.value;
         const item=allData.find(x=>String(x.id)===String(id));
+
+        // ===== لو اختار إلغاء =====
+        if(newVal===CANCEL_OPTION){
+          const ok=confirm('🚫 تأكيد الإلغاء؟\n\nهذا الخيار في حالة حفظ أوردر من بي كونكت فيزا بالخطأ.\nالمعاملة هتتشال من الحسابات وهتتنقل لتبويب "ملغاة".');
+          if(!ok){ restoreSpan(current); return; }
+          restoreCancelSpan();
+          if(item){
+            item.bill_status='ملغي';
+            item.machine_name=null;
+            await updateData({type:'visa_update',id,bill_status:'ملغي',machine_name:null,total_bill_net:item.total_bill_net??null,split_amount:item.split_amount??null,bill_save_date:item.bill_save_date??null});
+          }
+          applyFilter();
+          return;
+        }
+
         if(newVal===current){restoreSpan(current);return;}
         if(newVal&&isPaymobMachine(newVal)){
           const ok=await verifyPaymobBeforeSet(id,newVal,item);
@@ -651,8 +798,6 @@
     async function verifyPaymobBeforeSet(id, machineName, item) {
       const net   = parseFloat(item?.total_bill_net) || 0;
       const split = parseFloat(item?.split_amount)   || 0;
-      // بنبحث عن معاملة بقيمة net (الصافي الكلي) ومعاملة بقيمة split (لو موجود)
-      // مش الفرق بينهم
 
       if (net <= 0) {
         alert('⚠️ صافي الفيزا = 0 — أدخل القيمة الصحيحة قبل الربط بباي موب');
@@ -663,7 +808,6 @@
       const pmAll    = await fetchPaymob();
       const pmList   = Array.isArray(pmAll) ? pmAll : [];
 
-      // بحث عن معاملة بقيمة net
       const matchesNet = pmList.filter(p => {
         const pTerminal = String(p.terminal_id||'').trim();
         const pAmount   = parseFloat(p.amount);
@@ -671,7 +815,6 @@
         return pTerminal===terminal && pAmount===net && noBill;
       });
 
-      // بحث عن معاملة بقيمة split (لو فيه تقسيم)
       let matchesSplit = [];
       if (split > 0) {
         matchesSplit = pmList.filter(p => {
@@ -700,7 +843,6 @@
         if (!pmTrxNet) return false;
       }
 
-      // اختيار معاملة التقسيم لو موجود
       let pmTrxSplit = null;
       if (split > 0) {
         if (matchesSplit.length === 1) {
@@ -715,7 +857,6 @@
     }
 
     async function linkPaymob(id, machineName, item, pmTrxNet, pmTrxSplit) {
-      // حفظ الماكينة
       const okVisa = await updateData({
         type:'visa_update',id,machine_name:machineName,
         total_bill_net:item?.total_bill_net??null,
@@ -727,11 +868,9 @@
       if (item) item.machine_name = machineName;
 
       const billNo = item?.bill_no || '';
-      // كتابة رقم الفاتورة على معاملة الصافي
       const okNet = await paymobUpdate({ id: pmTrxNet.id, bill_no: billNo });
       if (!okNet) alert('⚠️ تم حفظ الماكينة، لكن فشل ربط معاملة الصافي في باي موب.');
 
-      // كتابة رقم الفاتورة على معاملة التقسيم لو موجودة
       if (pmTrxSplit) {
         const okSplit = await paymobUpdate({ id: pmTrxSplit.id, bill_no: billNo });
         if (!okSplit) alert('⚠️ تم ربط معاملة الصافي، لكن فشل ربط معاملة التقسيم في باي موب.');
@@ -741,7 +880,6 @@
       return true;
     }
 
-    // شاشة اختيار معاملة — بترجع الـ object المختار مش boolean
     let pmChooseResolve = null;
     function choosePaymobMatch(id, machineName, item, matches, title) {
       return new Promise(resolve => {
@@ -760,7 +898,7 @@
           row.onclick=()=>{
             overlay.style.display='none';
             const resolveFn=pmChooseResolve; pmChooseResolve=null;
-            if(resolveFn) resolveFn(p);  // بترجع الـ object
+            if(resolveFn) resolveFn(p);
           };
           listEl.appendChild(row);
         });
@@ -779,13 +917,16 @@
       const machine=document.getElementById('machineFilter').value;
       const extraStatus=document.getElementById('extraStatusFilter').value;
       const noMachine=document.getElementById('noMachineFilter').checked;
-      const refFilter=document.getElementById('refFilter').value.trim();
-      const saveDateF=document.getElementById('saveDateFilter').value;
+      const refFilter=document.getElementById('refFilterEnable').checked ? document.getElementById('refFilter').value.trim() : '';
+      const saveDateF=document.getElementById('saveDateEnable').checked ? document.getElementById('saveDateFilter').value : '';
       return allData.filter(item=>{
+        const isCancel=(item.bill_status==='ملغي');
         const isPosted=(item.bill_status==='مرحَّل'||item.bill_status==='posted'||item.bill_status==='مرتجع-مرحَّل');
         const isExtra=(item.bill_status==='زيادة');
         const isReturn=(item.bill_status==='مرتجع'||item.bill_status==='مرتجع-مرحَّل');
         const hasMachine=item.machine_name&&item.machine_name!=='null'&&item.machine_name!=='';
+        if(currentTab==='cancel'){if(!isCancel)return false;return !search||matchSearch(item,search);}
+        if(isCancel)return false;
         if(currentTab==='return'){if(!isReturn)return false;return !search||matchSearch(item,search);}
         if(currentTab==='extra'){if(!isExtra)return false;if(extraStatus==='no_machine'&&hasMachine)return false;if(extraStatus==='pending'&&(isPosted||hasMachine))return false;if(extraStatus==='posted'&&!isPosted)return false;return !search||matchSearch(item,search);}
         if(isExtra)return false;
@@ -801,8 +942,8 @@
 
     function updateGrandTotal() {
       const items=getFiltered();
-      const total=items.reduce((s,i)=>s+(parseFloat(i.total_bill_net)||0),0);
-      const bill=items.reduce((s,i)=>s+(parseFloat(i.total_bill)||0),0);
+      const total=items.reduce((s,i)=> i.bill_status==='ملغي'?s:s+(parseFloat(i.total_bill_net)||0),0);
+      const bill=items.reduce((s,i)=> i.bill_status==='ملغي'?s:s+(parseFloat(i.total_bill)||0),0);
       document.getElementById('total-bar').innerHTML=
         `<span>إجمالي صافي الفيزا: <b style="color:var(--warning);">${total.toFixed(2)}</b> جنيه</span>`+
         `<span>إجمالي الفواتير: <b style="color:var(--accent-dark);">${bill.toFixed(2)}</b> جنيه</span>`+
@@ -820,12 +961,43 @@
       else{alert('❌ فشل التحديث');btn.disabled=false;btn.innerHTML='<i class="fas fa-check"></i> ترحيل';}
     }
 
+    // ===== تفعيل/إخفاء خانات الفلاتر مع الـ checkbox =====
+    function toggleRefFilter(){
+      const on=document.getElementById('refFilterEnable').checked;
+      const inp=document.getElementById('refFilter');
+      const chip=document.getElementById('ref-chip');
+      inp.style.display=on?'inline-block':'none';
+      chip.classList.toggle('checked',on);
+      if(on){inp.focus();} else {inp.value='';}
+      applyFilter();
+    }
+    function toggleDateFilter(){
+      const on=document.getElementById('saveDateEnable').checked;
+      const inp=document.getElementById('saveDateFilter');
+      const chip=document.getElementById('date-chip');
+      inp.style.display=on?'inline-block':'none';
+      chip.classList.toggle('checked',on);
+      if(on){inp.focus();} else {inp.value='';}
+      applyFilter();
+    }
+    // تظليل chip بدون ماكينة
+    document.getElementById('noMachineFilter').addEventListener('change',function(){
+      document.getElementById('no-machine-label').classList.toggle('checked',this.checked);
+    });
+
     function clearFilters() {
       document.getElementById('searchInput').value='';
       document.getElementById('machineFilter').value='all';
       document.getElementById('noMachineFilter').checked=false;
+      document.getElementById('no-machine-label').classList.remove('checked');
+      document.getElementById('refFilterEnable').checked=false;
       document.getElementById('refFilter').value='';
+      document.getElementById('refFilter').style.display='none';
+      document.getElementById('ref-chip').classList.remove('checked');
+      document.getElementById('saveDateEnable').checked=false;
       document.getElementById('saveDateFilter').value='';
+      document.getElementById('saveDateFilter').style.display='none';
+      document.getElementById('date-chip').classList.remove('checked');
       applyFilter();
     }
   </script>
