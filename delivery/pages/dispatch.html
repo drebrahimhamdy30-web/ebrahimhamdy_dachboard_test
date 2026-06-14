@@ -1142,8 +1142,10 @@ async function confirmAssign(){
     const tOrds=orderIds.map(id=>allOrders.find(o=>o.id===id)).filter(Boolean);
     const newTotal=tOrds.reduce((s,o)=>s+Number(o.total_bill_net||0),0);
 
-    // شوف لو الطيار عنده رحلة active
-    const {data:existingTrips}=await db.from('trips').select('*').eq('driver_id',driverId).eq('status','active');
+// الفرع الصحيح: للأدمن = الفرع المختار، للموظف = فرعه
+    const branchId = currentUser?.role==='admin' ? activeBranchId : (currentUser?.branch_id||null);
+    // شوف لو الطيار عنده رحلة active (الأقدم لو فيه أكتر من واحدة)
+    const {data:existingTrips}=await db.from('trips').select('*').eq('driver_id',driverId).eq('status','active').order('created_at',{ascending:true});
     const existingTrip=existingTrips&&existingTrips.length>0?existingTrips[0]:null;
 
     let tripId=null;
@@ -1164,7 +1166,7 @@ async function confirmAssign(){
       const {data:trip}=await db.from('trips').insert({
         driver_id:driverId,
         driver_name:driver?.full_name,
-        branch_id:currentUser?.branch_id||null,
+        branch_id:branchId,
         status:'active',
         orders_count:orderIds.length,
         total_amount:newTotal,
