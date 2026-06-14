@@ -1748,8 +1748,16 @@ document.querySelectorAll('.modal-overlay').forEach(m=>m.addEventListener('click
 function showLoading(show){document.getElementById('loadingOverlay').classList.toggle('show',show);}
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
 
+// ============================================================
+// استبدل قسم BRANCH SELECTOR بالكامل في dispatch.html بدي
+// (من تعليق "// ===== BRANCH SELECTOR =====" لحد "initBranchSelector();")
+// ============================================================
+
 // ===== BRANCH SELECTOR =====
-let activeBranchId = null; // null = كل الفروع
+let activeBranchId = null;       // null = كل الفروع
+let allBranchesCache = [];       // كاش الفروع للتابات
+
+const BRANCH_STORAGE_KEY = 'dispatch_active_branch';
 
 async function initBranchSelector(){
   if(currentUser?.role !== 'admin'){
@@ -1759,17 +1767,71 @@ async function initBranchSelector(){
     setTimeout(initDispatchEngine, 2000);
     return;
   }
-  // Admin → اعرض اختيار الفرع
-  document.getElementById('switchBranchBtn').style.display='flex';
-  await showBranchOverlay();
+
+  // Admin → حمّل الفروع واعمل تابات
+  const {data:branches} = await db.from('branches').select('id,name').order('name');
+  allBranchesCache = branches || [];
+
+  // استرجع آخر فرع مختار من sessionStorage (عشان الـ refresh ميرجعش يسأل)
+  const saved = sessionStorage.getItem(BRANCH_STORAGE_KEY);
+  if(saved !== null){
+    activeBranchId = saved === 'all' ? null : saved;
+    renderBranchTabs();
+    const name = activeBranchId
+      ? (allBranchesCache.find(b=>b.id===activeBranchId)?.name || '')
+      : 'كل الفروع';
+    document.getElementById('branchLabel').textContent = '· ' + name;
+    loadAll();
+    setTimeout(initDispatchEngine, 1000);
+  } else {
+    // أول مرة بس → اعرض الـ overlay للاختيار المبدئي
+    renderBranchTabs();
+    await showBranchOverlay();
+  }
 }
 
+// تابات الفروع في الهيدر (للأدمن)
+function renderBranchTabs(){
+  let bar = document.getElementById('branchTabsBar');
+  if(!bar){
+    // أنشئ شريط التابات تحت الهيدر مباشرة
+    bar = document.createElement('div');
+    bar.id = 'branchTabsBar';
+    bar.style.cssText = 'display:flex;gap:.4rem;align-items:center;overflow-x:auto;padding:.4rem 1rem;background:#16203a;border-bottom:1px solid #334155;flex-shrink:0';
+    const header = document.querySelector('.dispatch-header');
+    header.insertAdjacentElement('afterend', bar);
+  }
+  const mk = (id,name,active)=>`
+    <button onclick="selectBranchTab(${id===null?'null':`'${id}'`})"
+      style="flex-shrink:0;padding:.3rem .85rem;border-radius:20px;font-family:'Cairo',sans-serif;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;border:1px solid ${active?'#3b82f6':'#334155'};background:${active?'rgba(59,130,246,.25)':'transparent'};color:${active?'#93c5fd':'#94a3b8'}">
+      ${name}
+    </button>`;
+  bar.innerHTML =
+    mk(null,'👁 كل الفروع', activeBranchId===null) +
+    allBranchesCache.map(b=>mk(b.id,'🏢 '+b.name, activeBranchId===b.id)).join('');
+}
+
+function selectBranchTab(id){
+  activeBranchId = id;
+  sessionStorage.setItem(BRANCH_STORAGE_KEY, id===null ? 'all' : id);
+  const name = id ? (allBranchesCache.find(b=>b.id===id)?.name || '') : 'كل الفروع';
+  document.getElementById('branchLabel').textContent = '· ' + name;
+  renderBranchTabs();
+  // أعد تشغيل الـ engine للفرع الجديد
+  if(dispatchEngine){ dispatchEngine.stop?.(); dispatchEngine=null; }
+  loadAll();
+  if(id) setTimeout(initDispatchEngine, 1000);
+}
+
+// الـ overlay لسه موجود لأول اختيار بس
 async function showBranchOverlay(){
   const overlay = document.getElementById('branchOverlay');
   overlay.style.display='flex';
-  // جيب الفروع
-  const {data:branches} = await db.from('branches').select('id,name').order('name');
-  document.getElementById('branchOverlayList').innerHTML = (branches||[]).map(b=>`
+  if(!allBranchesCache.length){
+    const {data:branches} = await db.from('branches').select('id,name').order('name');
+    allBranchesCache = branches || [];
+  }
+  document.getElementById('branchOverlayList').innerHTML = allBranchesCache.map(b=>`
     <button onclick="selectBranch('${b.id}','${b.name}')"
       style="width:100%;padding:.75rem 1rem;background:${activeBranchId===b.id?'rgba(26,86,219,.3)':'rgba(255,255,255,.05)'};
       border:1px solid ${activeBranchId===b.id?'#3b82f6':'#334155'};color:${activeBranchId===b.id?'#93c5fd':'#e2e8f0'};
@@ -1780,9 +1842,10 @@ async function showBranchOverlay(){
 
 function selectBranch(id, name){
   activeBranchId = id;
+  sessionStorage.setItem(BRANCH_STORAGE_KEY, id);
   document.getElementById('branchOverlay').style.display='none';
   document.getElementById('branchLabel').textContent = '· ' + name;
-  // أوقف الـ engine القديم وابدأ الجديد للفرع المختار
+  renderBranchTabs();
   if(dispatchEngine){ dispatchEngine.stop?.(); dispatchEngine=null; }
   loadAll();
   setTimeout(initDispatchEngine, 1000);
@@ -1790,8 +1853,10 @@ function selectBranch(id, name){
 
 function selectBranchAll(){
   activeBranchId = null;
+  sessionStorage.setItem(BRANCH_STORAGE_KEY, 'all');
   document.getElementById('branchOverlay').style.display='none';
   document.getElementById('branchLabel').textContent = '· كل الفروع';
+  renderBranchTabs();
   loadAll();
 }
 
