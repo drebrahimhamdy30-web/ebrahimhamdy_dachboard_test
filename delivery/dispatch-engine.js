@@ -1,6 +1,14 @@
 /**
- * dispatch-engine-v2.js
- * محرك التوزيع التلقائي - نسخة محسّنة
+ * dispatch-engine.js
+ * محرك التوزيع التلقائي - نسخة مُصلَّحة
+ *
+ * القواعد:
+ * - الطيار عنده رحلة واحدة active بس.
+ * - الرحلة بتتثبّت على "مفتاح خط سير" (route_key) أول طلب فيها:
+ *     خط السير الرسمي لو موجود، وإلا اسم المنطقة نفسها.
+ * - طلب جديد ينضاف على رحلة الطيار فقط لو:
+ *     نفس route_key  +  الرحلة لسه أقل من max_orders_per_trip.
+ * - غير كده → يروح لطيار تاني متاح (أو يستنى).
  */
 
 class DispatchEngine {
@@ -61,7 +69,8 @@ class DispatchEngine {
       this.log('👤 ' + drivers.length + ' طيار متاح');
 
       var routeMap = await this.buildRouteMap();
-      var driverActiveTrip = await this.getDriverActiveTrip(drivers.map(function(d){return d.id;}));
+      // حالة رحلة كل طيار (رحلة واحدة بس لكل طيار)
+      var driverActiveTrip = await this.getDriverActiveTrip(drivers.map(function(d){return d.id;}), routeMap);
 
       var assigned = 0;
       for (var i = 0; i < orders.length; i++) {
@@ -70,7 +79,6 @@ class DispatchEngine {
       }
       this.log('✅ تم توزيع ' + assigned + ' طلب');
 
-      // تشغيل الطلبات المؤجلة التي حان وقتها
       await this.activateDuePostponed();
 
     } catch(e) {
@@ -82,7 +90,6 @@ class DispatchEngine {
   async activateDuePostponed() {
     try {
       const now = new Date().toISOString();
-      // جيب الطلبات المؤجلة التي حان وقتها أو مالهاش وقت محدد وعدد محاولاتها أقل من الحد
       const result = await this.db
         .from('orders')
         .select('id, bill_no, postpone_time, attempt_count')
@@ -155,11 +162,10 @@ class DispatchEngine {
     if (!allDrivers.length) return [];
     var driverIds = allDrivers.map(function(d){return d.id;});
 
-    // جيب حالة الحضور اليوم
     var today = new Date().toISOString().split('T')[0];
     var attRes = await this.db
       .from('driver_attendance')
-      .select('driver_id, status')
+      .select('driver_id, status, created_at')
       .eq('date', today)
       .in('driver_id', driverIds)
       .order('created_at', {ascending: false});
@@ -169,12 +175,10 @@ class DispatchEngine {
       if(!attStatus[r.driver_id]) attStatus[r.driver_id] = r.status;
     });
 
-    // الطيار لازم حاضر (online)
     var presentDrivers = allDrivers.filter(function(d){
       return attStatus[d.id] === 'online';
     });
 
-    // fallback لو مفيش attendance data
     if (!presentDrivers.length) {
       presentDrivers = allDrivers.filter(function(d){ return d.is_online; });
     }
@@ -182,7 +186,7 @@ class DispatchEngine {
     if (!presentDrivers.length) return [];
     var presentIds = presentDrivers.map(function(d){return d.id;});
 
-    // استثني اللي استلم (picked)
+    // استثني اللي استلم (picked) — مشغول في توصيل
     var pickedRes = await this.db
       .from('orders')
       .select('driver_id')
@@ -221,83 +225,143 @@ class DispatchEngine {
     return { map: map, routes: routesRes.data || [] };
   }
 
-  async getDriverActiveTrip(driverIds) {
+  /**
+   * مفتاح خط السير لطلب معيّن:
+   * - لو المنطقة مربوطة بخط سير رسمي → 'route:' + أول route_id
+   * - لو منطقة موجودة بس بدون خط سير رسمي → 'region:' + اسم المنطقة
+   * - لو مفيش منطقة خالص → 'none'
+   */
+  getOrderRouteKey(order, routeMap) {
+    var regionName = (order.cust_region||'').trim().toLowerCase();
+    if (!regionName) return { key: 'none', route_id: null, region_data: null, unregistered: false };
+    var rd = routeMap.map[regionName];
+    if (!rd) {
+      // منطقة غير مسجلة خالص → تُعامل كخط سير قائم بذاته باسمها
+      return { key: 'region:' + regionName, route_id: null, region_data: null, unregistered: true };
+    }
+    if (rd.route_ids && rd.route_ids.length) {
+      return { key: 'route:' + rd.route_ids[0], route_id: rd.route_ids[0], region_data: rd, unregistered: false };
+    }
+    // منطقة مسجلة بس مالهاش خط سير رسمي → تُعامل كخط سير باسمها
+    return { key: 'region:' + regionName, route_id: null, region_data: rd, unregistered: false };
+  }
+
+  /**
+   * رحلة الطيار الحالية (الطيار عنده رحلة active واحدة بس).
+   * بنرجّع لكل طيار: trip_id, route_key, order_count.
+   * route_key بنحسبه من أول طلب في الرحلة.
+   */
+  async getDriverActiveTrip(driverIds, routeMap) {
     if (!driverIds.length) return {};
+    if (!routeMap) routeMap = await this.buildRouteMap();
 
     var tripsRes = await this.db
       .from('trips')
-      .select('id, driver_id, route_id')
-      .eq('status', 'active');
+      .select('id, driver_id, route_id, created_at')
+      .eq('status', 'active')
+      .order('created_at', { ascending: true });
 
-    var trips = tripsRes.data || [];
-    var tripIds = trips.map(function(t){return t.id;});
-    var orderCounts = {};
-
-    if (tripIds.length > 0) {
-      var toRes = await this.db
-        .from('trip_orders')
-        .select('trip_id')
-        .in('trip_id', tripIds);
-      (toRes.data||[]).forEach(function(to){
-        orderCounts[to.trip_id] = (orderCounts[to.trip_id]||0) + 1;
-      });
-    }
+    var trips = (tripsRes.data || []).filter(function(t){
+      return driverIds.includes(t.driver_id);
+    });
 
     var result = {};
-    trips.forEach(function(trip) {
-      if (driverIds.includes(trip.driver_id) && !result[trip.driver_id]) {
-        result[trip.driver_id] = {
-          trip_id: trip.id,
-          route_id: trip.route_id,
-          order_count: orderCounts[trip.id] || 0
-        };
+    // الطيار عنده رحلة واحدة بس — ناخد الأقدم لو (استثناءً) لقينا أكتر
+    trips.forEach(function(trip){
+      if (!result[trip.driver_id]) {
+        result[trip.driver_id] = { trip_id: trip.id, route_id: trip.route_id, order_count: 0, route_key: null, first_order_region: null };
       }
     });
 
-    driverIds.forEach(function(id) {
-      if (!result[id]) result[id] = { trip_id: null, route_id: null, order_count: 0 };
+    var tripIds = Object.keys(result).map(function(did){ return result[did].trip_id; });
+    if (!tripIds.length) {
+      driverIds.forEach(function(id){ if(!result[id]) result[id] = { trip_id: null, route_id: null, order_count: 0, route_key: null }; });
+      return result;
+    }
+
+    // اجمع طلبات كل رحلة عشان نحسب العدد ومفتاح خط السير من أول طلب
+    var toRes = await this.db
+      .from('trip_orders')
+      .select('trip_id, order_id')
+      .in('trip_id', tripIds);
+
+    var tripOrderIds = {};
+    (toRes.data||[]).forEach(function(to){
+      if(!tripOrderIds[to.trip_id]) tripOrderIds[to.trip_id] = [];
+      tripOrderIds[to.trip_id].push(to.order_id);
+    });
+
+    var allOrderIds = (toRes.data||[]).map(function(to){return to.order_id;});
+    var ordersById = {};
+    if (allOrderIds.length) {
+      var ordRes = await this.db
+        .from('orders')
+        .select('id, cust_region, created_at')
+        .in('id', allOrderIds);
+      (ordRes.data||[]).forEach(function(o){ ordersById[o.id] = o; });
+    }
+
+    var self = this;
+    Object.keys(result).forEach(function(did){
+      var t = result[did];
+      var oids = tripOrderIds[t.trip_id] || [];
+      t.order_count = oids.length;
+      // أول طلب (الأقدم) يحدد مفتاح خط السير للرحلة
+      var firstOrder = oids
+        .map(function(id){ return ordersById[id]; })
+        .filter(Boolean)
+        .sort(function(a,b){ return new Date(a.created_at) - new Date(b.created_at); })[0];
+      if (firstOrder) {
+        t.route_key = self.getOrderRouteKey(firstOrder, routeMap).key;
+      } else if (t.route_id) {
+        t.route_key = 'route:' + t.route_id;
+      }
+    });
+
+    driverIds.forEach(function(id){
+      if(!result[id]) result[id] = { trip_id: null, route_id: null, order_count: 0, route_key: null };
     });
 
     return result;
   }
 
   async assignOrder(order, drivers, routeMap, driverActiveTrip) {
-    var regionName = (order.cust_region||'').trim().toLowerCase();
-    var regionData = regionName ? routeMap.map[regionName] : null;
-    var noRegion = !regionName;
-    var unregisteredRegion = !noRegion && !regionData;
+    var rk = this.getOrderRouteKey(order, routeMap);
+    var orderRouteKey = rk.key;
+    var regionData = rk.region_data;
+    var needsLicense = regionData ? (regionData.types||[]).includes('permit') : false;
 
-    var regionRouteIds = [];
-    var needsLicense = false;
-
-    if (unregisteredRegion) {
-      // منطقة غير مسجلة → وزّع على أي طيار متاح
-      this.log('⚠️ منطقة "' + order.cust_region + '" غير مسجلة — سيتم التوزيع على أي طيار متاح');
-    } else if (!noRegion && regionData) {
-      regionRouteIds = regionData.route_ids;
-      needsLicense = regionData.types.includes('permit');
+    if (rk.unregistered) {
+      this.log('⚠️ منطقة "' + order.cust_region + '" غير مسجلة — تُعامل كخط سير مستقل');
     }
 
     var maxOrders = this.settings.max_orders_per_trip || 10;
 
+    var self = this;
     var eligible = drivers.filter(function(driver) {
-      // تحقق من التصنيفات المغطاة
-      if (!noRegion && !unregisteredRegion && regionData) {
+      // التصنيفات المغطاة (لو المنطقة مسجلة وعندها تصنيف)
+      if (regionData) {
         var regionTypes = regionData.types || [];
         var coveredTypes = driver.covered_types || [];
-        // لو المنطقة عندها تصنيف → الطيار لازم يغطيه
         if (regionTypes.length > 0 && coveredTypes.length > 0) {
           var hasMatch = regionTypes.some(function(t){ return coveredTypes.includes(t); });
           if (!hasMatch) return false;
         }
       }
       if (needsLicense && !driver.has_vehicle_license && !driver.has_drive_license) return false;
+
       var trip = driverActiveTrip[driver.id];
-      if (trip && trip.order_count >= maxOrders) return false;
-      // لو منطقة مسجلة → تحقق من خط السير
-      if (!noRegion && !unregisteredRegion && regionRouteIds.length) {
-        if (trip && trip.trip_id && trip.route_id && !regionRouteIds.includes(trip.route_id)) return false;
+
+      // الطيار عنده رحلة active:
+      if (trip && trip.trip_id) {
+        // لازم نفس مفتاح خط السير
+        if (trip.route_key && trip.route_key !== orderRouteKey) return false;
+        // ولازم الرحلة لسه أقل من الحد
+        if ((trip.order_count || 0) >= maxOrders) return false;
+        return true;
       }
+
+      // الطيار مفيش عنده رحلة → متاح لأي خط سير
       return true;
     });
 
@@ -306,20 +370,21 @@ class DispatchEngine {
       return false;
     }
 
-    // الأقل طلبات أولاً
+    // الأولوية: الأقل طلبات أولاً
     eligible.sort(function(a, b) {
-      var ac = driverActiveTrip[a.id] ? driverActiveTrip[a.id].order_count : 0;
-      var bc = driverActiveTrip[b.id] ? driverActiveTrip[b.id].order_count : 0;
+      var ac = driverActiveTrip[a.id] ? (driverActiveTrip[a.id].order_count||0) : 0;
+      var bc = driverActiveTrip[b.id] ? (driverActiveTrip[b.id].order_count||0) : 0;
       return ac - bc;
     });
 
     var selectedDriver = eligible[0];
     var trip = driverActiveTrip[selectedDriver.id];
     var now = new Date().toISOString();
-    var assignedRouteId = (trip && trip.route_id) ? trip.route_id : (regionRouteIds[0] || null);
+    var assignedRouteId = rk.route_id || (trip && trip.route_id) || null;
 
     try {
       if (trip && trip.trip_id) {
+        // أضف على الرحلة الموجودة
         await this.db.from('orders').update({
           driver_id: selectedDriver.id,
           deliveryman: selectedDriver.full_name,
@@ -330,9 +395,15 @@ class DispatchEngine {
 
         await this.db.from('trip_orders').insert({ trip_id: trip.trip_id, order_id: order.id });
         await this.db.from('trips').update({ orders_count: (trip.order_count||0)+1, updated_at: now }).eq('id', trip.trip_id);
-        driverActiveTrip[selectedDriver.id].order_count++;
+
+        // حدّث الحالة في الذاكرة
+        driverActiveTrip[selectedDriver.id].order_count = (trip.order_count||0)+1;
+        if (!driverActiveTrip[selectedDriver.id].route_key) {
+          driverActiveTrip[selectedDriver.id].route_key = orderRouteKey;
+        }
 
       } else {
+        // أنشئ رحلة جديدة (أول طلب يثبّت مفتاح خط السير)
         var tripRes = await this.db.from('trips').insert({
           driver_id: selectedDriver.id,
           driver_name: selectedDriver.full_name,
@@ -356,7 +427,12 @@ class DispatchEngine {
           updated_at: now
         }).eq('id', order.id);
 
-        driverActiveTrip[selectedDriver.id] = { trip_id: newTrip.id, route_id: assignedRouteId, order_count: 1 };
+        driverActiveTrip[selectedDriver.id] = {
+          trip_id: newTrip.id,
+          route_id: assignedRouteId,
+          order_count: 1,
+          route_key: orderRouteKey
+        };
 
         try {
           await this.db.from('trip_logs').insert({
