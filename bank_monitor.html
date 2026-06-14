@@ -58,12 +58,19 @@
     .dup-warning.show { display:flex; }
     .dup-warning i { color:#f59e0b; font-size:1rem; flex-shrink:0; }
 
+    /* شريط الترحيل الجماعي */
+    .bulk-bar { display:none; align-items:center; gap:12px; background:#f0fdf4; border:1.5px solid #16a34a; border-radius:var(--radius-md); padding:10px 14px; margin-bottom:12px; flex-wrap:wrap; }
+    .bulk-bar .bulk-info { font-weight:700; font-size:0.85rem; color:#15803d; }
+    .bulk-bar .bulk-sum  { font-size:0.8rem; color:#15803d; }
+
     /* جدول */
     .bm-table { width:100%; border-collapse:collapse; }
     .bm-table th { background:var(--primary); color:#fff; padding:9px 10px; font-size:0.72rem; font-weight:700; text-align:right; white-space:nowrap; }
     .bm-table td { padding:9px 10px; font-size:0.8rem; border-bottom:1px solid var(--surface-3); vertical-align:middle; }
     .bm-table tr.posted-row td { background:#f0fdf4; }
     .bm-table tr.pending-row td { background:#fffbeb; }
+    .bm-table tr.selected-row td { background:#dbeafe !important; }
+    .row-check, #select-all { width:16px; height:16px; cursor:pointer; }
     .amount-pos { color:#16a34a; font-weight:700; }
     .amount-neg { color:#dc2626; font-weight:700; }
     .source-badge { display:inline-block; padding:2px 8px; border-radius:20px; font-size:0.65rem; font-weight:700; }
@@ -115,15 +122,15 @@
             <span class="chip-name">انستاباي</span>
             <span class="chip-total" id="sum-instapay">—</span>
           </div>
-          <div class="src-chip active" id="chip-paymob" onclick="toggleChip('paymob')">
+          <div class="src-chip" id="chip-paymob" onclick="toggleChip('paymob')">
             <span class="chip-name">باي موب</span>
             <span class="chip-total" id="sum-paymob">—</span>
           </div>
-          <div class="src-chip active" id="chip-abuqir" onclick="toggleChip('abuqir')">
+          <div class="src-chip" id="chip-abuqir" onclick="toggleChip('abuqir')">
             <span class="chip-name">أبو قير</span>
             <span class="chip-total" id="sum-abuqir">—</span>
           </div>
-          <div class="src-chip active" id="chip-other" onclick="toggleChip('other')">
+          <div class="src-chip" id="chip-other" onclick="toggleChip('other')">
             <span class="chip-name">أخرى</span>
             <span class="chip-total" id="sum-other">—</span>
           </div>
@@ -180,6 +187,20 @@
         <span id="dup-msg"></span>
       </div>
 
+      <!-- شريط الترحيل الجماعي -->
+      <div class="bulk-bar" id="bulk-bar">
+        <span class="bulk-info">
+          <i class="fas fa-check-double"></i> محدّد: <span id="bulk-count">0</span> معاملة
+        </span>
+        <span class="bulk-sum">الإجمالي: <b id="bulk-sum">0.00</b></span>
+        <button class="btn btn-success btn-sm" onclick="postSelected()" id="bulk-post-btn">
+          <i class="fas fa-check"></i> ترحيل المحدد
+        </button>
+        <button class="btn btn-sm" style="background:var(--surface-3);color:var(--text-secondary);" onclick="clearSelection()">
+          <i class="fas fa-times"></i> إلغاء التحديد
+        </button>
+      </div>
+
       <!-- فلاتر -->
       <div class="filter-row">
         <select id="filter-status" class="form-select" style="width:auto;" onchange="resetPageAndRender()">
@@ -204,6 +225,9 @@
         <table class="bm-table">
           <thead>
             <tr>
+              <th style="width:36px;text-align:center;">
+                <input type="checkbox" id="select-all" onchange="toggleSelectAll(this)" title="تحديد كل المعروض غير المرحّل">
+              </th>
               <th>التاريخ والوقت</th>
               <th>الوصف</th>
               <th>المبلغ</th>
@@ -214,7 +238,7 @@
             </tr>
           </thead>
           <tbody id="bm-tbody">
-            <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">⏳ جاري التحميل...</td></tr>
+            <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">⏳ جاري التحميل...</td></tr>
           </tbody>
         </table>
       </div>
@@ -242,8 +266,11 @@
     let currentPage = 1;
     const pageSize  = 20;
 
-    // حالة الـ chips — كل المصادر مفعّلة افتراضياً
-    const chipState = { instapay: true, paymob: true, abuqir: true, other: true };
+    // المعاملات المحددة للترحيل الجماعي
+    let selectedIds = new Set();
+
+    // حالة الـ chips — انستاباي فقط مفعّل افتراضياً (حماية من ترحيل مصادر مهمة بالخطأ)
+    const chipState = { instapay: true, paymob: false, abuqir: false, other: false };
 
     checkAuth().then(async user => {
       if (!user) return;
@@ -279,6 +306,10 @@
       try {
         const txResp = await fetch(BM_GET + '?type=get').then(r => r.json()).catch(() => []);
         allTx = Array.isArray(txResp) ? txResp : (txResp.data || []);
+        // تنظيف التحديدات اللي مبقاش ليها معاملات
+        selectedIds.forEach(id => {
+          if (!allTx.find(t => String(t.id) === String(id))) selectedIds.delete(id);
+        });
         try {
           const settResp = await fetch(BM_GET + '?type=get_settings').then(r => r.json());
           const settings = Array.isArray(settResp) ? settResp : (settResp.data || []);
@@ -290,7 +321,7 @@
         renderTable();
       } catch(e) {
         document.getElementById('bm-tbody').innerHTML =
-          '<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل التحميل</td></tr>';
+          '<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل التحميل</td></tr>';
       }
     }
 
@@ -356,7 +387,7 @@
       }
     }
 
-    // ===== إضافة يدوية بباسورد =====
+    // ===== إضافة يدوية =====
     function colorAmount(input) {
       const v = parseFloat(input.value);
       input.classList.remove('positive','negative');
@@ -393,7 +424,7 @@
       document.getElementById('dup-warning').classList.remove('show');
     }
 
-    // ===== ترحيل =====
+    // ===== ترحيل فردي =====
     async function postTx(id, btn) {
       if (!confirm('تأكيد ترحيل هذه المعاملة؟ لا يمكن التراجع.')) return;
       btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
@@ -405,6 +436,7 @@
         if (resp.ok) {
           const t = allTx.find(x => String(x.id)===String(id));
           if (t) t.is_posted = true;
+          selectedIds.delete(String(id));
           updateKPIs(); renderTable();
         } else {
           alert('❌ فشل الترحيل');
@@ -414,6 +446,75 @@
         alert('❌ خطأ في الاتصال');
         btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> ترحيل';
       }
+    }
+
+    // ===== التحديد والترحيل الجماعي =====
+    function onRowCheck(cb) {
+      const id = String(cb.dataset.id);
+      if (cb.checked) selectedIds.add(id);
+      else            selectedIds.delete(id);
+      renderTable();
+    }
+
+    function toggleSelectAll(cb) {
+      // يحدد/يلغي معاملات الصفحة الحالية غير المرحّلة فقط
+      document.querySelectorAll('.row-check').forEach(rc => {
+        const id = String(rc.dataset.id);
+        if (cb.checked) selectedIds.add(id);
+        else            selectedIds.delete(id);
+      });
+      renderTable();
+    }
+
+    function clearSelection() {
+      selectedIds.clear();
+      renderTable();
+    }
+
+    function updateBulkBar() {
+      const bar = document.getElementById('bulk-bar');
+      if (!bar) return;
+      const count = selectedIds.size;
+      if (count === 0) { bar.style.display = 'none'; return; }
+      bar.style.display = 'flex';
+      document.getElementById('bulk-count').textContent = count;
+      const sum = allTx
+        .filter(t => selectedIds.has(String(t.id)))
+        .reduce((s,t) => s+(parseFloat(t.amount)||0), 0);
+      document.getElementById('bulk-sum').textContent = (sum>=0?'+':'') + fmt(Math.abs(sum));
+    }
+
+    async function postSelected() {
+      const ids = [...selectedIds];
+      if (!ids.length) return;
+      if (!confirm(`تأكيد ترحيل ${ids.length} معاملة؟ لا يمكن التراجع.`)) return;
+
+      const btn = document.getElementById('bulk-post-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الترحيل...';
+
+      let ok = 0, fail = 0;
+      for (const id of ids) {
+        try {
+          const resp = await fetch(BM_POST, {
+            method: 'POST', headers: { 'Content-Type':'application/json' },
+            body: JSON.stringify({ type: 'post_transaction', id })
+          });
+          if (resp.ok) {
+            const t = allTx.find(x => String(x.id)===String(id));
+            if (t) t.is_posted = true;
+            ok++;
+          } else fail++;
+        } catch(e) { fail++; }
+      }
+
+      selectedIds.clear();
+      updateKPIs();
+      renderTable();
+
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-check"></i> ترحيل المحدد';
+      alert(`✅ تم ترحيل ${ok} معاملة` + (fail ? ` · ❌ فشل ${fail}` : ''));
     }
 
     // ===== رصيد البداية =====
@@ -478,23 +579,32 @@
       const srcCls = { instapay:'src-instapay', paymob:'src-paymob', abuqir:'src-abuqir', other:'src-other' };
 
       if (!paged.length) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد معاملات</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد معاملات</td></tr>';
+        const selAll = document.getElementById('select-all');
+        if (selAll) selAll.checked = false;
+        updateBulkBar();
         return;
       }
 
       tbody.innerHTML = paged.map(t => {
-        const isPosted = t.is_posted==='true'||t.is_posted===true;
-        const amt      = parseFloat(t.amount)||0;
-        const rowClass = isPosted ? 'posted-row' : 'pending-row';
-        const _d       = t.date ? new Date(t.date) : null;
-        const dateStr  = _d
+        const isPosted   = t.is_posted==='true'||t.is_posted===true;
+        const amt        = parseFloat(t.amount)||0;
+        const isSelected = !isPosted && selectedIds.has(String(t.id));
+        const rowClass   = isSelected ? 'selected-row' : (isPosted ? 'posted-row' : 'pending-row');
+        const _d         = t.date ? new Date(t.date) : null;
+        const dateStr    = _d
           ? _d.toLocaleDateString('ar-EG') +
             '<br><span style="font-size:0.68rem;color:var(--text-muted);">' +
             _d.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit', hour12:true}) +
             '</span>'
           : '---';
 
+        const checkCell = isPosted
+          ? '<td></td>'
+          : `<td style="text-align:center;"><input type="checkbox" class="row-check" data-id="${t.id}" onchange="onRowCheck(this)" ${isSelected?'checked':''}></td>`;
+
         return `<tr class="${rowClass}">
+          ${checkCell}
           <td style="white-space:nowrap;font-size:0.78rem;">${dateStr}</td>
           <td style="font-weight:600;">${t.description||t.cust_name||'---'}</td>
           <td><span class="${amt>=0?'amount-pos':'amount-neg'}">${amt>=0?'+':''}${fmt(Math.abs(amt))}</span></td>
@@ -508,15 +618,32 @@
             : `<button class="btn btn-success btn-sm" onclick="postTx('${t.id}',this)"><i class="fas fa-check"></i> ترحيل</button>`}</td>
         </tr>`;
       }).join('');
+
+      // ضبط حالة select-all حسب الصفحة الحالية (معاملات غير مرحّلة فقط)
+      const pagePendingIds = paged
+        .filter(t => !(t.is_posted==='true'||t.is_posted===true))
+        .map(t => String(t.id));
+      const selAll = document.getElementById('select-all');
+      if (selAll) {
+        selAll.checked = pagePendingIds.length>0 && pagePendingIds.every(id => selectedIds.has(id));
+      }
+
+      updateBulkBar();
     }
 
     function clearFilters() {
       document.getElementById('filter-status').value = 'pending';
       document.getElementById('filter-month').value  = '';
       document.getElementById('search-amount').value = '';
+      // إعادة الـ chips للوضع الافتراضي: انستاباي فقط
+      chipState.instapay = true;
+      chipState.paymob   = false;
+      chipState.abuqir   = false;
+      chipState.other    = false;
       Object.keys(chipState).forEach(src => {
-        chipState[src] = true;
-        document.getElementById('chip-' + src).classList.add('active');
+        const el = document.getElementById('chip-' + src);
+        if (chipState[src]) el.classList.add('active');
+        else                el.classList.remove('active');
       });
       resetPageAndRender();
     }
