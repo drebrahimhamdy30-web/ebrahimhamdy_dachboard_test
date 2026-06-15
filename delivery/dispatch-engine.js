@@ -54,7 +54,7 @@ class DispatchEngine {
     } catch(e) { console.error('loadSettings error:', e); }
   }
 
-  async run() {
+async run() {
     if (!this.isRunning) return;
     await this.loadSettings();
     if (!this.settings || !this.settings.auto_dispatch) {
@@ -64,6 +64,9 @@ class DispatchEngine {
 
     this.log('🔄 جاري فحص الطلبات...');
     try {
+      // رجّع الطلبات المؤجلة اللي عدّى وقتها أولاً — قبل أي return
+      await this.activateDuePostponed();
+
       var orders = await this.getPendingOrders();
       if (!orders.length) { this.log('📭 لا توجد طلبات تحتاج توزيع'); return; }
       this.log('📦 ' + orders.length + ' طلب ينتظر التوزيع');
@@ -82,14 +85,11 @@ class DispatchEngine {
       }
       this.log('✅ تم توزيع ' + assigned + ' طلب');
 
-      await this.activateDuePostponed();
-
     } catch(e) {
       console.error('Engine error:', e);
       this.log('❌ خطأ: ' + e.message);
     }
   }
-
   async activateDuePostponed() {
     try {
       const now = new Date().toISOString();
