@@ -93,12 +93,20 @@ class DispatchEngine {
   async activateDuePostponed() {
     try {
       const now = new Date().toISOString();
-      const result = await this.db
+const now = new Date().toISOString();
+      // الطلبات المؤجلة اللي عدّى وقتها (نفس منطق الأمر اليدوي المُجرّب)
+      const dueRes = await this.db
         .from('orders')
         .select('id, bill_no, postpone_time, attempt_count')
         .eq('status', 'postponed')
-        .or(`postpone_time.lte.${now},postpone_time.is.null`);
-
+        .lte('postpone_time', now);
+      // الطلبات المؤجلة بدون وقت محدد (ترجع فوراً)
+      const nullRes = await this.db
+        .from('orders')
+        .select('id, bill_no, postpone_time, attempt_count')
+        .eq('status', 'postponed')
+        .is('postpone_time', null);
+      const result = { data: [...(dueRes.data||[]), ...(nullRes.data||[])] };
       const maxAttempts = this.settings.max_attempts || 3;
       const orders = (result.data || []).filter(o =>
         !o.attempt_count || o.attempt_count < maxAttempts
