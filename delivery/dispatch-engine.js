@@ -217,7 +217,7 @@ async run() {
       .eq('is_active', true);
 
     var rrRes = await this.db.from('route_regions').select('route_id, region_id');
-    var regRes = await this.db.from('regions').select('id, name, types').eq('is_active', true);
+   var regRes = await this.db.from('regions').select('id, name, types').eq('is_active', true).eq('branch_id', this.branchId);
 
     var routeRegions = rrRes.data || [];
     var regions = regRes.data || [];
