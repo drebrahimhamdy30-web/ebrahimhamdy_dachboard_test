@@ -573,6 +573,15 @@ function buildTimers(o){
 
 // ===== LOAD =====
 let dispatchSettings = null;
+function postponeInfo(o){
+  if(o.status!=='postponed'||!o.postpone_time)return '';
+  const t=new Date(o.postpone_time);
+  const diff=Math.round((t-new Date())/1000);
+  const timeStr=t.toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'});
+  if(diff<=0)return `<div style="font-size:.62rem;font-weight:700;background:#dcfce7;color:#15803d;padding:.15rem .45rem;border-radius:6px;margin-bottom:.3rem;display:inline-block">⏰ جاهز للإرجاع · ${timeStr}</div>`;
+  const m=Math.floor(diff/60),s=diff%60;
+  return `<div style="font-size:.62rem;font-weight:700;background:var(--purple-light);color:#6d28d9;padding:.15rem .45rem;border-radius:6px;margin-bottom:.3rem;display:inline-block">⏰ يعود ${timeStr} · باقي ${m}:${String(s).padStart(2,'0')}</div>`;
+}
 
 async function loadAll(){
   showLoading(true);
@@ -615,7 +624,7 @@ async function loadAll(){
   }catch(e){console.error(e);showToast('خطأ في التحميل');}
   showLoading(false);
 }
-setInterval(()=>{renderOrders();renderTrips();},60000);
+setInterval(()=>{renderOrders();renderTrips();},1000);
 setInterval(loadAll,30000);
 
 // ===== HEADER =====
@@ -1028,6 +1037,7 @@ function renderOrders(){
     return `<div class="order-card ${late?'late':''} ${o.status==='postponed'?'sp':''} ${['assigned','picked'].includes(o.status)?'sk':''} ${sel?'sel':''} ${(o.notes||'').includes('🚨')?'urgent':''}" id="oc-${o.id}" onclick="toggleSel('${o.id}',event)">
       <div class="oc-check">${sel?'✓':''}</div>
       <div class="oc-timers">${buildTimers(o)}</div>
+      ${postponeInfo(o)}
       <div class="oc-customer">${cn}</div>
       <div class="oc-address">📍 ${o.customer_address||o.cust_address||'—'}</div>
       ${o.cust_region?`<span class="oc-region" style="${!knownRegions.has(o.cust_region)?'background:#fee2e2;color:#b91c1c;border:1px solid #fecaca':''}">${o.cust_region}${!knownRegions.has(o.cust_region)?' ⚠️':''}</span>`:''}
@@ -1354,18 +1364,18 @@ async function markPicked(id,e){
 // إزالة أوردر من رحلة (يتأجل 5 دقائق ثم يعود للتوزيع)
 async function removeFromTrip(orderId, tripId, e){
   e?.stopPropagation();
-  if(!confirm('إزالة الطلب من الرحلة؟ سيتأجل 5 دقائق ثم يعود للتوزيع تلقائياً.')) return;
+  if(!confirm('إزالة الطلب من الرحلة؟ سيتأجل دقيقة ثم يعود للتوزيع تلقائياً.')) return;
   showLoading(true);
   const now = new Date().toISOString();
-  const reactivateAt = new Date(Date.now() + 5*60000).toISOString();
+  const reactivateAt = new Date(Date.now() + 1*60000).toISOString();
   // شيل من trip_orders
   await db.from('trip_orders').delete().eq('trip_id', tripId).eq('order_id', orderId);
-  // أجّل الطلب 5 دقائق بدل ما يرجع pending فوراً
+  // أجّل الطلب 1 دقائق بدل ما يرجع pending فوراً
   await db.from('orders').update({
     driver_id: null, deliveryman: null,
     status: 'postponed',
     postpone_time: reactivateAt,
-    postpone_reason: 'أُزيل من الرحلة — إعادة توزيع بعد 5 دقائق',
+    postpone_reason: 'أُزيل من الرحلة — إعادة توزيع بعد 1 دقائق',
     assigned_at: null, picked_at: null,
     updated_at: now
   }).eq('id', orderId);
@@ -1373,7 +1383,7 @@ async function removeFromTrip(orderId, tripId, e){
   const {data:to} = await db.from('trip_orders').select('id').eq('trip_id', tripId);
   await db.from('trips').update({orders_count: (to||[]).length, updated_at: now}).eq('id', tripId);
   await addOrderLog(orderId, 'order_postponed', {action: 'removed_from_trip', trip_id: tripId, reactivate_at: reactivateAt});
-  showToast('✓ تم تأجيل الطلب 5 دقائق');
+  showToast('✓ تم تأجيل الطلب 1 دقائق');
   await loadAll();
   showLoading(false);
 }
