@@ -1159,16 +1159,21 @@ function toggleOrder(id){
 async function pickupAll(tripId){
   if(!confirm('تأكيد استلام جميع الطلبات؟'))return;
   load(true);
-  const orders=tripOrders[tripId]||[];
-  const ids=orders.filter(o=>o.status==='assigned').map(o=>o.id);
-  if(ids.length){
-    const now=new Date().toISOString();
-    await db.from('orders').update({status:'picked',picked_at:now,updated_at:now}).in('id',ids);
-    for(const id of ids){try{await db.from('order_logs').insert({order_id:id,event:'order_picked',details:{bulk:true},user_id:currentUser.id,user_name:currentUser.full_name});}catch(e){}}
+  const now=new Date().toISOString();
+  // اقرأ طلبات الرحلة الحقيقية من قاعدة البيانات (مش من الذاكرة)
+  const toRes=await db.from('trip_orders').select('order_id').eq('trip_id',tripId);
+  const orderIds=(toRes.data||[]).map(r=>r.order_id);
+  if(orderIds.length){
+    // خُد بس اللي حالتها assigned فعلاً دلوقتي (تجاهل المؤجل/المشال)
+    const ordRes=await db.from('orders').select('id,status').in('id',orderIds).eq('status','assigned');
+    const ids=(ordRes.data||[]).map(o=>o.id);
+    if(ids.length){
+      await db.from('orders').update({status:'picked',picked_at:now,updated_at:now}).in('id',ids);
+      for(const id of ids){try{await db.from('order_logs').insert({order_id:id,event:'order_picked',details:{bulk:true},user_id:currentUser.id,user_name:currentUser.full_name});}catch(e){}}
+    }
   }
   await loadAll();load(false);
 }
-
 async function pickupOne(orderId){
   load(true);
   const now=new Date().toISOString();
