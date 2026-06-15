@@ -93,7 +93,6 @@ class DispatchEngine {
   async activateDuePostponed() {
     try {
       const now = new Date().toISOString();
-const now = new Date().toISOString();
       // الطلبات المؤجلة اللي عدّى وقتها (نفس منطق الأمر اليدوي المُجرّب)
       const dueRes = await this.db
         .from('orders')
