@@ -563,7 +563,7 @@ async function loadSettings(){
 async function loadAttendance(){
   if(!driverRecord)return;
   try{
-    const today=new Date().toISOString().split('T')[0];
+    const today=getTodayCairo();
     const {data}=await db.from('driver_attendance')
       .select('*').eq('driver_id',driverRecord.id)
       .eq('date',today)
@@ -655,7 +655,7 @@ async function endBreakAuto(breakRecord){
     await db.from('driver_attendance').update({status:'break_ended',ended_at:new Date().toISOString()}).eq('id',breakRecord.id);
     // أنشئ record online جديد
     await db.from('driver_attendance').insert({
-      driver_id:driverRecord.id,date:new Date().toISOString().split('T')[0],
+      driver_id:driverRecord.id,date:getTodayCairo(),
       status:'online',approved_at:new Date().toISOString(),
       notes:'استراحة انتهت تلقائياً'
     });
@@ -668,7 +668,7 @@ async function endBreakManual(){
   load(true);
   await db.from('driver_attendance').update({status:'break_ended',ended_at:new Date().toISOString()}).eq('id',attRecord.id);
   await db.from('driver_attendance').insert({
-    driver_id:driverRecord.id,date:new Date().toISOString().split('T')[0],
+    driver_id:driverRecord.id,date:getTodayCairo(),
     status:'online',approved_at:new Date().toISOString(),notes:'إنهاء استراحة يدوي'
   });
   await loadAttendance();
@@ -697,7 +697,7 @@ async function requestAttendance(type){
 
   const requireApproval=settings?.require_attendance_approval!==false;
   load(true);
-  const today=new Date().toISOString().split('T')[0];
+  const today=getTodayCairo();
 
   if(requireApproval){
     // إرسال طلب للإدارة
@@ -759,7 +759,9 @@ function fmTime(mins){
   if(mins<60)return `${mins} د`;
   return `${Math.floor(mins/60)}س ${mins%60}د`;
 }
-
+function getTodayCairo(){
+  return new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Cairo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+}
 // ===== TRIPS & ORDERS =====
 let mainTab = 'trips';
 
@@ -815,7 +817,7 @@ async function loadHistory(){
 
       const dateObj=new Date(date);
       const dayLabel=dateObj.toLocaleDateString('ar-EG',{weekday:'long',day:'numeric',month:'long'});
-      const isToday=date===new Date().toISOString().split('T')[0];
+      const isToday=date===getTodayCairo();
 
       html+=`<div style="background:white;border-radius:12px;border:1.5px solid var(--border);margin-bottom:.75rem;overflow:hidden">
         <div style="padding:.625rem 1rem;background:#f8fafc;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
@@ -845,7 +847,7 @@ async function renderDriverRank(){
   const badge=document.getElementById('driverRankBadge');
   if(!badge||!driverRecord)return;
   try{
-    const today=new Date().toISOString().split('T')[0];
+    const today=getTodayCairo();
     const priority=settings?.driver_priority||'least_orders';
 
     // جيب الطيارين الحاضرين اليوم
@@ -1262,14 +1264,12 @@ function doLogout(){sessionStorage.removeItem('delivery_user');window.location.h
 
 // ===== PWA PUSH NOTIFICATIONS =====
 const VAPID_PUBLIC_KEY = 'BH1oBRuSLihoOaaZOttnUkpXH2uarZldE9DWEM40tLMvWRrE7NQOhGF_AtgI9D6Lf2Tua-JqBR5a_yoUvOP4LcI';
-
 function urlBase64ToUint8Array(base64String){
   const padding='='.repeat((4-base64String.length%4)%4);
   const base64=(base64String+padding).replace(/-/g,'+').replace(/_/g,'/');
   const raw=window.atob(base64);
   return new Uint8Array([...raw].map(c=>c.charCodeAt(0)));
 }
-
 async function registerPush(){
   if(!('serviceWorker' in navigator)||!('PushManager' in window)) return;
   try{
