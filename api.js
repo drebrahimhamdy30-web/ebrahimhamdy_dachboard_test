@@ -205,6 +205,40 @@ async function checkAuth() {
   localStorage.setItem('lastVerify', now);
   return user;
 }
+// ===================== المحافظ (SMS) =====================
+// جلب معاملات المحافظ من webhook bmonline (نوع sms)
+async function fetchSms() {
+  try {
+    const response = await fetch(`https://agent.ebrahimhamdy.com/webhook/bmonline?type=sms`);
+    if (!response.ok) throw new Error('Network error');
+    const text = await response.text();
+    if (!text || text.trim() === '') return [];
+    const data = JSON.parse(text);
+    if (Array.isArray(data) && data[0]?.data) return data[0].data;
+    if (Array.isArray(data) && data[0]?.to_no) return data;
+    if (data.data && Array.isArray(data.data)) return data.data;
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error('fetchSms error:', error);
+    return [];
+  }
+}
+
+// إضافة معاملة محفظة جديدة — نوع sms_insert
+// ملاحظة: محتاج تضيف فرع sms_insert في n8n يقرأ من الـ body
+async function insertSms(data) {
+  try {
+    const response = await fetch(`https://agent.ebrahimhamdy.com/webhook/bmonline`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'sms_insert', ...data })
+    });
+    return response.ok;
+  } catch (e) {
+    console.error('insertSms error:', e);
+    return false;
+  }
+}
 
 function logout() {
   localStorage.clear();
