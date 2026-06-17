@@ -852,20 +852,19 @@ async function renderDriverRank(){
   const badge=document.getElementById('driverRankBadge');
   if(!badge||!driverRecord)return;
   try{
-    const today=getTodayCairo();
     const priority=settings?.driver_priority||'least_orders';
 
-    // جيب الطيارين الحاضرين اليوم
+    // جيب آخر 500 سجل حضور (كل الأيام) عشان نعرف آخر حالة لكل طيار — مش بس النهاردة
     const {data:attData}=await db.from('driver_attendance')
       .select('driver_id,status,approved_at,created_at')
-      .eq('date',today)
-      .order('created_at',{ascending:false});
+      .order('created_at',{ascending:false})
+      .limit(500);
 
-    // آخر حالة لكل طيار
+    // آخر حالة لكل طيار (الأحدث أولاً)
     const attStatus={};
     (attData||[]).forEach(r=>{if(!attStatus[r.driver_id])attStatus[r.driver_id]=r;});
 
-    // فقط الحاضرين (online)
+    // فقط الحاضرين (آخر حالتهم online)
     const onlineDriverIds=Object.entries(attStatus)
       .filter(([,r])=>r.status==='online')
       .map(([id])=>id);
@@ -905,7 +904,6 @@ async function renderDriverRank(){
 
     } else {
       // longest_idle — الأطول فراغاً أولاً
-      // نحسب آخر وقت اتوزع عليه طلب
       const {data:lastOrders}=await db.from('orders')
         .select('driver_id,assigned_at')
         .in('driver_id',onlineDriverIds)
@@ -927,7 +925,6 @@ async function renderDriverRank(){
 
       rank=onlineDriverIds.filter(id=>{
         const theirLast=lastAssigned[id]||new Date(0);
-        // آخر تعيينه أقدم مني → هو قبلي (فراغه أطول)
         return theirLast < myLastAssigned;
       }).length + 1;
     }
