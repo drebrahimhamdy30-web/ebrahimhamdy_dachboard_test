@@ -659,8 +659,8 @@ let attendanceToday=[];
 
 async function loadAttendanceData(){
   try{
-    const today=new Date().toISOString().split('T')[0];
-    const {data}=await db.from('driver_attendance').select('*').eq('date',today).order('created_at',{ascending:false});
+    // جيب آخر 500 سجل حضور (كل الأيام) عشان نعرف آخر حالة لكل طيار — مش بس النهاردة
+    const {data}=await db.from('driver_attendance').select('*').order('created_at',{ascending:false}).limit(500);
     attendanceToday=data||[];
     renderAttNotif();
   }catch(e){}
@@ -673,13 +673,21 @@ function getDriverAttStatus(driverId){
 }
 
 function getDriverWorkMins(driverId){
-  const recs=attendanceToday.filter(r=>r.driver_id===driverId&&r.status==='online'&&r.approved_at);
-  let mins=0;
-  for(const r of recs){
-    const end=r.ended_at?new Date(r.ended_at):new Date();
-    mins+=Math.floor((end-new Date(r.approved_at))/60000);
+  // كل سجلات الطيار، الأحدث أولاً
+  const recs=attendanceToday.filter(r=>r.driver_id===driverId).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  if(!recs.length)return 0;
+  // احسب من آخر سجل online لسه شغّال (مالوش ended_at)
+  const lastOnline=recs.find(r=>r.status==='online'&&r.approved_at&&!r.ended_at);
+  if(lastOnline){
+    return Math.floor((new Date()-new Date(lastOnline.approved_at))/60000);
   }
-  return mins;
+  // مفيش online شغّال → احسب آخر فترة online مكتملة
+  const lastDone=recs.find(r=>r.status==='online'&&r.approved_at);
+  if(lastDone){
+    const end=lastDone.ended_at?new Date(lastDone.ended_at):new Date();
+    return Math.floor((end-new Date(lastDone.approved_at))/60000);
+  }
+  return 0;
 }
 
 function fmWorkTime(mins){if(mins<60)return `${mins}د`;return `${Math.floor(mins/60)}س${mins%60}د`;}
@@ -856,8 +864,8 @@ async function openDriverPopup(driverId){
   statusEl.style.color=attStatus==='online'?'#4ade80':attStatus==='break'?'#f87171':'#94a3b8';
 
   // جيب الرحلات اليوم وملخصها
-  const today=new Date().toISOString().split('T')[0];
-  const {data:trips}=await db.from('trips').select('id,route_id,status,orders_count,created_at').eq('driver_id',driverId).gte('created_at',today+'T00:00:00');
+const since=new Date(Date.now()-24*60*60*1000).toISOString();
+  const {data:trips}=await db.from('trips').select('id,route_id,status,orders_count,created_at').eq('driver_id',driverId).gte('created_at',since);
   const tripsEl=document.getElementById('dp-trips');
   if(!trips?.length){
     tripsEl.innerHTML='<div style="color:#64748b;font-size:.75rem;text-align:center;padding:.5rem">لا توجد رحلات اليوم</div>';
