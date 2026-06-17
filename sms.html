@@ -256,6 +256,13 @@
       if (d && !isNaN(d)) return d.getTime();
       const n = parseInt(item.id); return isNaN(n) ? 0 : n;
     }
+    // ترتيب فحص الرصيد: نعتمد على id (ترتيب الإدخال الحقيقي في الجدول)
+    // لأن أكتر من معاملة ممكن يكون عندها نفس createdAt بالضبط (نفس الثانية)،
+    // فالاعتماد على الوقت بس يقلب الترتيب الحقيقي ويطلّع أحمر كاذب
+    function sortKey(item){
+      const n = parseInt(item.id);
+      return isNaN(n) ? ts(item) : n;
+    }
     // عرض التاريخ والوقت من createdAt
     function dateCell(item){
       const raw = item.createdAt || item.created_at;
@@ -295,7 +302,8 @@
           : data.filter(r => String(r.branch||'').trim() === userBranch);
 
         // ترتيب زمني تصاعدي (الأقدم أولاً) — مهم عشان فحص الرصيد يطلع صح
-        allData.sort((a,b) => ts(a) - ts(b));
+        // ترتيب بالـ id (ترتيب الإدخال الحقيقي) — أدق من الوقت عند تطابق createdAt
+        allData.sort((a,b) => sortKey(a) - sortKey(b));
 
         allData.forEach((r,i)=>{ if(r.id===undefined||r.id===null) r.id='_'+i; });
 
@@ -393,7 +401,7 @@
         return;
       }
       // عرض الأحدث أولاً (نسخة معكوسة — لا نغيّر ترتيب allData المستخدم في فحص الرصيد)
-      const view = items.slice().sort((a,b) => ts(b) - ts(a));
+      const view = items.slice().sort((a,b) => (ts(b) - ts(a)) || (sortKey(b) - sortKey(a)));
       let totalIn=0, totalOut=0;
       tbody.innerHTML = view.map(item => {
         const w = walletOf(item), c = walletColor(w);
