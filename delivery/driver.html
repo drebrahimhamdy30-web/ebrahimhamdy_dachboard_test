@@ -563,12 +563,11 @@ async function loadSettings(){
 async function loadAttendance(){
   if(!driverRecord)return;
   try{
-    const today=getTodayCairo();
+    // جيب آخر سجلات الطيار (كل الأيام) عشان نعرف آخر حالة فعلية — مش بس النهاردة
     const {data}=await db.from('driver_attendance')
       .select('*').eq('driver_id',driverRecord.id)
-      .eq('date',today)
       .order('created_at',{ascending:false})
-      .limit(20);
+      .limit(50);
     renderAttendance(data||[]);
     renderHoursCard(data||[]);
     await renderDriverRank();
@@ -723,34 +722,40 @@ async function requestAttendance(type){
 function renderHoursCard(records){
   const card=document.getElementById('hoursCard');
   if(!records.length){card.style.display='none';return;}
+
+  // خُد بس سجلات آخر شيفت: من آخر سجل online لسه شغّال (أو آخر فترة)
+  const sorted=[...records].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  const latest=sorted[0];
+  if(!latest||(latest.status==='offline')){card.style.display='none';return;}
   card.style.display='block';
 
-  const maxBreakMins=settings?.max_break_minutes||15;
-  const maxWorkHours=settings?.max_online_hours||10;
-  const maxWorkMins=maxWorkHours*60;
+  // حدّد بداية الشيفت الحالي: آخر سجل online مالوش ended_at، أو أحدث online
+  const shiftStart=sorted.find(r=>r.status==='online'&&r.approved_at&&!r.ended_at)
+                 ||sorted.find(r=>r.status==='online'&&r.approved_at);
+  const shiftStartTime=shiftStart?new Date(shiftStart.approved_at):null;
 
-  // حساب وقت العمل الفعلي
+  const maxBreakMins=settings?.max_break_minutes||15;
+
+  // احسب بس السجلات من بداية الشيفت الحالي
   let workMins=0, breakMins=0;
-  const onlineRecs=records.filter(r=>r.status==='online'&&r.approved_at);
-  for(const r of onlineRecs){
+  const shiftRecs=shiftStartTime?sorted.filter(r=>r.approved_at&&new Date(r.approved_at)>=shiftStartTime):sorted;
+  shiftRecs.filter(r=>r.status==='online'&&r.approved_at).forEach(r=>{
     const end=r.ended_at?new Date(r.ended_at):new Date();
     workMins+=Math.floor((end-new Date(r.approved_at))/60000);
-  }
-  const breakRecs=records.filter(r=>r.status==='break'&&r.approved_at);
-  for(const r of breakRecs){
+  });
+  shiftRecs.filter(r=>r.status==='break'&&r.approved_at).forEach(r=>{
     const end=r.ended_at?new Date(r.ended_at):new Date();
     breakMins+=Math.floor((end-new Date(r.approved_at))/60000);
-  }
+  });
 
-  // خصم الاستراحة الزيادة من وقت العمل
   const excessBreak=Math.max(0,breakMins-maxBreakMins);
   const effectiveWork=Math.max(0,workMins-excessBreak);
+  const maxWorkMins=(settings?.max_online_hours||10)*60;
   const pct=Math.min(100,Math.round(effectiveWork/maxWorkMins*100));
 
   document.getElementById('hc-work').textContent=fmTime(effectiveWork);
   document.getElementById('hc-break').textContent=fmTime(breakMins)+(excessBreak>0?` (زيادة ${fmTime(excessBreak)})`:'');
   document.getElementById('hc-allowed').textContent=fmTime(maxBreakMins);
-  // حد الساعات مش مطلوب في بورتال الطيار
   document.getElementById('hc-fill').style.width=pct+'%';
   document.getElementById('hc-fill').style.background=pct>90?'var(--red)':pct>70?'var(--yellow)':'var(--green)';
 }
