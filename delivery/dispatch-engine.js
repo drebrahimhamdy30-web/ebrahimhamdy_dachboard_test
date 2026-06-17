@@ -172,13 +172,13 @@ async run() {
     if (!allDrivers.length) return [];
     var driverIds = allDrivers.map(function(d){return d.id;});
 
-    var today = new Date().toISOString().split('T')[0];
+// آخر حالة حضور لكل طيار — مهما كان تاريخها (مش بس النهاردة)
     var attRes = await this.db
       .from('driver_attendance')
       .select('driver_id, status, created_at')
-      .eq('date', today)
       .in('driver_id', driverIds)
-      .order('created_at', {ascending: false});
+      .order('created_at', {ascending: false})
+      .limit(500);
 
     var attStatus = {};
     (attRes.data||[]).forEach(function(r){
