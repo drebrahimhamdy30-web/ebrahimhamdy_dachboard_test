@@ -54,6 +54,11 @@
 
     .total-bar { display:flex; gap:16px; flex-wrap:wrap; padding:10px 0; font-size:0.88rem; font-weight:700; }
 
+    /* شريط تجميع المعاملات المحددة */
+    .selection-bar { display:none; align-items:center; gap:16px; flex-wrap:wrap; background:#eff6ff; border:1.5px solid #bfdbfe; border-radius:10px; padding:10px 16px; margin-bottom:12px; font-size:0.85rem; font-weight:700; color:#1e3a8a; }
+    .selection-bar.show { display:flex; }
+    .selection-bar .sb-clear { margin-right:auto; background:transparent; border:1px solid #bfdbfe; color:#1e3a8a; border-radius:8px; padding:4px 10px; font-size:0.76rem; cursor:pointer; font-family:var(--font); }
+
     /* Modal الرسالة الكاملة */
     .sms-modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.72); z-index:99999; align-items:center; justify-content:center; }
     .sms-modal { background:#1e293b; border:2px solid #334155; border-radius:16px; padding:22px; width:92%; max-width:480px; direction:rtl; font-family:var(--font); box-shadow:0 20px 60px rgba(0,0,0,0.6); max-height:88vh; overflow-y:auto; }
@@ -118,6 +123,8 @@
         <span>فيه معاملات رصيدها غير متطابق مع المتوقع — معلّمة بالأحمر بالأسفل.</span>
       </div>
 
+      <div class="selection-bar" id="selection-bar"></div>
+
       <div class="table-wrap">
         <table>
           <thead>
@@ -127,6 +134,7 @@
               <th>المحفظة</th>
               <th>النوع</th>
               <th>القيمة</th>
+              <th>الرسوم</th>
               <th id="party-th">من / إلى</th>
               <th>الرصيد الحالي</th>
               <th>الحالة</th>
@@ -134,7 +142,7 @@
             </tr>
           </thead>
           <tbody id="table-body">
-            <tr class="loading-row"><td colspan="9">⏳ جاري التحميل...</td></tr>
+            <tr class="loading-row"><td colspan="10">⏳ جاري التحميل...</td></tr>
           </tbody>
         </table>
       </div>
@@ -173,6 +181,10 @@
         <div class="add-field">
           <label>القيمة</label>
           <input type="number" id="add-ammount" step="0.01" placeholder="0.00">
+        </div>
+        <div class="add-field">
+          <label>الرسوم (تُخصم دايماً من الرصيد)</label>
+          <input type="number" id="add-fees" step="0.01" placeholder="0.00" value="0">
         </div>
         <div class="add-field">
           <label>الرصيد الحالي بعد المعاملة</label>
@@ -286,7 +298,7 @@
 
     async function loadAll() {
       const tbody = document.getElementById('table-body');
-      tbody.innerHTML = '<tr class="loading-row"><td colspan="9">⏳ جاري جلب البيانات...</td></tr>';
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="10">⏳ جاري جلب البيانات...</td></tr>';
       try {
         const resp = await fetch(SMS_GET_URL);
         const text = await resp.text();
@@ -311,7 +323,7 @@
         applyFilter();
       } catch(e) {
         console.error(e);
-        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
       }
     }
 
@@ -324,7 +336,8 @@
         for (let i=1; i<rows.length; i++) {
           const prev=rows[i-1], cur=rows[i];
           const sign = isSend(cur) ? -1 : 1;
-          const expected = num(prev.balance) + sign*num(cur.ammount);
+          // الرسوم دايماً بتُخصم من الرصيد، سواء استلام أو إرسال
+          const expected = num(prev.balance) + sign*num(cur.ammount) - num(cur.fees);
           if (Math.abs(expected - num(cur.balance)) > 0.01) {
             badIds.add(String(cur.id)); badIds.add(String(prev.id));
           }
@@ -395,20 +408,22 @@
     function renderTable(items) {
       const tbody = document.getElementById('table-body');
       if (!items.length) {
-        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج</td></tr>';
         document.getElementById('total-bar').innerHTML=''; 
         syncSelectionUI();
         return;
       }
       // عرض الأحدث أولاً (نسخة معكوسة — لا نغيّر ترتيب allData المستخدم في فحص الرصيد)
       const view = items.slice().sort((a,b) => (ts(b) - ts(a)) || (sortKey(b) - sortKey(a)));
-      let totalIn=0, totalOut=0;
+      let totalIn=0, totalOut=0, totalFees=0;
       tbody.innerHTML = view.map(item => {
         const w = walletOf(item), c = walletColor(w);
         const send = isSend(item), bad = badIds.has(String(item.id));
         const posted = isPosted(item);
         const amt = num(item.ammount);
+        const fee = num(item.fees);
         if (send) totalOut+=amt; else totalIn+=amt;
+        totalFees += fee;
         const party = item.from_no || item.to_no || '---';
         const checked = selected.has(String(item.id)) ? 'checked' : '';
         // المرحّل مايتحددش (اتراجع خلاص)
@@ -424,6 +439,7 @@
           <td><span class="wallet-badge" style="background:color-mix(in srgb, ${c} 14%, transparent);color:${c};border:1px solid color-mix(in srgb, ${c} 35%, transparent);">${w}</span></td>
           <td>${send?'<span class="wallet-badge type-out">إرسال ↑</span>':'<span class="wallet-badge type-in">استلام ↓</span>'}</td>
           <td class="${send?'amount-out':'amount-in'}">${send?'−':'+'}${fmt(amt)} ج</td>
+          <td style="white-space:nowrap;color:${fee>0?'#b91c1c':'var(--text-muted)'};font-weight:${fee>0?'700':'400'};">${fee>0?'−'+fmt(fee):'—'} ${fee>0?'ج':''}</td>
           <td style="font-weight:600;font-size:0.85rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(party)}">${escapeHtml(party)}</td>
           <td style="white-space:nowrap;"><b style="color:${bad?'#b91c1c':c};">${fmt(item.balance)} ج</b>${bad?'<span class="bad-flag"><i class="fas fa-triangle-exclamation"></i> غير مظبوط</span>':''}</td>
           <td>${statusCell}</td>
@@ -433,6 +449,7 @@
       document.getElementById('total-bar').innerHTML =
         `<span>إجمالي الوارد: <b style="color:#15803d;">${fmt(totalIn)}</b> ج</span>`+
         `<span>إجمالي الصادر: <b style="color:#b91c1c;">${fmt(totalOut)}</b> ج</span>`+
+        `<span>إجمالي الرسوم: <b style="color:#b91c1c;">${fmt(totalFees)}</b> ج</span>`+
         `<span style="color:var(--text-muted);">عدد المعاملات: <b>${view.length}</b></span>`;
       syncSelectionUI();
     }
@@ -467,6 +484,38 @@
         master.checked = allChecked;
         master.indeterminate = !allChecked && rowCbs.some(cb=>cb.checked);
       }
+      renderSelectionSummary();
+    }
+
+    // تجميع المعاملات المحددة بالـ checkbox: القيمة (وارد/صادر) + الرسوم + العدد
+    function renderSelectionSummary() {
+      const bar = document.getElementById('selection-bar');
+      if (!bar) return;
+      if (!selected.size) { bar.classList.remove('show'); bar.innerHTML=''; return; }
+
+      const items = allData.filter(it => selected.has(String(it.id)));
+      let inSum=0, outSum=0, feeSum=0;
+      items.forEach(it => {
+        const amt = num(it.ammount), fee = num(it.fees);
+        if (isSend(it)) outSum += amt; else inSum += amt;
+        feeSum += fee;
+      });
+      const net = inSum - outSum - feeSum; // الأثر الصافي على الرصيد
+
+      bar.classList.add('show');
+      bar.innerHTML =
+        `<span><i class="fas fa-layer-group"></i> محدّد: <b>${items.length}</b></span>`+
+        `<span>وارد: <b style="color:#15803d;">${fmt(inSum)}</b> ج</span>`+
+        `<span>صادر: <b style="color:#b91c1c;">${fmt(outSum)}</b> ج</span>`+
+        `<span>رسوم: <b style="color:#b91c1c;">${fmt(feeSum)}</b> ج</span>`+
+        `<span>الصافي: <b style="color:${net>=0?'#15803d':'#b91c1c'};">${fmt(net)}</b> ج</span>`+
+        `<button class="sb-clear" onclick="clearSelection()"><i class="fas fa-times"></i> إلغاء التحديد</button>`;
+    }
+
+    function clearSelection() {
+      selected.clear();
+      document.querySelectorAll('.row-cb').forEach(cb => cb.checked = false);
+      syncSelectionUI();
     }
 
     async function postSelected() {
@@ -540,6 +589,7 @@
       const to_no   = document.getElementById('add-to_no').value.trim();
       const typeSel = document.getElementById('add-type-sel').value;
       const ammount = document.getElementById('add-ammount').value;
+      const fees    = document.getElementById('add-fees').value;
       const balance = document.getElementById('add-balance').value;
       const from_no = document.getElementById('add-from_no').value.trim();
       const branch  = document.getElementById('add-branch').value.trim();
@@ -560,7 +610,7 @@
         balance: num(balance),
         message: message || null,
         sms_type: typeSel,          // استلام / إرسال (للمنطق لو حبيت تستخدمه في n8n)
-        fees:    0,
+        fees:    num(fees),
         bill_no: null,
         done:    null
       };
@@ -577,6 +627,7 @@
     }
     function clearAdd(){
       ['add-to_no','add-ammount','add-balance','add-from_no','add-message'].forEach(id=>document.getElementById(id).value='');
+      document.getElementById('add-fees').value = '0';
     }
   </script>
 </body>
