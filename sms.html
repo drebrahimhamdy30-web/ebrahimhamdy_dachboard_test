@@ -7,6 +7,10 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   <style>
+    /* توسيع الشاشة لصفحة المحافظ */
+    .container { max-width:1500px !important; }
+    .table-wrap { overflow-x:auto; }
+
     .sms-header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px; }
     .sms-header-left { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
     .sms-header-right { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
@@ -112,6 +116,7 @@
         <table>
           <thead>
             <tr>
+              <th>التاريخ والوقت</th>
               <th>المحفظة</th>
               <th>النوع</th>
               <th>القيمة</th>
@@ -121,7 +126,7 @@
             </tr>
           </thead>
           <tbody id="table-body">
-            <tr class="loading-row"><td colspan="6">⏳ جاري التحميل...</td></tr>
+            <tr class="loading-row"><td colspan="7">⏳ جاري التحميل...</td></tr>
           </tbody>
         </table>
       </div>
@@ -231,6 +236,22 @@
     function fmt(n){ return num(n).toLocaleString('ar-EG',{minimumFractionDigits:2,maximumFractionDigits:2}); }
     function escapeHtml(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
+    // قيمة زمنية للترتيب (من created_at، fallback للـ id)
+    function ts(item){
+      const d = item.created_at ? new Date(item.created_at) : null;
+      if (d && !isNaN(d)) return d.getTime();
+      const n = parseInt(item.id); return isNaN(n) ? 0 : n;
+    }
+    // عرض التاريخ والوقت من created_at
+    function dateCell(item){
+      if (!item.created_at) return '<span style="color:var(--text-muted);">---</span>';
+      const d = new Date(item.created_at);
+      if (isNaN(d)) return '<span style="color:var(--text-muted);">---</span>';
+      const day = d.toLocaleDateString('ar-EG');
+      const time = d.toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit',hour12:true});
+      return `${day}<br><span style="font-size:0.7rem;color:var(--text-muted);">${time}</span>`;
+    }
+
     // الحماية (نفس نمط باقي الصفحات)
     checkAuth().then(async user => {
       activeUser = user;
@@ -241,22 +262,36 @@
       }
     });
 
-async function loadAll() {
+    async function loadAll() {
       const tbody = document.getElementById('table-body');
-      tbody.innerHTML = '<tr class="loading-row"><td colspan="6">⏳ جاري جلب البيانات...</td></tr>';
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="7">⏳ جاري جلب البيانات...</td></tr>';
       try {
-        const data = await fetchSms();
+        const resp = await fetch(SMS_GET_URL);
+        const text = await resp.text();
+        let data = [];
+        if (text && text.trim()) {
+          const parsed = JSON.parse(text);
+          data = Array.isArray(parsed) ? parsed
+               : (parsed.data && Array.isArray(parsed.data)) ? parsed.data
+               : (Array.isArray(parsed) && parsed[0]?.data) ? parsed[0].data : [];
+        }
         // فلترة بالفرع لو الموظف ليه فرع محدد
         allData = (!userBranch) ? data
           : data.filter(r => String(r.branch||'').trim() === userBranch);
+
+        // ترتيب زمني تصاعدي (الأقدم أولاً) — مهم عشان فحص الرصيد يطلع صح
+        allData.sort((a,b) => ts(a) - ts(b));
+
         allData.forEach((r,i)=>{ if(r.id===undefined||r.id===null) r.id='_'+i; });
+
         computeBalanceFlags();
         applyFilter();
       } catch(e) {
         console.error(e);
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
       }
     }
+
     // فحص الرصيد داخل كل محفظة على حدة بالترتيب
     function computeBalanceFlags() {
       badIds = new Set();
@@ -336,17 +371,20 @@ async function loadAll() {
     function renderTable(items) {
       const tbody = document.getElementById('table-body');
       if (!items.length) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج</td></tr>';
         document.getElementById('total-bar').innerHTML=''; return;
       }
+      // عرض الأحدث أولاً (نسخة معكوسة — لا نغيّر ترتيب allData المستخدم في فحص الرصيد)
+      const view = items.slice().sort((a,b) => ts(b) - ts(a));
       let totalIn=0, totalOut=0;
-      tbody.innerHTML = items.map(item => {
+      tbody.innerHTML = view.map(item => {
         const w = walletOf(item), c = walletColor(w);
         const send = isSend(item), bad = badIds.has(String(item.id));
         const amt = num(item.ammount);
         if (send) totalOut+=amt; else totalIn+=amt;
         const party = item.from_no || item.to_no || '---';
         return `<tr class="${bad?'bad-row':''}">
+          <td style="font-size:0.78rem;white-space:nowrap;">${dateCell(item)}</td>
           <td><span class="wallet-badge" style="background:color-mix(in srgb, ${c} 14%, transparent);color:${c};border:1px solid color-mix(in srgb, ${c} 35%, transparent);">${w}</span></td>
           <td>${send?'<span class="wallet-badge type-out">إرسال ↑</span>':'<span class="wallet-badge type-in">استلام ↓</span>'}</td>
           <td class="${send?'amount-out':'amount-in'}">${send?'−':'+'}${fmt(amt)} ج</td>
@@ -358,7 +396,7 @@ async function loadAll() {
       document.getElementById('total-bar').innerHTML =
         `<span>إجمالي الوارد: <b style="color:#15803d;">${fmt(totalIn)}</b> ج</span>`+
         `<span>إجمالي الصادر: <b style="color:#b91c1c;">${fmt(totalOut)}</b> ج</span>`+
-        `<span style="color:var(--text-muted);">عدد المعاملات: <b>${items.length}</b></span>`;
+        `<span style="color:var(--text-muted);">عدد المعاملات: <b>${view.length}</b></span>`;
     }
 
     // ===== Modal الرسالة =====
@@ -412,8 +450,11 @@ async function loadAll() {
       };
 
       try {
-const ok = await insertSms(payload);
-        if (ok) { closeAdd(); clearAdd(); await loadAll(); }
+        const r = await fetch(SMS_POST_URL, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(payload)
+        });
+        if (r.ok) { closeAdd(); clearAdd(); await loadAll(); }
         else alert('❌ فشل الحفظ — تأكد إن فرع sms_insert موجود في n8n');
       } catch(e) { alert('❌ خطأ في الاتصال'); }
       btn.disabled=false; btn.innerHTML='<i class="fas fa-save"></i> حفظ';
