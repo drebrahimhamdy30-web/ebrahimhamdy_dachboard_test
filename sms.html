@@ -241,25 +241,15 @@
       }
     });
 
-    async function loadAll() {
+async function loadAll() {
       const tbody = document.getElementById('table-body');
       tbody.innerHTML = '<tr class="loading-row"><td colspan="6">⏳ جاري جلب البيانات...</td></tr>';
       try {
-        const resp = await fetch(SMS_GET_URL);
-        const text = await resp.text();
-        let data = [];
-        if (text && text.trim()) {
-          const parsed = JSON.parse(text);
-          data = Array.isArray(parsed) ? parsed
-               : (parsed.data && Array.isArray(parsed.data)) ? parsed.data
-               : (Array.isArray(parsed) && parsed[0]?.data) ? parsed[0].data : [];
-        }
+        const data = await fetchSms();
         // فلترة بالفرع لو الموظف ليه فرع محدد
         allData = (!userBranch) ? data
           : data.filter(r => String(r.branch||'').trim() === userBranch);
-
         allData.forEach((r,i)=>{ if(r.id===undefined||r.id===null) r.id='_'+i; });
-
         computeBalanceFlags();
         applyFilter();
       } catch(e) {
@@ -267,7 +257,6 @@
         tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
       }
     }
-
     // فحص الرصيد داخل كل محفظة على حدة بالترتيب
     function computeBalanceFlags() {
       badIds = new Set();
@@ -423,11 +412,8 @@
       };
 
       try {
-        const r = await fetch(SMS_POST_URL, {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify(payload)
-        });
-        if (r.ok) { closeAdd(); clearAdd(); await loadAll(); }
+const ok = await insertSms(payload);
+        if (ok) { closeAdd(); clearAdd(); await loadAll(); }
         else alert('❌ فشل الحفظ — تأكد إن فرع sms_insert موجود في n8n');
       } catch(e) { alert('❌ خطأ في الاتصال'); }
       btn.disabled=false; btn.innerHTML='<i class="fas fa-save"></i> حفظ';
