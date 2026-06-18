@@ -1273,17 +1273,45 @@ async function retryFailed(orderId){
 }
 async function completeTrip(tripId){
   const orders=tripOrders[tripId]||[];
+  // بس assigned و picked بيمنعوا الإنهاء — المتعذر (failed) مسموح
   const blocking=orders.filter(o=>['assigned','picked'].includes(o.status));
   if(blocking.length>0){alert('لا يمكن إنهاء الرحلة — يوجد '+blocking.length+' طلب لم يتم توصيله\nيجب توصيل أو تسجيل تعذر أولاً');return;}
-  if(!confirm('إنهاء الرحلة؟'))return;
+
+  const failedOrders=orders.filter(o=>o.status==='failed');
+  if(failedOrders.length>0){
+    if(!confirm(`يوجد ${failedOrders.length} طلب متعذر سيرجع للإدارة لإعادة توزيعه. إنهاء الرحلة؟`))return;
+  } else {
+    if(!confirm('إنهاء الرحلة؟'))return;
+  }
+
   load(true);
   const now=new Date().toISOString();
+
+  // الأوردرات المتعذرة → ترجع للتوزيع (تخرج من الطيار والرحلة)
+  if(failedOrders.length>0){
+    const failedIds=failedOrders.map(o=>o.id);
+    await db.from('orders').update({
+      status:'postponed',
+      driver_id:null,deliveryman:null,
+      assigned_at:null,picked_at:null,
+      updated_at:now
+    }).in('id',failedIds);
+    if(tripId!=='direct'){
+      for(const id of failedIds){
+        await db.from('trip_orders').delete().eq('trip_id',tripId).eq('order_id',id);
+      }
+    }
+    for(const id of failedIds){try{await db.from('order_logs').insert({order_id:id,event:'order_postponed',details:{released_on_trip_complete:true},user_id:currentUser.id,user_name:currentUser.full_name});}catch(e){}}
+  }
+
+  // المُوصّلة → completed
   const deliveredIds=orders.filter(o=>o.status==='delivered').map(o=>o.id);
   if(deliveredIds.length)
     await db.from('orders').update({status:'completed',completed_at:now,updated_at:now}).in('id',deliveredIds);
+
   if(tripId!=='direct')
     await db.from('trips').update({status:'completed',updated_at:now}).eq('id',tripId);
-  try{await db.from('trip_logs').insert({trip_id:tripId,event:'trip_completed',details:{by:'driver'},user_id:currentUser.id,user_name:currentUser.full_name});}catch(e){}
+  try{await db.from('trip_logs').insert({trip_id:tripId,event:'trip_completed',details:{by:'driver',failed_released:failedOrders.length},user_id:currentUser.id,user_name:currentUser.full_name});}catch(e){}
   await loadAll();load(false);
 }
 
