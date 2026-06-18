@@ -100,10 +100,10 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
           <input type="text" class="form-control" id="u-phone" placeholder="01xxxxxxxxx">
         </div>
       </div>
-      <div class="form-grid-2">
+<div class="form-grid-2">
         <div class="form-group">
           <label>الدور *</label>
-          <select class="form-control" id="u-role">
+          <select class="form-control" id="u-role" onchange="toggleBranchField()">
             <option value="driver">طيار</option>
             <option value="cashier">كاشير</option>
             <option value="pharmacist">صيدلي</option>
@@ -118,6 +118,12 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
             <option value="0">معطل</option>
           </select>
         </div>
+      </div>
+      <div class="form-group" id="branchFieldWrap">
+        <label>الفرع *</label>
+        <select class="form-control" id="u-branch">
+          <option value="">— اختر الفرع —</option>
+        </select>
       </div>
     </div>
     <div class="modal-footer">
@@ -157,6 +163,10 @@ const ROLE_COLORS = ['#1a56db','#7c3aed','#16a34a','#ea580c','#0891b2','#ca8a04'
 let allUsers = [];
 let deleteTargetId = null;
 
+let allUsers = [];
+let allBranches = [];
+let deleteTargetId = null;
+
 async function init() {
   const user = getCurrentUser();
   if (!user) return;
@@ -165,11 +175,24 @@ async function init() {
     return;
   }
   showLoading(true);
+  // حمّل الفروع
+  const { data: branches } = await db.from('branches').select('id,name').order('name');
+  allBranches = branches || [];
+  const branchSel = document.getElementById('u-branch');
+  branchSel.innerHTML = '<option value="">— اختر الفرع —</option>' +
+    allBranches.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+
   const { data } = await db.from('users').select('*').order('role').order('full_name');
   allUsers = data || [];
   renderStats();
   renderUsers();
   showLoading(false);
+}
+
+// أخفي خانة الفرع لو الدور أدمن (الأدمن = كل الفروع)
+function toggleBranchField() {
+  const role = document.getElementById('u-role').value;
+  document.getElementById('branchFieldWrap').style.display = role === 'admin' ? 'none' : 'block';
 }
 
 function renderStats() {
@@ -227,7 +250,7 @@ function renderUsers() {
       <td style="font-family:monospace;font-size:.75rem;color:var(--text-muted)">${u.username||'—'}</td>
       <td><span class="badge badge-${u.role}">${ROLE_LABELS[u.role]||u.role}</span></td>
       <td><span class="badge ${u.is_active?'badge-active':'badge-inactive'}">${u.is_active?'نشط':'معطل'}</span></td>
-      <td style="font-size:.72rem;color:var(--text-muted)">${u.branch_id||'—'}</td>
+      <td style="font-size:.72rem;color:var(--text-muted)">${u.role==='admin'?'كل الفروع':(allBranches.find(b=>b.id===u.branch_id)?.name||'—')}</td>
       <td>
         <div class="action-cell">
           <button class="btn btn-outline btn-sm" onclick="openEditModal('${u.id}')">تعديل</button>
@@ -244,6 +267,8 @@ function openUserModal() {
   ['u-id','u-name','u-username','u-password','u-phone'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('u-role').value = 'driver';
   document.getElementById('u-active').value = '1';
+  document.getElementById('u-branch').value = '';
+  toggleBranchField();
   document.getElementById('userModal').classList.add('open');
 }
 
@@ -257,6 +282,8 @@ function openEditModal(id) {
   document.getElementById('u-phone').value = u.phone||'';
   document.getElementById('u-role').value = u.role||'driver';
   document.getElementById('u-active').value = u.is_active ? '1' : '0';
+  document.getElementById('u-branch').value = u.branch_id || '';
+  toggleBranchField();
   document.getElementById('userModal').classList.add('open');
 }
 
@@ -265,16 +292,20 @@ async function saveUser() {
   const name = document.getElementById('u-name').value.trim();
   const username = document.getElementById('u-username').value.trim();
   const password = document.getElementById('u-password').value.trim();
+  const role = document.getElementById('u-role').value;
+  const branch = document.getElementById('u-branch').value;
   if (!name || !username) { alert('الاسم واسم المستخدم مطلوبان'); return; }
   if (!id && !password) { alert('كلمة المرور مطلوبة للمستخدم الجديد'); return; }
+  // الفرع إجباري لكل الأدوار ماعدا الأدمن
+  if (role !== 'admin' && !branch) { alert('الفرع مطلوب'); return; }
 
   showLoading(true);
   try {
     const payload = {
-      full_name: name, username,
-      role: document.getElementById('u-role').value,
+      full_name: name, username, role,
       is_active: document.getElementById('u-active').value === '1',
-      phone: document.getElementById('u-phone').value.trim() || null
+      phone: document.getElementById('u-phone').value.trim() || null,
+      branch_id: role === 'admin' ? null : branch
     };
     if (password) payload.password_hash = password;
 
