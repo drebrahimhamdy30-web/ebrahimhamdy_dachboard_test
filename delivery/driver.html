@@ -101,6 +101,9 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text);min-h
 .order-row.status-delivered{border-right:3px solid var(--green);background:#f0fdf4}
 .order-row.status-delivered .or-head{background:#f0fdf4}
 .order-row.status-completed{border-right:3px solid var(--gray);background:#f9fafb}
+  .order-row.status-failed{border-right:3px solid var(--red);background:#fef2f2}
+.order-row.status-failed .or-head{background:#fef2f2}
+.ors-failed{background:var(--red-light);color:#b91c1c}
 .order-row.late{border-right:3px solid var(--red)}
 .or-head{padding:.5rem .75rem;display:flex;align-items:center;gap:.5rem;cursor:pointer}
 .or-no{font-weight:800;color:var(--primary);font-size:.8rem;flex-shrink:0}
@@ -326,7 +329,7 @@ const {createClient}=supabase;
 const db=createClient(SUPABASE_URL,SUPABASE_KEY);
 
 const PAY_LABELS={cash:'💵 كاش',visa:'💳 فيزا',transfer:'🏦 تحويل',deferred:'📋 آجل'};
-const ST_LABEL={pending:'جاهز',assigned:'على رحلة',picked:'استلم',delivered:'وصّل',completed:'مكتمل',postponed:'تعذر'};
+const ST_LABEL={pending:'جاهز',assigned:'على رحلة',picked:'استلم',delivered:'وصّل',completed:'مكتمل',postponed:'تعذر',failed:'متعذر'};
 
 let currentUser=null, driverRecord=null, settings=null;
 let allTrips=[], tripOrders={}, currentTripId=null;
@@ -1121,7 +1124,8 @@ function renderContent(){
         <div class="or-amount">${amount.toLocaleString('ar-EG')} ج.م</div>
         ${o.collected_amount?`<div style="font-size:.72rem;color:var(--green);font-weight:600;margin-bottom:.3rem">✓ محصل: ${Number(o.collected_amount).toLocaleString()} ج</div>`:''}
         ${(o.notes||'').includes('🚨')?`<div class="or-note note-urgent">🚨 طلب عاجل</div>`:''}
-        ${o.staff_notes?`<div class="or-note note-staff">💼 ${o.staff_notes}</div>`:''}
+${o.staff_notes?`<div class="or-note note-staff">💼 ${o.staff_notes}</div>`:''}
+        ${o.status==='failed'&&o.postpone_reason?`<div class="or-note note-urgent">⚠️ تعذر: ${o.postpone_reason}</div>`:''}
         ${actions?`<div class="or-actions">${actions}</div>`:''}
       </div>
     </div>`;
@@ -1255,7 +1259,18 @@ async function confirmFail(){
   try{await db.from('order_logs').insert({order_id:id,event:'order_postponed',details:{reason,kept_in_trip:true},user_id:currentUser.id,user_name:currentUser.full_name});}catch(e){}
   closeModal('failModal');await loadAll();load(false);
 }
-
+async function retryFailed(orderId){
+  load(true);
+  const now=new Date().toISOString();
+  // رجّع الأوردر "مع الطيار" تاني — هو لسه في الرحلة ومعاه
+  await db.from('orders').update({
+    status:'picked',
+    picked_at:now,
+    updated_at:now
+  }).eq('id',orderId);
+  try{await db.from('order_logs').insert({order_id:orderId,event:'order_picked',details:{retry:true},user_id:currentUser.id,user_name:currentUser.full_name});}catch(e){}
+  await loadAll();load(false);
+}
 async function completeTrip(tripId){
   const orders=tripOrders[tripId]||[];
   const blocking=orders.filter(o=>['assigned','picked'].includes(o.status));
