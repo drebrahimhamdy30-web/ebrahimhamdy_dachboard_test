@@ -1578,11 +1578,14 @@ function buildHorizTimeline(stages){
 }
 
 // Trip Order Detail Modal
-function openTripOrderDetail(orderId, tripId){
+async function openTripOrderDetail(orderId, tripId){
   const o=allOrders.find(x=>x.id===orderId);if(!o)return;
   const base=getBillDate(o);
   const pm=o.payment_method;
   const pmL=pm?PL[pm]:(o.bill_type||'—');
+
+  // جيب سجل الطلب الكامل لبناء الخريطة (كل المراحل والمحاولات)
+  const {data:ologs}=await db.from('order_logs').select('event,created_at').eq('order_id',orderId).order('created_at',{ascending:true});
 
   // Build timers
   let timersHtml='';
@@ -1607,14 +1610,26 @@ if(o.delivered_at){
   function fmDT(dt){if(!dt)return '—';return new Date(dt).toLocaleString('ar-EG',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}
   function diffLabel(from,to){if(!from||!to)return '';const m=Math.floor((new Date(to)-new Date(from))/60000);return m<60?`${m}د`:(`${Math.floor(m/60)}س${m%60}د`);}
 
+// ابنِ المراحل من سجل الطلب (order_logs) — يعرض كل تعذر وكل محاولة بالترتيب
+  const EVENT_MAP={
+    order_created:{label:'إنشاء الطلب',color:'#60a5fa',icon:'📦'},
+    driver_assigned:{label:'تعيين على طيار',color:'#f97316',icon:'🚗'},
+    order_picked:{label:'استلام الطلب',color:'#a78bfa',icon:'▶️'},
+    order_delivered:{label:'تم التوصيل',color:'#4ade80',icon:'✅'},
+    order_postponed:{label:'تعذر التوصيل',color:'#f87171',icon:'⚠️'},
+    order_cancelled:{label:'إلغاء الطلب',color:'#dc2626',icon:'❌'},
+    order_completed:{label:'اكتمال الرحلة',color:'#94a3b8',icon:'🏁'}
+  };
   const stages=[];
-  const billDt=getBillDate(o);
-  stages.push({label:'إنشاء الطلب',time:billDt,color:'#60a5fa',icon:'📦'});
-  if(o.assigned_at) stages.push({label:'تعيين على طيار',time:new Date(o.assigned_at),color:'#f97316',icon:'🚗'});
-  if(o.picked_at) stages.push({label:'استلام الطلب',time:new Date(o.picked_at),color:'#a78bfa',icon:'▶️'});
-  if(o.delivered_at) stages.push({label:'تم التوصيل',time:new Date(o.delivered_at),color:'#4ade80',icon:'✅'});
-  else if(o.status==='postponed') stages.push({label:'تعذر التوصيل',time:new Date(o.updated_at||Date.now()),color:'#f87171',icon:'⚠️'});
-  if(o.completed_at) stages.push({label:'اكتمال الرحلة',time:new Date(o.completed_at),color:'#94a3b8',icon:'🏁'});
+  // ابدأ دائماً بإنشاء الطلب (وقت الفاتورة الحقيقي)
+  stages.push({label:'إنشاء الطلب',time:getBillDate(o),color:'#60a5fa',icon:'📦'});
+  // باقي المراحل من السجل (نتجاهل order_created عشان محطوط فوق بوقت الفاتورة)
+  (ologs||[]).forEach(l=>{
+    if(l.event==='order_created') return;
+    const m=EVENT_MAP[l.event];
+    if(!m) return; // تجاهل الأحداث اللي مالهاش مرحلة (تعديل، عاجل، إلخ)
+    stages.push({label:m.label,time:new Date(l.created_at),color:m.color,icon:m.icon});
+  });
 
   const timelineHtml=buildHorizTimeline(stages);
 
