@@ -196,10 +196,10 @@ async run() {
     if (!presentDrivers.length) return [];
     var presentIds = presentDrivers.map(function(d){return d.id;});
 
-    var pickedRes = await this.db
+var pickedRes = await this.db
       .from('orders')
       .select('driver_id')
-      .eq('status', 'picked')
+      .in('status', ['picked', 'failed'])
       .in('driver_id', presentIds);
     var pickedIds = {};
     (pickedRes.data||[]).forEach(function(o){pickedIds[o.driver_id]=true;});
