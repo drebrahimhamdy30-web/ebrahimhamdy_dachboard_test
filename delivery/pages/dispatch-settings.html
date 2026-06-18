@@ -330,15 +330,30 @@ async function init(){
   const user=getCurrentUser();if(!user)return;
   load(true);
   try{
+    const isAdmin=user.role==='admin';
+    const userBranch=user.branch_id;
+
     const [br,dr]=await Promise.all([
       db.from('branches').select('id,name').order('name'),
       db.from('drivers').select('id,full_name,branch_id').eq('is_active',true)
     ]);
     branches=br.data||[];
     drivers=dr.data||[];
+
     const sel=document.getElementById('branchSelect');
-    sel.innerHTML='<option value="">اختر الفرع...</option>'+
-      branches.map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
+    if(!isAdmin && userBranch){
+      // مش أدمن → فرعه بس، مقفول
+      const myBranch=branches.filter(b=>b.id===userBranch);
+      sel.innerHTML=myBranch.map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
+      sel.value=userBranch;
+      sel.disabled=true;
+      // افتح إعداداته تلقائياً
+      onBranchChange();
+    } else {
+      // أدمن → كل الفروع
+      sel.innerHTML='<option value="">اختر الفرع...</option>'+
+        branches.map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
+    }
   }catch(e){console.error(e);}
   load(false);
 }
