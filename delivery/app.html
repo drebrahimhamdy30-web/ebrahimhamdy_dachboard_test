@@ -227,13 +227,27 @@ const { createClient } = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const ROLE_LABELS = {admin:'Admin',supervisor:'مشرف',cashier:'كاشير',pharmacist:'صيدلي',driver:'طيار'};
-const PERMISSIONS = {
+
+// الصلاحيات الافتراضية (لو القاعدة مش متاحة) — تتحدّث من جدول role_permissions
+let PERMISSIONS = {
   admin:      {canManageUsers:true, canViewPermissions:true, canViewReports:true},
   supervisor: {canManageUsers:false,canViewPermissions:false,canViewReports:true},
   cashier:    {canManageUsers:false,canViewPermissions:false,canViewReports:false},
   pharmacist: {canManageUsers:false,canViewPermissions:false,canViewReports:false},
   driver:     {canManageUsers:false,canViewPermissions:false,canViewReports:false},
 };
+
+// حمّل الصلاحيات الفعلية من القاعدة
+async function loadPermissionsFromDB(){
+  try{
+    const {data}=await db.from('role_permissions').select('role,permissions');
+    if(data&&data.length){
+      const fresh={};
+      data.forEach(r=>{fresh[r.role]=r.permissions||{};});
+      Object.keys(fresh).forEach(role=>{ PERMISSIONS[role]={...(PERMISSIONS[role]||{}),...fresh[role]}; });
+    }
+  }catch(e){ console.warn('loadPermissionsFromDB failed, using defaults', e); }
+}
 
 let currentUser = null;
 let currentPage = 'overview';
@@ -249,6 +263,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('userRoleLabel').textContent = ROLE_LABELS[currentUser.role] || currentUser.role;
   document.getElementById('userAvatar').textContent = currentUser.full_name?.charAt(0) || 'U';
 
+await loadPermissionsFromDB();
   applyPermissions();
   await loadHeaderStats();
   setInterval(loadHeaderStats, 60000);
