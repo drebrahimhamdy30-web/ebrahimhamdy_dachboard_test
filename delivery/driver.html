@@ -1243,10 +1243,16 @@ async function confirmFail(){
   const o=Object.values(tripOrders).flat().find(x=>x.id===id);
   load(true);
   const now=new Date().toISOString();
-  await db.from('orders').update({status:'postponed',postpone_reason:reason,driver_notes:note||null,attempt_count:(o?.attempt_count||0)+1,driver_id:null,deliveryman:null,assigned_at:null,picked_at:null,updated_at:now}).eq('id',id);
-  if(currentTripId&&currentTripId!=='direct')
-    await db.from('trip_orders').delete().eq('trip_id',currentTripId).eq('order_id',id);
-  try{await db.from('order_logs').insert({order_id:id,event:'order_postponed',details:{reason},user_id:currentUser.id,user_name:currentUser.full_name});}catch(e){}
+  // الأوردر يفضل في الرحلة مع الطيار — بس حالته تبقى "متعذر"
+  // مش بنشيله من trip_orders ولا بنرجّع driver_id=null
+  await db.from('orders').update({
+    status:'failed',
+    postpone_reason:reason,
+    driver_notes:note||null,
+    attempt_count:(o?.attempt_count||0)+1,
+    updated_at:now
+  }).eq('id',id);
+  try{await db.from('order_logs').insert({order_id:id,event:'order_postponed',details:{reason,kept_in_trip:true},user_id:currentUser.id,user_name:currentUser.full_name});}catch(e){}
   closeModal('failModal');await loadAll();load(false);
 }
 
