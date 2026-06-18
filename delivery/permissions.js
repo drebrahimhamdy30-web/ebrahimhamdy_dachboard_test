@@ -1,90 +1,177 @@
-const PERMISSIONS = {
-  admin: {
-    canViewOrders: true,
-    canCreateOrders: true,
-    canEditOrders: true,
-    canDeleteOrders: true,
-    canAssignDrivers: true,
-    canManageTrips: true,
-    canViewReports: true,
-    canManageUsers: true,
-    canViewPermissions: true,
-    canViewAllBranches: true,
-  },
-  supervisor: {
-    canViewOrders: true,
-    canCreateOrders: true,
-    canEditOrders: true,
-    canDeleteOrders: false,
-    canAssignDrivers: true,
-    canManageTrips: true,
-    canViewReports: true,
-    canManageUsers: false,
-    canViewPermissions: false,
-    canViewAllBranches: true,
-  },
-  cashier: {
-    canViewOrders: true,
-    canCreateOrders: false,
-    canEditOrders: false,
-    canDeleteOrders: false,
-    canAssignDrivers: false,
-    canManageTrips: false,
-    canViewReports: true,
-    canManageUsers: false,
-    canViewPermissions: false,
-    canViewAllBranches: false,
-  },
-  pharmacist: {
-    canViewOrders: true,
-    canCreateOrders: false,
-    canEditOrders: false,
-    canDeleteOrders: false,
-    canAssignDrivers: false,
-    canManageTrips: false,
-    canViewReports: false,
-    canManageUsers: false,
-    canViewPermissions: false,
-    canViewAllBranches: false,
-  },
-  driver: {
-    canViewOrders: true,
-    canCreateOrders: false,
-    canEditOrders: false,
-    canDeleteOrders: false,
-    canAssignDrivers: false,
-    canManageTrips: false,
-    canViewReports: false,
-    canManageUsers: false,
-    canViewPermissions: false,
-    canViewAllBranches: false,
-    onlyOwnTrips: true,
-  },
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>الصلاحيات</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../delivery-style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg); }
+.perm-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.25rem; flex-wrap:wrap; gap:.75rem; }
+.perm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+.perm-card { background: white; border-radius: 14px; border: 1px solid var(--border); box-shadow: var(--shadow); overflow: hidden; }
+.perm-card-header { padding: 1rem 1.25rem; display: flex; align-items: center; gap: .75rem; border-bottom: 1px solid var(--border); }
+.perm-role-icon { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1rem; flex-shrink: 0; }
+.perm-role-name { font-weight: 700; font-size: .875rem; }
+.perm-role-desc { font-size: .7rem; color: var(--text-muted); }
+.perm-list { padding: .75rem 1.25rem; }
+.perm-row { display: flex; align-items: center; justify-content: space-between; padding: .4rem 0; border-bottom: 1px solid var(--gray-light); font-size: .78rem; }
+.perm-row:last-child { border-bottom: none; }
+.perm-label { color: var(--text); }
+.perm-check { font-size: .85rem; }
+.perm-yes { color: var(--green); }
+.perm-no { color: #d1d5db; }
+/* وضع التعديل */
+.perm-toggle { position:relative; width:38px; height:20px; flex-shrink:0; cursor:pointer; }
+.perm-toggle input { opacity:0; width:0; height:0; position:absolute; }
+.perm-slider { position:absolute; inset:0; background:#d1d5db; border-radius:20px; transition:.2s; }
+.perm-slider::before { content:''; position:absolute; height:14px; width:14px; right:3px; top:3px; background:white; border-radius:50%; transition:.2s; }
+.perm-toggle input:checked + .perm-slider { background:var(--green); }
+.perm-toggle input:checked + .perm-slider::before { transform:translateX(-18px); }
+.btn-edit { background:var(--primary,#1a56db); color:white; border:none; border-radius:8px; padding:.45rem .9rem; font-family:'Cairo',sans-serif; font-size:.78rem; font-weight:700; cursor:pointer; }
+.btn-save { background:#16a34a; color:white; border:none; border-radius:8px; padding:.45rem .9rem; font-family:'Cairo',sans-serif; font-size:.78rem; font-weight:700; cursor:pointer; }
+.btn-cancel { background:#f3f4f6; color:#374151; border:1px solid var(--border); border-radius:8px; padding:.45rem .9rem; font-family:'Cairo',sans-serif; font-size:.78rem; font-weight:700; cursor:pointer; }
+.perm-actions { display:flex; gap:.5rem; }
+.perm-card.admin-locked { opacity:.7; }
+.lock-note { font-size:.62rem; color:var(--text-muted); margin-top:.2rem; }
+.toast { position:fixed; bottom:1.5rem; left:50%; transform:translateX(-50%); background:#1e293b; color:white; padding:.6rem 1.25rem; border-radius:10px; font-size:.8rem; font-weight:600; z-index:400; display:none; }
+.toast.show { display:block; }
+</style>
+</head>
+<body>
+<div class="perm-head">
+  <div>
+    <div style="font-size:.875rem;font-weight:700;margin-bottom:.25rem">الصلاحيات والأدوار</div>
+    <div style="font-size:.78rem;color:var(--text-muted)" id="permSubtitle">عرض صلاحيات كل دور في النظام</div>
+  </div>
+  <div class="perm-actions" id="permActions"></div>
+</div>
+<div class="perm-grid" id="permGrid"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const SUPABASE_URL='https://rxtjoqulmgkkcohmgzgi.supabase.co';
+const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
+const {createClient}=supabase;
+const db=createClient(SUPABASE_URL,SUPABASE_KEY);
+
+const currentUser = JSON.parse(sessionStorage.getItem('delivery_user')||'null');
+const isAdmin = currentUser?.role === 'admin';
+
+const ROLES = [
+  { key:'admin', name:'Admin', desc:'صلاحيات كاملة على كل الوظائف', icon:'👑', bg:'#ede9fe', color:'#7c3aed' },
+  { key:'supervisor', name:'مشرف', desc:'إدارة الطلبات والرحلات والتقارير', icon:'🎯', bg:'#ecfeff', color:'#0891b2' },
+  { key:'cashier', name:'كاشير', desc:'عرض الطلبات والتقارير المالية', icon:'💰', bg:'#fef9c3', color:'#ca8a04' },
+  { key:'pharmacist', name:'صيدلي', desc:'عرض الطلبات الخاصة بالفرع', icon:'💊', bg:'#fff7ed', color:'#ea580c' },
+  { key:'driver', name:'طيار', desc:'عرض رحلاته وتحديث حالة الطلبات', icon:'🚗', bg:'#dcfce7', color:'#16a34a' },
+];
+const PERM_LABELS = {
+  canViewOrders: 'عرض الطلبات',
+  canCreateOrders: 'إضافة طلبات',
+  canEditOrders: 'تعديل الطلبات',
+  canDeleteOrders: 'حذف الطلبات',
+  canAssignDrivers: 'تعيين الطيارين',
+  canManageTrips: 'إدارة الرحلات',
+  canViewReports: 'عرض التقارير',
+  canManageUsers: 'إدارة المستخدمين',
+  canViewPermissions: 'عرض الصلاحيات',
+  canViewAllBranches: 'عرض كل الفروع',
 };
 
-function hasPermission(role, permission) {
-  return PERMISSIONS[role]?.[permission] === true;
+let permData = {};   // الصلاحيات المحمّلة من القاعدة
+let editMode = false;
+
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
+
+async function loadPermissions(){
+  const {data,error}=await db.from('role_permissions').select('role,permissions');
+  permData={};
+  (data||[]).forEach(r=>{permData[r.role]=r.permissions||{};});
+  render();
 }
 
-function getCurrentUser() {
-  const u = sessionStorage.getItem('delivery_user');
-  return u ? JSON.parse(u) : null;
-}
-
-function requireAuth(allowedRoles = []) {
-  const user = getCurrentUser();
-  if (!user) {
-    window.location.href = 'auth.html';
-    return null;
+function renderActions(){
+  const el=document.getElementById('permActions');
+  if(!isAdmin){ el.innerHTML=''; return; }
+  if(editMode){
+    el.innerHTML=`
+      <button class="btn-save" onclick="savePermissions()">💾 حفظ التغييرات</button>
+      <button class="btn-cancel" onclick="cancelEdit()">إلغاء</button>`;
+  } else {
+    el.innerHTML=`<button class="btn-edit" onclick="enterEdit()">✏️ تعديل الصلاحيات</button>`;
   }
-  if (allowedRoles.length > 0 && !allowedRoles.includes(user.role)) {
-    window.location.href = 'auth.html';
-    return null;
-  }
-  return user;
+  document.getElementById('permSubtitle').textContent =
+    editMode ? 'وضع التعديل — فعّل/عطّل الصلاحيات ثم احفظ' : 'عرض صلاحيات كل دور في النظام';
 }
 
-function logout() {
-  sessionStorage.removeItem('delivery_user');
-  window.location.href = 'auth.html';
+function render(){
+  renderActions();
+  document.getElementById('permGrid').innerHTML = ROLES.map(role => {
+    const perms = permData[role.key] || {};
+    // دور الأدمن مقفول في وضع التعديل (حماية: متشلش صلاحيات الأدمن بالغلط)
+    const lockAdmin = editMode && role.key==='admin';
+    return `
+    <div class="perm-card ${lockAdmin?'admin-locked':''}">
+      <div class="perm-card-header">
+        <div class="perm-role-icon" style="background:${role.bg};color:${role.color}">${role.icon}</div>
+        <div>
+          <div class="perm-role-name">${role.name}</div>
+          <div class="perm-role-desc">${role.desc}</div>
+          ${lockAdmin?'<div class="lock-note">🔒 صلاحيات الأدمن ثابتة</div>':''}
+        </div>
+      </div>
+      <div class="perm-list">
+        ${Object.entries(PERM_LABELS).map(([key, label]) => {
+          const has = perms[key]===true;
+          if(editMode && role.key!=='admin'){
+            return `<div class="perm-row">
+              <span class="perm-label">${label}</span>
+              <label class="perm-toggle">
+                <input type="checkbox" data-role="${role.key}" data-perm="${key}" ${has?'checked':''}>
+                <span class="perm-slider"></span>
+              </label>
+            </div>`;
+          }
+          return `<div class="perm-row">
+            <span class="perm-label">${label}</span>
+            <span class="perm-check ${has?'perm-yes':'perm-no'}">${has?'✓':'✕'}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
 }
+
+function enterEdit(){ editMode=true; render(); }
+function cancelEdit(){ editMode=false; loadPermissions(); }
+
+async function savePermissions(){
+  if(!isAdmin){ showToast('غير مسموح'); return; }
+  // اجمع القيم من الـ checkboxes
+  const updated={};
+  document.querySelectorAll('#permGrid input[type=checkbox]').forEach(cb=>{
+    const r=cb.dataset.role, p=cb.dataset.perm;
+    if(!updated[r]) updated[r]={...(permData[r]||{})};
+    updated[r][p]=cb.checked;
+  });
+  try{
+    // احفظ كل دور اتعدّل (الأدمن مش بيتعدّل لأنه مقفول)
+    for(const role of Object.keys(updated)){
+      const {error}=await db.rpc('save_role_permissions',{p_role:role,p_permissions:updated[role]});
+      if(error) throw error;
+    }
+    showToast('✓ تم حفظ الصلاحيات');
+    editMode=false;
+    await loadPermissions();
+  }catch(e){
+    console.error(e);
+    showToast('حدث خطأ في الحفظ');
+  }
+}
+
+loadPermissions();
+</script>
+</body>
+</html>
