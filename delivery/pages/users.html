@@ -266,6 +266,7 @@ async function saveUser() {
   const username = document.getElementById('u-username').value.trim();
   const password = document.getElementById('u-password').value.trim();
   if (!name || !username) { alert('الاسم واسم المستخدم مطلوبان'); return; }
+  if (!id && !password) { alert('كلمة المرور مطلوبة للمستخدم الجديد'); return; }
 
   showLoading(true);
   try {
@@ -273,19 +274,29 @@ async function saveUser() {
       full_name: name, username,
       role: document.getElementById('u-role').value,
       is_active: document.getElementById('u-active').value === '1',
-      phone: document.getElementById('u-phone').value.trim()
+      phone: document.getElementById('u-phone').value.trim() || null
     };
     if (password) payload.password_hash = password;
 
+    let error;
     if (id) {
-      await db.from('users').update(payload).eq('id', id);
+      ({ error } = await db.from('users').update(payload).eq('id', id));
     } else {
-      await db.from('users').insert({ ...payload, password_hash: password });
+      ({ error } = await db.from('users').insert({ ...payload, password_hash: password }));
     }
+
+    if (error) {
+      showLoading(false);
+      alert('حدث خطأ: ' + error.message);
+      return;
+    }
+
     closeModal('userModal');
     await init();
-  } catch(e) { alert('حدث خطأ: ' + e.message); }
-  showLoading(false);
+  } catch(e) {
+    showLoading(false);
+    alert('حدث خطأ: ' + e.message);
+  }
 }
 
 async function toggleActive(id, current) {
