@@ -202,8 +202,8 @@ textarea.form-ctrl{height:80px;padding:.75rem;resize:none}
     <div class="h-name" id="driverName">بورتال الطيار</div>
     <div class="h-sub" id="driverBranch">جاري التحميل...</div>
   </div>
-  <div class="h-actions">
-
+<div class="h-actions">
+    <button class="h-btn" onclick="openChangePassword()">🔑 كلمة المرور</button>
     <button class="h-btn" onclick="doLogout()">خروج</button>
   </div>
 </div>
@@ -317,6 +317,27 @@ textarea.form-ctrl{height:80px;padding:.75rem;resize:none}
 <!-- HISTORY SECTION -->
 <div id="historySection" style="display:none;padding:.75rem">
   <div id="historyContent"></div>
+</div>
+  <!-- Modal: Change Password -->
+<div class="modal-overlay" id="pwdModal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">🔑 تغيير كلمة المرور</div>
+    <div class="form-group">
+      <label class="form-label">كلمة المرور الحالية</label>
+      <input type="password" class="form-ctrl" id="pwd-old" placeholder="••••••">
+    </div>
+    <div class="form-group">
+      <label class="form-label">كلمة المرور الجديدة</label>
+      <input type="password" class="form-ctrl" id="pwd-new" placeholder="••••••">
+    </div>
+    <div class="form-group">
+      <label class="form-label">تأكيد كلمة المرور الجديدة</label>
+      <input type="password" class="form-ctrl" id="pwd-confirm" placeholder="••••••">
+    </div>
+    <button class="btn-full btn-green" onclick="submitChangePassword()">✓ حفظ كلمة المرور</button>
+    <button class="btn-full btn-gray" onclick="closeModal('pwdModal')">إلغاء</button>
+  </div>
 </div>
 
 <div class="loading-overlay" id="lo"><div class="spinner"></div></div>
@@ -1325,6 +1346,39 @@ function closeModal(id){document.getElementById(id).classList.remove('open');}
 document.querySelectorAll('.modal-overlay').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');}));
 function load(s){document.getElementById('lo').classList.toggle('show',s);}
 function doLogout(){sessionStorage.removeItem('delivery_user');window.location.href='auth.html';}
+  function openChangePassword(){
+  document.getElementById('pwd-old').value='';
+  document.getElementById('pwd-new').value='';
+  document.getElementById('pwd-confirm').value='';
+  document.getElementById('pwdModal').classList.add('open');
+}
+async function submitChangePassword(){
+  const oldP=document.getElementById('pwd-old').value.trim();
+  const newP=document.getElementById('pwd-new').value.trim();
+  const confirmP=document.getElementById('pwd-confirm').value.trim();
+  if(!oldP||!newP||!confirmP){alert('املأ كل الخانات');return;}
+  if(newP!==confirmP){alert('كلمة المرور الجديدة وتأكيدها غير متطابقين');return;}
+  if(newP.length<4){alert('كلمة المرور الجديدة قصيرة جداً (4 أحرف على الأقل)');return;}
+  load(true);
+  try{
+    const {data,error}=await db.rpc('change_user_password',{
+      p_user_id:currentUser.id,
+      p_old_password:oldP,
+      p_new_password:newP
+    });
+    if(error)throw error;
+    if(data?.success){
+      closeModal('pwdModal');
+      alert('✓ تم تغيير كلمة المرور بنجاح');
+    } else {
+      alert(data?.error||'حدث خطأ');
+    }
+  }catch(e){
+    console.error(e);
+    alert('حدث خطأ في تغيير كلمة المرور');
+  }
+  load(false);
+}
 
 // ===== PWA PUSH NOTIFICATIONS =====
 const VAPID_PUBLIC_KEY = 'BH1oBRuSLihoOaaZOttnUkpXH2uarZldE9DWEM40tLMvWRrE7NQOhGF_AtgI9D6Lf2Tua-JqBR5a_yoUvOP4LcI';
