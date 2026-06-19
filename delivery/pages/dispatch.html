@@ -454,10 +454,11 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
   <div class="dp-status" id="dp-status"></div>
   <div class="dp-section">ملخص الرحلات اليوم</div>
   <div id="dp-trips"></div>
-  <div style="margin-top:1rem;display:flex;gap:.5rem">
+<div style="margin-top:1rem;display:flex;gap:.5rem">
     <button onclick="callDriver(currentPopupDriverId)" style="flex:1;padding:.5rem;background:#1a56db;color:white;border:none;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer">📞 استدعاء</button>
     <button onclick="openSendMessage(currentPopupDriverId)" style="flex:1;padding:.5rem;background:#334155;color:white;border:none;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer">💬 رسالة</button>
   </div>
+  <button id="dp-offline-btn" onclick="forceDriverOffline(currentPopupDriverId)" style="margin-top:.5rem;width:100%;padding:.5rem;background:var(--red-light);color:#b91c1c;border:1px solid #fecaca;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer">🔴 تسجيل انصراف الطيار</button>
 </div>
 <!-- Modal: Send Message -->
 <div class="modal-overlay" id="msgModal">
@@ -489,7 +490,7 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="/ebrahimhamdy_dachboard_test/delivery/dispatch-engine.js"></script>
+<script src="../dispatch-engine.js"></script>
 <script>
 const SUPABASE_URL='https://rxtjoqulmgkkcohmgzgi.supabase.co';
 const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
@@ -518,6 +519,9 @@ else currentUser=JSON.parse(stored);
 setInterval(()=>{document.getElementById('clockTime').textContent=new Date().toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit',second:'2-digit'})},1000);
 
 // Timers helpers
+  function getTodayCairo(){
+  return new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Cairo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+}
 function fm(mins){if(mins<0)mins=0;return mins<60?`${mins}د`:`${Math.floor(mins/60)}:${String(mins%60).padStart(2,'0')}`}
 function dm(from,to=new Date()){return Math.floor((new Date(to)-new Date(from))/60000)}
 function getBillDate(o){if(!o.bill_date)return new Date(o.created_at);return new Date(o.bill_date);}
@@ -1763,6 +1767,47 @@ async function completeTrip(tripId){
 }
 
 // ===== CALL & MESSAGE =====
+  // ===== انصراف يدوي للطيار من الإدارة =====
+async function forceDriverOffline(driverId){
+  if(!driverId)return;
+  const driver=allDrivers.find(d=>d.id===driverId);
+  const name=driver?.full_name||'الطيار';
+
+  // تأمين: تأكد إنه مفيش رحلة جارية أو طلبات شغّالة
+  const {data:activeTrips}=await db.from('trips').select('id').eq('driver_id',driverId).eq('status','active');
+  if(activeTrips?.length>0){
+    showToast('❌ لا يمكن — الطيار لديه رحلة جارية');
+    return;
+  }
+  const {data:activeOrders}=await db.from('orders').select('id').eq('driver_id',driverId).in('status',['assigned','picked']);
+  if(activeOrders?.length>0){
+    showToast('❌ لا يمكن — الطيار لديه طلبات جارية');
+    return;
+  }
+
+  if(!confirm(`تسجيل انصراف ${name}؟\n\nسيتم تسجيله كمنصرف فوراً بدون الحاجة لموافقته.`))return;
+
+  showLoading(true);
+  try{
+    const now=new Date().toISOString();
+    // أنهِ آخر فترة online شغّالة
+    const prevOnline=attendanceToday.find(r=>r.driver_id===driverId&&r.status==='online'&&!r.ended_at);
+    if(prevOnline)await db.from('driver_attendance').update({ended_at:now}).eq('id',prevOnline.id);
+    // سجّل انصراف مباشر (موافَق عليه من الإدارة)
+    await db.from('driver_attendance').insert({
+      driver_id:driverId,
+      date:getTodayCairo(),
+      status:'offline',
+      approved_at:now,
+      notes:'انصراف بواسطة الإدارة'
+    });
+    showToast(`✓ تم تسجيل انصراف ${name}`);
+    closeDriverPopup();
+    await loadAttendanceData();
+    await loadAll();
+  }catch(e){console.error(e);showToast('حدث خطأ');}
+  showLoading(false);
+}
 async function callDriver(driverId){
   if(!driverId)return;
   try{
