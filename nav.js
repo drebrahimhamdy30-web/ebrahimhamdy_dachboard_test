@@ -32,6 +32,7 @@ function injectNavbar() {
   var contractPages    = ['sales_contracts.html', 'claims.html', 'contracts.html', 'contracts_stats.html'];
   var csPages          = ['customer_service.html', 'shortages.html'];
   var purchasesPages   = ['purchases.html', 'cosmo_order.html', 'inventory_management.html'];
+  // ✅ تعديل ١: ضفنا sms.html لصفحات الفيزا عشان زرار "فيزا" يفضل مظلّل
   var visaPages        = ['visa_transactions.html', 'bank_monitor.html', 'paymob.html', 'sms.html'];
   var isContractPage   = contractPages.includes(currentPage);
   var isCSPage         = csPages.includes(currentPage);
@@ -48,12 +49,10 @@ function injectNavbar() {
       '<span style="font-weight:900;font-size:1.1rem;letter-spacing:1px;">Phalix</span>' +
     '</div>' +
     '<nav class="nav-links">' +
-      '<a href="delivery/auth.html" style="color:#38bdf8;font-weight:700;background:rgba(56,189,248,.12);padding:7px 12px;border-radius:8px;font-size:0.8rem;display:flex;align-items:center;gap:5px;text-decoration:none;white-space:nowrap;">' +
-        '<i class="fas fa-motorcycle"></i> التوصيل</a>' +
-
       '<a href="main.html" class="' + (currentPage === 'main.html' ? 'active' : '') + '">' +
         '<i class="fas fa-plus-circle"></i> مدخلات</a>' +
 
+      // ===== Dropdown: إدارة المخزون =====
       '<a id="purchases-toggle" href="#" style="' +
         'color:' + (isPurchasesPage ? 'var(--primary)' : '#94a3b8') + ';' +
         'background:' + (isPurchasesPage ? 'var(--accent)' : 'transparent') + ';' +
@@ -101,6 +100,7 @@ function injectNavbar() {
         '<i class="fas fa-chevron-down" style="font-size:0.6rem;margin-right:2px;"></i>' +
       '</a>' +
 
+      // ===== Dropdown: فيزا =====
       '<a id="visa-toggle" href="#" style="' +
         'color:' + (isVisaPage ? 'var(--primary)' : '#94a3b8') + ';' +
         'background:' + (isVisaPage ? 'var(--accent)' : 'transparent') + ';' +
@@ -136,6 +136,7 @@ function injectNavbar() {
   var navBar = document.querySelector('.nav-bar');
   if (navBar) navBar.innerHTML = navContent;
 
+  // Dropdown: إدارة المخزون
   var purchasesItems = [
     { href: 'purchases.html', icon: 'fa-shopping-cart', label: 'مشتريات', active: currentPage === 'purchases.html' }
   ];
@@ -159,6 +160,8 @@ function injectNavbar() {
     { href: 'contracts_stats.html', icon: 'fa-chart-bar',           label: 'إحصائيات',               active: currentPage === 'contracts_stats.html' }
   ]);
 
+  // Dropdown: فيزا
+  // ✅ تعديل ٢: ضفنا "معاملات المحافظ" كآخر عنصر في القائمة
   createFloatingDropdown('visa-dropdown', [
     { href: 'visa_transactions.html', icon: 'fa-credit-card',          label: 'معاملات الفيزا',  active: currentPage === 'visa_transactions.html' },
     { href: 'bank_monitor.html',      icon: 'fa-university',           label: 'متابعة البنك',    active: currentPage === 'bank_monitor.html' },
@@ -170,4 +173,208 @@ function injectNavbar() {
   bindToggle('cs-toggle',        'cs-dropdown');
   bindToggle('contracts-toggle', 'contracts-dropdown');
   bindToggle('visa-toggle',      'visa-dropdown');
+}
+
+function createFloatingDropdown(id, items) {
+  var old = document.getElementById(id);
+  if (old) old.remove();
+
+  var menu = document.createElement('div');
+  menu.id = id;
+  menu.style.cssText =
+    'display:none;position:fixed;' +
+    'background:#1e293b;border:1px solid #334155;border-radius:10px;' +
+    'min-width:210px;box-shadow:0 8px 24px rgba(0,0,0,0.5);' +
+    'z-index:99999;overflow:hidden;';
+
+  items.forEach(function(item, i) {
+    var a = document.createElement('a');
+    a.href = item.href;
+    a.style.cssText =
+      'display:flex;align-items:center;gap:8px;padding:11px 16px;' +
+      'text-decoration:none;font-size:0.82rem;font-family:Tajawal,sans-serif;' +
+      'color:' + (item.active ? '#38bdf8' : '#94a3b8') + ';' +
+      'background:' + (item.active ? '#0c4a6e' : 'transparent') + ';' +
+      (i < items.length - 1 ? 'border-bottom:1px solid #334155;' : '');
+    a.innerHTML = '<i class="fas ' + item.icon + '"></i> ' + item.label;
+    menu.appendChild(a);
+  });
+
+  document.body.appendChild(menu);
+}
+
+function bindToggle(toggleId, menuId) {
+  var btn  = document.getElementById(toggleId);
+  var menu = document.getElementById(menuId);
+  if (!btn || !menu) return;
+
+  var allDropdowns = ['purchases-dropdown', 'cs-dropdown', 'contracts-dropdown', 'visa-dropdown'];
+
+  btn.addEventListener('click', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    allDropdowns.forEach(function(id) {
+      if (id !== menuId) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      }
+    });
+    if (menu.style.display === 'block') {
+      menu.style.display = 'none';
+      return;
+    }
+    var rect = btn.getBoundingClientRect();
+    menu.style.top   = (rect.bottom + 6) + 'px';
+    menu.style.right = (window.innerWidth - rect.right) + 'px';
+    menu.style.left  = 'auto';
+    menu.style.display = 'block';
+  });
+}
+
+var allDropdowns = ['purchases-dropdown', 'cs-dropdown', 'contracts-dropdown', 'visa-dropdown'];
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', function() {
+    injectNavbar();
+    setTimeout(startNotifWatcher, 2000);
+    document.addEventListener('click', function() {
+      allDropdowns.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      });
+    });
+  });
+} else {
+  injectNavbar();
+  setTimeout(startNotifWatcher, 2000);
+  document.addEventListener('click', function() {
+    allDropdowns.forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+  });
+}
+
+// ===== نظام التنبيهات =====
+var lastNotifCount = -1;
+var notifInterval  = null;
+
+function startNotifWatcher() {
+  var token = localStorage.getItem('authToken');
+  if (!token) return;
+
+  if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+
+  var lastCheck = parseInt(localStorage.getItem('lastNotifCheck') || '0');
+  var now       = Date.now();
+  var oneHour   = 60 * 60 * 1000;
+  if (now - lastCheck >= oneHour) checkNotifications();
+  notifInterval = setInterval(checkNotifications, oneHour);
+}
+
+async function checkNotifications() {
+  try {
+    var data       = await fetchFromN8N('notifications');
+    var items      = Array.isArray(data) ? data : [];
+    var userBranch = (localStorage.getItem('userBranch') || '').trim();
+    var pending    = items.filter(function(item) {
+      var isReceived = String(item.target_branch || '').trim() === userBranch;
+      var isDone     = (item.done === 'تم' || item.done === true || item.done === 'true');
+      return isReceived && !isDone;
+    });
+    localStorage.setItem('lastNotifCheck', Date.now().toString());
+    var count = pending.length;
+    updateNotifBadge(count);
+    if (count > 0 && count !== lastNotifCount) {
+      showNotifPopup(count);
+      playNotifSound();
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        var label = count > 1 ? 'إشعارات غير مكتملة' : 'إشعار غير مكتمل';
+        var n = new Notification('Phalix 🔔', {
+          body: 'لديك ' + count + ' ' + label,
+          icon: 'https://drebrahimhamdy30-web.github.io/ebrahimhamdy_dachboard_test/favicon.ico',
+          dir: 'rtl',
+          tag: 'phalix-notif'
+        });
+        n.onclick = function() {
+          window.focus();
+          window.location.href = 'notifications.html';
+        };
+      }
+    }
+    lastNotifCount = count;
+  } catch(e) {
+    console.log('Notif check failed:', e);
+  }
+}
+
+function updateNotifBadge(count) {
+  var badge = document.getElementById('notif-badge');
+  if (!badge) return;
+  badge.textContent   = count;
+  badge.style.display = count > 0 ? 'flex' : 'none';
+}
+
+function showNotifPopup(count) {
+  var old = document.getElementById('notif-popup');
+  if (old) old.remove();
+  var label = count > 1 ? 'إشعارات غير مكتملة' : 'إشعار غير مكتمل';
+  var text  = 'لديك ' + count + ' ' + label;
+  var popup = document.createElement('div');
+  popup.id  = 'notif-popup';
+  var inner = document.createElement('div');
+  inner.style.cssText =
+    'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);' +
+    'background:#1e293b;border:2px solid #f59e0b;border-radius:16px;' +
+    'padding:18px 24px;box-shadow:0 8px 32px rgba(0,0,0,0.5);' +
+    'z-index:99999;display:flex;align-items:center;gap:14px;' +
+    'min-width:300px;max-width:90vw;font-family:Tajawal,sans-serif;direction:rtl;';
+  inner.innerHTML =
+    '<div style="font-size:2rem;">🔔</div>' +
+    '<div style="flex:1;">' +
+      '<div style="font-weight:700;color:#f59e0b;font-size:0.95rem;margin-bottom:4px;">' + text + '</div>' +
+      '<div style="font-size:0.82rem;color:#94a3b8;">برجاء مراجعة شاشة الإشعارات</div>' +
+    '</div>' +
+    '<div style="display:flex;flex-direction:column;gap:8px;flex-shrink:0;">' +
+      '<button onclick="window.location.href=\'notifications.html\'" ' +
+        'style="padding:8px 14px;background:#f59e0b;color:#000;border:none;border-radius:8px;' +
+        'font-weight:700;cursor:pointer;font-family:Tajawal,sans-serif;font-size:0.82rem;white-space:nowrap;">' +
+        'عرض الإشعارات</button>' +
+      '<button onclick="closeNotifPopup()" ' +
+        'style="padding:6px 14px;background:transparent;color:#64748b;border:1px solid #334155;' +
+        'border-radius:8px;cursor:pointer;font-family:Tajawal,sans-serif;font-size:0.78rem;">' +
+        'إغلاق</button>' +
+    '</div>';
+  popup.appendChild(inner);
+  document.body.appendChild(popup);
+  setTimeout(closeNotifPopup, 8000);
+}
+
+function closeNotifPopup() {
+  var popup = document.getElementById('notif-popup');
+  if (popup) popup.remove();
+}
+
+function playNotifSound() {
+  try {
+    var ctx   = new (window.AudioContext || window.webkitAudioContext)();
+    var notes = [880, 1046, 880];
+    notes.forEach(function(freq, i) {
+      var osc  = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      var t = ctx.currentTime + i * 0.18;
+      gain.gain.setValueAtTime(1.0, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+      osc.start(t);
+      osc.stop(t + 0.15);
+    });
+  } catch(e) {
+    console.log('Sound failed:', e);
+  }
 }
