@@ -218,15 +218,28 @@ let deleteTargetId=null, importNewNames=[], selectedNames=new Set();
 async function init(){
   const user=getCurrentUser();if(!user)return;
   showLoading(true);
+  const isAdmin=user.role==='admin';
+  const userBranch=user.branch_id;
+
   const {data:br}=await db.from('branches').select('id,name').order('name');
   branches=br||[];
   const sel=document.getElementById('branchSelect');
-  sel.innerHTML='<option value="">اختر الفرع...</option>'+branches.map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
-  // لو المستخدم عنده فرع محدد → اختاره تلقائياً
-  const user2=getCurrentUser();
-  if(user2?.branch_id){
-    sel.value=user2.branch_id;
+
+  if(!isAdmin && userBranch){
+    // مش أدمن → فرعه بس، مقفول
+    const myBranch=branches.filter(b=>b.id===userBranch);
+    sel.innerHTML=myBranch.map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
+    sel.value=userBranch;
+    sel.disabled=true;
     await onBranchChange();
+  } else {
+    // أدمن → كل الفروع
+    sel.innerHTML='<option value="">اختر الفرع...</option>'+branches.map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
+    // لو الأدمن عنده فرع افتراضي → اختاره
+    if(userBranch){
+      sel.value=userBranch;
+      await onBranchChange();
+    }
   }
   showLoading(false);
 }
