@@ -44,11 +44,12 @@ function injectNavbar() {
   var isAdmin          = userRole === 'admin';
   var isManager        = userRole === 'manager';
 
-  var navContent =
+var navContent =
     '<div class="nav-logo">' +
       '<span style="font-weight:900;font-size:1.1rem;letter-spacing:1px;">Phalix</span>' +
     '</div>' +
     '<nav class="nav-links">' +
+      '<a href="delivery/auth.html" style="color:#38bdf8;font-weight:700;background:rgba(56,189,248,.12);padding:7px 12px;border-radius:8px;font-size:0.8rem;display:flex;align-items:center;gap:5px;text-decoration:none;white-space:nowrap;"><i class="fas fa-motorcycle"></i> التوصيل</a>' +
       '<a href="main.html" class="' + (currentPage === 'main.html' ? 'active' : '') + '">' +
         '<i class="fas fa-plus-circle"></i> مدخلات</a>' +
 
