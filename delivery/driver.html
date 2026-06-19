@@ -980,12 +980,12 @@ try{
 async function loadAll(){
   if(!driverRecord)return;
   try{
-    const {data:trips}=await db.from('trips').select('*')
+const {data:trips}=await db.from('trips').select('*')
       .eq('driver_id',driverRecord.id)
-      .in('status',['active','completed'])
+      .in('status',['active','pending_complete','completed'])
       .order('created_at',{ascending:false}).limit(10);
 
-    const activeTrip=(trips||[]).find(t=>t.status==='active');
+    const activeTrip=(trips||[]).find(t=>['active','pending_complete'].includes(t.status));
     const completedTrips=(trips||[]).filter(t=>t.status==='completed').slice(0,3);
     allTrips=activeTrip?[activeTrip,...completedTrips]:completedTrips;
 
@@ -1104,14 +1104,19 @@ function renderContent(){
   const canComplete=settings?.driver_can_complete_trip!==false;
   const blockingCount=orders.filter(o=>['assigned','picked'].includes(o.status)).length;
 
-  let actionsBar='';
+let actionsBar='';
   if(isActive){
     actionsBar='<div class="trip-actions-bar">';
     if(assignedOrders.length>0)
       actionsBar+=`<button class="ta-btn ta-pickup-all" onclick="pickupAll('${trip.id}')">▶️ استلمت الكل (${assignedOrders.length})</button>`;
-    if(canComplete)
+    // لو الرحلة في انتظار موافقة الإدارة
+    if(trip.status==='pending_complete'){
+      actionsBar+=`<button class="ta-btn" onclick="cancelCompleteRequest('${trip.id}')" style="background:#fef9c3;color:#a16207">⏳ بانتظار موافقة الإدارة — إلغاء الطلب</button>`;
+    } else {
+      const directComplete=settings?.driver_can_complete_trip!==false;
       actionsBar+=`<button class="ta-btn ta-complete" onclick="completeTrip('${trip.id}')" style="${blockingCount>0?'background:#9ca3af':''}">
-        ${blockingCount>0?`⏳ ينتظر ${blockingCount} طلب`:'🏁 إنهاء الرحلة'}</button>`;
+        ${blockingCount>0?`⏳ ينتظر ${blockingCount} طلب`:(directComplete?'🏁 إنهاء الرحلة':'🏁 طلب إنهاء الرحلة')}</button>`;
+    }
     actionsBar+='</div>';
   }
 
@@ -1303,7 +1308,15 @@ async function completeTrip(tripId){
   // بس assigned و picked بيمنعوا الإنهاء — المتعذر (failed) مسموح
   const blocking=orders.filter(o=>['assigned','picked'].includes(o.status));
   if(blocking.length>0){alert('لا يمكن إنهاء الرحلة — يوجد '+blocking.length+' طلب لم يتم توصيله\nيجب توصيل أو تسجيل تعذر أولاً');return;}
-
+  const directComplete=settings?.driver_can_complete_trip!==false;
+  if(!directComplete && tripId!=='direct'){
+    load(true);
+    const now=new Date().toISOString();
+    await db.from('trips').update({status:'pending_complete',updated_at:now}).eq('id',tripId);
+    try{await db.from('trip_logs').insert({trip_id:tripId,event:'complete_requested',details:{by:'driver'},user_id:currentUser.id,user_name:currentUser.full_name});}catch(e){}
+    await loadAll();load(false);
+    return;
+  }
   const failedOrders=orders.filter(o=>o.status==='failed');
   if(failedOrders.length>0){
     if(!confirm(`يوجد ${failedOrders.length} طلب متعذر سيرجع للإدارة لإعادة توزيعه. إنهاء الرحلة؟`))return;
@@ -1339,6 +1352,15 @@ async function completeTrip(tripId){
   if(tripId!=='direct')
     await db.from('trips').update({status:'completed',updated_at:now}).eq('id',tripId);
   try{await db.from('trip_logs').insert({trip_id:tripId,event:'trip_completed',details:{by:'driver',failed_released:failedOrders.length},user_id:currentUser.id,user_name:currentUser.full_name});}catch(e){}
+await loadAll();load(false);
+}
+
+async function cancelCompleteRequest(tripId){
+  if(!confirm('إلغاء طلب الإنهاء والرجوع للرحلة؟'))return;
+  load(true);
+  const now=new Date().toISOString();
+  await db.from('trips').update({status:'active',updated_at:now}).eq('id',tripId);
+  try{await db.from('trip_logs').insert({trip_id:tripId,event:'complete_cancelled',details:{by:'driver'},user_id:currentUser.id,user_name:currentUser.full_name});}catch(e){}
   await loadAll();load(false);
 }
 
