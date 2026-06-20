@@ -14,11 +14,14 @@ self.addEventListener('push', e => {
   const title = data.title || '📦 طلب جديد';
   const options = {
     body: data.body || 'وصلك طلب جديد',
-    icon: data.icon || '/ebrahimhamdy_dachboard_test/delivery/icon.png',
-    badge: '/ebrahimhamdy_dachboard_test/delivery/icon.png',
-    vibrate: [300, 100, 300, 100, 300],
+    icon: data.icon || './icon.png',
+    badge: './icon.png',
+    vibrate: [300, 100, 300, 100, 300, 100, 300],
     requireInteraction: true,
-    data: { url: data.url || '/ebrahimhamdy_dachboard_test/delivery/driver.html' }
+    renotify: true,
+    tag: 'new-order',
+    silent: false,
+    data: { url: data.url || './driver.html' }
   };
   e.waitUntil(self.registration.showNotification(title, options));
 });
@@ -26,12 +29,13 @@ self.addEventListener('push', e => {
 // لما الطيار يضغط على الـ notification
 self.addEventListener('notificationclick', e => {
   e.notification.close();
+  const targetUrl = e.notification.data?.url || './driver.html';
   e.waitUntil(
-    clients.matchAll({type:'window'}).then(list => {
+    clients.matchAll({type:'window', includeUncontrolled:true}).then(list => {
       for(const c of list){
         if(c.url.includes('driver.html') && 'focus' in c) return c.focus();
       }
-      return clients.openWindow(e.notification.data?.url || '/ebrahimhamdy_dachboard_test/delivery/driver.html');
+      return clients.openWindow(targetUrl);
     })
   );
 });
