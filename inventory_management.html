@@ -775,6 +775,7 @@
     // ===================================================================
     var purchases=[];
     var detectedSourceBranch=null;
+    var branchesInFile=[];
     var disbComputed=[];
     var disbManual={};
     var disbPage=1;
@@ -806,19 +807,33 @@
     function parsePurchases(rows, fileName){
       var items=[];
       var curSupplier='';
-      var sheetBranch=null;
+      var curBranch=null;   // الفرع الحالي (يتغيّر مع كل قسم في ملف كل الفروع)
       function joined(row){ return row.map(function(v){return v==null?'':String(v);}).join('\t'); }
+
+      // التقاط اسم فرع من أي خلية في الصف (عنوان القسم يظهر في col1 أو col11)
+      function detectBranch(row){
+        for(var i=0;i<row.length;i++){
+          var v=row[i];
+          if(typeof v!=='string') continue;
+          var vs=v.trim();
+          if(BRANCH_NAME_MAP.hasOwnProperty(vs)) return BRANCH_NAME_MAP[vs];
+          // من سطر "تم الإسترجاع" لو فرع محدد
+          if(vs.indexOf('تم الإسترجاع')>-1){
+            for(var nm in BRANCH_NAME_MAP){ if(vs.indexOf(nm)>-1) return BRANCH_NAME_MAP[nm]; }
+          }
+        }
+        return null;
+      }
 
       rows.forEach(function(row){
         if(!row||!row.length) return;
         var c1=row[0];
         var j=joined(row);
-        if(typeof c1==='string'){
-          Object.keys(BRANCH_NAME_MAP).forEach(function(nm){
-            if(c1.trim()===nm) sheetBranch=BRANCH_NAME_MAP[nm];
-            else if(c1.indexOf('تم الإسترجاع')>-1 && c1.indexOf(nm)>-1) sheetBranch=BRANCH_NAME_MAP[nm];
-          });
-        }
+
+        // تحديث الفرع الحالي لو الصف عنوان قسم (اسم فرع بمفرده، أو سطر الاسترجاع)
+        var b=detectBranch(row);
+        if(b) curBranch=b;
+
         if(c1==='ملاحظات'){ curSupplier=(row[20]!=null?String(row[20]).trim():''); return; }
         if(j.indexOf('الإجمالى')>-1 && j.indexOf('عدد الأصناف')>-1) return;
         if(j.indexOf('****')>-1) return;
@@ -830,28 +845,38 @@
           var totBuy=parseFloat(row[20])||0;
           if(qty<=0) return;
           items.push({ code:String(code).trim(), name:String(name).trim(),
-            qty:qty, totBuy:totBuy, supplier:curSupplier });
+            qty:qty, totBuy:totBuy, supplier:curSupplier,
+            branch: curBranch||'unknown' });
         }
       });
 
+      // الدمج بمفتاح (الفرع + الكود) — نفس الصنف في فرعين يفضل منفصل
       var mp={};
       items.forEach(function(it){
-        if(!mp[it.code]) mp[it.code]={code:it.code,name:it.name,qty:0,totBuy:0,suppliers:{}};
-        var m=mp[it.code];
+        var key=it.branch+'|'+it.code;
+        if(!mp[key]) mp[key]={code:it.code,name:it.name,branch:it.branch,qty:0,totBuy:0,suppliers:{}};
+        var m=mp[key];
         m.qty+=it.qty; m.totBuy+=it.totBuy; m.name=it.name||m.name;
         if(it.supplier) m.suppliers[it.supplier]=true;
       });
-      purchases=Object.keys(mp).map(function(code){
-        var m=mp[code];
-        return { code:m.code, name:m.name, qty:m.qty,
+      purchases=Object.keys(mp).map(function(key){
+        var m=mp[key];
+        return { code:m.code, name:m.name, branch:m.branch, qty:m.qty,
           unitBuy: m.qty>0 ? m.totBuy/m.qty : 0,
           suppliers: Object.keys(m.suppliers) };
       });
-      detectedSourceBranch = sheetBranch;
 
+      // الفروع الموجودة فعلاً في الملف
+      var found={};
+      purchases.forEach(function(p){ if(p.branch&&p.branch!=='unknown') found[p.branch]=true; });
+      branchesInFile=Object.keys(found);
+      // الفرع الافتراضي المختار = أول فرع موجود
+      detectedSourceBranch = branchesInFile.length ? branchesInFile[0] : null;
+
+      var multiNote = branchesInFile.length>1 ? ' · '+branchesInFile.length+' فروع' : (detectedSourceBranch?' · فرع: '+BRANCHES[detectedSourceBranch]:'');
       document.getElementById('file-tag-wrap').innerHTML=
         '<div class="file-tag"><i class="fas fa-file-excel"></i> '+fileName+
-        ' — '+purchases.length+' صنف'+(detectedSourceBranch?' · فرع: '+BRANCHES[detectedSourceBranch]:'')+
+        ' — '+purchases.length+' سطر'+multiNote+
         ' <span class="x" onclick="clearDisbFile()">×</span></div>';
 
       buildSupplierFilter();
@@ -862,7 +887,7 @@
     }
 
     function clearDisbFile(){
-      purchases=[]; disbComputed=[]; disbManual={}; detectedSourceBranch=null;
+      purchases=[]; disbComputed=[]; disbManual={}; detectedSourceBranch=null; branchesInFile=[];
       document.getElementById('file-tag-wrap').innerHTML='';
       document.getElementById('file-input').value='';
       document.getElementById('disb-filters').style.display='none';
@@ -871,15 +896,24 @@
     }
 
     function buildSupplierFilter(){
+      var from = document.getElementById('from-branch') ? document.getElementById('from-branch').value : null;
       var set={};
-      purchases.forEach(function(p){ p.suppliers.forEach(function(s){ set[s]=true; }); });
+      purchases.forEach(function(p){
+        if(from && p.branch!==from) return; // موردين الفرع المختار فقط
+        p.suppliers.forEach(function(s){ set[s]=true; });
+      });
       var sel=document.getElementById('supplier-filter');
+      var cur=sel.value;
       sel.innerHTML='<option value="">كل الموردين</option>'+
         Object.keys(set).sort().map(function(s){return '<option value="'+s+'">'+s+'</option>';}).join('');
+      // أبقِ الاختيار لو لسه موجوداً
+      if(cur && set[cur]) sel.value=cur;
     }
     function buildBranchSelects(){
       var from=document.getElementById('from-branch');
-      var opts=Object.keys(BRANCHES).map(function(k){return '<option value="'+k+'">'+BRANCHES[k]+'</option>';}).join('');
+      // لو الملف فيه فروع محددة، اعرضها فقط؛ وإلا اعرض كل الفروع
+      var list = (branchesInFile && branchesInFile.length) ? branchesInFile : Object.keys(BRANCHES);
+      var opts=list.map(function(k){return '<option value="'+k+'">'+BRANCHES[k]+'</option>';}).join('');
       from.innerHTML=opts;
       if(detectedSourceBranch){ from.value=detectedSourceBranch; }
     }
@@ -944,14 +978,18 @@
       var coverDays=parseFloat(document.getElementById('cover-days').value)||60;
       disbManual={}; disbPage=1;
 
-      disbComputed=purchases.map(function(p){
+      // أصناف الفرع المصدر فقط (لو الملف فيه فروع متعددة)
+      var sourceItems = purchases.filter(function(p){
+        return (!branchesInFile.length) || p.branch===from || p.branch==='unknown';
+      });
+
+      disbComputed=sourceItems.map(function(p){
         var inv=itemsMapForDisb[p.code];
         var dist=distributePlan(p, from, coverDays);
         var others=Object.keys(BRANCHES).filter(function(b){return b!==from;});
-        // كمية التوفير للوجهة (تغطية الفترة) — تُستخدم لتلوين الشراء الزائد
         var coverNeed = others.reduce(function(s,b){ return s + (inv?coverQtyDays(inv[b].avg,coverDays):0); },0);
         return {
-          code:p.code, name:p.name, qty:p.qty, unitBuy:p.unitBuy, suppliers:p.suppliers,
+          code:p.code, name:p.name, branch:p.branch, qty:p.qty, unitBuy:p.unitBuy, suppliers:p.suppliers,
           isMedicine: inv?inv.isMedicine:false, isNew: !inv,
           inv: inv,
           plan: dist.plan||{}, need: dist.need||{}, max: dist.max||{},
@@ -959,6 +997,7 @@
           coverNeedTotal: coverNeed
         };
       });
+      buildSupplierFilter(); // حدّث الموردين حسب الفرع المختار
       renderDisb();
     }
 
