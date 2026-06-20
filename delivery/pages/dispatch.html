@@ -444,7 +444,22 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
     </div>
   </div>
 </div>
-
+  
+<!-- Complete Approval Modal -->
+<div class="modal-overlay" id="completeApprovalModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">🏁 طلب إنهاء رحلة</span>
+      <button class="modal-close" onclick="closeModal('completeApprovalModal')">✕</button>
+    </div>
+    <div class="modal-body" id="completeApprovalBody"></div>
+    <div class="modal-footer">
+      <input type="hidden" id="ca-trip-id">
+      <button class="btn btn-red" onclick="rejectComplete()">✕ رفض</button>
+      <button class="btn btn-green" onclick="approveComplete()">✓ موافقة وإنهاء</button>
+    </div>
+  </div>
+</div>
 <!-- Driver Popup -->
 <div class="driver-popup" id="driverPopup">
   <button class="dp-close" onclick="closeDriverPopup()">✕</button>
@@ -596,7 +611,7 @@ async function loadAll(){
 
     let ordersQ=db.from('orders').select('*').order('created_at',{ascending:false});
     let driversQ=db.from('drivers').select('*,branches(name)').eq('is_active',true).order('full_name');
-    let tripsQ=db.from('trips').select('*').eq('status','active').order('created_at',{ascending:false});
+    let tripsQ=db.from('trips').select('*').in('status',['active','pending_complete']).order('created_at',{ascending:false});
 
     if(branchId){
       ordersQ=ordersQ.eq('branch_id',branchId);
@@ -709,6 +724,8 @@ function fmWorkTime(mins){if(mins<60)return `${mins}د`;return `${Math.floor(min
 
 function renderAttNotif(){
   const pending=attendanceToday.filter(r=>r.status.endsWith('_request'));
+  // رحلات بانتظار موافقة الإنهاء
+  const pendingCompleteTrips=activeTrips.filter(t=>t.status==='pending_complete');
   // Update header button
   const btn=document.getElementById('attNotifBtn');
   if(btn){
@@ -716,9 +733,9 @@ function renderAttNotif(){
     else btn.style.display='none';
   }
   // Update right bar in drivers section
-  const bar=document.getElementById('attRequestsBar');
+const bar=document.getElementById('attRequestsBar');
   if(!bar)return;
-  if(!pending.length){bar.style.display='none';return;}
+  if(!pending.length && !pendingCompleteTrips.length){bar.style.display='none';return;}
   bar.style.display='flex';
   const typeLabels={'online_request':'حضور','offline_request':'انصراف','break_request':'استراحة'};
   const typeColors={'online_request':'#4ade80','offline_request':'#f87171','break_request':'#fbbf24'};
@@ -733,7 +750,17 @@ function renderAttNotif(){
         ${ini}
         <div style="position:absolute;top:-4px;right:-4px;width:14px;height:14px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:.45rem;color:#0f172a;font-weight:800">!</div>
       </div>
-      <div style="font-size:.52rem;color:${color};font-weight:700">${label}</div>
+<div style="font-size:.52rem;color:${color};font-weight:700">${label}</div>
+    </div>`;
+  }).join('')
+  + pendingCompleteTrips.map(t=>{
+    const ini=(t.driver_name||'؟').split(' ').slice(0,2).map(w=>w[0]).join('');
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:.2rem;cursor:pointer;flex-shrink:0" onclick="openCompleteApproval('${t.id}')">
+      <div style="width:40px;height:40px;border-radius:50%;background:#334155;border:2.5px solid #fbbf24;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.78rem;color:white;position:relative">
+        ${ini}
+        <div style="position:absolute;top:-4px;right:-4px;width:14px;height:14px;border-radius:50%;background:#fbbf24;display:flex;align-items:center;justify-content:center;font-size:.45rem;color:#0f172a;font-weight:800">🏁</div>
+      </div>
+      <div style="font-size:.52rem;color:#fbbf24;font-weight:700">إنهاء رحلة</div>
     </div>`;
   }).join('');
 }
@@ -1765,7 +1792,75 @@ async function completeTrip(tripId){
   for(const id of oIds)await addOrderLog(id,'order_completed',{trip_id:tripId});
   showToast('✓ تم إنهاء الرحلة');await loadAll();showLoading(false);
 }
+// ===== موافقة إنهاء الرحلة (طلب من الطيار) =====
+async function openCompleteApproval(tripId){
+  const trip=activeTrips.find(t=>t.id===tripId);if(!trip)return;
+  document.getElementById('ca-trip-id').value=tripId;
+  const oIds=tripOrdersMap[tripId]||[];
+  const tO=oIds.map(id=>allOrders.find(o=>o.id===id)).filter(Boolean);
+  const total=tO.reduce((s,o)=>s+Number(o.total_bill_net||0),0);
+  const cashDue=tO.filter(o=>o.payment_method==='cash').reduce((s,o)=>s+Number(o.collected_amount||o.total_bill_net||0),0);
 
+  const rows=tO.map(o=>{
+    const pm=o.payment_method||'cash';
+    return `<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.5rem;border-bottom:1px solid var(--border);font-size:.78rem">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;color:var(--primary)">${o.bill_no||o.id?.slice(0,6)}</div>
+        <div style="color:var(--text-muted);font-size:.7rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${o.customer_name||o.cust_name||'—'}</div>
+      </div>
+      <span class="oc-pay p-${pm}">${PL[pm]||pm}</span>
+      <strong style="white-space:nowrap">${Number(o.total_bill_net||0).toLocaleString()} ج</strong>
+    </div>`;
+  }).join('');
+
+  document.getElementById('completeApprovalBody').innerHTML=`
+    <div style="background:var(--bg);border-radius:10px;padding:.75rem;margin-bottom:1rem">
+      <div style="font-weight:700;font-size:.9rem">🚗 ${trip.driver_name||'—'}</div>
+      <div style="font-size:.72rem;color:var(--text-muted)">${tO.length} طلب في الرحلة</div>
+    </div>
+    <div style="max-height:240px;overflow-y:auto;margin-bottom:1rem">${rows||'<div style="text-align:center;padding:1rem;color:var(--text-muted)">لا توجد طلبات</div>'}</div>
+    <div style="display:flex;justify-content:space-between;padding:.5rem .75rem;background:var(--blue-light);border-radius:8px;margin-bottom:.4rem">
+      <span style="font-weight:600;color:#0e7490">إجمالي قيمة الرحلة</span>
+      <strong style="color:#0e7490">${total.toLocaleString()} ج.م</strong>
+    </div>
+    <div style="display:flex;justify-content:space-between;padding:.5rem .75rem;background:var(--green-light);border-radius:8px">
+      <span style="font-weight:600;color:#15803d">المطلوب من الطيار (كاش)</span>
+      <strong style="color:#15803d">${cashDue.toLocaleString()} ج.م</strong>
+    </div>`;
+  document.getElementById('completeApprovalModal').classList.add('open');
+}
+
+async function approveComplete(){
+  const tripId=document.getElementById('ca-trip-id').value;
+  showLoading(true);
+  const now=new Date().toISOString();
+  const oIds=tripOrdersMap[tripId]||[];
+  const tO=oIds.map(id=>allOrders.find(o=>o.id===id)).filter(Boolean);
+  // المتعذرة ترجع للتوزيع
+  const failedIds=tO.filter(o=>o.status==='failed').map(o=>o.id);
+  if(failedIds.length){
+    await db.from('orders').update({status:'postponed',driver_id:null,deliveryman:null,assigned_at:null,picked_at:null,updated_at:now}).in('id',failedIds);
+    for(const id of failedIds){await db.from('trip_orders').delete().eq('trip_id',tripId).eq('order_id',id);}
+  }
+  // المُوصّلة → completed
+  const deliveredIds=tO.filter(o=>o.status==='delivered').map(o=>o.id);
+  if(deliveredIds.length)await db.from('orders').update({status:'completed',completed_at:now,updated_at:now}).in('id',deliveredIds);
+  // الرحلة → completed (وقت الموافقة = وقت الإنهاء الفعلي)
+  await db.from('trips').update({status:'completed',updated_at:now}).eq('id',tripId);
+  await addTripLog(tripId,'trip_completed',{by:'admin_approved'});
+  for(const id of deliveredIds)await addOrderLog(id,'order_completed',{trip_id:tripId});
+  closeModal('completeApprovalModal');showToast('✓ تمت الموافقة وإنهاء الرحلة');await loadAll();showLoading(false);
+}
+
+async function rejectComplete(){
+  const tripId=document.getElementById('ca-trip-id').value;
+  if(!confirm('رفض الطلب وإرجاع الرحلة للطيار؟'))return;
+  showLoading(true);
+  const now=new Date().toISOString();
+  await db.from('trips').update({status:'active',updated_at:now}).eq('id',tripId);
+  await addTripLog(tripId,'complete_rejected',{by:'admin'});
+  closeModal('completeApprovalModal');showToast('تم رفض الطلب — رجعت الرحلة للطيار');await loadAll();showLoading(false);
+}
 // ===== CALL & MESSAGE =====
   // ===== انصراف يدوي للطيار من الإدارة =====
 async function forceDriverOffline(driverId){
