@@ -119,6 +119,8 @@
     .needs-hl { color:var(--danger); }
     .src-hl { color:var(--success); }
     .warn-row td { background:#fffbeb !important; }
+    .over-row td { background:#fee2e2 !important; }
+    .over-note td { padding:0 !important; }
   </style>
 </head>
 <body>
@@ -215,25 +217,29 @@
             <div id="file-tag-wrap"></div>
 
             <div class="disb-flt" id="disb-filters" style="display:none;">
+              <div class="mini-field auto">
+                <span class="filter-label">الفرع المصدر (المشتري) <span class="help-ic">؟<span class="tip">الفرع الذي اشترى الأصناف — سنوزّع من رصيده على باقي الفروع المحتاجة.</span></span></span>
+                <select id="from-branch" onchange="computeDisb()"></select>
+              </div>
               <div class="mini-field wideauto">
                 <span class="filter-label">المورد <span class="help-ic">؟<span class="tip">فلترة الأصناف حسب المورد الذي تم الشراء منه.</span></span></span>
                 <select id="supplier-filter" onchange="renderDisb()"><option value="">كل الموردين</option></select>
               </div>
-              <div class="from-to">
-                <div class="mini-field auto">
-                  <span class="filter-label">تحويل من <span class="help-ic">؟<span class="tip">الفرع المصدر الذي سنخصم من رصيده الحالي.</span></span></span>
-                  <select id="from-branch" onchange="computeDisb()"></select>
-                </div>
-                <span class="arrow-ic"><i class="fas fa-arrow-left"></i></span>
-                <div class="mini-field auto">
-                  <span class="filter-label">تحويل إلى</span>
-                  <select id="to-branch" onchange="computeDisb()"></select>
-                </div>
+              <div class="mini-field auto">
+                <span class="filter-label">فترة التوفير (يوم) <span class="help-ic">؟<span class="tip">كل فرع يُمدّ بما يكفي استهلاك هذا العدد من الأيام. الافتراضي 60 يوم.</span></span></span>
+                <input type="number" id="cover-days" value="60" min="1" step="5" style="width:auto;min-width:120px" onchange="computeDisb()">
               </div>
               <div class="mini-field auto">
                 <span class="filter-label">ابحث بالصنف/الكود</span>
-                <input type="text" id="disb-search" placeholder="بحث..." oninput="renderDisb()">
+                <input type="text" id="disb-search" placeholder="بحث..." oninput="renderDisb()" style="width:auto;min-width:150px">
               </div>
+              <label class="mini-field auto" style="cursor:pointer;justify-content:flex-end;">
+                <span class="filter-label" style="margin-bottom:7px;">
+                  <input type="checkbox" id="add-purchase-toggle" onchange="computeDisb()" style="width:auto;vertical-align:middle;margin-left:5px;">
+                  جمع الشراء مع رصيد المصدر
+                  <span class="help-ic">؟<span class="tip">فعّله لو فاتورة الشراء دخلت بعد سحب الرصيد، فيُضاف الكمية المشتراة لرصيد فرع المصدر لإعطاء الرصيد الحقيقي.</span></span>
+                </span>
+              </label>
             </div>
           </div>
         </div>
@@ -873,28 +879,60 @@
     }
     function buildBranchSelects(){
       var from=document.getElementById('from-branch');
-      var to=document.getElementById('to-branch');
       var opts=Object.keys(BRANCHES).map(function(k){return '<option value="'+k+'">'+BRANCHES[k]+'</option>';}).join('');
-      from.innerHTML=opts; to.innerHTML=opts;
+      from.innerHTML=opts;
       if(detectedSourceBranch){ from.value=detectedSourceBranch; }
-      var others=Object.keys(BRANCHES).filter(function(k){return k!==from.value;});
-      to.value=others[0];
-    }
-
-    // الكمية المقترحة بنفس شروط Power Query:
-    // الوجهة محتاجة لو رصيدها < معدلها/2، والكمية = max(0, معدل الوجهة − رصيدها) بحد أقصى رصيد المصدر
-    function disbSuggested(item, from, to){
-      var inv=itemsMapForDisb[item.code];
-      if(!inv) return {qty:0, needs:false, isNew:true};
-      var d=inv[to], s=inv[from];
-      var needs = d.stock < (d.avg/2);
-      if(!needs) return {qty:0, needs:false, isNew:false};
-      var maxRecv = Math.max(0, d.avg - d.stock);
-      var qty = Math.floor(Math.min(maxRecv, s.stock));
-      return {qty:qty, needs:true, isNew:false};
     }
 
     var itemsMapForDisb={};
+
+    // الرصيد الفعلي لفرع المصدر = رصيد النظام (+ كمية الشراء لو التوجل شغّال)
+    function sourceBalance(item, from){
+      var inv=itemsMapForDisb[item.code];
+      var base = inv ? inv[from].stock : 0;
+      var addPurchase = document.getElementById('add-purchase-toggle').checked;
+      return addPurchase ? base + (item.qty||0) : base;
+    }
+
+    // تغطية فترة التوفير لفرع = (المعدل الشهري / 30) × أيام التوفير
+    function coverQtyDays(avg, coverDays){ return (avg/30) * coverDays; }
+
+    // ===== توزيع صنف من المصدر على باقي الفروع (نفس منطق Power Query) =====
+    // الوجهة محتاجة لو رصيدها < تغطية فترة التوفير
+    // أقصى استلام = تغطية الفترة − رصيدها ؛ توزيع نسبي من رصيد المصدر ؛ floor + الباقي للكسر الأكبر
+    function distributePlan(item, from, coverDays){
+      var inv=itemsMapForDisb[item.code];
+      if(!inv) return {isNew:true, plan:{}, need:{}, max:{}};
+      var others=Object.keys(BRANCHES).filter(function(b){return b!==from;});
+      var srcBal = sourceBalance(item, from);
+
+      var need={}, max={};
+      others.forEach(function(b){
+        var cov = coverQtyDays(inv[b].avg, coverDays);
+        need[b] = inv[b].stock < cov;
+        max[b]  = need[b] ? Math.max(0, cov - inv[b].stock) : 0;
+      });
+      var totalNeeded = others.reduce(function(s,b){return s+max[b];},0);
+
+      var raw={}, floor={};
+      others.forEach(function(b){
+        raw[b] = totalNeeded>0 ? (max[b]/totalNeeded)*srcBal : 0;
+        floor[b] = Math.floor(Math.min(raw[b], max[b]));
+      });
+      var remainder = Math.floor(srcBal) - others.reduce(function(s,b){return s+floor[b];},0);
+
+      var fracArr = others.map(function(b){ return {b:b, f: need[b] ? raw[b]-floor[b] : 0}; });
+      fracArr.sort(function(a,b){return b.f-a.f;});
+
+      var plan={};
+      others.forEach(function(b){ plan[b]=floor[b]; });
+      for(var i=0;i<fracArr.length && remainder>0;i++){
+        // لا نتجاوز أقصى احتياج الوجهة عند توزيع الباقي
+        if(plan[fracArr[i].b] < max[fracArr[i].b]){ plan[fracArr[i].b]+=1; remainder--; }
+      }
+      return {isNew:false, plan:plan, need:need, max:max, srcBal:srcBal};
+    }
+
     async function computeDisb(){
       if(!stockLoaded){
         document.getElementById('result-container').innerHTML='<div class="loading-overlay">⏳ جاري تحميل بيانات المخزون...</div>';
@@ -903,26 +941,43 @@
       }
       itemsMapForDisb = buildItemsMap();
       var from=document.getElementById('from-branch').value;
-      var to=document.getElementById('to-branch').value;
+      var coverDays=parseFloat(document.getElementById('cover-days').value)||60;
       disbManual={}; disbPage=1;
+
       disbComputed=purchases.map(function(p){
         var inv=itemsMapForDisb[p.code];
-        var sug=disbSuggested(p, from, to);
+        var dist=distributePlan(p, from, coverDays);
+        var others=Object.keys(BRANCHES).filter(function(b){return b!==from;});
+        // كمية التوفير للوجهة (تغطية الفترة) — تُستخدم لتلوين الشراء الزائد
+        var coverNeed = others.reduce(function(s,b){ return s + (inv?coverQtyDays(inv[b].avg,coverDays):0); },0);
         return {
           code:p.code, name:p.name, qty:p.qty, unitBuy:p.unitBuy, suppliers:p.suppliers,
           isMedicine: inv?inv.isMedicine:false, isNew: !inv,
-          fromStock: inv?inv[from].stock:0, fromAvg: inv?inv[from].avg:0,
-          toStock: inv?inv[to].stock:0, toAvg: inv?inv[to].avg:0,
-          needs: sug.needs, suggested: sug.qty
+          inv: inv,
+          plan: dist.plan||{}, need: dist.need||{}, max: dist.max||{},
+          srcBal: dist.srcBal||0,
+          coverNeedTotal: coverNeed
         };
       });
       renderDisb();
     }
 
-    function disbFinalQty(r){
-      if(disbManual.hasOwnProperty(r.code)) return disbManual[r.code];
-      return r.suggested||0;
+    // الكمية النهائية لوجهة معيّنة (يدوي يطغى على المقترح)
+    function disbQtyTo(r, branch){
+      var key=r.code+'|'+branch;
+      if(disbManual.hasOwnProperty(key)) return disbManual[key];
+      return r.plan[branch]||0;
     }
+    // إجمالي المحوّل من المصدر لصنف
+    function disbRowTotal(r, from){
+      var others=Object.keys(BRANCHES).filter(function(b){return b!==from;});
+      return others.reduce(function(s,b){return s+disbQtyTo(r,b);},0);
+    }
+    // هل الصنف فيه أي كمية تحويل؟
+    function disbRowHasQty(r, from){ return disbRowTotal(r, from)>0; }
+    // هل تجاوز إجمالي المحوّل رصيد المصدر؟ (تنبيه التوازن)
+    function disbRowOver(r, from){ return disbRowTotal(r, from) > r.srcBal; }
+
     function disbFilteredRows(){
       var supplier=document.getElementById('supplier-filter').value;
       var search=(document.getElementById('disb-search').value||'').trim().toLowerCase();
@@ -934,7 +989,8 @@
     }
     function disbWithQty(){
       if(!disbComputed.length) return 0;
-      return disbFilteredRows().filter(function(r){return disbFinalQty(r)>0;}).length;
+      var from=document.getElementById('from-branch').value;
+      return disbFilteredRows().filter(function(r){return disbRowHasQty(r,from);}).length;
     }
 
     function renderDisbContainer(){
@@ -948,20 +1004,15 @@
 
     function renderDisb(){
       var from=document.getElementById('from-branch').value;
-      var to=document.getElementById('to-branch').value;
+      var others=Object.keys(BRANCHES).filter(function(b){return b!==from;});
       var container=document.getElementById('result-container');
       var excelBtn=document.getElementById('excel-btn');
 
-      if(from===to){
-        container.innerHTML='<div class="loading-overlay" style="color:var(--danger)">⚠️ اختر فرعين مختلفين للتحويل من وإلى</div>';
-        if(excelBtn) excelBtn.disabled=true;
-        return;
-      }
-
       var rows=disbFilteredRows();
       var total=rows.length;
-      var withQty=rows.filter(function(r){return disbFinalQty(r)>0;}).length;
-      document.getElementById('result-count').textContent=total+' صنف · '+withQty+' للتحويل';
+      var withQty=rows.filter(function(r){return disbRowHasQty(r,from);}).length;
+      var overCount=rows.filter(function(r){return disbRowOver(r,from);}).length;
+      document.getElementById('result-count').textContent=total+' صنف · '+withQty+' للتحويل'+(overCount?' · ⚠️ '+overCount+' تجاوز الرصيد':'');
       if(excelBtn) excelBtn.disabled = withQty===0;
 
       if(!total){ container.innerHTML='<div class="loading-overlay">لا توجد نتائج مطابقة</div>'; return; }
@@ -970,37 +1021,81 @@
       if(disbPage>totalPages) disbPage=totalPages;
       var pageRows=rows.slice((disbPage-1)*DISB_PAGE, disbPage*DISB_PAGE);
 
-      var html='<div class="summary-bar">'+
-        '<div class="summary-item">من <b>'+BRANCHES[from]+'</b> ← إلى <b>'+BRANCHES[to]+'</b></div>'+
-        '<div class="summary-item">أصناف: <b>'+total+'</b></div>'+
-        '<div class="summary-item">سيتم تحويل: <b>'+withQty+'</b></div></div>';
+      var addP=document.getElementById('add-purchase-toggle').checked;
+      var coverDays=parseFloat(document.getElementById('cover-days').value)||60;
 
-      html+='<div class="res-wrap"><table class="res-table" style="min-width:880px"><thead><tr>'+
-        '<th class="name-cell" style="text-align:right">الصنف</th>'+
-        '<th>سعر القطعة</th>'+
-        '<th>مشترى<br>(استرشادي)</th>'+
-        '<th>'+BRANCHES[from]+'<br>(المصدر)</th>'+
-        '<th>'+BRANCHES[to]+'<br>(الوجهة)</th>'+
-        '<th>الكمية المحوّلة</th></tr></thead><tbody>';
+      var html='<div class="summary-bar">'+
+        '<div class="summary-item">المصدر: <b>'+BRANCHES[from]+'</b></div>'+
+        '<div class="summary-item">فترة التوفير: <b>'+coverDays+'</b> يوم</div>'+
+        '<div class="summary-item">سيتم تحويل: <b>'+withQty+'</b></div>'+
+        (addP?'<div class="summary-item" style="color:var(--accent-dark)">🧮 الشراء مضاف للرصيد</div>':'')+
+        (overCount?'<div class="summary-item" style="color:var(--danger)">⚠️ '+overCount+' صنف تجاوز رصيد المصدر</div>':'')+'</div>';
+
+      // رؤوس الأعمدة: الاسم | تحويل لوجهة1 | تحويل لوجهة2 | رصيد+معدل 3 فروع | كمية الشراء | السعر | إجمالي الرصيد+المعدل
+      html+='<div class="res-wrap"><table class="res-table" style="min-width:1050px"><thead><tr>'+
+        '<th class="name-cell" style="text-align:right">الصنف</th>';
+      others.forEach(function(b){ html+='<th style="background:#0e7490">↤ '+BRANCHES[b]+'</th>'; });
+      ['mamora','san','bishr'].forEach(function(b){
+        var isSrc = (b===from);
+        html+='<th'+(isSrc?' style="background:#15803d"':'')+'>'+BRANCHES[b]+(isSrc?'<br>(المصدر)':'')+'</th>';
+      });
+      html+='<th>كمية الشراء</th><th>السعر</th><th>إجمالي الرصيد<br>/ المعدل</th></tr></thead><tbody>';
 
       pageRows.forEach(function(r){
-        var fq=disbFinalQty(r);
+        var rowTotal=disbRowTotal(r,from);
+        var over=disbRowOver(r,from);
+        var purchaseExceeds = !r.isNew && (r.qty > r.coverNeedTotal); // الشراء أكبر من كمية التوفير
+        var rowCls = over ? ' class="over-row"' : (purchaseExceeds ? ' class="warn-row"' : '');
         var badge = r.isNew?'<span class="badge-new">جديد</span>':(r.isMedicine?'<span class="badge-med">دواء</span>':'<span class="badge-cos">تجميل</span>');
-        var warnCls = r.isNew ? ' class="warn-row"' : '';
-        html+='<tr'+warnCls+'>'+
+
+        html+='<tr'+rowCls+'>'+
           '<td class="name-cell"><div style="font-weight:600">'+r.name+' '+badge+'</div>'+
-            '<div style="font-size:0.63rem;color:var(--text-muted)">'+r.code+(r.suppliers.length?' · '+r.suppliers.join('، '):'')+'</div></td>'+
-          '<td>'+r1(r.unitBuy)+'</td>'+
-          '<td style="font-weight:700">'+r.qty+'</td>';
-        if(r.isNew){
-          html+='<td colspan="2" style="color:var(--text-muted);font-size:0.72rem">غير مسجّل بالمخزون — عدّل الكمية يدوياً</td>';
-        } else {
-          var srcCls = r.fromStock>0?'src-hl':'';
-          var dstCls = r.needs?'needs-hl':'';
-          html+='<td><div class="bc-col"><span class="bc-num '+srcCls+'">'+r.fromStock+'</span><span class="bc-lbl">معدل '+r1(r.fromAvg)+'</span></div></td>'+
-            '<td><div class="bc-col"><span class="bc-num '+dstCls+'">'+r.toStock+'</span><span class="bc-lbl">معدل '+r1(r.toAvg)+(r.needs?' · محتاج':'')+'</span></div></td>';
+            '<div style="font-size:0.63rem;color:var(--text-muted)">'+r.code+(r.suppliers.length?' · '+r.suppliers.join('، '):'')+'</div></td>';
+
+        // خانات التحويل للوجهتين
+        others.forEach(function(b){
+          if(r.isNew){
+            html+='<td><input type="number" class="qty-input" min="0" step="1" value="'+disbQtyTo(r,b)+'" onchange="editDisbQty(\''+r.code+'\',\''+b+'\',this.value)"></td>';
+          } else {
+            var needCls = r.need[b]?'needs-hl':'';
+            html+='<td><input type="number" class="qty-input '+needCls+'" min="0" step="1" value="'+disbQtyTo(r,b)+'" '+
+              'title="أقصى احتياج: '+Math.floor(r.max[b]||0)+'" onchange="editDisbQty(\''+r.code+'\',\''+b+'\',this.value)"></td>';
+          }
+        });
+
+        // رصيد + معدل الـ3 فروع
+        ['mamora','san','bishr'].forEach(function(b){
+          if(!r.inv){ html+='<td class="zero-stock">—</td>'; return; }
+          var st=r.inv[b].stock, av=r.inv[b].avg;
+          var isSrc=(b===from);
+          var stShown = (isSrc && addP) ? (st+r.qty) : st;
+          var srcStyle = isSrc ? ' style="background:#f0fdf4"' : '';
+          html+='<td'+srcStyle+'><div class="bc-col"><span class="bc-num">'+stShown+(isSrc&&addP?' <span style="font-size:0.6rem;color:var(--success)">(+'+r.qty+')</span>':'')+'</span>'+
+            '<span class="bc-lbl">معدل '+r1(av)+'</span></div></td>';
+        });
+
+        // كمية الشراء (لون أحمر لو زائدة)
+        var qtyStyle = purchaseExceeds ? ' style="color:var(--danger);font-weight:800"' : ' style="font-weight:700"';
+        html+='<td'+qtyStyle+'>'+r.qty+(purchaseExceeds?' ⚠️':'')+'</td>';
+        html+='<td>'+r1(r.unitBuy)+'</td>';
+
+        // إجمالي الرصيد + إجمالي المعدل (يحترم التوجل للمصدر)
+        if(r.inv){
+          var totStock=['mamora','san','bishr'].reduce(function(s,b){
+            var st=r.inv[b].stock; if(b===from && addP) st+=r.qty; return s+st;
+          },0);
+          var totAvg=['mamora','san','bishr'].reduce(function(s,b){return s+r.inv[b].avg;},0);
+          html+='<td><div class="bc-col"><span class="bc-num" style="color:var(--accent-dark)">'+totStock+'</span><span class="bc-lbl">معدل '+r1(totAvg)+'</span></div></td>';
+        } else { html+='<td class="zero-stock">—</td>'; }
+
+        html+='</tr>';
+
+        // صف تنبيه التوازن
+        if(over){
+          var colspan = 1 + others.length + 3 + 2 + 1;
+          html+='<tr class="over-note"><td colspan="'+colspan+'" style="background:#fef2f2;color:var(--danger);font-size:0.72rem;font-weight:700;text-align:right;padding:4px 12px">'+
+            '⚠️ إجمالي التحويل ('+rowTotal+') تجاوز رصيد المصدر المتاح ('+r.srcBal+') — قلّل كمية إحدى الوجهات.</td></tr>';
         }
-        html+='<td><input type="number" class="qty-input" min="0" step="1" value="'+fq+'" onchange="editDisbQty(\''+r.code+'\', this.value)"></td></tr>';
       });
       html+='</tbody></table></div>';
 
@@ -1012,13 +1107,10 @@
       container.innerHTML=html;
     }
 
-    function editDisbQty(code, val){
+    function editDisbQty(code, branch, val){
       var q=parseInt(val)||0; if(q<0) q=0;
-      disbManual[code]=q;
-      var withQty=disbWithQty();
-      var rows=disbFilteredRows();
-      document.getElementById('result-count').textContent=rows.length+' صنف · '+withQty+' للتحويل';
-      var excelBtn=document.getElementById('excel-btn'); if(excelBtn) excelBtn.disabled=withQty===0;
+      disbManual[code+'|'+branch]=q;
+      renderDisb(); // إعادة رسم لتحديث الإجمالي وتنبيه التوازن
     }
     function changeDisbPage(d){
       var total=disbFilteredRows().length;
@@ -1083,23 +1175,35 @@
       XLSX.writeFile(wb, 'inventory_mgmt_'+currentTab+'_'+today+'.xlsx');
     }
 
+    // تصدير أذون الصرف: شيت لكل وجهة (من المصدر ← الوجهة)
     function exportDisb(){
-      var from=document.getElementById('from-branch').value, to=document.getElementById('to-branch').value;
+      var from=document.getElementById('from-branch').value;
+      var others=Object.keys(BRANCHES).filter(function(b){return b!==from;});
       var supplier=document.getElementById('supplier-filter').value;
       var rows=disbComputed.filter(function(r){
         if(supplier && !r.suppliers.includes(supplier)) return false;
-        return disbFinalQty(r)>0;
+        return true;
       });
-      if(!rows.length){ alert('لا توجد كميات للتحويل'); return; }
-      var wsData=[['الكود','الصنف','المورد','الكمية المطلوب تحويلها']];
-      rows.forEach(function(r){ wsData.push([r.code, r.name, r.suppliers.join('، '), disbFinalQty(r)]); });
-      var ws=XLSX.utils.aoa_to_sheet(wsData);
-      ws['!cols']=[{wch:14},{wch:45},{wch:22},{wch:18}];
+
       var wb=XLSX.utils.book_new();
-      var name=('من '+BRANCHES[from]+' ← '+BRANCHES[to]).slice(0,31);
-      XLSX.utils.book_append_sheet(wb, ws, name);
+      var added=false;
+      others.forEach(function(b){
+        var data=[['الكود','الصنف','المورد','الكمية المطلوب تحويلها']];
+        rows.forEach(function(r){
+          var q=disbQtyTo(r,b);
+          if(q>0) data.push([r.code, r.name, r.suppliers.join('، '), q]);
+        });
+        if(data.length>1){
+          var ws=XLSX.utils.aoa_to_sheet(data);
+          ws['!cols']=[{wch:14},{wch:45},{wch:22},{wch:18}];
+          var name=('من '+BRANCHES[from]+' ← '+BRANCHES[b]).slice(0,31);
+          XLSX.utils.book_append_sheet(wb, ws, name);
+          added=true;
+        }
+      });
+      if(!added){ alert('لا توجد كميات للتحويل'); return; }
       var today=new Date().toISOString().slice(0,10);
-      XLSX.writeFile(wb, 'اذن_صرف_'+from+'_الى_'+to+'_'+today+'.xlsx');
+      XLSX.writeFile(wb, 'اذن_صرف_'+from+'_'+today+'.xlsx');
     }
   </script>
 </body>
