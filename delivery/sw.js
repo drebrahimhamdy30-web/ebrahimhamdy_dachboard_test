@@ -21,6 +21,7 @@ self.addEventListener('push', e => {
     renotify: true,
     tag: 'new-order',
     silent: false,
+    timestamp: Date.now(),
     data: { url: data.url || './driver.html' }
   };
   e.waitUntil(self.registration.showNotification(title, options));
