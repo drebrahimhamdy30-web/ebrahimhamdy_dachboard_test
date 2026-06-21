@@ -121,6 +121,10 @@
     .arrow-ic { color:var(--accent);font-size:1rem;padding-bottom:9px; }
     .qty-input { width:64px;padding:6px 4px;border:1.5px solid var(--accent);border-radius:7px;text-align:center;font-family:var(--font);font-size:0.9rem;font-weight:800;color:var(--accent-dark);outline:none;background:var(--surface); }
     .cell-stat { font-size:0.6rem;color:var(--text-muted);font-weight:700;margin-bottom:3px;white-space:nowrap;letter-spacing:0.3px; }
+    /* checkbox labels في شريط أذون الصرف */
+    .chk-label { display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:0.78rem;font-weight:700;color:var(--text-secondary);white-space:nowrap;padding-bottom:8px;user-select:none; }
+    .chk-label input[type="checkbox"] { width:16px;height:16px;margin:0;cursor:pointer;accent-color:var(--accent);flex-shrink:0; }
+    .chk-label .help-ic { margin-right:2px; }
     .qty-input:focus { box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
     .needs-hl { color:var(--danger); }
     .src-hl { color:var(--success); }
@@ -250,26 +254,20 @@
                 <span class="filter-label">ابحث بالصنف/الكود</span>
                 <input type="text" id="disb-search" placeholder="بحث..." oninput="renderDisb()" style="width:auto;min-width:150px">
               </div>
-              <label class="mini-field auto" style="cursor:pointer;justify-content:flex-end;">
-                <span class="filter-label" style="margin-bottom:7px;">
-                  <input type="checkbox" id="add-purchase-toggle" onchange="computeDisb()" style="width:auto;vertical-align:middle;margin-left:5px;">
-                  جمع الشراء مع رصيد المصدر
-                  <span class="help-ic">؟<span class="tip">فعّله لو فاتورة الشراء دخلت بعد سحب الرصيد، فيُضاف الكمية المشتراة لرصيد فرع المصدر لإعطاء الرصيد الحقيقي.</span></span>
-                </span>
+              <label class="chk-label">
+                <input type="checkbox" id="add-purchase-toggle" onchange="computeDisb()">
+                <span>جمع الشراء مع رصيد المصدر</span>
+                <span class="help-ic">؟<span class="tip">فعّله لو فاتورة الشراء دخلت بعد سحب الرصيد، فيُضاف الكمية المشتراة لرصيد فرع المصدر لإعطاء الرصيد الحقيقي.</span></span>
               </label>
-              <label class="mini-field auto" style="cursor:pointer;justify-content:flex-end;">
-                <span class="filter-label" style="margin-bottom:7px;">
-                  <input type="checkbox" id="hide-zero-toggle" onchange="renderDisb()" style="width:auto;vertical-align:middle;margin-left:5px;">
-                  إخفاء غير المرحّل
-                  <span class="help-ic">؟<span class="tip">يخفي الأصناف التي إجمالي كمية تحويلها صفر، ولا يُصدّرها في الإكسل.</span></span>
-                </span>
+              <label class="chk-label">
+                <input type="checkbox" id="hide-zero-toggle" onchange="renderDisb()">
+                <span>إخفاء غير المرحّل</span>
+                <span class="help-ic">؟<span class="tip">يخفي الأصناف التي إجمالي كمية تحويلها صفر، ولا يُصدّرها في الإكسل.</span></span>
               </label>
-              <label class="mini-field auto" style="cursor:pointer;justify-content:flex-end;">
-                <span class="filter-label" style="margin-bottom:7px;">
-                  <input type="checkbox" id="only-excess-toggle" onchange="renderDisb()" style="width:auto;vertical-align:middle;margin-left:5px;">
-                  الزائد عن المعدل فقط
-                  <span class="help-ic">؟<span class="tip">يعرض فقط الأصناف المعلّمة بالأحمر — كمية شرائها أكبر من احتياج الفروع (الرصيد أعلى من معدل الاستهلاك).</span></span>
-                </span>
+              <label class="chk-label">
+                <input type="checkbox" id="only-excess-toggle" onchange="renderDisb()">
+                <span>الزائد عن المعدل فقط</span>
+                <span class="help-ic">؟<span class="tip">يعرض فقط الأصناف الزائدة — إجمالي رصيد الفروع أكبر من إجمالي تغطية فترة التوفير (مع تجاهل الأصناف قليلة الرصيد).</span></span>
               </label>
             </div>
           </div>
@@ -1006,15 +1004,22 @@
       disbComputed=sourceItems.map(function(p){
         var inv=itemsMapForDisb[p.code];
         var dist=distributePlan(p, from, coverDays);
-        var others=Object.keys(BRANCHES).filter(function(b){return b!==from;});
-        var coverNeed = others.reduce(function(s,b){ return s + (inv?coverQtyDays(inv[b].avg,coverDays):0); },0);
+        var allB=['mamora','san','bishr'];
+        // إجمالي رصيد الـ3 فروع (يحترم التوجل: يضيف الشراء لرصيد المصدر)
+        var addP=document.getElementById('add-purchase-toggle').checked;
+        var totalStock = inv ? allB.reduce(function(s,b){
+          var st=inv[b].stock; if(b===from && addP) st+=p.qty; return s+st;
+        },0) : 0;
+        // إجمالي تغطية فترة التوفير للـ3 فروع = Σ(معدل الفرع ÷ 30 × أيام التوفير)
+        var totalCover = inv ? allB.reduce(function(s,b){ return s + coverQtyDays(inv[b].avg, coverDays); },0) : 0;
         return {
           code:p.code, name:p.name, branch:p.branch, qty:p.qty, unitBuy:p.unitBuy, suppliers:p.suppliers,
           isMedicine: inv?inv.isMedicine:false, isNew: !inv,
           inv: inv,
           plan: dist.plan||{}, need: dist.need||{}, max: dist.max||{},
           srcBal: dist.srcBal||0,
-          coverNeedTotal: coverNeed
+          totalStock: totalStock,         // إجمالي رصيد الـ3 فروع
+          totalCover: totalCover          // إجمالي تغطية التوفير للـ3 فروع
         };
       });
       buildSupplierFilter(); // حدّث الموردين حسب الفرع المختار
@@ -1037,6 +1042,11 @@
     // هل تجاوز إجمالي المحوّل رصيد المصدر؟ (تنبيه التوازن)
     function disbRowOver(r, from){ return disbRowTotal(r, from) > r.srcBal; }
 
+    // الصنف "زائد" = إجمالي رصيد الـ3 فروع > إجمالي تغطية التوفير، بشرط أن يكون الرصيد الكلي أكبر من حد أدنى
+    // (رصيد ≤ 3 = قطعة لكل فرع تقريباً، يُعتبر توفير طبيعي وليس فائضاً)
+    var EXCESS_MIN_STOCK = 3;
+    function isExcess(r){ return !r.isNew && (r.totalStock > EXCESS_MIN_STOCK) && (r.totalStock > r.totalCover); }
+
     function disbFilteredRows(){
       var supplier=document.getElementById('supplier-filter').value;
       var search=(document.getElementById('disb-search').value||'').trim().toLowerCase();
@@ -1047,7 +1057,7 @@
         if(supplier && !r.suppliers.includes(supplier)) return false;
         if(search && !r.name.toLowerCase().includes(search) && !r.code.includes(search)) return false;
         if(hideZero && !disbRowHasQty(r, from)) return false; // إخفاء غير المرحّل
-        if(onlyExcess && !(!r.isNew && r.qty > r.coverNeedTotal)) return false; // الزائد عن المعدل فقط
+        if(onlyExcess && !isExcess(r)) return false; // الزائد عن المعدل فقط
         return true;
       });
     }
@@ -1108,8 +1118,8 @@
       pageRows.forEach(function(r){
         var rowTotal=disbRowTotal(r,from);
         var over=disbRowOver(r,from);
-        var purchaseExceeds = !r.isNew && (r.qty > r.coverNeedTotal); // الشراء أكبر من كمية التوفير
-        var rowCls = over ? ' class="over-row"' : (purchaseExceeds ? ' class="warn-row"' : '');
+        var excess = isExcess(r); // إجمالي الرصيد أكبر من إجمالي تغطية التوفير
+        var rowCls = over ? ' class="over-row"' : (excess ? ' class="warn-row"' : '');
         var badge = r.isNew?'<span class="badge-new">جديد</span>':(r.isMedicine?'<span class="badge-med">دواء</span>':'<span class="badge-cos">تجميل</span>');
 
         html+='<tr'+rowCls+' data-rowcode="'+r.code+'">'+
@@ -1142,18 +1152,18 @@
             '<span class="bc-lbl">معدل '+r1(av)+'</span></div></td>';
         });
 
-        // كمية الشراء (لون أحمر لو زائدة)
-        var qtyStyle = purchaseExceeds ? ' style="color:var(--danger);font-weight:800"' : ' style="font-weight:700"';
-        html+='<td'+qtyStyle+'>'+r.qty+(purchaseExceeds?' ⚠️':'')+'</td>';
+        // كمية الشراء (استرشادي)
+        html+='<td style="font-weight:700">'+r.qty+'</td>';
         html+='<td>'+r1(r.unitBuy)+'</td>';
 
-        // إجمالي الرصيد + إجمالي المعدل (يحترم التوجل للمصدر)
+        // إجمالي الرصيد + إجمالي المعدل (يحترم التوجل للمصدر) — أحمر لو الرصيد زائد عن التغطية
         if(r.inv){
           var totStock=['mamora','san','bishr'].reduce(function(s,b){
             var st=r.inv[b].stock; if(b===from && addP) st+=r.qty; return s+st;
           },0);
           var totAvg=['mamora','san','bishr'].reduce(function(s,b){return s+r.inv[b].avg;},0);
-          html+='<td><div class="bc-col"><span class="bc-num" style="color:var(--accent-dark)">'+totStock+'</span><span class="bc-lbl">معدل '+r1(totAvg)+'</span></div></td>';
+          var totColor = excess ? 'var(--danger)' : 'var(--accent-dark)';
+          html+='<td><div class="bc-col"><span class="bc-num" style="color:'+totColor+'">'+totStock+(excess?' ⚠️':'')+'</span><span class="bc-lbl">معدل '+r1(totAvg)+'</span></div></td>';
         } else { html+='<td class="zero-stock">—</td>'; }
 
         html+='</tr>';
@@ -1193,9 +1203,8 @@
       var note=document.querySelector('tr[data-noterow="'+code+'"]');
       if(tr){
         tr.classList.remove('over-row','warn-row');
-        var purchaseExceeds = !r.isNew && (r.qty > r.coverNeedTotal);
         if(over) tr.classList.add('over-row');
-        else if(purchaseExceeds) tr.classList.add('warn-row');
+        else if(isExcess(r)) tr.classList.add('warn-row');
       }
       if(note){
         if(over){
