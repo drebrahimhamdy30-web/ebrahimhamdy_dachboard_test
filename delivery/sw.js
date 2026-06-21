@@ -19,7 +19,7 @@ self.addEventListener('push', e => {
     vibrate: [300, 100, 300, 100, 300, 100, 300],
     requireInteraction: true,
     renotify: true,
-    tag: 'new-order',
+    tag: 'order-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
     silent: false,
     timestamp: Date.now(),
     data: { url: data.url || './driver.html' }
