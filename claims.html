@@ -271,7 +271,8 @@
           </tr>`;
       }).join('');
 
-      totalEl.innerHTML = `الإجمالي: <span style="color:var(--warning);">${grandTotal.toFixed(2)}</span> جنيه`;
+      const net = grandTotal * 0.85;
+      totalEl.innerHTML = `الإجمالي: <span style="color:var(--warning);">${grandTotal.toFixed(2)}</span> جنيه &nbsp;—&nbsp; الصافي (بعد خصم 15%): <span style="color:var(--success);">${net.toFixed(2)}</span> جنيه`;
     }
 
     // ===== Inline Edit Functions =====
@@ -559,7 +560,7 @@
       const retirees = items.filter(i => (i.bill_type || '').trim() === 'معاشات');
 
       function buildTable(list) {
-        if (list.length === 0) return '<p style="color:#000;">لا توجد فواتير</p>';
+        if (list.length === 0) return { html: '<p style="color:#000;">لا توجد فواتير</p>', total: 0, net: 0, count: 0 };
         let total = 0;
         let rows  = list.map((item, i) => {
           const { name, qaid } = extractQaid(item.cust_name_ar || '');
@@ -577,12 +578,17 @@
               <td style="text-align:center;font-weight:bold;">${amount.toFixed(2)}</td>
             </tr>`;
         }).join('');
+        const net = total * 0.85;
         rows += `
           <tr style="font-weight:bold;">
             <td colspan="5" style="text-align:left;padding:8px;">الإجمالي</td>
             <td style="text-align:center;color:#000;">${total.toFixed(2)}</td>
+          </tr>
+          <tr style="font-weight:bold;">
+            <td colspan="5" style="text-align:left;padding:8px;">الصافي (بعد خصم 15% نظير التعاقد)</td>
+            <td style="text-align:center;color:#000;">${net.toFixed(2)}</td>
           </tr>`;
-        return `
+        const html = `
           <table border="1" cellpadding="6" cellspacing="0"
             style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px;color:#000;">
             <thead style="background:#fff;color:#000;border-bottom:2px solid #000;">
@@ -597,16 +603,21 @@
             </thead>
             <tbody>${rows}</tbody>
           </table>`;
+        return { html, total, net, count: list.length };
       }
 
-      const totalAll = items.reduce((s, i) => s + calcAmount(i.total_bill, i.payment_type), 0);
+      const workersTbl  = buildTable(workers);
+      const retireesTbl = buildTable(retirees);
+
+      const totalAll = workersTbl.total + retireesTbl.total;
+      const netAll   = workersTbl.net   + retireesTbl.net;
 
       const html = `
         <!DOCTYPE html>
         <html dir="rtl" lang="ar">
         <head>
           <meta charset="UTF-8">
-          <title>مطالبة رقم ${claimId}</title>
+          <title>مطالبة صيدلية د ابراهيم حمدي</title>
           <style>
             * { box-sizing:border-box; }
             body { font-family:'Arial',sans-serif; margin:20px; direction:rtl; color:#000; }
@@ -614,21 +625,37 @@
             h2 { color:#000; font-size:14px; margin:16px 0 6px; border-bottom:2px solid #000; padding-bottom:4px; }
             .header { border:2px solid #000; padding:12px; border-radius:8px; margin-bottom:16px; }
             .meta { font-size:12px; color:#000; margin-top:4px; }
-            .grand-total { background:#fff; color:#000; border:2px solid #000; padding:10px 16px; border-radius:8px; margin-top:16px; font-size:14px; font-weight:bold; text-align:left; }
+            .summary { font-size:12px; color:#000; margin-top:8px; line-height:1.9; }
+            .summary table { width:100%; border-collapse:collapse; margin-top:6px; font-size:12px; }
+            .summary td { border:1px solid #000; padding:5px 8px; }
+            .summary td:first-child { font-weight:bold; width:55%; }
+            .grand-total { background:#fff; color:#000; border:2px solid #000; padding:10px 16px; border-radius:8px; margin-top:16px; font-size:14px; font-weight:bold; }
+            .grand-total div { margin:4px 0; }
             @media print { body { margin:10px; } }
           </style>
         </head>
         <body>
           <div class="header">
-            <h1>📋 مطالبة رقم ${claimId}</h1>
-            <div class="meta">التاريخ: ${dateStr} — أعدها: ${activeUser}</div>
+            <h1>مطالبة صيدلية د/ ابراهيم حمدي</h1>
+            <div class="meta">بتاريخ: ${dateStr} — أعدها: ${activeUser}</div>
+            <div class="summary">
+              <table>
+                <tr><td>عدد فواتير العاملين</td><td>${workersTbl.count}</td></tr>
+                <tr><td>عدد فواتير المعاشات</td><td>${retireesTbl.count}</td></tr>
+                <tr><td>إجمالي المطالبة (عاملين)</td><td>${workersTbl.total.toFixed(2)} جنيه</td></tr>
+                <tr><td>إجمالي المطالبة (معاشات)</td><td>${retireesTbl.total.toFixed(2)} جنيه</td></tr>
+                <tr><td>صافي المطالبة (عاملين)</td><td>${workersTbl.net.toFixed(2)} جنيه</td></tr>
+                <tr><td>صافي المطالبة (معاشات)</td><td>${retireesTbl.net.toFixed(2)} جنيه</td></tr>
+              </table>
+            </div>
           </div>
           <h2>👷 عاملين</h2>
-          ${buildTable(workers)}
+          ${workersTbl.html}
           <h2>👴 معاشات</h2>
-          ${buildTable(retirees)}
+          ${retireesTbl.html}
           <div class="grand-total">
-            الإجمالي الكلي للمطالبة: ${totalAll.toFixed(2)} جنيه
+            <div>إجمالي المطالبة (عاملين + معاشات): ${totalAll.toFixed(2)} جنيه</div>
+            <div>صافي المطالبة (عاملين + معاشات): ${netAll.toFixed(2)} جنيه</div>
           </div>
         </body>
         </html>`;
