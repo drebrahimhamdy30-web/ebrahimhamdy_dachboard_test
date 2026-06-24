@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>تسوية المدفوعات وإغلاق الشيفت — Phalix</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<style>
+  /* ===== أنماط خاصة بصفحة التسوية (متناسقة مع style.css) ===== */
+  .tabs-bar{display:flex;gap:6px;background:var(--surface-3);border:1px solid var(--border);border-radius:var(--radius-md);padding:5px;margin-bottom:16px;flex-wrap:wrap}
+  .tab-btn{flex:1;min-width:130px;display:flex;align-items:center;justify-content:center;gap:7px;padding:10px 14px;border:none;background:transparent;border-radius:var(--radius-sm);font-family:var(--font);font-size:0.85rem;font-weight:700;color:var(--text-secondary);cursor:pointer;transition:all .2s}
+  .tab-btn:hover{background:var(--surface)}
+  .tab-btn.active{background:var(--accent);color:var(--primary)}
+  .tab-view{display:none}
+  .tab-view.active{display:block}
+
+  /* ===== Reconciliation aligned table (each pair = one row, two halves) ===== */
+  .recon-table{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden}
+  .recon-thead{display:grid;grid-template-columns:1fr 1fr;background:var(--surface-3);border-bottom:2px solid var(--border);position:sticky;top:0;z-index:3}
+  .recon-thead .rh{padding:12px 16px;display:flex;align-items:center;gap:9px;font-weight:700;font-size:0.9rem}
+  .recon-thead .rh.sys{border-inline-end:1px solid var(--border)}
+  .recon-thead .rh .col-count{margin-inline-start:auto;font-size:0.75rem;color:var(--text-muted);font-weight:600}
+  .recon-tbody{max-height:64vh;overflow-y:auto}
+
+  .pair{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--surface-3);position:relative}
+  .pair:last-child{border-bottom:none}
+  .pair:hover{background:#f8fafc}
+  .half{position:relative;min-height:62px;display:flex;align-items:stretch}
+  .half.sys{border-inline-end:1px solid var(--border)}
+  .half .rbody{flex:1;padding:9px 14px;display:flex;flex-direction:column;justify-content:center;min-width:0}
+  .half .r1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .half .ramt{font-size:1.05rem;font-weight:900;color:var(--text-primary);white-space:nowrap}
+  .half .r2{display:flex;align-items:center;gap:7px;margin-top:3px;color:var(--text-muted);font-size:0.74rem;flex-wrap:wrap}
+  .half .ractions{display:flex;align-items:center;gap:4px;padding:0 8px;opacity:0;transition:.15s}
+  .pair:hover .half .ractions{opacity:1}
+
+  .pair.matched .half{background:linear-gradient(90deg,#f0fdf4,transparent 80%)}
+  .pair.matched .ramt{color:#15803d}
+  .pair.diff .half{background:#fffbeb}
+  .pair.diff .ramt{color:#b45309}
+  .pair.manual .half{background:#eff6ff}
+  .pair.hidden-soft{opacity:.5}
+
+  .half.empty{background:repeating-linear-gradient(45deg,#fef2f2,#fef2f2 10px,#fee2e2 10px,#fee2e2 20px);align-items:center;justify-content:center;color:#b91c1c;font-weight:700;font-size:0.8rem;gap:9px;padding:9px 14px;text-align:center}
+  .half.draggable{cursor:grab}
+  .half.dragging{opacity:.4}
+  .half.drop-ok{outline:2px dashed var(--accent);outline-offset:-2px;background:#ecfeff}
+  .half.sel{outline:2px solid var(--accent);outline-offset:-2px}
+
+  .rstatus{position:absolute;top:5px;inset-inline-end:8px;font-size:0.62rem;font-weight:800;padding:2px 7px;border-radius:20px;z-index:2}
+
+  .ibtn{width:28px;height:28px;border-radius:7px;border:1px solid var(--border);background:var(--surface);display:grid;place-items:center;cursor:pointer;color:var(--text-muted);transition:.15s;font-size:0.8rem}
+  .ibtn:hover{color:var(--text-primary);border-color:var(--text-muted)}
+  .ibtn.danger:hover{color:var(--danger);border-color:var(--danger)}
+  .ibtn.go:hover{color:var(--success);border-color:var(--success)}
+
+  .add-here{border:1px solid #fca5a5;background:#fff;color:#b91c1c;padding:5px 11px;border-radius:var(--radius-sm);cursor:pointer;font-family:var(--font);font-weight:700;font-size:0.76rem;display:inline-flex;gap:5px;align-items:center}
+  .add-here:hover{background:#fef2f2}
+
+  .src-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:20px;font-size:0.7rem;font-weight:700}
+  .src-paymob{background:#fae8ff;color:#a21caf}
+  .src-orange{background:#ffedd5;color:#c2410c}
+  .src-vodafone{background:#fee2e2;color:#b91c1c}
+  .src-instapay{background:#ede9fe;color:#6d28d9}
+  .src-fawry{background:#dcfce7;color:#15803d}
+  .src-other{background:#f1f5f9;color:#475569}
+  .bill-chip{background:#e0f2fe;color:#0369a1;padding:2px 9px;border-radius:20px;font-size:0.7rem;font-weight:700}
+
+  /* ===== Close shift ===== */
+  .close-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:16px;align-items:start}
+  .denom-row{display:grid;grid-template-columns:80px 1fr 110px;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--surface-3)}
+  .denom-row:last-child{border-bottom:none}
+  .denom-face{text-align:center;font-weight:800;font-size:0.9rem;padding:6px 0;border-radius:var(--radius-sm);background:var(--surface-3)}
+  .denom-face.coin{color:#a16207;background:#fef9c3}
+  .denom-face.note{color:#0369a1;background:#e0f2fe}
+  .denom-sub{text-align:left;font-weight:700;color:var(--text-primary);font-size:0.9rem}
+  .denom-sub.zero{color:var(--text-muted);font-weight:400}
+
+  .cust-line{display:grid;grid-template-columns:1fr 110px 32px;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--surface-3)}
+  .cust-line:last-child{border-bottom:none}
+  .add-line-btn{margin-top:10px;width:100%;padding:9px;border:1.5px dashed var(--border);background:transparent;border-radius:var(--radius-sm);color:var(--text-secondary);cursor:pointer;font-family:var(--font);font-weight:600;font-size:0.82rem}
+  .add-line-btn:hover{border-color:var(--accent);color:var(--accent-dark)}
+
+  .wtot-line{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--surface-3)}
+  .wtot-line:last-child{border-bottom:none}
+
+  .card-mini-head{font-size:0.9rem;font-weight:700;display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+  .card-mini-head .htot{margin-inline-start:auto;font-weight:900;color:var(--accent-dark)}
+
+  .grand-card{grid-column:1/-1;background:linear-gradient(135deg,#f0fdf4,#fff);border:1.5px solid #86efac;border-radius:var(--radius-lg);padding:18px;display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:4px}
+  .grand-cell{text-align:center}
+  .grand-cell .gl{font-size:0.72rem;color:var(--text-secondary);font-weight:600;margin-bottom:5px}
+  .grand-cell .gv{font-size:1.5rem;font-weight:900;line-height:1}
+  .grand-cell.cash .gv{color:#a16207}
+  .grand-cell.cust .gv{color:#c2410c}
+  .grand-cell.auto .gv{color:#0369a1}
+  .grand-cell.total .gv{color:#15803d}
+
+  .lock-warn{background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:var(--radius-md);padding:14px 16px;font-size:0.85rem;font-weight:600;display:flex;align-items:center;gap:10px}
+
+  .mono{font-variant-numeric:tabular-nums}
+
+  /* Modal */
+  .modal-bg{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;place-items:center;z-index:2000;padding:16px}
+  .modal-bg.show{display:grid}
+  .modal-box{background:var(--surface);border-radius:var(--radius-lg);width:min(460px,100%);box-shadow:var(--shadow-lg);overflow:hidden}
+  .modal-box h3{padding:16px 18px;border-bottom:1px solid var(--border);font-size:1rem;display:flex;align-items:center;gap:8px}
+  .modal-box .mb{padding:18px}
+  .modal-box .mf{padding:14px 18px;border-top:1px solid var(--border);display:flex;gap:9px;justify-content:flex-end;background:var(--surface-2)}
+  .modal-lbl{display:block;font-size:0.78rem;font-weight:700;color:var(--text-secondary);margin:14px 0 5px}
+  .modal-lbl:first-child{margin-top:0}
+  .modal-hint{font-size:0.76rem;color:var(--text-muted);margin-top:5px}
+
+  /* toast */
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--primary);color:#fff;padding:12px 20px;border-radius:var(--radius-md);box-shadow:var(--shadow-lg);opacity:0;transition:.25s;z-index:3000;font-weight:600;font-size:0.85rem}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.ok{background:#15803d} .toast.bad{background:#b91c1c}
+
+  @media (max-width:760px){
+    .close-grid{grid-template-columns:1fr}
+    .grand-card{grid-template-columns:1fr 1fr}
+    .half .ramt{font-size:0.95rem}
+    .half .r2{font-size:0.68rem}
+  }
+</style>
+</head>
+<body>
+
+<div class="nav-bar"></div>
+
+<div class="container">
+
+  <div class="page-header">
+    <div class="page-title">
+      <i class="fas fa-scale-balanced"></i> تسوية المدفوعات <span class="highlight" id="branch-title"></span>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select class="form-select" id="branch-select" style="width:auto;display:none"></select>
+      <button class="btn btn-primary btn-sm" id="btn-refresh"><i class="fas fa-rotate"></i> تحديث</button>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs-bar">
+    <button class="tab-btn active" data-tab="recon"><i class="fas fa-table-cells"></i> التسوية</button>
+    <button class="tab-btn" data-tab="close"><i class="fas fa-lock"></i> إغلاق الشيفت</button>
+    <button class="tab-btn" data-tab="history"><i class="fas fa-clock-rotate-left"></i> الإغلاقات السابقة</button>
+  </div>
+
+  <!-- ===== RECON TAB ===== -->
+  <div class="tab-view active" id="tab-recon">
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-num" id="s-matched" style="color:var(--success)">0</div><div class="stat-lbl">مطابَقة</div></div>
+      <div class="stat-card"><div class="stat-num" id="s-diff" style="color:var(--warning)">0</div><div class="stat-lbl">فرق قيمة</div></div>
+      <div class="stat-card"><div class="stat-num" id="s-unsys" style="color:var(--danger)">0</div><div class="stat-lbl">سيستم بلا دفع</div></div>
+      <div class="stat-card"><div class="stat-num" id="s-unwal" style="color:var(--danger)">0</div><div class="stat-lbl">دفع بلا فاتورة</div></div>
+    </div>
+
+    <div class="filter-bar">
+      <span class="filter-label"><i class="fas fa-filter"></i> فلترة:</span>
+      <input class="form-input" id="search" style="width:auto;flex:1;min-width:160px" placeholder="بحث: رقم فاتورة / قيمة / موظف…">
+      <div style="display:flex;gap:4px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:3px">
+        <button class="btn btn-sm seg-btn active" data-f="all" style="background:var(--accent);color:var(--primary)">الكل</button>
+        <button class="btn btn-sm seg-btn" data-f="issues" style="background:transparent;color:var(--text-secondary)">المشاكل</button>
+        <button class="btn btn-sm seg-btn" data-f="matched" style="background:transparent;color:var(--text-secondary)">المطابق</button>
+      </div>
+      <label class="check-label"><input type="checkbox" id="show-hidden"> إظهار المخفية</label>
+    </div>
+
+    <div class="recon-table">
+      <div class="recon-thead">
+        <div class="rh sys"><i class="fas fa-file-invoice" style="color:#0284c7"></i> السيستم · B Connect <span class="col-count" id="c-system">—</span></div>
+        <div class="rh wal"><i class="fas fa-wallet" style="color:#a855f7"></i> المحافظ والماكينات <span class="col-count" id="c-wallet">—</span></div>
+      </div>
+      <div class="recon-tbody" id="recon-rows"></div>
+    </div>
+  </div>
+
+  <!-- ===== CLOSE TAB ===== -->
+  <div class="tab-view" id="tab-close">
+    <div id="close-wrap"></div>
+  </div>
+
+  <!-- ===== HISTORY TAB ===== -->
+  <div class="tab-view" id="tab-history">
+    <div class="card">
+      <div class="page-header" style="margin-bottom:14px">
+        <div class="page-title" style="font-size:1rem"><i class="fas fa-clock-rotate-left"></i> سجل إغلاقات الشيفت</div>
+        <button class="btn btn-primary btn-sm" id="hist-refresh"><i class="fas fa-rotate"></i> تحديث</button>
+      </div>
+      <div id="hist-body"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ===== MODALS ===== -->
+<div class="modal-bg" id="modal-add"><div class="modal-box">
+  <h3><i class="fas fa-plus-circle" style="color:var(--accent-dark)"></i> إضافة معاملة مقابِلة</h3>
+  <div class="mb">
+    <p class="modal-hint" id="add-context" style="margin-bottom:6px"></p>
+    <label class="modal-lbl">القيمة</label>
+    <input class="form-input" id="add-amount" type="number" step="0.01">
+    <div class="modal-hint">اتعبّت بقيمة الفاتورة. عدّلها لو العميل دفع زيادة أو أقل.</div>
+    <label class="modal-lbl">المصدر / المحفظة</label>
+    <select class="form-select" id="add-source">
+      <option value="paymob">Paymob (فيزا/ماكينة)</option>
+      <option value="orange">أورنج كاش</option>
+      <option value="vodafone">فودافون كاش</option>
+      <option value="instapay">إنستاباي</option>
+      <option value="fawry">فوري</option>
+      <option value="other">أخرى</option>
+    </select>
+    <label class="modal-lbl">ملاحظة (اختياري)</label>
+    <input class="form-input" id="add-note" placeholder="سبب الإضافة اليدوية…">
+  </div>
+  <div class="mf">
+    <button class="btn btn-sm" style="background:var(--surface-3)" onclick="closeModal('modal-add')">إلغاء</button>
+    <button class="btn btn-primary btn-sm" id="add-confirm">إضافة وربط</button>
+  </div>
+</div></div>
+
+<div class="modal-bg" id="modal-hide"><div class="modal-box">
+  <h3><i class="fas fa-eye-slash" style="color:var(--danger)"></i> إخفاء معاملة</h3>
+  <div class="mb">
+    <p class="modal-hint" id="hide-context" style="margin-bottom:6px"></p>
+    <label class="modal-lbl">سبب الإخفاء</label>
+    <select class="form-select" id="hide-reason">
+      <option value="cash_saved_visa">فاتورة فيزا وهي أصلاً كاش</option>
+      <option value="api_duplicate">الـAPI كرّر المعاملة بالخطأ</option>
+      <option value="test">معاملة تجريبية</option>
+      <option value="other">سبب آخر</option>
+    </select>
+    <label class="modal-lbl">ملاحظة (اختياري)</label>
+    <input class="form-input" id="hide-note">
+  </div>
+  <div class="mf">
+    <button class="btn btn-sm" style="background:var(--surface-3)" onclick="closeModal('modal-hide')">إلغاء</button>
+    <button class="btn btn-danger btn-sm" id="hide-confirm">إخفاء</button>
+  </div>
+</div></div>
+
+<div class="modal-bg" id="modal-pull"><div class="modal-box">
+  <h3><i class="fas fa-magnifying-glass" style="color:var(--accent-dark)"></i> استدعاء فاتورة برقمها</h3>
+  <div class="mb">
+    <p class="modal-hint" id="pull-context" style="margin-bottom:6px"></p>
+    <label class="modal-lbl">رقم الفاتورة</label>
+    <input class="form-input" id="pull-billno" placeholder="مثال: 1386021">
+    <div class="modal-hint">المعاملة من الـAPI بلا فاتورة. اكتب رقم الفاتورة وهتتربط بيها. مش هيتعدّل على الفاتورة.</div>
+    <div id="pull-result" style="margin-top:12px"></div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-sm" style="background:var(--surface-3)" onclick="closeModal('modal-pull')">إلغاء</button>
+    <button class="btn btn-primary btn-sm" id="pull-confirm" disabled>ربط الفاتورة</button>
+  </div>
+</div></div>
+
+<div class="toast" id="toast"></div>
+
+<script src="api.js"></script>
+<script src="nav.js"></script>
+<script>
+/* ============================================================
+   تسوية المدفوعات + إغلاق الشيفت
+   متكاملة مع api.js و nav.js و style.css
+   ============================================================ */
+
+/* ---- صلاحية + فرع المستخدم ---- */
+const USER_ROLE   = (localStorage.getItem('userRole')   || '').trim();
+const USER_BRANCH = (localStorage.getItem('userBranch') || '').trim();
+const IS_ADMIN    = USER_ROLE === 'admin' || USER_ROLE === 'manager';
+
+/* الفرع الفعّال: الأدمن يختار، غير الأدمن مقفول على فرعه */
+let ACTIVE_BRANCH = IS_ADMIN ? '' : USER_BRANCH;
+
+/* ---- overlay محلي للتعديلات (إخفاء/إضافة/ربط) ---- */
+const LS_OVERLAY = 'recon.overlay.v1';
+const overlay = Object.assign(
+  { hidden:{}, manual:[], matches:{}, pulls:{}, amends:{} },
+  JSON.parse(localStorage.getItem(LS_OVERLAY) || '{}')
+);
+function saveOverlay(){ localStorage.setItem(LS_OVERLAY, JSON.stringify(overlay)); }
+
+let SYSTEM=[], WALLET=[], MACHINES=[], PAIRS=[];
+let TERMINAL2STORE={}, MNAME2STORE={}, ALL_STORES=[];
+
+/* ============ helpers ============ */
+const $=s=>document.querySelector(s);
+const num=v=>{const n=parseFloat(String(v??'').replace(/,/g,''));return isFinite(n)?n:NaN;};
+const money=n=>isNaN(n)?'—':n.toLocaleString('en-EG',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtDate=s=>{if(!s)return'';const d=new Date(String(s).replace(' ','T'));return isNaN(d)?s:d.toLocaleString('ar-EG',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});};
+
+let toastT=null;
+function toast(msg,kind){const t=$('#toast');t.className='toast show '+(kind||'');t.textContent=msg;clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),2600);}
+function openModal(id){$('#'+id).classList.add('show');}
+function closeModal(id){$('#'+id).classList.remove('show');}
+document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('mousedown',e=>{if(e.target===m)m.classList.remove('show');}));
+
+/* ============ machine maps ============ */
+function mkey(s){
+  return String(s||'').toLowerCase().replace(/\s+/g,'')
+    .replace(/cash|كاش/g,'').replace(/orange|اورنج|أورنج|اورنچ/g,'orange')
+    .replace(/vodafone|فودافون/g,'vodafone').replace(/etisalat|اتصالات/g,'etisalat')
+    .replace(/instapay|انستاباي|إنستاباي|انستا/g,'instapay').replace(/fawry|فوري|فورى/g,'fawry')
+    .replace(/[^a-z0-9]/g,'');
+}
+function buildMachineMaps(){
+  TERMINAL2STORE={};MNAME2STORE={};const owners={};
+  MACHINES.forEach(m=>{
+    const store=m.store_name;if(!store)return;
+    if(m.terminal_id)TERMINAL2STORE[String(m.terminal_id)]=store;
+    const k=mkey(m.machine_name);if(k)(owners[k]=owners[k]||new Set()).add(store);
+  });
+  Object.entries(owners).forEach(([k,set])=>{if(set.size===1)MNAME2STORE[k]=[...set][0];});
+}
+
+/* ============ source detection ============ */
+function walletSource(rec){
+  if(rec.order_id||rec.terminal_id)return'paymob';
+  const m=(rec.message||'')+' '+(rec.machine_name||'')+' ';
+  if(/اورنچ|أورنج|orange/i.test(m))return'orange';
+  if(/فودافون|vodafone|vfcash/i.test(m))return'vodafone';
+  if(/اتصالات|etisalat/i.test(m))return'etisalat';
+  if(/انستا|instapay/i.test(m))return'instapay';
+  if(/فوري|فورى|fawry/i.test(m))return'fawry';
+  return'other';
+}
+const SRC_LABEL={paymob:'Paymob',orange:'أورنج كاش',vodafone:'فودافون كاش',etisalat:'اتصالات كاش',instapay:'إنستاباي',fawry:'فوري',other:'محفظة'};
+const SRC_ICON={paymob:'fa-mobile-screen-button',orange:'fa-wallet',vodafone:'fa-wallet',instapay:'fa-money-bill-transfer',fawry:'fa-store',etisalat:'fa-wallet',other:'fa-wallet'};
+
+/* ============ normalize ============ */
+function normSystem(r){
+  return{side:'system',id:'sys-'+(r.id??r.bill_no),raw:r,
+    bill_no:String(r.bill_no??'').trim(),amount:num(r.total_bill_net??r.total_bill),
+    date:r.bill_date||r.createdAt,store:r.store_name||'',who:r.employee_name||'',
+    machine:r.machine_name||'',cust:r.cust_name_ar||''};
+}
+function normWallet(r){
+  const src=walletSource(r);let store='';
+  if(r.terminal_id&&TERMINAL2STORE[String(r.terminal_id)])store=TERMINAL2STORE[String(r.terminal_id)];
+  else{const k=mkey(r.machine_name||src);if(MNAME2STORE[k])store=MNAME2STORE[k];}
+  return{side:'wallet',id:'wal-'+(r.id??(r.order_id||Math.random())),raw:r,
+    bill_no:String(r.bill_no??'').trim(),amount:num(r.amount??r.ammount),
+    date:r.transaction_time||r.createdAt,src,srcLabel:SRC_LABEL[src],store,
+    ref:r.order_id||r.terminal_id||r.from_no||'',terminal:r.terminal_id||''};
+}
+
+/* ============ matching engine ============ */
+function buildPairs(){
+  const hidden=overlay.hidden;
+  const sys=SYSTEM.filter(r=>!hidden[r.id]);
+  const wal=WALLET.filter(r=>!hidden[r.id]);
+  [...sys,...wal].forEach(r=>{if(overlay.amends[r.id]!=null)r.amount=overlay.amends[r.id];});
+
+  const usedW=new Set(),usedS=new Set(),rows=[];
+  const sysById=Object.fromEntries(sys.map(r=>[r.id,r]));
+  const walById=Object.fromEntries(wal.map(r=>[r.id,r]));
+
+  for(const[sid,wid]of Object.entries(overlay.matches)){
+    const s=sysById[sid],w=walById[wid];
+    if(s&&w&&!usedS.has(sid)&&!usedW.has(wid)){usedS.add(sid);usedW.add(wid);rows.push(makePair(s,w,'manual'));}
+  }
+  for(const[wid,billno]of Object.entries(overlay.pulls)){
+    const w=walById[wid];if(!w||usedW.has(wid))continue;
+    const s=sys.find(x=>x.bill_no&&x.bill_no===String(billno)&&!usedS.has(x.id));
+    if(s){usedS.add(s.id);usedW.add(wid);rows.push(makePair(s,w,'pulled'));}
+    else{usedW.add(wid);rows.push(makePair(null,w,'pulled-missing',{billno}));}
+  }
+  const walByBill={};
+  wal.forEach(w=>{if(w.bill_no&&!usedW.has(w.id))(walByBill[w.bill_no]=walByBill[w.bill_no]||[]).push(w);});
+  for(const s of sys){
+    if(usedS.has(s.id)||!s.bill_no)continue;
+    const c=(walByBill[s.bill_no]||[]).filter(w=>!usedW.has(w.id));
+    if(c.length){usedS.add(s.id);usedW.add(c[0].id);rows.push(makePair(s,c[0],'bill'));}
+  }
+  const walByAmt={};
+  wal.forEach(w=>{if(!usedW.has(w.id)&&!isNaN(w.amount)){const k=w.amount.toFixed(2);(walByAmt[k]=walByAmt[k]||[]).push(w);}});
+  Object.values(walByAmt).forEach(a=>a.sort((x,y)=>new Date(x.date)-new Date(y.date)));
+  const sysSorted=sys.filter(s=>!usedS.has(s.id)).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  for(const s of sysSorted){
+    if(isNaN(s.amount))continue;
+    const arr=walByAmt[s.amount.toFixed(2)];if(!arr||!arr.length)continue;
+    let idx=arr.findIndex(w=>!usedW.has(w.id)&&w.store&&s.store&&w.store===s.store);
+    if(idx<0)idx=arr.findIndex(w=>!usedW.has(w.id)&&!w.store);
+    if(idx<0)continue;
+    const w=arr.splice(idx,1)[0];usedS.add(s.id);usedW.add(w.id);rows.push(makePair(s,w,'amount'));
+  }
+  sys.forEach(s=>{if(!usedS.has(s.id))rows.push(makePair(s,null,'sys-only'));});
+  wal.forEach(w=>{if(!usedW.has(w.id))rows.push(makePair(null,w,'wal-only'));});
+
+  const sev=r=>({'sys-only':0,'wal-only':0,'pulled-missing':0,diff:1,manual:2,pulled:2,bill:3,amount:3}[r.kind]??3);
+  rows.sort((a,b)=>{const s=sev(a)-sev(b);if(s)return s;return new Date(b.sys?.date||b.wal?.date||0)-new Date(a.sys?.date||a.wal?.date||0);});
+  PAIRS=rows;
+}
+function makePair(s,w,kind,extra={}){
+  if(s&&w){
+    const diff=!isNaN(s.amount)&&!isNaN(w.amount)?+(s.amount-w.amount).toFixed(2):0;
+    let status=kind==='manual'?'manual':(Math.abs(diff)>=0.01?'diff':'matched');
+    return{sys:s,wal:w,kind:status,diff,...extra};
+  }
+  if(s)return{sys:s,wal:null,kind:'sys-only',...extra};
+  return{sys:null,wal:w,kind:(kind==='pulled-missing'?'pulled-missing':'wal-only'),...extra};
+}
+
+/* ============ render recon ============ */
+let FILTER={status:'all',q:''};
+function passFilter(p){
+  if(FILTER.status==='issues'&&['matched','bill','amount'].includes(p.kind))return false;
+  if(FILTER.status==='matched'&&!['matched','manual','bill','amount','pulled'].includes(p.kind))return false;
+  if(ACTIVE_BRANCH){
+    const inS=(p.sys?.store||'')===ACTIVE_BRANCH,inW=(p.wal?.store||'')===ACTIVE_BRANCH;
+    if(!inS&&!inW)return false;
+  }
+  if(FILTER.q){
+    const q=FILTER.q.toLowerCase();
+    const hay=[p.sys?.bill_no,p.sys?.who,p.sys?.store,p.wal?.ref,p.wal?.srcLabel,
+      p.sys&&!isNaN(p.sys.amount)?p.sys.amount:'',p.wal&&!isNaN(p.wal.amount)?p.wal.amount:''].join(' ').toLowerCase();
+    if(!hay.includes(q))return false;
+  }
+  return true;
+}
+function render(){
+  buildPairs();
+  const tb=$('#recon-rows');tb.innerHTML='';
+  let cM=0,cD=0,cUs=0,cUw=0;
+  PAIRS.filter(passFilter).forEach(p=>{
+    const pair=document.createElement('div');pair.className='pair';
+    if(['matched','bill','amount'].includes(p.kind))pair.classList.add('matched');
+    else if(p.kind==='diff')pair.classList.add('diff');
+    else if(p.kind==='manual'||p.kind==='pulled')pair.classList.add('manual');
+    // status badge once, on the pair (top-end corner)
+    const[bc,bt]=statusInfo(p.kind);
+    if(bt){const st=document.createElement('span');st.className='rstatus badge '+bc;st.textContent=bt;pair.appendChild(st);}
+    pair.appendChild(halfEl(p,'system'));
+    pair.appendChild(halfEl(p,'wallet'));
+    tb.appendChild(pair);
+  });
+  PAIRS.forEach(p=>{
+    if(['matched','manual','bill','amount','pulled'].includes(p.kind))cM++;
+    else if(p.kind==='diff')cD++;
+    else if(p.kind==='sys-only')cUs++;
+    else if(p.kind==='wal-only'||p.kind==='pulled-missing')cUw++;
+  });
+  $('#s-matched').textContent=cM;$('#s-diff').textContent=cD;$('#s-unsys').textContent=cUs;$('#s-unwal').textContent=cUw;
+  const sysN=SYSTEM.filter(s=>!ACTIVE_BRANCH||s.store===ACTIVE_BRANCH).length;
+  const walN=WALLET.filter(w=>!ACTIVE_BRANCH||w.store===ACTIVE_BRANCH).length;
+  $('#c-system').textContent=sysN+' فاتورة';$('#c-wallet').textContent=walN+' معاملة';
+  if($('#show-hidden').checked)renderHidden();
+  attachDnD();
+}
+function elSpan(t){const s=document.createElement('span');s.textContent=t;return s;}
+function srcChip(src,label){const s=document.createElement('span');s.className='src-chip src-'+src;s.innerHTML='<i class="fas '+SRC_ICON[src]+'"></i> '+label;return s;}
+function billChip(t){const s=document.createElement('span');s.className='bill-chip';s.textContent=t;return s;}
+
+function statusInfo(kind){
+  return{matched:['badge-green','مطابَقة'],manual:['badge-blue','ربط يدوي'],bill:['badge-green','رقم الفاتورة'],
+    amount:['badge-green','بالقيمة'],pulled:['badge-blue','فاتورة مستدعاة'],diff:['badge-yellow','فرق قيمة'],
+    'sys-only':['badge-red','بلا دفع'],'wal-only':['badge-red','بلا فاتورة'],'pulled-missing':['badge-red','فاتورة غير موجودة']}[kind]||['badge-gray',''];
+}
+function ibtn(cls,icon,title,fn){const b=document.createElement('button');b.className='ibtn '+cls;b.title=title;b.innerHTML='<i class="fas '+icon+'"></i>';b.onclick=e=>{e.stopPropagation();fn();};return b;}
+
+/* بناء نص واحد (يمين=system / يسار=wallet) داخل صف الزوج */
+function halfEl(p,col){
+  const rec=col==='system'?p.sys:p.wal;
+  const half=document.createElement('div');half.className='half '+(col==='system'?'sys':'wal');
+
+  if(!rec){
+    half.classList.add('empty');
+    if(col==='wallet'){
+      const b=document.createElement('button');b.className='add-here';
+      b.innerHTML='<i class="fas fa-plus"></i> إضافة معاملة دفع';b.onclick=()=>openAdd(p.sys);
+      half.appendChild(elSpan('لا توجد معاملة دفع'));half.appendChild(b);
+    }else{
+      const b=document.createElement('button');b.className='add-here';
+      b.innerHTML='<i class="fas fa-magnifying-glass"></i> استدعاء فاتورة';b.onclick=()=>openPull(p.wal,p.billno);
+      half.appendChild(elSpan(p.billno?('فاتورة '+p.billno+' غير موجودة'):'لا توجد فاتورة'));half.appendChild(b);
+    }
+    return half;
+  }
+
+  const body=document.createElement('div');body.className='rbody';
+  const r1=document.createElement('div');r1.className='r1';
+  const amt=document.createElement('span');amt.className='ramt mono';amt.textContent=money(rec.amount)+' ج';r1.appendChild(amt);
+  if(col==='system'){
+    r1.appendChild(billChip('فاتورة '+(rec.bill_no||'—')));
+  }else{
+    r1.appendChild(srcChip(rec.src,rec.srcLabel));
+    if(rec.bill_no)r1.appendChild(billChip('فاتورة '+rec.bill_no));
+  }
+  body.appendChild(r1);
+
+  const r2=document.createElement('div');r2.className='r2';
+  if(col==='system'){
+    if(rec.store)r2.appendChild(elSpan('🏥 '+rec.store));
+    if(rec.who)r2.appendChild(elSpan('👤 '+rec.who));
+    if(rec.date)r2.appendChild(elSpan('🕐 '+fmtDate(rec.date)));
+    if(p.kind==='diff'&&p.diff){const d=document.createElement('span');d.style.cssText='font-weight:700;color:'+(p.diff>0?'#b91c1c':'#15803d');d.textContent=(p.diff>0?'دفع أقل بـ ':'دفع زيادة بـ ')+money(Math.abs(p.diff))+' ج';r2.appendChild(d);}
+  }else{
+    if(rec.store)r2.appendChild(elSpan('🏥 '+rec.store));else r2.appendChild(elSpan('🏥 فرع غير محدد'));
+    if(rec.ref)r2.appendChild(elSpan('#'+rec.ref));
+    if(rec.date)r2.appendChild(elSpan('🕐 '+fmtDate(rec.date)));
+    if(overlay.amends[rec.id]!=null)r2.appendChild(elSpan('✏ معدّلة'));
+  }
+  body.appendChild(r2);
+  half.appendChild(body);
+
+  const acts=document.createElement('div');acts.className='ractions';
+  acts.appendChild(ibtn('danger','fa-eye-slash','إخفاء',()=>openHide(rec)));
+  if(rec.id.startsWith('man-'))acts.appendChild(ibtn('','fa-pen','تعديل القيمة',()=>editAmount(rec)));
+  if((p.kind==='manual'||p.kind==='pulled'))acts.appendChild(ibtn('','fa-link-slash','فك الربط',()=>unlink(p)));
+  if(p.kind==='sys-only'&&col==='system')acts.appendChild(ibtn('go','fa-link','ربط يدوي',()=>toggleSelect(p.sys,'system')));
+  if(p.kind==='wal-only'&&col==='wallet')acts.appendChild(ibtn('go','fa-link','ربط يدوي',()=>toggleSelect(p.wal,'wallet')));
+  half.appendChild(acts);
+
+  if((p.kind==='wal-only'||p.kind==='diff'||p.kind==='manual')&&col==='wallet'){half.classList.add('draggable');half.draggable=true;half.dataset.wid=rec.id;}
+  if((p.kind==='sys-only'||p.kind==='diff')&&col==='system'){half.dataset.sid=rec.id;half.dataset.drop='1';}
+  if(SEL&&SEL.id===rec.id)half.classList.add('sel');
+  return half;
+}
+
+/* ============ selection + manual match ============ */
+let SEL=null;
+function toggleSelect(rec,side){
+  if(SEL&&SEL.id===rec.id){SEL=null;render();return;}
+  if(SEL&&SEL.side!==side){
+    const sid=side==='system'?rec.id:SEL.id, wid=side==='wallet'?rec.id:SEL.id;
+    overlay.matches[sid]=wid;saveOverlay();SEL=null;render();toast('تم الربط اليدوي','ok');
+    syncManualMatch(sid,wid);return;
+  }
+  SEL={id:rec.id,side,rec};render();toast('اختَر المعاملة المقابلة أو اسحبها','ok');
+}
+function attachDnD(){
+  document.querySelectorAll('.half.draggable').forEach(r=>{
+    r.addEventListener('dragstart',e=>{r.classList.add('dragging');e.dataTransfer.setData('wid',r.dataset.wid);});
+    r.addEventListener('dragend',()=>r.classList.remove('dragging'));
+  });
+  document.querySelectorAll('.half[data-drop]').forEach(r=>{
+    r.addEventListener('dragover',e=>{e.preventDefault();r.classList.add('drop-ok');});
+    r.addEventListener('dragleave',()=>r.classList.remove('drop-ok'));
+    r.addEventListener('drop',e=>{
+      e.preventDefault();r.classList.remove('drop-ok');
+      const wid=e.dataTransfer.getData('wid'),sid=r.dataset.sid;
+      if(wid&&sid){
+        Object.keys(overlay.matches).forEach(k=>{if(k===sid||overlay.matches[k]===wid)delete overlay.matches[k];});
+        overlay.matches[sid]=wid;saveOverlay();render();toast('تم الربط بالسحب','ok');syncManualMatch(sid,wid);
+      }
+    });
+  });
+}
+
+/* ============ actions ============ */
+let HIDE_T=null;
+function openHide(rec){HIDE_T=rec;$('#hide-context').textContent=(rec.side==='system'?'فاتورة ':'معاملة ')+(rec.bill_no||rec.ref||'')+' · '+money(rec.amount)+' ج';$('#hide-reason').value=rec.side==='system'?'cash_saved_visa':'api_duplicate';openModal('modal-hide');}
+$('#hide-confirm').onclick=()=>{if(!HIDE_T)return;overlay.hidden[HIDE_T.id]={reason:$('#hide-reason').value,note:$('#hide-note').value,at:Date.now()};saveOverlay();closeModal('modal-hide');$('#hide-note').value='';render();toast('تم إخفاء المعاملة','ok');};
+
+let ADD_FOR=null;
+function openAdd(s){ADD_FOR=s;$('#add-context').textContent='مقابل فاتورة '+(s.bill_no||'')+' بقيمة '+money(s.amount)+' ج';$('#add-amount').value=isNaN(s.amount)?'':s.amount;$('#add-note').value='';openModal('modal-add');}
+$('#add-confirm').onclick=async()=>{
+  if(!ADD_FOR)return;const amount=num($('#add-amount').value);
+  if(isNaN(amount)){toast('اكتب قيمة صحيحة','bad');return;}
+  const src=$('#add-source').value;
+  const man={side:'wallet',id:'man-'+Date.now(),raw:{manual:true},bill_no:ADD_FOR.bill_no,amount,date:new Date().toISOString(),src,srcLabel:SRC_LABEL[src],store:ADD_FOR.store||'',ref:'يدوي',terminal:''};
+  overlay.manual.push(man);overlay.matches[ADD_FOR.id]=man.id;saveOverlay();WALLET.push(man);
+  closeModal('modal-add');render();toast('تمت الإضافة والربط','ok');
+  // كتابة لـ n8n: معاملة باي موب يدوي (لو المصدر paymob)
+  if(src==='paymob'&&typeof paymobInsert==='function'){
+    const ok=await paymobInsert({amount,terminal_id:'',bill_no:ADD_FOR.bill_no||'',transaction_time:man.date});
+    if(!ok)console.warn('paymobInsert failed');
+  }else if(typeof insertSms==='function'){
+    insertSms({ammount:amount,from_no:'يدوي',bill_no:ADD_FOR.bill_no||'',machine_name:SRC_LABEL[src]});
+  }
+};
+function editAmount(rec){
+  const v=prompt('القيمة الجديدة:',isNaN(rec.amount)?'':rec.amount);if(v==null)return;
+  const n=num(v);if(isNaN(n)){toast('قيمة غير صحيحة','bad');return;}
+  overlay.amends[rec.id]=n;const m=overlay.manual.find(x=>x.id===rec.id);if(m)m.amount=n;
+  saveOverlay();render();toast('تم تعديل القيمة','ok');
+}
+let PULL_FOR=null;
+function openPull(w,preset){PULL_FOR=w;$('#pull-context').textContent='معاملة '+w.srcLabel+' · '+money(w.amount)+' ج بلا فاتورة';$('#pull-billno').value=preset||'';$('#pull-result').innerHTML='';$('#pull-confirm').disabled=true;openModal('modal-pull');setTimeout(()=>$('#pull-billno').focus(),50);}
+$('#pull-billno').addEventListener('input',()=>{
+  const bn=$('#pull-billno').value.trim();const found=SYSTEM.find(s=>String(s.bill_no)===bn&&!overlay.hidden[s.id]);const res=$('#pull-result');
+  if(!bn){res.innerHTML='';$('#pull-confirm').disabled=true;return;}
+  if(found){res.innerHTML='<div class="badge badge-green" style="padding:8px 12px;display:block">✓ فاتورة '+found.bill_no+' · '+money(found.amount)+' ج · '+(found.store||'')+' · '+(found.who||'')+'</div>';$('#pull-confirm').disabled=false;}
+  else{res.innerHTML='<div class="badge badge-red" style="padding:8px 12px;display:block">لا توجد فاتورة بهذا الرقم.</div>';$('#pull-confirm').disabled=true;}
+});
+$('#pull-confirm').onclick=async()=>{
+  if(!PULL_FOR)return;const bn=$('#pull-billno').value.trim();
+  overlay.pulls[PULL_FOR.id]=bn;saveOverlay();closeModal('modal-pull');render();toast('تم ربط الفاتورة','ok');
+  // كتابة رقم الفاتورة على معاملة باي موب
+  if(PULL_FOR.src==='paymob'&&PULL_FOR.raw&&PULL_FOR.raw.id!=null&&typeof paymobUpdate==='function'){
+    const ok=await paymobUpdate({id:PULL_FOR.raw.id,bill_no:bn});if(!ok)console.warn('paymobUpdate failed');
+  }
+};
+function unlink(p){if(p.sys&&overlay.matches[p.sys.id])delete overlay.matches[p.sys.id];if(p.wal&&overlay.pulls[p.wal.id])delete overlay.pulls[p.wal.id];saveOverlay();render();toast('تم فك الربط','ok');}
+
+function renderHidden(){
+  const tb=$('#recon-rows');
+  [...SYSTEM,...WALLET].filter(r=>overlay.hidden[r.id]&&(!ACTIVE_BRANCH||r.store===ACTIVE_BRANCH)).forEach(r=>{
+    const pair=document.createElement('div');pair.className='pair hidden-soft';
+    const mk=(rec)=>{
+      const half=document.createElement('div');half.className='half '+(rec.side==='system'?'sys':'wal');
+      const body=document.createElement('div');body.className='rbody';
+      body.innerHTML='<div class="r1"><span class="ramt mono">'+money(rec.amount)+' ج</span><span class="badge badge-gray">مخفية</span></div><div class="r2">'+(overlay.hidden[rec.id].reason||'')+'</div>';
+      const acts=document.createElement('div');acts.className='ractions';
+      acts.appendChild(ibtn('','fa-rotate-left','إلغاء الإخفاء',()=>{delete overlay.hidden[rec.id];saveOverlay();render();toast('تم الاسترجاع','ok');}));
+      half.appendChild(body);half.appendChild(acts);return half;
+    };
+    const blank=(cls)=>{const h=document.createElement('div');h.className='half '+cls;h.style.background='var(--surface-2)';return h;};
+    if(r.side==='system'){pair.appendChild(mk(r));pair.appendChild(blank('wal'));}
+    else{pair.appendChild(blank('sys'));pair.appendChild(mk(r));}
+    tb.appendChild(pair);
+  });
+}
+
+/* ربط n8n: لو معاملة باي موب اترِبطت يدوياً، اكتب رقم الفاتورة عليها */
+function syncManualMatch(sid,wid){
+  const w=WALLET.find(x=>x.id===wid),s=SYSTEM.find(x=>x.id===sid);
+  if(w&&s&&w.src==='paymob'&&w.raw&&w.raw.id!=null&&s.bill_no&&typeof paymobUpdate==='function'){
+    paymobUpdate({id:w.raw.id,bill_no:s.bill_no});
+  }
+}
+
+/* ============================================================
+   CLOSE SHIFT
+   ============================================================ */
+const DENOMS=[200,100,50,20,10,5,1,0.5,0.25];
+const LS_DRAFT='recon.closedraft.v1';
+let closeDraft=JSON.parse(localStorage.getItem(LS_DRAFT)||'{}');
+function saveDraft(){localStorage.setItem(LS_DRAFT,JSON.stringify(closeDraft));}
+
+function branchWalletTotals(branch){
+  const rows=WALLET.filter(w=>!overlay.hidden[w.id]).filter(w=>branch?(w.store===branch):true);
+  const g={};
+  rows.forEach(w=>{const k=w.terminal?(w.srcLabel+' · '+w.terminal):w.srcLabel;if(!g[k])g[k]={label:k,src:w.src,count:0,total:0};g[k].count++;if(!isNaN(w.amount))g[k].total+=w.amount;});
+  return Object.values(g).sort((a,b)=>b.total-a.total);
+}
+
+function buildCloseView(){
+  const branch=ACTIVE_BRANCH;const wrap=$('#close-wrap');
+  if(!branch){
+    wrap.innerHTML='<div class="lock-warn"><i class="fas fa-triangle-exclamation"></i> إغلاق الشيفت بيتم على مستوى الفرع. اختار الفرع من القائمة فوق (الفرع بيقفل شيفته، مش الأدمن).</div>';
+    return;
+  }
+  if(!closeDraft.counts)closeDraft.counts={};
+  if(!closeDraft.custodies)closeDraft.custodies=[{name:'',amount:''}];
+  if(closeDraft.notes==null)closeDraft.notes='';
+
+  const wt=branchWalletTotals(branch);const walletSum=wt.reduce((s,g)=>s+g.total,0);
+
+  wrap.innerHTML=`
+    <div class="card" style="margin-bottom:16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <div><div style="font-weight:900;font-size:1.05rem">إغلاق شيفت — ${branch}</div>
+      <div style="color:var(--text-muted);font-size:0.8rem">${new Date().toLocaleString('ar-EG',{dateStyle:'medium',timeStyle:'short'})}</div></div>
+      <div style="flex:1"></div>
+      <input class="form-input" id="close-cashier" style="width:auto;min-width:200px" placeholder="اسم الكاشير المسؤول">
+    </div>
+    <div class="close-grid">
+      <div class="card">
+        <div class="card-mini-head"><i class="fas fa-calculator" style="color:var(--accent-dark)"></i> جرد النقدية <span class="htot mono" id="cash-h">0.00 ج</span></div>
+        <div id="denoms"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="card">
+          <div class="card-mini-head"><i class="fas fa-motorcycle" style="color:#c2410c"></i> العهدة مع الطيارين <span class="htot mono" id="cust-h">0.00 ج</span></div>
+          <div id="custodies"></div>
+          <button class="add-line-btn" id="add-custody"><i class="fas fa-plus"></i> إضافة طيار / عهدة</button>
+        </div>
+        <div class="card">
+          <div class="card-mini-head"><i class="fas fa-wallet" style="color:#0369a1"></i> المحافظ والماكينات (تلقائي) <span class="htot mono" id="wallet-h">${money(walletSum)} ج</span></div>
+          <div>${wt.length?wt.map(g=>`<div class="wtot-line"><span class="src-chip src-${g.src}"><i class="fas ${SRC_ICON[g.src]}"></i> ${g.label}</span><span><span style="color:var(--text-muted);font-size:0.74rem">${g.count} معاملة · </span><b class="mono">${money(g.total)} ج</b></span></div>`).join(''):'<div class="empty-state" style="padding:20px"><i class="fas fa-inbox"></i>لا توجد معاملات محافظ لهذا الفرع في الشيفت الحالي.</div>'}</div>
+        </div>
+        <div class="card">
+          <div class="card-mini-head"><i class="fas fa-note-sticky" style="color:var(--text-secondary)"></i> ملاحظات</div>
+          <textarea class="form-input" id="close-notes" rows="2" placeholder="أي ملاحظات…">${closeDraft.notes||''}</textarea>
+        </div>
+      </div>
+      <div class="grand-card">
+        <div class="grand-cell cash"><div class="gl">إجمالي الكاش</div><div class="gv mono" id="g-cash">0.00</div></div>
+        <div class="grand-cell cust"><div class="gl">العهد مع الطيارين</div><div class="gv mono" id="g-cust">0.00</div></div>
+        <div class="grand-cell auto"><div class="gl">المحافظ والماكينات</div><div class="gv mono" id="g-auto">${money(walletSum)}</div></div>
+        <div class="grand-cell total"><div class="gl">الإجمالي المرحَّل</div><div class="gv mono" id="g-total">0.00</div></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:16px">
+      <span style="color:var(--text-muted);font-size:0.8rem">الإجمالي المرحَّل = الكاش + العهد + المحافظ — ده اللي بيتصرف من نقطة البيع.</span>
+      <div style="flex:1"></div>
+      <button class="btn btn-sm" style="background:var(--surface-3)" onclick="window.print()"><i class="fas fa-print"></i> طباعة</button>
+      <button class="btn btn-success" id="btn-save-close"><i class="fas fa-lock"></i> حفظ وإغلاق الشيفت</button>
+    </div>`;
+
+  renderDenoms();renderCustodies();
+  $('#close-cashier').value=closeDraft.cashier||localStorage.getItem('activeUser')||'';
+  $('#close-cashier').addEventListener('input',e=>{closeDraft.cashier=e.target.value;saveDraft();});
+  $('#close-notes').addEventListener('input',e=>{closeDraft.notes=e.target.value;saveDraft();});
+  $('#add-custody').onclick=()=>{closeDraft.custodies.push({name:'',amount:''});saveDraft();renderCustodies();recalc();};
+  $('#btn-save-close').onclick=()=>saveClose(branch,wt,walletSum);
+  recalc();
+}
+function renderDenoms(){
+  const el=$('#denoms');el.innerHTML='';
+  DENOMS.forEach(d=>{
+    const coin=d<1,row=document.createElement('div');row.className='denom-row';
+    const c=closeDraft.counts[d]??'';
+    row.innerHTML='<div class="denom-face '+(coin?'coin':'note')+'">'+(d>=1?d:d.toFixed(2))+' ج</div><input class="table-input" type="number" min="0" inputmode="numeric" data-d="'+d+'" value="'+c+'" placeholder="العدد" style="text-align:center"><div class="denom-sub zero mono" data-sub="'+d+'">0.00</div>';
+    el.appendChild(row);
+  });
+  el.querySelectorAll('input').forEach(inp=>{
+    const upd=()=>{const d=parseFloat(inp.dataset.d),c=parseInt(inp.value)||0;closeDraft.counts[d]=inp.value===''?'':c;saveDraft();const sub=el.querySelector('[data-sub="'+d+'"]');sub.textContent=money(d*c);sub.classList.toggle('zero',!(d*c));recalc();};
+    inp.addEventListener('input',upd);
+    const d=parseFloat(inp.dataset.d),c=parseInt(inp.value)||0,sub=el.querySelector('[data-sub="'+d+'"]');sub.textContent=money(d*c);sub.classList.toggle('zero',!(d*c));
+  });
+}
+function renderCustodies(){
+  const el=$('#custodies');el.innerHTML='';
+  closeDraft.custodies.forEach((c,i)=>{
+    const row=document.createElement('div');row.className='cust-line';
+    row.innerHTML='<input class="table-input" placeholder="اسم الطيار / الجهة" data-i="'+i+'" data-k="name" value="'+(c.name||'')+'"><input class="table-input mono" type="number" step="0.01" placeholder="المبلغ" data-i="'+i+'" data-k="amount" value="'+(c.amount||'')+'" style="text-align:center"><button class="ibtn danger" data-del="'+i+'">×</button>';
+    el.appendChild(row);
+  });
+  el.querySelectorAll('input').forEach(inp=>inp.addEventListener('input',()=>{closeDraft.custodies[+inp.dataset.i][inp.dataset.k]=inp.value;saveDraft();recalc();}));
+  el.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{closeDraft.custodies.splice(+b.dataset.del,1);if(!closeDraft.custodies.length)closeDraft.custodies=[{name:'',amount:''}];saveDraft();renderCustodies();recalc();});
+}
+function recalc(){
+  let cash=0;DENOMS.forEach(d=>cash+=d*(parseInt(closeDraft.counts[d])||0));
+  let cust=0;closeDraft.custodies.forEach(c=>cust+=parseFloat(c.amount)||0);
+  const walletSum=branchWalletTotals(ACTIVE_BRANCH).reduce((s,g)=>s+g.total,0);
+  const set=(id,v)=>{const e=$(id);if(e)e.textContent=v;};
+  set('#cash-h',money(cash)+' ج');set('#cust-h',money(cust)+' ج');
+  set('#g-cash',money(cash));set('#g-cust',money(cust));set('#g-auto',money(walletSum));set('#g-total',money(cash+cust+walletSum));
+}
+async function saveClose(branch,wt,walletSum){
+  let cash=0;DENOMS.forEach(d=>cash+=d*(parseInt(closeDraft.counts[d])||0));
+  const custodies=closeDraft.custodies.filter(c=>(c.name||'').trim()||parseFloat(c.amount));
+  const custSum=custodies.reduce((s,c)=>s+(parseFloat(c.amount)||0),0);
+  const cashier=($('#close-cashier')?.value||'').trim();
+  if(cash===0&&walletSum===0&&custSum===0){if(!confirm('كل المبالغ صفر. تأكيد إغلاق شيفت فاضي؟'))return;}
+
+  const closedWalletIds=WALLET.filter(w=>!overlay.hidden[w.id]&&w.store===branch).map(w=>(w.raw&&w.raw.id!=null)?w.raw.id:w.id);
+  const record={
+    branch,cashier,closed_at:new Date().toISOString(),
+    cash_breakdown:Object.fromEntries(DENOMS.map(d=>[d,parseInt(closeDraft.counts[d])||0]).filter(x=>x[1])),
+    cash_total:+cash.toFixed(2),custodies,custody_total:+custSum.toFixed(2),
+    wallets:wt.map(g=>({label:g.label,src:g.src,count:g.count,total:+g.total.toFixed(2)})),
+    wallet_total:+walletSum.toFixed(2),grand_total:+(cash+custSum+walletSum).toFixed(2),
+    notes:closeDraft.notes||'',closed_wallet_ids:closedWalletIds
+  };
+
+  $('#btn-save-close').disabled=true;
+  let ok=false;
+  if(typeof postShiftClose==='function'){try{ok=await postShiftClose(record);}catch(e){console.warn(e);}}
+
+  const local=JSON.parse(localStorage.getItem('recon.closes.v1')||'[]');
+  local.unshift({...record,id:'local-'+Date.now(),_local:true,_synced:ok});
+  localStorage.setItem('recon.closes.v1',JSON.stringify(local));
+
+  closedWalletIds.forEach(rid=>{const w=WALLET.find(x=>((x.raw&&x.raw.id)||x.id)===rid);if(w)overlay.hidden[w.id]={reason:'closed_shift',shift:record.closed_at,note:'مرحّلة بإغلاق شيفت '+branch,at:Date.now()};});
+  saveOverlay();
+  closeDraft={counts:{},custodies:[{name:'',amount:''}],notes:'',cashier:''};saveDraft();
+  $('#btn-save-close').disabled=false;
+  toast(ok?'تم حفظ الإغلاق وترحيل الشيفت':'تم الحفظ محلياً (n8n غير موصّل)',ok?'ok':'bad');
+  render();buildCloseView();
+}
+
+/* ============================================================
+   HISTORY
+   ============================================================ */
+async function loadHistory(){
+  const body=$('#hist-body');body.innerHTML='<div class="empty-state"><i class="fas fa-spinner fa-spin"></i>جاري التحميل…</div>';
+  let rows=[];
+  if(typeof fetchShiftCloses==='function'){try{const d=await fetchShiftCloses();rows=Array.isArray(d)?d:[];}catch(e){}}
+  const local=JSON.parse(localStorage.getItem('recon.closes.v1')||'[]');
+  const seen=new Set(rows.map(r=>r.closed_at));local.forEach(l=>{if(!seen.has(l.closed_at))rows.push(l);});
+  if(!IS_ADMIN)rows=rows.filter(r=>r.branch===USER_BRANCH);
+  rows.sort((a,b)=>new Date(b.closed_at)-new Date(a.closed_at));
+  if(!rows.length){body.innerHTML='<div class="empty-state"><i class="fas fa-folder-open"></i>مفيش إغلاقات محفوظة بعد.</div>';return;}
+  body.innerHTML='<div class="table-wrap"><table><thead><tr><th>التاريخ</th><th>الفرع</th><th>الكاشير</th><th>الكاش</th><th>العهد</th><th>المحافظ</th><th>الإجمالي</th><th>الحالة</th><th></th></tr></thead><tbody>'+
+    rows.map((r,i)=>'<tr><td class="mono">'+new Date(r.closed_at).toLocaleString('ar-EG',{dateStyle:'short',timeStyle:'short'})+'</td><td><span class="branch-tag">'+(r.branch||'')+'</span></td><td>'+(r.cashier||'—')+'</td><td class="mono">'+money(r.cash_total||0)+'</td><td class="mono">'+money(r.custody_total||0)+'</td><td class="mono">'+money(r.wallet_total||0)+'</td><td class="mono" style="font-weight:900;color:#15803d">'+money(r.grand_total||0)+'</td><td>'+(r._local?(r._synced?'<span class="badge badge-green">مُزامن</span>':'<span class="badge badge-yellow">محلي</span>'):'<span class="badge badge-green">n8n</span>')+'</td><td><button class="btn btn-sm btn-primary" data-hi="'+i+'">تفاصيل</button></td></tr>').join('')+
+    '</tbody></table></div>';
+  body.querySelectorAll('[data-hi]').forEach(b=>b.onclick=()=>showDetail(rows[+b.dataset.hi]));
+}
+function showDetail(r){
+  const cash=Object.entries(r.cash_breakdown||{}).map(([d,c])=>(+d>=1?d:(+d).toFixed(2))+'ج × '+c+' = '+money(+d*c)).join('\n')||'—';
+  const cust=(r.custodies||[]).map(c=>(c.name||'—')+': '+money(parseFloat(c.amount)||0)).join('\n')||'—';
+  const wal=(r.wallets||[]).map(w=>w.label+': '+money(w.total)+' ('+w.count+')').join('\n')||'—';
+  alert('إغلاق شيفت — '+r.branch+'\n'+new Date(r.closed_at).toLocaleString('ar-EG')+'\nالكاشير: '+(r.cashier||'—')+'\n\n— النقدية —\n'+cash+'\nإجمالي الكاش: '+money(r.cash_total||0)+'\n\n— العهد —\n'+cust+'\nإجمالي العهد: '+money(r.custody_total||0)+'\n\n— المحافظ —\n'+wal+'\nإجمالي المحافظ: '+money(r.wallet_total||0)+'\n\nالإجمالي المرحّل: '+money(r.grand_total||0)+' ج'+(r.notes?'\n\nملاحظات: '+r.notes:''));
+}
+
+/* ============================================================
+   LOAD DATA (من api.js)
+   ============================================================ */
+async function loadData(){
+  $('#btn-refresh').disabled=true;
+  $('#recon-rows').innerHTML='<div class="empty-state" style="padding:40px"><i class="fas fa-spinner fa-spin"></i> تحميل…</div>';
+  try{
+    const [paymob,sms,machines,branchSales]=await Promise.all([
+      typeof fetchPaymob==='function'?fetchPaymob():[],
+      typeof fetchSms==='function'?fetchSms():[],
+      typeof fetchMachines==='function'?fetchMachines():[],
+      typeof fetchBranchSales==='function'?fetchBranchSales():[]
+    ]);
+    MACHINES=Array.isArray(machines)?machines:[];
+    buildMachineMaps();
+    SYSTEM=(Array.isArray(branchSales)?branchSales:[]).map(normSystem);
+    WALLET=[...(Array.isArray(paymob)?paymob:[]).map(normWallet),...(Array.isArray(sms)?sms:[]).map(normWallet)];
+    overlay.manual.forEach(m=>WALLET.push(m));
+    ALL_STORES=[...new Set([...MACHINES.map(m=>m.store_name).filter(Boolean),...SYSTEM.map(s=>s.store).filter(Boolean)])].sort();
+    populateBranches();
+    render();
+    if(CURRENT_TAB==='close')buildCloseView();
+  }catch(e){
+    console.error(e);
+    $('#recon-rows').innerHTML='<div class="empty-state"><i class="fas fa-circle-exclamation"></i>تعذّر تحميل البيانات. تأكد من اتصالك بالإنترنت.</div>';
+  }finally{$('#btn-refresh').disabled=false;}
+}
+
+function populateBranches(){
+  const sel=$('#branch-select');
+  if(IS_ADMIN){
+    sel.style.display='';
+    const cur=sel.value;
+    sel.innerHTML='<option value="">كل الفروع (أدمن)</option>'+ALL_STORES.map(s=>'<option>'+s+'</option>').join('');
+    if(ALL_STORES.includes(cur))sel.value=cur;
+  }else{
+    sel.style.display='none';
+  }
+  updateBranchTitle();
+}
+function updateBranchTitle(){
+  const t=$('#branch-title');
+  if(ACTIVE_BRANCH)t.textContent='· '+ACTIVE_BRANCH;
+  else if(IS_ADMIN)t.textContent='· كل الفروع';
+  else t.textContent='';
+}
+
+/* ============================================================
+   TABS + WIRE UP
+   ============================================================ */
+let CURRENT_TAB='recon';
+document.querySelectorAll('.tab-btn').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('.tab-btn').forEach(x=>x.classList.remove('active'));b.classList.add('active');
+    CURRENT_TAB=b.dataset.tab;
+    document.querySelectorAll('.tab-view').forEach(v=>v.classList.remove('active'));
+    $('#tab-'+CURRENT_TAB).classList.add('active');
+    if(CURRENT_TAB==='close')buildCloseView();
+    if(CURRENT_TAB==='history')loadHistory();
+  };
+});
+$('#btn-refresh').onclick=loadData;
+$('#hist-refresh').onclick=loadHistory;
+$('#search').addEventListener('input',e=>{FILTER.q=e.target.value.trim();render();});
+$('#show-hidden').addEventListener('change',render);
+document.querySelectorAll('.seg-btn').forEach(b=>{
+  b.onclick=()=>{document.querySelectorAll('.seg-btn').forEach(x=>{x.classList.remove('active');x.style.background='transparent';x.style.color='var(--text-secondary)';});b.classList.add('active');b.style.background='var(--accent)';b.style.color='var(--primary)';FILTER.status=b.dataset.f;render();};
+});
+$('#branch-select').addEventListener('change',e=>{
+  ACTIVE_BRANCH=e.target.value;updateBranchTitle();render();
+  if(CURRENT_TAB==='close')buildCloseView();
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.querySelectorAll('.modal-bg.show').forEach(m=>m.classList.remove('show'));if(SEL){SEL=null;render();}}});
+
+/* ============================================================
+   INIT — حماية + تحميل
+   ============================================================ */
+(async function init(){
+  if(typeof checkAuth==='function'){
+    const user=await checkAuth();
+    if(!user)return; // checkAuth بيعمل redirect
+  }
+  updateBranchTitle();
+  loadData();
+})();
+</script>
+</body>
+</html>
