@@ -33,7 +33,7 @@ function injectNavbar() {
   var csPages          = ['customer_service.html', 'shortages.html'];
   var purchasesPages   = ['purchases.html', 'cosmo_order.html', 'inventory_management.html'];
   // ✅ تعديل ١: ضفنا sms.html لصفحات الفيزا عشان زرار "فيزا" يفضل مظلّل
-  var visaPages        = ['visa_transactions.html', 'bank_monitor.html', 'paymob.html', 'sms.html'];
+var visaPages        = ['visa_transactions.html', 'bank_monitor.html', 'paymob.html', 'sms.html', 'pos_reconciliation.html'];
   var isContractPage   = contractPages.includes(currentPage);
   var isCSPage         = csPages.includes(currentPage);
   var isPurchasesPage  = purchasesPages.includes(currentPage);
@@ -163,12 +163,14 @@ var navContent =
 
   // Dropdown: فيزا
   // ✅ تعديل ٢: ضفنا "معاملات المحافظ" كآخر عنصر في القائمة
-  createFloatingDropdown('visa-dropdown', [
+createFloatingDropdown('visa-dropdown', [
     { href: 'visa_transactions.html', icon: 'fa-credit-card',          label: 'معاملات الفيزا',  active: currentPage === 'visa_transactions.html' },
     { href: 'bank_monitor.html',      icon: 'fa-university',           label: 'متابعة البنك',    active: currentPage === 'bank_monitor.html' },
     { href: 'paymob.html',            icon: 'fa-mobile-screen-button', label: 'معاملات باي موب', active: currentPage === 'paymob.html' },
-    { href: 'sms.html',               icon: 'fa-wallet',               label: 'معاملات المحافظ', active: currentPage === 'sms.html' }
+    { href: 'sms.html',               icon: 'fa-wallet',               label: 'معاملات المحافظ', active: currentPage === 'sms.html' },
+    { href: 'pos_reconciliation.html', icon: 'fa-scale-balanced',      label: 'تسوية وإغلاق',    active: currentPage === 'pos_reconciliation.html' }
   ]);
+  
 
   bindToggle('purchases-toggle', 'purchases-dropdown');
   bindToggle('cs-toggle',        'cs-dropdown');
