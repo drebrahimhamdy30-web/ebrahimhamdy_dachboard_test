@@ -788,30 +788,58 @@ function showDetail(r){
 }
 
 /* ============================================================
-   LOAD DATA (من api.js)
+   LOAD DATA — نداء واحد من webhook posmanagement
+   بيرجّع object: { sms, paymob, branch_visa_sales, machine }
    ============================================================ */
+const POSMGMT_URL = 'https://agent.ebrahimhamdy.com/webhook/posmanagement';
+
 async function loadData(){
   $('#btn-refresh').disabled=true;
   $('#recon-rows').innerHTML='<div class="empty-state" style="padding:40px"><i class="fas fa-spinner fa-spin"></i> تحميل…</div>';
   try{
-    const [paymob,sms,machines,branchSales]=await Promise.all([
-      typeof fetchPaymob==='function'?fetchPaymob():[],
-      typeof fetchSms==='function'?fetchSms():[],
-      typeof fetchMachines==='function'?fetchMachines():[],
-      typeof fetchBranchSales==='function'?fetchBranchSales():[]
-    ]);
-    MACHINES=Array.isArray(machines)?machines:[];
+    const res=await fetch(POSMGMT_URL);
+    const text=await res.text();
+    let data = text && text.trim() ? JSON.parse(text) : {};
+    // n8n ممكن يلف الرد في array: [{...}]
+    if(Array.isArray(data)) data = data[0] || {};
+
+    // استخراج الجداول من المفاتيح، مع fallback للتصنيف لو رجعت array مخلوطة
+    let sms=[], paymob=[], branch=[], machines=[];
+    const pick=o=>Array.isArray(o)?o:[];
+    if(data && typeof data==='object' && !Array.isArray(data) &&
+       (data.sms||data.paymob||data.branch_visa_sales||data.machine)){
+      sms     = pick(data.sms);
+      paymob  = pick(data.paymob);
+      branch  = pick(data.branch_visa_sales || data.branchvisasales);
+      machines= pick(data.machine || data.machines);
+    } else {
+      // fallback: صنّف صفوف array مخلوطة حسب الأعمدة المميزة
+      const flat = Array.isArray(data) ? data.flat() : Object.values(data).flat();
+      flat.forEach(r=>{
+        if(!r||typeof r!=='object') return;
+        if(('machine_name' in r)&&('is_active' in r)&&!('total_bill' in r)&&!('amount' in r)&&!('order_id' in r)) machines.push(r);
+        else if('total_bill' in r) branch.push(r);
+        else if('order_id' in r) paymob.push(r);
+        else if(('message' in r)||('from_no' in r)||('ammount' in r)) sms.push(r);
+        else if(('terminal_id' in r)&&('amount' in r)) paymob.push(r);
+      });
+    }
+
+    MACHINES=machines;
     buildMachineMaps();
-    SYSTEM=(Array.isArray(branchSales)?branchSales:[]).map(normSystem);
-    WALLET=[...(Array.isArray(paymob)?paymob:[]).map(normWallet),...(Array.isArray(sms)?sms:[]).map(normWallet)];
+    SYSTEM=branch.map(normSystem);
+    WALLET=[...paymob.map(normWallet),...sms.map(normWallet)];
     overlay.manual.forEach(m=>WALLET.push(m));
     ALL_STORES=[...new Set([...MACHINES.map(m=>m.store_name).filter(Boolean),...SYSTEM.map(s=>s.store).filter(Boolean)])].sort();
     populateBranches();
     render();
     if(CURRENT_TAB==='close')buildCloseView();
+    if(!SYSTEM.length && !WALLET.length){
+      $('#recon-rows').innerHTML='<div class="empty-state"><i class="fas fa-inbox"></i>مفيش بيانات. تأكد إن webhook posmanagement شغّال ويرجّع الجداول.</div>';
+    }
   }catch(e){
     console.error(e);
-    $('#recon-rows').innerHTML='<div class="empty-state"><i class="fas fa-circle-exclamation"></i>تعذّر تحميل البيانات. تأكد من اتصالك بالإنترنت.</div>';
+    $('#recon-rows').innerHTML='<div class="empty-state"><i class="fas fa-circle-exclamation"></i>تعذّر تحميل البيانات. تأكد من اتصالك ومن أن posmanagement شغّال.</div>';
   }finally{$('#btn-refresh').disabled=false;}
 }
 
