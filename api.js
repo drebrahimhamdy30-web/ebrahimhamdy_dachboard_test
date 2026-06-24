@@ -239,6 +239,34 @@ async function insertSms(data) {
     return false;
   }
 }
+// ===================== إغلاق نقطة البيع + التسوية =====================
+// ألصق الدوال دي في آخر api.js عندك (قبل دالة logout أو بعدها، مش فارقة)
+
+// ---- فواتير السيستم (B Connect) ----
+// بتمشي على نفس fetchFromN8N بنوع branch_visa_sales
+// محتاج تضيف فرع type=branch_visa_sales في n8n يرجّع جدول الفواتير
+async function fetchBranchSales() { return await fetchFromN8N('branch_visa_sales'); }
+
+// ---- إغلاق الشيفت ----
+// حفظ إغلاق شيفت — بيتبعت لـ taskmanagement (POST_URL) بنوع shift_close
+// محتاج تضيف فرع type=shift_close في n8n يخزّن في جدول shift_closes
+// وكمان ياخد closed_wallet_ids ويعلّم المعاملات دي كـ "مرحّلة" عشان متظهرش في الشيفت الجديد
+async function postShiftClose(data) {
+  try {
+    const response = await fetch(POST_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'shift_close', ...data })
+    });
+    return response.ok;
+  } catch (e) {
+    console.error('postShiftClose error:', e);
+    return false;
+  }
+}
+
+// جلب سجل الإغلاقات السابقة — بنفس fetchFromN8N بنوع shift_closes
+async function fetchShiftCloses() { return await fetchFromN8N('shift_closes'); }
 
 function logout() {
   localStorage.clear();
