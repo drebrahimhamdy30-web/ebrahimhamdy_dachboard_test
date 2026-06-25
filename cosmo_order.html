@@ -54,11 +54,13 @@
     .qty-input:disabled { background:var(--surface-3);color:var(--text-muted);cursor:not-allowed; }
     .qty-edited { border-color:var(--accent)!important;background:#eff6ff!important; }
     /* صف البحث + الشركات في سطر واحد */
-    .search-company-row { display:grid;grid-template-columns:1fr 1.4fr;gap:8px;margin-bottom:10px; }
+    .search-company-row { display:grid;grid-template-columns:1fr 1.4fr;gap:8px;margin-bottom:10px;align-items:stretch; }
     @media(max-width:600px){ .search-company-row{grid-template-columns:1fr;} }
+    .search-company-row .field-icon-wrap { display:flex;align-items:center; }
+    .search-company-row .field-icon-wrap .form-input { height:36px;box-sizing:border-box; }
     /* بحث مرن للشركات */
-    .company-search-box { position:relative; }
-    .company-chips { display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:34px;padding:4px 8px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);cursor:text; }
+    .company-search-box { position:relative;display:flex; }
+    .company-chips { flex:1;display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-height:36px;padding:0 8px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);cursor:text;box-sizing:border-box; }
     .company-chips:focus-within { border-color:var(--accent); }
     .company-chip { display:inline-flex;align-items:center;gap:4px;background:var(--surface-3);color:var(--text-secondary);border-radius:20px;padding:1px 4px 1px 8px;font-size:0.7rem;font-weight:700; }
     .company-chip i { cursor:pointer;color:var(--danger);font-size:0.7rem;padding:1px 3px; }
@@ -138,6 +140,9 @@
           <button class="btn" style="background:#16a34a;color:#fff;flex:1;" onclick="exportExcel()">
             <i class="fas fa-file-excel"></i> Excel
           </button>
+          <button id="btn-toggle-ignored" class="btn" style="background:var(--surface-3);color:var(--text-secondary);flex:1;font-size:0.78rem;" onclick="toggleShowIgnored()">
+            <i class="fas fa-eye"></i> <span id="toggle-ignored-label">إظهار المتجاهَل</span>
+          </button>
         </div>
       </div>
 
@@ -201,6 +206,7 @@
     var allCompanies = [];              // كل الشركات المتاحة للنوع الحالي
     var selectedCompanies = [];         // المختارة ([] = الكل)
     var companyActiveIdx = -1;          // للتنقل بالكيبورد في الاقتراحات
+    var showIgnored = false;            // إظهار المتجاهَل (افتراضي مخفي)
     var customQty  = JSON.parse(localStorage.getItem('cosmo_qty')||'{}');
     var origQty    = {}; // الكميات المحسوبة الأصلية
 
@@ -573,6 +579,7 @@
 
       filteredResults=allResults.filter(function(item){
         var state=itemStates[item.code]||{};
+        if(!showIgnored && state.ignored) return false;
         if(search&&!item.name.toLowerCase().includes(search)&&!item.code.includes(search)) return false;
         if(companies.length&&!companies.includes(item.company)) return false;
         if(statusF==='pending'&&state.ordered) return false;
@@ -582,11 +589,23 @@
       renderResults(filteredResults);
     }
 
+    function toggleShowIgnored(){
+      showIgnored = !showIgnored;
+      var btn = document.getElementById('btn-toggle-ignored');
+      var lbl = document.getElementById('toggle-ignored-label');
+      lbl.textContent = showIgnored ? 'إخفاء المتجاهَل' : 'إظهار المتجاهَل';
+      btn.querySelector('i').className = showIgnored ? 'fas fa-eye-slash' : 'fas fa-eye';
+      btn.style.background = showIgnored ? '#fee2e2' : 'var(--surface-3)';
+      btn.style.color = showIgnored ? '#b91c1c' : 'var(--text-secondary)';
+      applyFilters();
+    }
+
     // ===== Render =====
     function renderResults(list){
       var container=document.getElementById('result-container');
       var ordered=list.filter(function(i){return (itemStates[i.code]||{}).ordered;}).length;
-      var ignored=list.filter(function(i){return (itemStates[i.code]||{}).ignored;}).length;
+      // عدّ المتجاهَل من كل النتائج (حتى لو مخفي من القائمة)
+      var ignored=allResults.filter(function(i){return (itemStates[i.code]||{}).ignored;}).length;
       var totalQty=list.filter(function(i){return !(itemStates[i.code]||{}).ignored;})
                        .reduce(function(s,i){return s+qtyOf(i);},0);
 
