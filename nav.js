@@ -142,7 +142,7 @@ var navContent =
     { href: 'purchases.html', icon: 'fa-shopping-cart', label: 'مشتريات', active: currentPage === 'purchases.html' }
   ];
   purchasesItems.push(
-    { href: 'cosmo_order.html', icon: 'fa-shopping-basket', label: 'طلبيات الكوزمو', active: currentPage === 'cosmo_order.html' }
+    { href: 'cosmo_order.html', icon: 'fa-shopping-basket', label: 'طلبيات الكوزمو والشركات', active: currentPage === 'cosmo_order.html' }
   );
   purchasesItems.push(
     { href: 'inventory_management.html', icon: 'fa-warehouse', label: 'إدارة المخزون', active: currentPage === 'inventory_management.html' }
