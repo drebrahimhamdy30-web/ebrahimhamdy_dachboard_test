@@ -330,35 +330,52 @@ function buildMachineMaps(){
   Object.entries(owners).forEach(([k,set])=>{if(set.size===1)MNAME2STORE[k]=[...set][0];});
 }
 
-/* ============ source detection ============ */
+/* ============ source detection ============
+   البنية الجديدة: type=SALE => فيزا/Paymob. غير كده محفظة،
+   ونوعها يتحدد من عمود to (اسم الماكينة/المحفظة). */
 function walletSource(rec){
-  if(rec.order_id||rec.terminal_id)return'paymob';
-  const m=(rec.message||'')+' '+(rec.machine_name||'')+' ';
+  const type=String(rec.type||'').trim().toUpperCase();
+  if(type==='SALE'||rec.order_id||rec.terminal_id)return'paymob';
+  const m=String(rec.to||'')+' '+String(rec.message||'')+' ';
   if(/اورنچ|أورنج|orange/i.test(m))return'orange';
   if(/فودافون|vodafone|vfcash/i.test(m))return'vodafone';
   if(/اتصالات|etisalat/i.test(m))return'etisalat';
   if(/انستا|instapay/i.test(m))return'instapay';
   if(/فوري|فورى|fawry/i.test(m))return'fawry';
+  if(/wee|وي/i.test(m))return'wee';
   return'other';
 }
-const SRC_LABEL={paymob:'Paymob',orange:'أورنج كاش',vodafone:'فودافون كاش',etisalat:'اتصالات كاش',instapay:'إنستاباي',fawry:'فوري',other:'محفظة'};
-const SRC_ICON={paymob:'fa-mobile-screen-button',orange:'fa-wallet',vodafone:'fa-wallet',instapay:'fa-money-bill-transfer',fawry:'fa-store',etisalat:'fa-wallet',other:'fa-wallet'};
+const SRC_LABEL={paymob:'Paymob',orange:'أورنج كاش',vodafone:'فودافون كاش',etisalat:'اتصالات كاش',instapay:'إنستاباي',fawry:'فوري',wee:'wee',other:'محفظة'};
+const SRC_ICON={paymob:'fa-mobile-screen-button',orange:'fa-wallet',vodafone:'fa-wallet',instapay:'fa-money-bill-transfer',fawry:'fa-store',etisalat:'fa-wallet',wee:'fa-wallet',other:'fa-wallet'};
+
+/* توحيد رسم العربي للفرع: الياء/الألف المقصورة، التاء المربوطة، الألفات، والمسافات */
+function normBranch(s){
+  return String(s||'').trim()
+    .replace(/\u0649/g,'\u064a')      // ى → ي
+    .replace(/\u0629/g,'\u0647')      // ة → ه
+    .replace(/[\u0623\u0625\u0622]/g,'\u0627') // أ إ آ → ا
+    .replace(/\s+/g,' ');
+}
 
 /* ============ normalize ============ */
 function normSystem(r){
+  const store=(r.branch||r.store_name||'').trim();
   return{side:'system',id:'sys-'+(r.id??r.bill_no),raw:r,
-    bill_no:String(r.bill_no??'').trim(),amount:num(r.total_bill_net??r.total_bill),
-    date:r.bill_date||r.createdAt,store:r.store_name||'',who:r.employee_name||'',
-    machine:r.machine_name||'',cust:r.cust_name_ar||''};
+    bill_no:String(r.bill_no??'').trim(),amount:num(r.net_ammount??r.total_bill_net??r.total_bill),
+    date:r.bill_date||r.createdAt,store,storeKey:normBranch(store),who:r.employee_name||'',
+    machine:r.machine_name||'',cust:r.cust_name_ar||'',
+    closed:r.closed===true||r.closed==='true'||r.closed===1};
 }
 function normWallet(r){
-  const src=walletSource(r);let store='';
-  if(r.terminal_id&&TERMINAL2STORE[String(r.terminal_id)])store=TERMINAL2STORE[String(r.terminal_id)];
-  else{const k=mkey(r.machine_name||src);if(MNAME2STORE[k])store=MNAME2STORE[k];}
+  const src=walletSource(r);
+  const store=(r.branch||'').trim();
   return{side:'wallet',id:'wal-'+(r.id??(r.order_id||Math.random())),raw:r,
-    bill_no:String(r.bill_no??'').trim(),amount:num(r.amount??r.ammount),
-    date:r.transaction_time||r.createdAt,src,srcLabel:SRC_LABEL[src],store,
-    ref:r.order_id||r.terminal_id||r.from_no||'',terminal:r.terminal_id||''};
+    bill_no:String(r.bill_no??'').trim(),amount:num(r.ammount??r.amount),
+    date:r.transaction_time||r.createdAt,src,srcLabel:SRC_LABEL[src],
+    store,storeKey:normBranch(store),
+    dir:String(r.type||'').trim(),
+    ref:r.order_id||r.to||r.from||'',terminal:r.terminal_id||'',
+    closed:r.closed===true||r.closed==='true'||r.closed===1};
 }
 
 /* ============ matching engine ============ */
@@ -396,7 +413,7 @@ function buildPairs(){
   for(const s of sysSorted){
     if(isNaN(s.amount))continue;
     const arr=walByAmt[s.amount.toFixed(2)];if(!arr||!arr.length)continue;
-    let idx=arr.findIndex(w=>!usedW.has(w.id)&&w.store&&s.store&&w.store===s.store);
+    let idx=arr.findIndex(w=>!usedW.has(w.id)&&w.storeKey&&s.storeKey&&w.storeKey===s.storeKey);
     if(idx<0)idx=arr.findIndex(w=>!usedW.has(w.id)&&!w.store);
     if(idx<0)continue;
     const w=arr.splice(idx,1)[0];usedS.add(s.id);usedW.add(w.id);rows.push(makePair(s,w,'amount'));
@@ -424,7 +441,8 @@ function passFilter(p){
   if(FILTER.status==='issues'&&['matched','bill','amount'].includes(p.kind))return false;
   if(FILTER.status==='matched'&&!['matched','manual','bill','amount','pulled'].includes(p.kind))return false;
   if(ACTIVE_BRANCH){
-    const inS=(p.sys?.store||'')===ACTIVE_BRANCH,inW=(p.wal?.store||'')===ACTIVE_BRANCH;
+    const ak=normBranch(ACTIVE_BRANCH);
+    const inS=(p.sys?.storeKey||'')===ak,inW=(p.wal?.storeKey||'')===ak;
     if(!inS&&!inW)return false;
   }
   if(FILTER.q){
@@ -458,8 +476,9 @@ function render(){
     else if(p.kind==='wal-only'||p.kind==='pulled-missing')cUw++;
   });
   $('#s-matched').textContent=cM;$('#s-diff').textContent=cD;$('#s-unsys').textContent=cUs;$('#s-unwal').textContent=cUw;
-  const sysN=SYSTEM.filter(s=>!ACTIVE_BRANCH||s.store===ACTIVE_BRANCH).length;
-  const walN=WALLET.filter(w=>!ACTIVE_BRANCH||w.store===ACTIVE_BRANCH).length;
+  const ak=ACTIVE_BRANCH?normBranch(ACTIVE_BRANCH):'';
+  const sysN=SYSTEM.filter(s=>!ak||s.storeKey===ak).length;
+  const walN=WALLET.filter(w=>!ak||w.storeKey===ak).length;
   $('#c-system').textContent=sysN+' فاتورة';$('#c-wallet').textContent=walN+' معاملة';
   if($('#show-hidden').checked)renderHidden();
   attachDnD();
@@ -612,7 +631,7 @@ function unlink(p){if(p.sys&&overlay.matches[p.sys.id])delete overlay.matches[p.
 
 function renderHidden(){
   const tb=$('#recon-rows');
-  [...SYSTEM,...WALLET].filter(r=>overlay.hidden[r.id]&&(!ACTIVE_BRANCH||r.store===ACTIVE_BRANCH)).forEach(r=>{
+  [...SYSTEM,...WALLET].filter(r=>overlay.hidden[r.id]&&(!ACTIVE_BRANCH||r.storeKey===normBranch(ACTIVE_BRANCH))).forEach(r=>{
     const pair=document.createElement('div');pair.className='pair hidden-soft';
     const mk=(rec)=>{
       const half=document.createElement('div');half.className='half '+(rec.side==='system'?'sys':'wal');
@@ -646,7 +665,8 @@ let closeDraft=JSON.parse(localStorage.getItem(LS_DRAFT)||'{}');
 function saveDraft(){localStorage.setItem(LS_DRAFT,JSON.stringify(closeDraft));}
 
 function branchWalletTotals(branch){
-  const rows=WALLET.filter(w=>!overlay.hidden[w.id]).filter(w=>branch?(w.store===branch):true);
+  const bk=branch?normBranch(branch):'';
+  const rows=WALLET.filter(w=>!overlay.hidden[w.id]).filter(w=>bk?(w.storeKey===bk):true);
   const g={};
   rows.forEach(w=>{const k=w.terminal?(w.srcLabel+' · '+w.terminal):w.srcLabel;if(!g[k])g[k]={label:k,src:w.src,count:0,total:0};g[k].count++;if(!isNaN(w.amount))g[k].total+=w.amount;});
   return Object.values(g).sort((a,b)=>b.total-a.total);
@@ -752,7 +772,7 @@ async function saveClose(branch,wt,walletSum){
   const cashier=($('#close-cashier')?.value||'').trim();
   if(cash===0&&walletSum===0&&custSum===0){if(!confirm('كل المبالغ صفر. تأكيد إغلاق شيفت فاضي؟'))return;}
 
-  const closedWalletIds=WALLET.filter(w=>!overlay.hidden[w.id]&&w.store===branch).map(w=>(w.raw&&w.raw.id!=null)?w.raw.id:w.id);
+  const closedWalletIds=WALLET.filter(w=>!overlay.hidden[w.id]&&w.storeKey===normBranch(branch)).map(w=>(w.raw&&w.raw.id!=null)?w.raw.id:w.id);
   const record={
     branch,cashier,closed_at:new Date().toISOString(),
     cash_breakdown:Object.fromEntries(DENOMS.map(d=>[d,parseInt(closeDraft.counts[d])||0]).filter(x=>x[1])),
@@ -787,7 +807,7 @@ async function loadHistory(){
   if(typeof fetchShiftCloses==='function'){try{const d=await fetchShiftCloses();rows=Array.isArray(d)?d:[];}catch(e){}}
   const local=JSON.parse(localStorage.getItem('recon.closes.v1')||'[]');
   const seen=new Set(rows.map(r=>r.closed_at));local.forEach(l=>{if(!seen.has(l.closed_at))rows.push(l);});
-  if(!IS_ADMIN)rows=rows.filter(r=>r.branch===USER_BRANCH);
+  if(!IS_ADMIN)rows=rows.filter(r=>normBranch(r.branch)===normBranch(USER_BRANCH));
   rows.sort((a,b)=>new Date(b.closed_at)-new Date(a.closed_at));
   if(!rows.length){body.innerHTML='<div class="empty-state"><i class="fas fa-folder-open"></i>مفيش إغلاقات محفوظة بعد.</div>';return;}
   body.innerHTML='<div class="table-wrap"><table><thead><tr><th>التاريخ</th><th>الفرع</th><th>الكاشير</th><th>الكاش</th><th>العهد</th><th>المحافظ</th><th>الإجمالي</th><th>الحالة</th><th></th></tr></thead><tbody>'+
@@ -818,34 +838,19 @@ async function loadData(){
     // n8n ممكن يلف الرد في array: [{...}]
     if(Array.isArray(data)) data = data[0] || {};
 
-    // استخراج الجداول من المفاتيح، مع fallback للتصنيف لو رجعت array مخلوطة
-    let sms=[], paymob=[], branch=[], machines=[];
     const pick=o=>Array.isArray(o)?o:[];
-    if(data && typeof data==='object' && !Array.isArray(data) &&
-       (data.sms||data.paymob||data.branch_visa_sales||data.machine)){
-      sms     = pick(data.sms);
-      paymob  = pick(data.paymob);
-      branch  = pick(data.branch_visa_sales || data.branchvisasales);
-      machines= pick(data.machine || data.machines);
-    } else {
-      // fallback: صنّف صفوف array مخلوطة حسب الأعمدة المميزة
-      const flat = Array.isArray(data) ? data.flat() : Object.values(data).flat();
-      flat.forEach(r=>{
-        if(!r||typeof r!=='object') return;
-        if(('machine_name' in r)&&('is_active' in r)&&!('total_bill' in r)&&!('amount' in r)&&!('order_id' in r)) machines.push(r);
-        else if('total_bill' in r) branch.push(r);
-        else if('order_id' in r) paymob.push(r);
-        else if(('message' in r)||('from_no' in r)||('ammount' in r)) sms.push(r);
-        else if(('terminal_id' in r)&&('amount' in r)) paymob.push(r);
-      });
-    }
+    // البنية الجديدة: جدولين بس
+    const walletRows = pick(data.wallet);
+    const salesRows  = pick(data.sales_wallet || data.branch_visa_sales || data.branchvisasales);
 
-    MACHINES=machines;
-    buildMachineMaps();
-    SYSTEM=branch.map(normSystem);
-    WALLET=[...paymob.map(normWallet),...sms.map(normWallet)];
+    MACHINES=[];
+    SYSTEM = salesRows.map(normSystem);
+    WALLET = walletRows.map(normWallet);
     overlay.manual.forEach(m=>WALLET.push(m));
-    ALL_STORES=[...new Set([...MACHINES.map(m=>m.store_name).filter(Boolean),...SYSTEM.map(s=>s.store).filter(Boolean)])].sort();
+    ALL_STORES=[...new Set([
+      ...WALLET.map(w=>w.store).filter(Boolean),
+      ...SYSTEM.map(s=>s.store).filter(Boolean)
+    ])].sort();
     populateBranches();
     render();
     if(CURRENT_TAB==='close')buildCloseView();
