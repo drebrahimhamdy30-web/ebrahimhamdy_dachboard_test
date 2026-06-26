@@ -44,12 +44,13 @@
               <th>رقم الفاتورة</th>
               <th>اسم الصنف</th>
               <th>العدد</th>
+              <th>تم إبلاغ المورد</th>
               <th>الحالة</th>
               <th>إجراء</th>
             </tr>
           </thead>
           <tbody id="table-body">
-            <tr class="loading-row"><td colspan="7">⏳ جاري تحميل البيانات...</td></tr>
+            <tr class="loading-row"><td colspan="8">⏳ جاري تحميل البيانات...</td></tr>
           </tbody>
         </table>
       </div>
@@ -75,7 +76,7 @@
 
     async function loadMissing() {
       const tbody = document.getElementById('table-body');
-      tbody.innerHTML = '<tr class="loading-row"><td colspan="7">⏳ جاري جلب البيانات...</td></tr>';
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="8">⏳ جاري جلب البيانات...</td></tr>';
       try {
         const response = await fetchMissing();
         const all = response;
@@ -84,7 +85,7 @@
         renderStats();
         applyFilter();
       } catch(e) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:30px;">❌ خطأ في الاتصال</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ خطأ في الاتصال</td></tr>';
       }
     }
 
@@ -104,6 +105,7 @@
       const total    = rawData.length;
       const pending  = rawData.filter(i => !i.state || i.state === false || i.state === 'false').length;
       const deducted = rawData.filter(i => i.state === true || i.state === 'true').length;
+      const notified = rawData.filter(i => i.call === true || i.call === 'true').length;
 
       document.getElementById('stats-row').innerHTML = `
         <div class="stat-card">
@@ -117,6 +119,10 @@
         <div class="stat-card">
           <div class="stat-num" style="color:var(--success);">${deducted}</div>
           <div class="stat-lbl">تم التخصيم</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" style="color:var(--primary);">${notified}</div>
+          <div class="stat-lbl">تم إبلاغ المورد</div>
         </div>
       `;
     }
@@ -137,7 +143,7 @@
     function renderTable(items) {
       const tbody = document.getElementById('table-body');
       if (items.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">✅ لا توجد أصناف معلقة</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">✅ لا توجد أصناف معلقة</td></tr>';
         return;
       }
 
@@ -149,6 +155,7 @@
 
       tbody.innerHTML = items.map(item => {
         const isDeducted = (item.state === true || item.state === 'true');
+        const isCalled   = (item.call === true || item.call === 'true');
         const dateStr = item.createdAt ? new Date(item.createdAt).toLocaleDateString('ar-EG') : '---';
 
         return `
@@ -158,6 +165,14 @@
             <td><code style="font-size:0.82rem;color:var(--text-secondary);">${item.invoice_no || '---'}</code></td>
             <td style="text-align:right;font-weight:700;">${item.item_name || '---'}</td>
             <td><b style="color:var(--warning);">${item.qty || '---'}</b></td>
+            <td>
+              <button class="btn btn-sm ${isCalled ? 'btn-success' : 'btn-secondary'}"
+                      onclick="toggleCall('${item.id}', this)">
+                ${isCalled
+                  ? '<i class="fas fa-phone"></i> تم الإبلاغ ✅'
+                  : '<i class="fas fa-phone-slash"></i> لم يتم'}
+              </button>
+            </td>
             <td>
               ${isDeducted
                 ? '<span class="badge badge-green">تم التخصيم ✅</span>'
@@ -174,14 +189,45 @@
       }).join('');
     }
 
+    async function toggleCall(id, btn) {
+      const item = rawData.find(x => x.id == id);
+      const newCall  = !(item.call === true || item.call === 'true');
+      const curState = (item.state === true || item.state === 'true');
+      btn.disabled = true;
+      const oldHtml = btn.innerHTML;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+      const success = await updateData({
+        id: id,
+        type: "عدم_وصول_تحديث",
+        state: curState,
+        call: newCall,
+        updatedAt: new Date().toISOString()
+      });
+
+      if (success) {
+        item.call = newCall;
+        renderStats();
+        applyFilter();
+      } else {
+        alert("فشل التحديث ❌");
+        btn.disabled = false;
+        btn.innerHTML = oldHtml;
+      }
+    }
+
     async function markDeducted(id, btn) {
       if (!confirm("تأكيد التخصيم من المطالبة؟")) return;
+      const item = rawData.find(x => x.id == id);
+      const curCall = (item && (item.call === true || item.call === 'true'));
       btn.disabled = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
       const success = await updateData({
         id: id,
         type: "عدم_وصول_تحديث",
+        state: true,
+        call: curCall,
         updatedAt: new Date().toISOString()
       });
 
