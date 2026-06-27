@@ -702,7 +702,6 @@ function cancelLink(){ LINK=null; LINK_PICKS=new Map(); render(); }
 function toggleLinkPick(rec){
   if(!LINK)return;
   if(LINK_PICKS.has(rec.id)){ LINK_PICKS.delete(rec.id); render(); return; }
-  if(LINK.anchorSide==='system'){ LINK_PICKS.clear(); } // من جهة الفاتورة: معاملة واحدة بس
   LINK_PICKS.set(rec.id,rec);
   render();
 }
@@ -727,23 +726,35 @@ async function confirmLink(){
       await posUpdate({table:'wallet',action:'update',id:walId,data:{bill_no:String(sysRec.bill_no||'')}});
       delete overlay.excluded[walRec.id]; saveOverlay();
     }else{
-      if(LINK.anchorSide!=='wallet'){ alert('الربط المتعدد متاح من جهة المعاملة فقط (معاملة واحدة بفواتير متعددة)'); if(btn){btn.disabled=false;btn.innerHTML='<i class="fas fa-check"></i> تأكيد الربط';} return; }
-      const wal=LINK.anchor;
-      const walAmt=+(wal.amount||0).toFixed(2);
-      const billSum=+(picks.reduce((s,b)=>s+(+b.amount||0),0)).toFixed(2);
-      const diff=+(walAmt-billSum).toFixed(2);
-      if(Math.abs(diff)>=0.01&&!confirm(`مجموع الفواتير (${money(billSum)}) مختلف عن قيمة المعاملة (${money(walAmt)}) بفرق ${money(Math.abs(diff))} ج.\n\nتأكيد الربط بالرغم من الفرق؟`)){
+      const branch=LINK.anchor.store||'';
+      const now=new Date().toISOString();
+      const anchorAmt=+(LINK.anchor.amount||0).toFixed(2);
+      const pickSum=+(picks.reduce((s,r)=>s+(+r.amount||0),0)).toFixed(2);
+      const diff=+(anchorAmt-pickSum).toFixed(2);
+      if(Math.abs(diff)>=0.01&&!confirm(`مجموع المختار (${money(pickSum)}) مختلف عن القيمة (${money(anchorAmt)}) بفرق ${money(Math.abs(diff))} ج.\n\nتأكيد الربط بالرغم من الفرق؟`)){
         if(btn){btn.disabled=false;btn.innerHTML='<i class="fas fa-check"></i> تأكيد الربط';} return;
       }
-      const walId=(wal.raw&&wal.raw.id!=null)?wal.raw.id:wal.id;
-      const branch=wal.store||'';
-      const now=new Date().toISOString();
-      for(const b of picks){
-        await posUpdate({table:'links',action:'insert',data:{
-          wallet_id:String(walId),bill_no:String(b.bill_no||''),branch,amount:String(b.amount||''),created_at:now,closed:false
-        }});
+      if(LINK.anchorSide==='wallet'){
+        // معاملة واحدة بفواتير متعددة
+        const wal=LINK.anchor;
+        const walId=(wal.raw&&wal.raw.id!=null)?wal.raw.id:wal.id;
+        for(const b of picks){
+          await posUpdate({table:'links',action:'insert',data:{
+            wallet_id:String(walId),bill_no:String(b.bill_no||''),branch,amount:String(b.amount||''),created_at:now,closed:false
+          }});
+        }
+        await posUpdate({table:'wallet',action:'update',id:walId,data:{bill_no:'MULTI'}});
+      }else{
+        // فاتورة واحدة بمعاملات متعددة
+        const bill=LINK.anchor;
+        for(const w of picks){
+          const wId=(w.raw&&w.raw.id!=null)?w.raw.id:w.id;
+          await posUpdate({table:'links',action:'insert',data:{
+            wallet_id:String(wId),bill_no:String(bill.bill_no||''),branch,amount:String(w.amount||''),created_at:now,closed:false
+          }});
+          await posUpdate({table:'wallet',action:'update',id:wId,data:{bill_no:'MULTI'}});
+        }
       }
-      await posUpdate({table:'wallet',action:'update',id:walId,data:{bill_no:'MULTI'}});
     }
     cancelLink();
     toast('تم الربط','ok');
