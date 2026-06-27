@@ -658,7 +658,7 @@ function halfEl(p,col){
       half.appendChild(elSpan('لا توجد معاملة دفع'));half.appendChild(b);
     }else{
       const b=document.createElement('button');b.className='add-here';
-      b.innerHTML='<i class="fas fa-magnifying-glass"></i> استدعاء فاتورة';b.onclick=()=>openPull(p.wal,p.billno);
+      b.innerHTML='<i class="fas fa-magnifying-glass"></i> استدعاء فاتورة';b.onclick=()=>lookupBillFromRow(p.billno);
       half.appendChild(elSpan(p.billno?('فاتورة '+p.billno+' غير موجودة'):'لا توجد فاتورة'));half.appendChild(b);
     }
     return half;
@@ -1144,6 +1144,27 @@ function lookupActiveBranch(){
   return ACTIVE_BRANCH || USER_BRANCH;
 }
 
+/* بحث مشترك: يستخدمه الشريط فوق وزر الاستدعاء داخل الصف */
+async function doBillLookup(billNo,branch,uiBtn,uiMsg){
+  if(uiBtn){ uiBtn.disabled=true; uiBtn.innerHTML='<i class="fas fa-spinner fa-spin"></i>'; }
+  if(uiMsg){ uiMsg.textContent='جاري البحث…'; uiMsg.className='lk-msg loading'; }
+  try{
+    const res = await posUpdate({ table:'lookup', action:'search', data:{ branch, bill_no:billNo } });
+    const data = res?.result?.Data || [];
+    if(!data.length){
+      if(uiMsg){ uiMsg.textContent='الفاتورة مش موجودة في السيستم'; uiMsg.className='lk-msg err'; }
+      else toast('الفاتورة رقم '+billNo+' مش موجودة في السيستم','err');
+    } else {
+      showBillConfirm(data[0], branch);
+      if(uiMsg){ uiMsg.textContent=''; uiMsg.className='lk-msg'; }
+    }
+  }catch(e){
+    if(uiMsg){ uiMsg.textContent='خطأ في الاتصال'; uiMsg.className='lk-msg err'; }
+    else toast('خطأ في الاتصال','err');
+  }
+  if(uiBtn){ uiBtn.disabled=false; uiBtn.innerHTML='<i class="fas fa-search"></i> استدعاء'; }
+}
+
 async function lookupBill(){
   const inp = $('#lookup-bill-input');
   const billNo = (inp?.value || '').trim();
@@ -1154,22 +1175,19 @@ async function lookupBill(){
   if(!branch){ if(msg){msg.textContent='اختر الفرع أولاً'; msg.className='lk-msg err';} return; }
 
   const btn = $('#lookup-bill-btn');
-  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fas fa-spinner fa-spin"></i>'; }
-  if(msg){ msg.textContent='جاري البحث…'; msg.className='lk-msg loading'; }
+  await doBillLookup(billNo,branch,btn,msg);
+}
 
-  try{
-    const res = await posUpdate({ table:'lookup', action:'search', data:{ branch, bill_no:billNo } });
-    const data = res?.result?.Data || [];
-    if(!data.length){
-      if(msg){ msg.textContent='الفاتورة مش موجودة في السيستم'; msg.className='lk-msg err'; }
-    } else {
-      showBillConfirm(data[0], branch);
-      if(msg){ msg.textContent=''; msg.className='lk-msg'; }
-    }
-  }catch(e){
-    if(msg){ msg.textContent='خطأ في الاتصال'; msg.className='lk-msg err'; }
+/* استدعاء من داخل صف معاملة بلا فاتورة — نفس آلية الشريط فوق */
+async function lookupBillFromRow(presetBillNo){
+  const branch = lookupActiveBranch();
+  if(!branch){ toast('اختر الفرع أولاً','err'); return; }
+  let billNo=(presetBillNo||'').trim();
+  if(!billNo){
+    billNo=(prompt('رقم الفاتورة من B Connect:')||'').trim();
+    if(!billNo)return;
   }
-  if(btn){ btn.disabled=false; btn.innerHTML='<i class="fas fa-search"></i> استدعاء'; }
+  await doBillLookup(billNo,branch,null,null);
 }
 
 let pendingBill = null;
