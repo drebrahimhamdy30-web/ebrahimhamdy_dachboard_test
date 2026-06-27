@@ -45,6 +45,10 @@
   .half.empty{background:#fdf4f4;align-items:center;justify-content:center;color:#b91c1c;font-weight:700;font-size:0.76rem;gap:8px;padding:6px 12px;text-align:center;border:1px dashed #f3c6c6}
   .half.sel{outline:2px solid var(--accent);outline-offset:-2px}
 
+  /* ---- مجموعة الربط المتعدد: خانة واحدة ممتدة بصرياً (grid-row span) مقابل عناصر مرصوصة ---- */
+  .half.multi-anchor{background:#f3f7fd}
+  .half.multi-item.multi-sep{border-top:1px solid #eef1f5}
+
   /* ---- وضع الربط البصري (موحّد: واحد لواحد + متعدد) ---- */
   .pair.link-dim{opacity:.32;filter:saturate(.6)}
   .half.link-anchor{background:#dcfce7 !important;outline:2px solid #16a34a;outline-offset:-2px;z-index:1}
@@ -530,47 +534,27 @@ function makePair(s,w,kind,extra={}){
   return{sys:null,wal:w,kind:(kind==='pulled-missing'?'pulled-missing':'wal-only'),...extra};
 }
 
-function multiBillsEl(p){
-  const half=document.createElement('div');half.className='half sys';
-  const bills=p.bills||[];
-  const sum=bills.reduce((s,b)=>s+(+b.amount||0),0);
-  const head=document.createElement('div');head.className='r1';
-  head.innerHTML=`<span class="ramt mono">${money(sum)} ج</span><span class="bill-chip">${bills.length} فاتورة</span>`;
-  half.appendChild(head);
-  const list=document.createElement('div');list.style.cssText='display:flex;flex-direction:column;gap:3px;margin-top:4px;';
-  bills.forEach(b=>{
-    const row=document.createElement('div');
-    row.style.cssText='font-size:0.78rem;color:var(--text-secondary);display:flex;justify-content:space-between;gap:8px;border-bottom:1px dotted var(--border);padding:2px 0;';
-    row.innerHTML=`<span>فاتورة ${b.bill_no||'—'}</span><b>${money(+b.amount||0)} ج</b>`;
-    list.appendChild(row);
-  });
-  half.appendChild(list);
-  // زر فك الربط المتعدد
-  const acts=document.createElement('div');acts.className='ractions';
-  acts.appendChild(ibtn('','fa-link-slash','فك الربط المتعدد',()=>unlinkMulti(p.wal)));
-  half.appendChild(acts);
-  return half;
-}
-
-/* نظير multiBillsEl: فاتورة واحدة مربوطة بعدّة معاملات — تعرض القائمة في ناحية المحفظة */
-function multiWalletsEl(p){
-  const half=document.createElement('div');half.className='half wal';
-  const wallets=p.wallets||[];
-  const sum=wallets.reduce((s,w)=>s+(+w.amount||0),0);
-  const head=document.createElement('div');head.className='r1';
-  head.innerHTML=`<span class="ramt mono">${money(sum)} ج</span><span class="bill-chip">${wallets.length} معاملة</span>`;
-  half.appendChild(head);
-  const list=document.createElement('div');list.style.cssText='display:flex;flex-direction:column;gap:3px;margin-top:4px;';
-  wallets.forEach(w=>{
-    const row=document.createElement('div');
-    row.style.cssText='font-size:0.78rem;color:var(--text-secondary);display:flex;justify-content:space-between;gap:8px;border-bottom:1px dotted var(--border);padding:2px 0;';
-    row.innerHTML=`<span>${w.srcLabel||'معاملة'}${w.store?(' · '+w.store):''}</span><b>${money(+w.amount||0)} ج</b>`;
-    list.appendChild(row);
-  });
-  half.appendChild(list);
-  const acts=document.createElement('div');acts.className='ractions';
-  acts.appendChild(ibtn('','fa-link-slash','فك الربط المتعدد',()=>unlinkMultiBill(p)));
-  half.appendChild(acts);
+/* خانة كاملة التفاصيل لعنصر واحد جوّه مجموعة ربط متعدد (مقابلة بصرياً للأنكر) */
+function multiItemHalf(rec,col){
+  const half=document.createElement('div');half.className='half multi-item '+(col==='system'?'sys':'wal');
+  const body=document.createElement('div');body.className='rbody';
+  const r1=document.createElement('div');r1.className='r1';
+  const amt=document.createElement('span');amt.className='ramt mono';amt.textContent=money(+rec.amount||0)+' ج';r1.appendChild(amt);
+  if(col==='system'){
+    r1.appendChild(billChip('فاتورة '+(rec.bill_no||'—')));
+  }else{
+    r1.appendChild(srcChip(rec.src||'other',rec.srcLabel||'معاملة'));
+    if(rec.bill_no&&rec.bill_no!=='MULTI')r1.appendChild(billChip('فاتورة '+rec.bill_no));
+  }
+  body.appendChild(r1);
+  const r2=document.createElement('div');r2.className='r2';
+  if(rec.store)r2.appendChild(elSpan('🏥 '+rec.store));
+  if(rec.who)r2.appendChild(elSpan('👤 '+rec.who));
+  if(rec.ref)r2.appendChild(elSpan('#'+rec.ref));
+  if(rec.date)r2.appendChild(elSpan('🕐 '+fmtDate(rec.date)));
+  if(rec._fromLink)r2.appendChild(elSpan('⚠ بيانات من الربط'));
+  body.appendChild(r2);
+  half.appendChild(body);
   return half;
 }
 
@@ -612,13 +596,22 @@ function render(){
     const[bc,bt]=statusInfo(p.kind);
     if(bt){const st=document.createElement('span');st.className='rstatus badge '+bc;st.textContent=bt;pair.appendChild(st);}
     if(p.kind==='multi'){
-      if(p.dir==='b2w'){
-        pair.appendChild(halfEl(p,'system'));
-        pair.appendChild(multiWalletsEl(p));
-      }else{
-        pair.appendChild(multiBillsEl(p));
-        pair.appendChild(halfEl(p,'wallet'));
-      }
+      const anchorSide=p.dir==='b2w'?'system':'wallet';
+      const manySide=p.dir==='b2w'?'wallet':'system';
+      const items=p.dir==='b2w'?(p.wallets||[]):(p.bills||[]);
+      const n=Math.max(items.length,1);
+      const anchorHalf=halfEl(p,anchorSide);
+      anchorHalf.style.gridColumn=anchorSide==='system'?'1':'2';
+      anchorHalf.style.gridRow=`1 / ${n+1}`;
+      anchorHalf.classList.add('multi-anchor');
+      pair.appendChild(anchorHalf);
+      items.forEach((it,i)=>{
+        const mh=multiItemHalf(it,manySide);
+        mh.style.gridColumn=manySide==='system'?'1':'2';
+        mh.style.gridRow=String(i+1);
+        if(i>0)mh.classList.add('multi-sep');
+        pair.appendChild(mh);
+      });
     }else{
       pair.appendChild(halfEl(p,'system'));
       pair.appendChild(halfEl(p,'wallet'));
