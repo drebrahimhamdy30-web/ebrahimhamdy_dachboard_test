@@ -168,6 +168,13 @@
       <label class="check-label"><input type="checkbox" id="show-hidden"> إظهار المخفية</label>
     </div>
 
+    <div class="lookup-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--surface-3);border:1.5px solid var(--border);border-radius:var(--radius-md);padding:8px 12px;margin-bottom:12px;">
+      <span style="font-size:0.78rem;font-weight:700;color:var(--text-muted);white-space:nowrap;"><i class="fas fa-file-circle-plus" style="color:var(--accent);"></i> استدعاء فاتورة:</span>
+      <input type="text" id="lookup-bill-input" class="form-input" style="width:auto;flex:1;min-width:140px;max-width:200px;" placeholder="رقم الفاتورة من B Connect…" inputmode="numeric" onkeydown="if(event.key==='Enter')lookupBill()">
+      <button class="btn btn-primary btn-sm" id="lookup-bill-btn" onclick="lookupBill()"><i class="fas fa-search"></i> استدعاء</button>
+      <span id="lookup-bill-msg" class="lk-msg"></span>
+    </div>
+
     <div class="recon-table">
       <div class="recon-thead">
         <div class="rh sys"><i class="fas fa-file-invoice" style="color:#0284c7"></i> السيستم · B Connect <span class="col-count" id="c-system">—</span></div>
@@ -257,6 +264,25 @@
 </div></div>
 
 <div class="toast" id="toast"></div>
+
+<!-- Modal تأكيد إضافة الفاتورة -->
+<div id="bill-confirm-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:100000;align-items:center;justify-content:center;">
+  <div style="background:var(--surface-2,#1e293b);border:2px solid var(--border);border-radius:16px;padding:22px;width:92%;max-width:460px;direction:rtl;box-shadow:0 20px 60px rgba(0,0,0,0.6);max-height:88vh;overflow-y:auto;">
+    <h3 style="margin:0 0 14px;font-size:1rem;display:flex;align-items:center;gap:8px;"><i class="fas fa-file-circle-check" style="color:var(--accent);"></i> تأكيد إضافة الفاتورة</h3>
+    <div id="bill-confirm-body"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
+      <button class="btn btn-sm" style="background:var(--surface-3);color:var(--text-secondary);" onclick="closeBillConfirm()">إلغاء</button>
+      <button class="btn btn-primary btn-sm" id="bill-confirm-add" onclick="confirmAddBill()"><i class="fas fa-plus"></i> إضافة</button>
+    </div>
+  </div>
+</div>
+
+<style>
+.lk-msg{ font-size:0.75rem;padding:2px 8px;border-radius:20px;font-weight:600; }
+.lk-msg.ok{ background:#dcfce7;color:#15803d; }
+.lk-msg.err{ background:#fee2e2;color:#b91c1c; }
+.lk-msg.loading{ background:#e0f2fe;color:#0369a1; }
+</style>
 
 <script src="api.js"></script>
 <script src="nav.js"></script>
@@ -827,6 +853,115 @@ function showDetail(r){
    بيرجّع object: { sms, paymob, branch_visa_sales, machine }
    ============================================================ */
 const POSMGMT_URL = 'https://agent.ebrahimhamdy.com/webhook/posmanagement';
+const POSUPDATE_URL = 'https://agent.ebrahimhamdy.com/webhook/posupdate';
+
+/* نداء موحّد لـ posupdate (إضافة/تعديل/بحث) */
+async function posUpdate(payload){
+  const r = await fetch(POSUPDATE_URL,{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(payload)
+  });
+  const t = await r.text();
+  let d = t && t.trim() ? JSON.parse(t) : {};
+  if(Array.isArray(d)) d = d[0] || {};
+  return d;
+}
+
+/* ====== استدعاء فاتورة من B Connect وإضافتها لـ sales_wallet ====== */
+function lookupActiveBranch(){
+  return ACTIVE_BRANCH || USER_BRANCH;
+}
+
+async function lookupBill(){
+  const inp = $('#lookup-bill-input');
+  const billNo = (inp?.value || '').trim();
+  const msg = $('#lookup-bill-msg');
+  if(!billNo){ if(msg){msg.textContent='اكتب رقم الفاتورة'; msg.className='lk-msg err';} return; }
+
+  const branch = lookupActiveBranch();
+  if(!branch){ if(msg){msg.textContent='اختر الفرع أولاً'; msg.className='lk-msg err';} return; }
+
+  const btn = $('#lookup-bill-btn');
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fas fa-spinner fa-spin"></i>'; }
+  if(msg){ msg.textContent='جاري البحث…'; msg.className='lk-msg loading'; }
+
+  try{
+    const res = await posUpdate({ table:'lookup', action:'search', data:{ branch, bill_no:billNo } });
+    const data = res?.result?.Data || [];
+    if(!data.length){
+      if(msg){ msg.textContent='الفاتورة مش موجودة في السيستم'; msg.className='lk-msg err'; }
+    } else {
+      showBillConfirm(data[0], branch);
+      if(msg){ msg.textContent=''; msg.className='lk-msg'; }
+    }
+  }catch(e){
+    if(msg){ msg.textContent='خطأ في الاتصال'; msg.className='lk-msg err'; }
+  }
+  if(btn){ btn.disabled=false; btn.innerHTML='<i class="fas fa-search"></i> استدعاء'; }
+}
+
+let pendingBill = null;
+function showBillConfirm(bill, branch){
+  pendingBill = { bill, branch };
+  const net = parseFloat(bill.total_bill_net ?? bill.total_bill ?? 0);
+  const items = Array.isArray(bill.Items) ? bill.Items : [];
+  const itemsHtml = items.slice(0,6).map(it=>
+    `<div style="font-size:0.78rem;color:var(--text-secondary);padding:2px 0;">• ${it.itm_name_ar||''} — ${it.itm_qty||1}×${it.unit_price||0}</div>`
+  ).join('');
+  $('#bill-confirm-body').innerHTML = `
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:0.88rem;">
+      <b style="color:var(--text-muted);">رقم الفاتورة:</b><span>${bill.bill_no||'—'}</span>
+      <b style="color:var(--text-muted);">القيمة:</b><span style="color:var(--accent-dark);font-weight:800;">${net.toFixed(2)} ج</span>
+      <b style="color:var(--text-muted);">النوع:</b><span>${bill.bill_type||'—'}</span>
+      <b style="color:var(--text-muted);">العميل:</b><span>${bill.cust_name_ar||'—'}</span>
+      <b style="color:var(--text-muted);">الموظف:</b><span>${bill.employee_name||'—'}</span>
+      <b style="color:var(--text-muted);">التاريخ:</b><span style="font-size:0.8rem;">${bill.bill_date||'—'}</span>
+      <b style="color:var(--text-muted);">الفرع:</b><span>${branch}</span>
+    </div>
+    ${itemsHtml?`<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">${itemsHtml}</div>`:''}
+  `;
+  $('#bill-confirm-overlay').style.display='flex';
+}
+
+function closeBillConfirm(){
+  $('#bill-confirm-overlay').style.display='none';
+  pendingBill = null;
+}
+
+async function confirmAddBill(){
+  if(!pendingBill) return;
+  const { bill, branch } = pendingBill;
+  const btn = $('#bill-confirm-add');
+  if(btn){ btn.disabled=true; btn.innerHTML='<i class="fas fa-spinner fa-spin"></i> جاري الإضافة…'; }
+
+  try{
+    const res = await posUpdate({
+      table:'sales_wallet', action:'insert',
+      data:{
+        bill_no:        String(bill.bill_no||''),
+        bill_date:      bill.bill_date || '',
+        net_ammount:    String(bill.total_bill_net ?? bill.total_bill ?? ''),
+        cust_code:      String(bill.cust_code||''),
+        cust_name_ar:   bill.cust_name_ar || '',
+        store_name:     bill.store_name || branch,
+        employee_name:  bill.employee_name || '',
+        employee_save_bill: bill.employee_save_bill || '',
+        bill_save_date: bill.bill_save_date || ''
+      }
+    });
+    if(res && res.ok){
+      closeBillConfirm();
+      const li = $('#lookup-bill-input'); if(li) li.value='';
+      await loadData();
+    } else {
+      if(btn){ btn.disabled=false; btn.innerHTML='<i class="fas fa-plus"></i> إضافة'; }
+      alert('فشل إضافة الفاتورة');
+    }
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.innerHTML='<i class="fas fa-plus"></i> إضافة'; }
+    alert('خطأ في الاتصال');
+  }
+}
 
 async function loadData(){
   $('#btn-refresh').disabled=true;
