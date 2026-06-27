@@ -7,6 +7,37 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   <style>
+    /* صف الهيدر الموحّد: العنوان + الفلاتر + البحث + زر التحديث */
+    .notif-topbar {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .notif-topbar .page-title {
+      margin: 0;
+      white-space: nowrap;
+    }
+    .notif-topbar .topbar-filters {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      flex: 1;
+    }
+    .notif-topbar .search-box {
+      min-width: 150px;
+      flex: 1 1 160px;
+    }
+    .notif-topbar .btn-refresh {
+      margin-right: auto;
+    }
+    @media (max-width: 768px) {
+      .notif-topbar .btn-refresh { margin-right: 0; }
+      .notif-topbar .search-box { flex-basis: 100%; }
+    }
+
     .notif-card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -102,33 +133,37 @@
   <div class="nav-bar"></div>
   <div class="container">
     <div class="card">
-      <div class="page-header">
+
+      <div class="notif-topbar">
         <div class="page-title"><i class="fas fa-bell"></i> الإشعارات</div>
-        <button class="btn btn-primary" onclick="loadNotifications()">
+
+        <div class="topbar-filters">
+          <label class="check-label">
+            <input type="checkbox" id="showReceived" checked onchange="applyFilter()"> واردة 📥
+          </label>
+          <label class="check-label">
+            <input type="checkbox" id="showSent" onchange="applyFilter()"> مرسلة 📤
+          </label>
+          <label class="check-label" style="border-right:2px solid var(--border);padding-right:14px;margin-right:6px;">
+            <input type="checkbox" id="hideDone" checked onchange="applyFilter()"> قيد الانتظار فقط
+          </label>
+          <span class="filter-label">موجه إلى:</span>
+          <select id="assignedFilter" class="form-select" style="width:auto;" onchange="applyFilter()">
+            <option value="all">الكل</option>
+            <option value="مبيعات">مبيعات</option>
+            <option value="مشتريات">مشتريات</option>
+            <option value="حسابات">حسابات</option>
+            <option value="مدخل بيانات">مدخل بيانات</option>
+            <option value="ادارة الفرع">ادارة الفرع</option>
+            <option value="فرد">فرد</option>
+          </select>
+          <input type="text" id="searchBox" class="form-select search-box" placeholder="🔍 بحث..."
+                 oninput="applyFilter()">
+        </div>
+
+        <button class="btn btn-primary btn-refresh" onclick="loadNotifications()">
           <i class="fas fa-sync-alt"></i> تحديث
         </button>
-      </div>
-
-      <div class="filter-bar">
-        <label class="check-label">
-          <input type="checkbox" id="showReceived" checked onchange="applyFilter()"> واردة 📥
-        </label>
-        <label class="check-label">
-          <input type="checkbox" id="showSent" onchange="applyFilter()"> مرسلة 📤
-        </label>
-        <label class="check-label" style="border-right:2px solid var(--border);padding-right:14px;margin-right:6px;">
-          <input type="checkbox" id="hideDone" checked onchange="applyFilter()"> قيد الانتظار فقط
-        </label>
-        <span class="filter-label">موجه إلى:</span>
-        <select id="assignedFilter" class="form-select" style="width:auto;" onchange="applyFilter()">
-          <option value="all">الكل</option>
-          <option value="مبيعات">مبيعات</option>
-          <option value="مشتريات">مشتريات</option>
-          <option value="حسابات">حسابات</option>
-          <option value="مدخل بيانات">مدخل بيانات</option>
-          <option value="ادارة الفرع">ادارة الفرع</option>
-          <option value="فرد">فرد</option>
-        </select>
       </div>
 
       <div id="notif-container">
@@ -167,6 +202,7 @@
   function applyFilter() {
     const current     = String(userBranch).trim();
     const assignedVal = document.getElementById('assignedFilter').value;
+    const searchTerm  = document.getElementById('searchBox').value.trim().toLowerCase();
 
     const filtered = allItems.filter(item => {
       const isDone     = (item.done === 'تم' || item.done === true || item.done === 'true');
@@ -185,6 +221,15 @@
           if (String(item.assigned_to || '').trim() !== assignedVal) return false;
         }
       }
+
+      if (searchTerm) {
+        const haystack = [
+          item.note, item.comment, item.branch,
+          item.target_branch, item.assigned_to
+        ].map(v => String(v || '').toLowerCase()).join(' ');
+        if (!haystack.includes(searchTerm)) return false;
+      }
+
       return true;
     });
 
