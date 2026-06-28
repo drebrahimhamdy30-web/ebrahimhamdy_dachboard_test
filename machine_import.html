@@ -84,6 +84,8 @@
   .imp-full-table tbody td{padding:5px 8px;border-bottom:1px solid #f1f5f9;white-space:nowrap;cursor:cell;user-select:none;}
   .imp-full-table tbody tr.linked{opacity:.5;}
   .imp-full-table tbody tr.row-sel{background:#dcfce7;}
+  .imp-full-table th.col-card,.imp-full-table td.col-card{background:#eef2ff;color:#4338ca;}
+  .imp-full-table th.col-amount,.imp-full-table td.col-amount{background:#fef3c7;color:#92400e;font-weight:800;}
   .imp-full-table tbody td.cell-sel{background:#bbf7d0;outline:1.5px solid #16a34a;outline-offset:-1px;}
   .imp-full-table tbody td.pick-cell{cursor:pointer;text-align:center;}
   .imp-full-table tbody tr:hover td{background:#fafbfc;}
@@ -185,6 +187,21 @@ const EXPECTED_COLS=['العميل','الرقم','ت.صلاحية','البنك',
 let ROWS=[],WALLET=[],LINKS=[],CASH2WALLET=[];
 let SEL_R=new Set(),SEL_L=new Set();
 
+/* ====== حفظ مؤقت للجدول المستورد في المتصفح — يمنع ضياعه لو حصل Refresh بالغلط ====== */
+const LS_ROWS='machineImport.rows.v1';
+function saveRowsLocal(){
+  try{ localStorage.setItem(LS_ROWS, JSON.stringify(ROWS.map(r=>({id:r.id,byCol:r.byCol,names:r.names,sigKey:r.sigKey})))); }
+  catch(e){}
+}
+function loadRowsLocal(){
+  try{
+    const raw=localStorage.getItem(LS_ROWS);
+    if(!raw)return;
+    const arr=JSON.parse(raw);
+    if(Array.isArray(arr)&&arr.length) ROWS=arr;
+  }catch(e){}
+}
+
 function parsePastedText(text){
   const lines=text.split(/\r\n|\n|\r/).map(l=>l.trim()).filter(l=>l.length);
   return lines.map(l=>l.split('\t').map(c=>c.trim()));
@@ -220,6 +237,7 @@ zone.addEventListener('paste',e=>{
   if(!parsed.length){toast('متقدرش أقرا الجدول الملصوق','err');return;}
   ROWS=buildRowsFromParsed(parsed);
   SEL_R=new Set();
+  saveRowsLocal();
   zone.innerHTML='<i class="fas fa-check-circle" style="color:#16a34a;"></i> تم — '+ROWS.length+' صف. تقدر تلصق جدول جديد فوق ده لو حبيت.';
   applyLinksToData();
   buildMachineFilters();
@@ -228,6 +246,7 @@ zone.addEventListener('paste',e=>{
 });
 $('#btn-clear').onclick=()=>{
   ROWS=[];SEL_R=new Set();
+  localStorage.removeItem(LS_ROWS);
   zone.innerHTML='<i class="fas fa-paste"></i> اضغط هنا والصق الجدول (Ctrl+V)<div class="hint">منسوخ مباشرة من السيستم — هيتفكك تلقائياً لصفوف وأعمدة</div>';
   renderAll();
 };
@@ -269,6 +288,10 @@ async function loadWallet(){
     renderAll();
     renderC2W();
   }catch(e){ toast('فشل تحميل البيانات','err'); }
+}
+loadRowsLocal();
+if(ROWS.length){
+  zone.innerHTML='<i class="fas fa-check-circle" style="color:#16a34a;"></i> تم استرجاع '+ROWS.length+' صف محفوظ من قبل. تقدر تلصق جدول جديد فوق ده لو حبيت.';
 }
 loadWallet();
 
@@ -363,6 +386,11 @@ function renderRight(){
   renderRightBody();
 }
 
+function colClass(n){
+  if(n==='الرقم')return 'col-card';
+  if(n==='القيمة')return 'col-amount';
+  return '';
+}
 function renderRightBody(){
   const body=$('#right-body');
   const rows=CUR_RIGHT_ROWS;
@@ -372,7 +400,7 @@ function renderRightBody(){
   const thead='<tr><th class="pick-col"></th>'+names.map(n=>{
     const allKeys=rows.map((r,i)=>cellKey(i,n));
     const fullySel=allKeys.length && allKeys.every(k=>SUM_SEL.has(k));
-    return '<th class="'+(fullySel?'col-sel':'')+'" onclick="selectColumn(\''+n+'\')" title="اضغط لتحديد/تجميع العمود كله">'+n+'</th>';
+    return '<th class="'+colClass(n)+' '+(fullySel?'col-sel':'')+'" onclick="selectColumn(\''+n+'\')" title="اضغط لتحديد/تجميع العمود كله">'+n+'</th>';
   }).join('')+'</tr>';
   const tbody=rows.map((r,idx)=>{
     const linked=r.links&&r.links.length;
@@ -380,7 +408,7 @@ function renderRightBody(){
     const cells=names.map(n=>{
       const v=r.byCol[n];
       const csel=SUM_SEL.has(cellKey(idx,n));
-      return '<td class="'+(csel?'cell-sel':'')+'" onclick="clickCell('+idx+',\''+n+'\',event)">'+(v||'')+'</td>';
+      return '<td class="'+colClass(n)+' '+(csel?'cell-sel':'')+'" onclick="clickCell('+idx+',\''+n+'\',event)">'+(v||'')+'</td>';
     }).join('');
     return '<tr class="'+(linked?'linked':'')+' '+(sel?'row-sel':'')+'" data-id="'+r.id+'">'+
       '<td class="pick-cell" onclick="event.stopPropagation();toggleSel(\'R\',\''+r.id+'\')"><div class="pick-dot" style="margin:0 auto;">'+(sel?'<i class="fas fa-check" style="font-size:0.55rem"></i>':'')+'</div></td>'+
