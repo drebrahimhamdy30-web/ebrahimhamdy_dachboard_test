@@ -270,7 +270,7 @@ function openPicker(rowId){
   const rowDate=dateStr?new Date(dateStr):null;
   const bankText=row.byCol['البنك'];
 
-  const candidates=WALLET.filter(w=>!USED_WALLET.has(w.id)||w.id===row.matchedWalletId);
+  const candidates=WALLET.filter(w=>(!USED_WALLET.has(w.id)||w.id===row.matchedWalletId)&&!DUPLICATES.has(w.id));
   candidates.forEach(w=>{
     w._amtDiff = isNaN(amount)||isNaN(w.amount) ? 999999 : Math.abs(amount-w.amount);
     w._dateDiff = (rowDate && w.date) ? Math.abs(new Date(w.date)-rowDate) : 999999999999;
@@ -359,16 +359,38 @@ async function unlinkRow(rowId){
 }
 
 /* ====== عرض المعاملات المتبقية بلا ربط ====== */
+/* ====== علامة "تكرار" — تُستبعد المعاملة من قائمة المتبقية، وتُحفظ محلياً ====== */
+const LS_DUP='machineImport.duplicates.v1';
+let DUPLICATES=new Set(JSON.parse(localStorage.getItem(LS_DUP)||'[]'));
+function saveDuplicates(){ localStorage.setItem(LS_DUP, JSON.stringify([...DUPLICATES])); }
+function markDuplicate(walId){ DUPLICATES.add(walId); saveDuplicates(); renderLeftover(); }
+function unmarkDuplicate(walId){ DUPLICATES.delete(walId); saveDuplicates(); renderLeftover(); }
+
 function renderLeftover(){
   const card=$('#leftover-card'), area=$('#leftover-area'), cnt=$('#leftover-count');
-  const left=WALLET.filter(w=>!USED_WALLET.has(w.id));
   if(!WALLET.length){ card.style.display='none'; return; }
   card.style.display='block';
+  const notUsed=WALLET.filter(w=>!USED_WALLET.has(w.id));
+  const left=notUsed.filter(w=>!DUPLICATES.has(w.id)).sort((a,b)=> new Date(b.date||0) - new Date(a.date||0));
+  const dups=notUsed.filter(w=>DUPLICATES.has(w.id));
   cnt.textContent='('+left.length+' من '+WALLET.length+')';
-  if(!left.length){ area.innerHTML='<div class="empty-hint" style="padding:16px;">كل المعاملات اترَبطت ✓</div>'; return; }
-  area.innerHTML='<div class="table-wrap" style="max-height:40vh;"><table class="imp-table"><thead><tr><th>المصدر</th><th>الماكينة/ترمنال</th><th>القيمة</th><th>الوقت</th></tr></thead><tbody>'+
-    left.map(w=>`<tr><td>${w.srcLabel}</td><td>${w.to||'—'}${w.terminal?(' · '+w.terminal):''}</td><td class="col-amount">${fmtNum(w.amount)}</td><td>${fmtDate(w.date)}</td></tr>`).join('')+
-    '</tbody></table></div>';
+
+  if(!left.length){
+    area.innerHTML='<div class="empty-hint" style="padding:16px;">كل المعاملات اترَبطت ✓</div>';
+  }else{
+    area.innerHTML='<div class="table-wrap" style="max-height:40vh;"><table class="imp-table"><thead><tr><th>المصدر</th><th>الماكينة/ترمنال</th><th>القيمة</th><th>الوقت</th><th></th></tr></thead><tbody>'+
+      left.map(w=>`<tr><td>${w.srcLabel}</td><td>${w.to||'—'}${w.terminal?(' · '+w.terminal):''}</td><td class="col-amount">${fmtNum(w.amount)}</td><td>${fmtDate(w.date)}</td>
+        <td><button class="btn btn-ghost" style="padding:4px 9px;font-size:0.72rem;" onclick="markDuplicate('${w.id}')" title="علّم كمعاملة مكررة"><i class="fas fa-copy"></i> تكرار</button></td></tr>`).join('')+
+      '</tbody></table></div>';
+  }
+
+  if(dups.length){
+    area.innerHTML += `<details style="margin-top:10px;"><summary style="cursor:pointer;font-size:0.8rem;color:var(--text-muted);font-weight:700;">المعاملات المعلّمة كمكررة (${dups.length})</summary>`+
+      '<div class="table-wrap" style="max-height:30vh;margin-top:6px;"><table class="imp-table"><thead><tr><th>المصدر</th><th>الماكينة/ترمنال</th><th>القيمة</th><th>الوقت</th><th></th></tr></thead><tbody>'+
+      dups.map(w=>`<tr style="opacity:.6;"><td>${w.srcLabel}</td><td>${w.to||'—'}${w.terminal?(' · '+w.terminal):''}</td><td class="col-amount">${fmtNum(w.amount)}</td><td>${fmtDate(w.date)}</td>
+        <td><button class="btn btn-ghost" style="padding:4px 9px;font-size:0.72rem;" onclick="unmarkDuplicate('${w.id}')" title="تراجع"><i class="fas fa-rotate-left"></i> تراجع</button></td></tr>`).join('')+
+      '</tbody></table></div></details>';
+  }
 }
 
 /* ====== استقبال اللصق ====== */
