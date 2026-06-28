@@ -17,7 +17,7 @@ function injectNavbar() {
       '<nav class="nav-links">' +
         '<a href="inventory.html" class="active">' +
           '<i class="fas fa-clipboard-list"></i> جرد</a>' +
-      '</nav>' +
+      </nav>' +
       '<div class="user-info">' +
         '<span id="nav-user">' + displayInv + '</span>' +
         '<button class="btn-logout" onclick="logout()">' +
@@ -31,9 +31,10 @@ function injectNavbar() {
 
   var contractPages    = ['sales_contracts.html', 'claims.html', 'contracts.html', 'contracts_stats.html'];
   var csPages          = ['customer_service.html', 'shortages.html'];
-  var purchasesPages   = ['purchases.html', 'cosmo_order.html', 'inventory_management.html'];
-  // ✅ تعديل ١: ضفنا sms.html لصفحات الفيزا عشان زرار "فيزا" يفضل مظلّل
-var visaPages        = ['visa_transactions.html', 'bank_monitor.html', 'paymob.html', 'sms.html', 'pos_reconciliation.html', 'machine_import.html'];
+  // ✅ إضافة ملف صفحة فحص الأسعار هنا لتفعيل التظليل لزر القائمة الرئيسي
+  var purchasesPages   = ['purchases.html', 'cosmo_order.html', 'price_check.html', 'inventory_management.html'];
+  var visaPages        = ['visa_transactions.html', 'bank_monitor.html', 'paymob.html', 'sms.html', 'pos_reconciliation.html', 'machine_import.html'];
+  
   var isContractPage   = contractPages.includes(currentPage);
   var isCSPage         = csPages.includes(currentPage);
   var isPurchasesPage  = purchasesPages.includes(currentPage);
@@ -44,7 +45,7 @@ var visaPages        = ['visa_transactions.html', 'bank_monitor.html', 'paymob.h
   var isAdmin          = userRole === 'admin';
   var isManager        = userRole === 'manager';
 
-var navContent =
+  var navContent =
     '<div class="nav-logo">' +
       '<span style="font-weight:900;font-size:1.1rem;letter-spacing:1px;">Phalix</span>' +
     '</div>' +
@@ -86,7 +87,7 @@ var navContent =
           'background:#ef4444;color:#fff;border-radius:50%;width:16px;height:16px;' +
           'font-size:0.6rem;font-weight:700;align-items:center;justify-content:center;' +
           'line-height:16px;text-align:center;">0</span>' +
-        ' إشعارات</a>' +
+         ' إشعارات</a>' +
 
       '<a href="offers.html" class="' + (currentPage === 'offers.html' ? 'active' : '') + '">' +
         '<i class="fas fa-tags"></i> عروض</a>' +
@@ -144,14 +145,18 @@ var navContent =
   purchasesItems.push(
     { href: 'cosmo_order.html', icon: 'fa-shopping-basket', label: 'طلبيات الكوزمو والشركات', active: currentPage === 'cosmo_order.html' }
   );
+  // ✅ إضافة التبويب الجديد هنا قبل خيار إدارة المخزون العام
+  purchasesItems.push(
+    { href: 'price_check.html', icon: 'fa-tags', label: 'فرق اسعار اذون الاستلام', active: currentPage === 'price_check.html' }
+  );
   purchasesItems.push(
     { href: 'inventory_management.html', icon: 'fa-warehouse', label: 'إدارة المخزون', active: currentPage === 'inventory_management.html' }
   );
   createFloatingDropdown('purchases-dropdown', purchasesItems);
 
   createFloatingDropdown('cs-dropdown', [
-    { href: 'customer_service.html', icon: 'fa-headset',             label: 'خدمة العملاء', active: currentPage === 'customer_service.html' },
-    { href: 'shortages.html',        icon: 'fa-exclamation-triangle', label: 'نواقص',        active: currentPage === 'shortages.html' }
+    { href: 'customer_service.html', icon: 'fa-headset',               label: 'خدمة العملاء', active: currentPage === 'customer_service.html' },
+    { href: 'shortages.html',        icon: 'fa-exclamation-triangle', label: 'نواقص',         active: currentPage === 'shortages.html' }
   ]);
 
   createFloatingDropdown('contracts-dropdown', [
@@ -162,15 +167,13 @@ var navContent =
   ]);
 
   // Dropdown: فيزا
-  // ✅ تعديل ٢: ضفنا "معاملات المحافظ" كآخر عنصر في القائمة
-  // ✅ تعديل ٣: ضفنا "استيراد جدول الماكينات" بعد "تسوية وإغلاق"
-createFloatingDropdown('visa-dropdown', [
-    { href: 'visa_transactions.html', icon: 'fa-credit-card',          label: 'معاملات الفيزا',  active: currentPage === 'visa_transactions.html' },
+  createFloatingDropdown('visa-dropdown', [
+    { href: 'visa_transactions.html', icon: 'fa-credit-card',           label: 'معاملات الفيزا',  active: currentPage === 'visa_transactions.html' },
     { href: 'bank_monitor.html',      icon: 'fa-university',           label: 'متابعة البنك',    active: currentPage === 'bank_monitor.html' },
     { href: 'paymob.html',            icon: 'fa-mobile-screen-button', label: 'معاملات باي موب', active: currentPage === 'paymob.html' },
     { href: 'sms.html',               icon: 'fa-wallet',               label: 'معاملات المحافظ', active: currentPage === 'sms.html' },
     { href: 'pos_reconciliation.html', icon: 'fa-scale-balanced',      label: 'تسوية وإغلاق',    active: currentPage === 'pos_reconciliation.html' },
-    { href: 'machine_import.html',    icon: 'fa-file-import',         label: 'استيراد جدول الماكينات', active: currentPage === 'machine_import.html' }
+    { href: 'machine_import.html',    icon: 'fa-file-import',          label: 'استيراد جدول الماكينات', active: currentPage === 'machine_import.html' }
   ]);
   
 
