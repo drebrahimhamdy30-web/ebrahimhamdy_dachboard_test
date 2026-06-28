@@ -201,12 +201,59 @@ async function loadWallet(){
     const all=(Array.isArray(o.wallet)?o.wallet:[]).map(normWallet);
     const bk=normBranchKey(USER_BRANCH);
     WALLET = bk ? all.filter(w=>w.storeKey===bk) : all;
+    LINKS = Array.isArray(o.links)?o.links:[];
+    buildLinksIndex();
+    if(ROWS.length){ applyExistingLinks(); renderTable(); }
     renderLeftover();
   }catch(e){ toast('فشل تحميل معاملات المحافظ/الفيزا','err'); }
 }
 loadWallet();
 
-/* ====== فتح قائمة اختيار المعاملة المقابلة لصف معيّن ====== */
+/* ====== كتابة في n8n (نفس آلية صفحة التسوية) ====== */
+const POSUPDATE_URL='https://agent.ebrahimhamdy.com/webhook/posupdate';
+async function posUpdate(payload){
+  const r=await fetch(POSUPDATE_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const t=await r.text();
+  let d=t&&t.trim()?JSON.parse(t):{};
+  if(Array.isArray(d))d=d[0]||{};
+  return d;
+}
+
+/* ====== توقيع الصف الكامل (كل الأعمدة مع بعض) — عشان نتأكد إنه نفس الصف بالضبط لو لصقناه تاني ====== */
+function hashStr(s){
+  let h=0;
+  for(let i=0;i<s.length;i++){ h=((h<<5)-h+s.charCodeAt(i))|0; }
+  return (h>>>0).toString(36);
+}
+function rowSignature(row){
+  return row.names.map(n=>String(row.byCol[n]??'').trim()).join('|');
+}
+
+/* ====== خريطة الربط السابق (sig → سطر links) لتفادي تكرار نفس الصف ====== */
+let LINKS=[];
+let LINKS_BY_SIG={};
+function buildLinksIndex(){
+  LINKS_BY_SIG={};
+  LINKS.filter(l=>!(l.closed===true||l.closed==='true')&&String(l.bill_no||'').startsWith('IMP-')).forEach(l=>{
+    LINKS_BY_SIG[l.bill_no]=l;
+  });
+}
+
+/* لو الصفوف المستوردة دلوقتي اتربط جزء منها قبل كده (نفس التوقيع بالظبط)، نطبّق الربط تلقائياً */
+function applyExistingLinks(){
+  ROWS.forEach(row=>{
+    const sigKey='IMP-'+hashStr(rowSignature(row));
+    row.sigKey=sigKey;
+    const link=LINKS_BY_SIG[sigKey];
+    if(!link)return;
+    const w=WALLET.find(x=>String((x.raw&&x.raw.id!=null)?x.raw.id:x.id)===String(link.wallet_id));
+    if(w){
+      row.matchedWalletId=w.id;
+      row.linkId=link.id;
+      USED_WALLET.add(w.id);
+    }
+  });
+}
 let PICK_FOR=null;
 function fmtDate(d){ if(!d)return ''; const t=new Date(d); return isNaN(t)?String(d):t.toLocaleString('ar-EG',{dateStyle:'short',timeStyle:'short'}); }
 
@@ -256,22 +303,51 @@ function openPicker(rowId){
 }
 function closePicker(){ $('#pick-overlay').style.display='none'; PICK_FOR=null; }
 
-function pickWallet(walId){
+async function pickWallet(walId){
   if(!PICK_FOR)return;
-  // لو الصف ده كان مرتبط بمعاملة قبل كده، نسيبها (تتاح للصفوف التانية)
-  if(PICK_FOR.matchedWalletId) USED_WALLET.delete(PICK_FOR.matchedWalletId);
-  PICK_FOR.matchedWalletId=walId;
-  USED_WALLET.add(walId);
+  const row=PICK_FOR;
+  const w=WALLET.find(x=>x.id===walId);
+  if(!w)return;
   closePicker();
+
+  // لو الصف كان مرتبط بمعاملة قبل كده، نفك القديمة الأول
+  if(row.matchedWalletId && row.matchedWalletId!==walId) await unlinkRowBackend(row);
+
+  row.matchedWalletId=walId;
+  USED_WALLET.add(walId);
   renderTable();
   renderLeftover();
+
+  // تسجيل الربط في جدول links — بتوقيع الصف الكامل عشان نمنع تكراره لو لُصق تاني
+  try{
+    const rawWalId=(w.raw&&w.raw.id!=null)?w.raw.id:w.id;
+    const sigKey=row.sigKey||('IMP-'+hashStr(rowSignature(row)));
+    row.sigKey=sigKey;
+    const res=await posUpdate({table:'links',action:'insert',data:{
+      wallet_id:String(rawWalId), bill_no:sigKey, branch:USER_BRANCH,
+      amount:String(w.amount||''), created_at:new Date().toISOString(), closed:false
+    }});
+    const newId = res?.result?.id ?? res?.result?.[0]?.id;
+    if(newId!=null){ row.linkId=newId; LINKS.push({id:newId,wallet_id:String(rawWalId),bill_no:sigKey,branch:USER_BRANCH,amount:String(w.amount||''),closed:false}); buildLinksIndex(); }
+  }catch(e){ toast('تم الربط محلياً، لكن فشل تسجيله في القاعدة','err'); }
 }
 
-function unlinkRow(rowId){
+async function unlinkRowBackend(row){
+  if(!row.linkId)return;
+  try{
+    await posUpdate({table:'links',action:'update',id:row.linkId,data:{
+      wallet_id:'', bill_no:'', branch:'', amount:'0', created_at:'', closed:true
+    }});
+  }catch(e){}
+  row.linkId=null;
+}
+
+async function unlinkRow(rowId){
   const row=ROWS.find(r=>r.id===rowId);
   if(!row||!row.matchedWalletId)return;
   USED_WALLET.delete(row.matchedWalletId);
   row.matchedWalletId=null;
+  await unlinkRowBackend(row);
   renderTable();
   renderLeftover();
 }
@@ -298,9 +374,11 @@ zone.addEventListener('paste',e=>{
   const parsed=parsePastedText(text);
   if(!parsed.length){ toast('متقدرش أقرا الجدول الملصوق','err'); return; }
   ROWS=buildRowsFromParsed(parsed);
+  applyExistingLinks();
   zone.innerHTML='<i class="fas fa-check-circle" style="color:#16a34a;font-size:1.6rem;"></i><div>تم — '+ROWS.length+' صف. تقدر تلصق جدول جديد فوق ده لو حبيت.</div>';
   renderTable();
-  toast('تم استيراد '+ROWS.length+' صف','ok');
+  const dup=ROWS.filter(r=>r.matchedWalletId).length;
+  toast('تم استيراد '+ROWS.length+' صف'+(dup?(' — '+dup+' منهم متربط من قبل'):''),'ok');
 });
 
 $('#btn-clear').onclick=()=>{
@@ -337,7 +415,7 @@ function renderTable(){
     const w=r.matchedWalletId?WALLET.find(x=>x.id===r.matchedWalletId):null;
     const matchCell = w
       ? `<td><div style="display:flex;align-items:center;gap:6px;">
-           <span style="background:#dcfce7;color:#15803d;border-radius:20px;padding:3px 10px;font-size:0.72rem;font-weight:700;white-space:nowrap;"><i class="fas fa-check"></i> ${fmtNum(w.amount)} ج · ${w.srcLabel}</span>
+           <span style="background:${r.linkId?'#dcfce7':'#dbeafe'};color:${r.linkId?'#15803d':'#1d4ed8'};border-radius:20px;padding:3px 10px;font-size:0.72rem;font-weight:700;white-space:nowrap;"><i class="fas fa-check"></i> ${fmtNum(w.amount)} ج · ${w.srcLabel}${r.linkId?'':' (محلي)'}</span>
            <button class="btn btn-ghost" style="padding:4px 7px;" onclick="event.stopPropagation();unlinkRow('${r.id}')" title="فك الربط"><i class="fas fa-link-slash"></i></button>
          </div></td>`
       : `<td><button class="btn btn-primary" style="padding:5px 12px;font-size:0.76rem;" onclick="openPicker('${r.id}')"><i class="fas fa-link"></i> اختار المعاملة</button></td>`;
