@@ -203,6 +203,7 @@ async function loadWallet(){
     WALLET = bk ? all.filter(w=>w.storeKey===bk) : all;
     LINKS = Array.isArray(o.links)?o.links:[];
     buildLinksIndex();
+    buildDuplicatesIndex(Array.isArray(o.duplicates)?o.duplicates:[]);
     if(ROWS.length){ applyExistingLinks(); renderTable(); }
     renderLeftover();
   }catch(e){ toast('فشل تحميل معاملات المحافظ/الفيزا','err'); }
@@ -359,12 +360,38 @@ async function unlinkRow(rowId){
 }
 
 /* ====== عرض المعاملات المتبقية بلا ربط ====== */
-/* ====== علامة "تكرار" — تُستبعد المعاملة من قائمة المتبقية، وتُحفظ محلياً ====== */
-const LS_DUP='machineImport.duplicates.v1';
-let DUPLICATES=new Set(JSON.parse(localStorage.getItem(LS_DUP)||'[]'));
-function saveDuplicates(){ localStorage.setItem(LS_DUP, JSON.stringify([...DUPLICATES])); }
-function markDuplicate(walId){ DUPLICATES.add(walId); saveDuplicates(); renderLeftover(); }
-function unmarkDuplicate(walId){ DUPLICATES.delete(walId); saveDuplicates(); renderLeftover(); }
+/* ====== علامة "تكرار" — تُسجَّل في n8n (wallet_duplicates) دائمة ومشتركة ====== */
+let DUPLICATES=new Map();   // wal.id (الداخلي) → id سطر wallet_duplicates في القاعدة
+
+function buildDuplicatesIndex(dupRows){
+  DUPLICATES=new Map();
+  (dupRows||[]).forEach(d=>{
+    const w=WALLET.find(x=>String((x.raw&&x.raw.id!=null)?x.raw.id:x.id)===String(d.wallet_id));
+    if(w) DUPLICATES.set(w.id, d.id);
+  });
+}
+
+async function markDuplicate(walId){
+  const w=WALLET.find(x=>x.id===walId);
+  if(!w)return;
+  DUPLICATES.set(walId,null); // تحديث فوري في الواجهة، والـid الحقيقي يتسجّل لما يرجع الرد
+  renderLeftover();
+  try{
+    const rawWalId=(w.raw&&w.raw.id!=null)?w.raw.id:w.id;
+    const res=await posUpdate({table:'wallet_duplicates',action:'insert',data:{wallet_id:String(rawWalId)}});
+    const newId=res?.result?.id ?? res?.result?.[0]?.id;
+    if(newId!=null) DUPLICATES.set(walId,newId);
+  }catch(e){ toast('تم التعليم محلياً، لكن فشل تسجيله في القاعدة','err'); }
+}
+
+async function unmarkDuplicate(walId){
+  const dupId=DUPLICATES.get(walId);
+  DUPLICATES.delete(walId);
+  renderLeftover();
+  if(dupId==null)return;
+  try{ await posUpdate({table:'wallet_duplicates',action:'delete',id:dupId}); }
+  catch(e){ toast('فشل حذف العلامة من القاعدة','err'); }
+}
 
 function renderLeftover(){
   const card=$('#leftover-card'), area=$('#leftover-area'), cnt=$('#leftover-count');
