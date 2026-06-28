@@ -68,12 +68,31 @@
     <div class="toolbar">
       <span class="stat">عدد الصفوف: <b id="row-count">0</b></span>
       <span class="stat">إجمالي القيمة: <b id="row-sum">0.00</b> ج</span>
+      <span class="stat">الفرع: <b id="branch-label">...</b></span>
+      <span class="stat" style="background:#dcfce7;color:#15803d;">مرتبط: <b id="row-matched">0</b></span>
       <button class="btn btn-ghost" id="btn-clear"><i class="fas fa-trash"></i> مسح والبدء من جديد</button>
     </div>
 
     <div id="table-area">
       <div class="empty-hint">لسه مفيش بيانات ملصوقة. الصق الجدول في الخانة فوق.</div>
     </div>
+  </div>
+
+  <div class="card" id="leftover-card" style="margin-top:16px;display:none;">
+    <div class="page-title"><i class="fas fa-wallet" style="color:#a21caf;"></i> معاملات المحافظ/الفيزا المتبقية (بلا ربط) <span id="leftover-count" style="font-size:0.8rem;color:var(--text-muted);font-weight:600;"></span></div>
+    <div id="leftover-area"></div>
+  </div>
+</div>
+
+<!-- Modal اختيار المعاملة -->
+<div id="pick-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:99999;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:16px;padding:18px;width:94%;max-width:560px;max-height:84vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.4);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <div style="font-weight:800;font-size:0.95rem;"><i class="fas fa-link" style="color:var(--accent);"></i> اختار المعاملة المقابلة</div>
+      <button onclick="closePicker()" style="background:none;border:none;font-size:1.1rem;color:var(--text-muted);cursor:pointer;">✕</button>
+    </div>
+    <div id="pick-info" style="font-size:0.82rem;color:var(--text-secondary);background:var(--surface-3);border-radius:10px;padding:8px 12px;margin-bottom:10px;"></div>
+    <div id="pick-list"></div>
   </div>
 </div>
 
@@ -139,6 +158,137 @@ function buildRowsFromParsed(parsed){
   });
 }
 
+/* ====== الفرع الحالي (نفس منطق صفحة التسوية) ====== */
+const BRANCH_ALIAS = { 'الصيدلية':'المعمورة', 'ابراهيم حمدي 2':'سان ستيفانو', 'ابراهيم حمدي 3':'سيدى بشر' };
+function normBranchKey(s){
+  return String(s||'').trim()
+    .replace(/\u0649/g,'\u064a').replace(/\u0629/g,'\u0647')
+    .replace(/[\u0623\u0625\u0622]/g,'\u0627').replace(/\s+/g,' ');
+}
+const USER_BRANCH_RAW=(localStorage.getItem('userBranch')||'').trim();
+const USER_BRANCH = BRANCH_ALIAS[USER_BRANCH_RAW] || USER_BRANCH_RAW;
+$('#branch-label').textContent = USER_BRANCH || 'غير محدد';
+
+/* ====== تحميل معاملات المحافظ/الفيزا (wallet) لنفس الفرع ====== */
+const POSMGMT_URL='https://agent.ebrahimhamdy.com/webhook/posmanagement';
+let WALLET=[];          // كل معاملات الفرع
+let USED_WALLET=new Set(); // المعاملات اللي اترَبطت بصف من الجدول المستورد
+
+function num(v){const n=parseFloat(String(v??'').replace(/,/g,''));return isFinite(n)?n:NaN;}
+
+function normWallet(r){
+  const store=(r.branch||'').trim();
+  let srcLabel='محفظة', src='other';
+  const to=String(r.to||'').toLowerCase();
+  if(String(r.type||'').toUpperCase()==='SALE'||to.includes('paymob')){src='paymob';srcLabel='Paymob';}
+  else if(to.includes('orange')){src='orange';srcLabel='أورنج كاش';}
+  else if(to.includes('vodafone')){src='vodafone';srcLabel='فودافون كاش';}
+  else if(to.includes('instapay')){src='instapay';srcLabel='إنستاباي';}
+  else if(to.includes('fawry')||to.includes('فورى')||to.includes('فوري')){src='fawry';srcLabel='فوري';}
+  return {
+    id:'wal-'+(r.id??Math.random()), raw:r,
+    amount:num(r.ammount??r.amount), store, storeKey:normBranchKey(store),
+    to:r.to||'', terminal:r.terminal_id||'', src, srcLabel,
+    date:r.transaction_time||r.createdAt, bill_no:String(r.bill_no??'').trim()
+  };
+}
+
+async function loadWallet(){
+  try{
+    const res=await fetch(POSMGMT_URL);
+    const data=await res.json();
+    const o=Array.isArray(data)?data[0]:data;
+    const all=(Array.isArray(o.wallet)?o.wallet:[]).map(normWallet);
+    const bk=normBranchKey(USER_BRANCH);
+    WALLET = bk ? all.filter(w=>w.storeKey===bk) : all;
+    renderLeftover();
+  }catch(e){ toast('فشل تحميل معاملات المحافظ/الفيزا','err'); }
+}
+loadWallet();
+
+/* ====== فتح قائمة اختيار المعاملة المقابلة لصف معيّن ====== */
+let PICK_FOR=null;
+function fmtDate(d){ if(!d)return ''; const t=new Date(d); return isNaN(t)?String(d):t.toLocaleString('ar-EG',{dateStyle:'short',timeStyle:'short'}); }
+
+function bankMatchesWallet(bankText,w){
+  const digits=(String(bankText||'').match(/\d+/g)||[]).join('');
+  if(!digits)return false;
+  return String(w.terminal||'').includes(digits) || String(w.to||'').includes(digits);
+}
+
+function openPicker(rowId){
+  const row=ROWS.find(r=>r.id===rowId);
+  if(!row)return;
+  PICK_FOR=row;
+  const amount=num(row.byCol['القيمة']);
+  const dateStr=row.byCol['تاريخ'];
+  const rowDate=dateStr?new Date(dateStr):null;
+  const bankText=row.byCol['البنك'];
+
+  const candidates=WALLET.filter(w=>!USED_WALLET.has(w.id)||w.id===row.matchedWalletId);
+  candidates.forEach(w=>{
+    w._amtDiff = isNaN(amount)||isNaN(w.amount) ? 999999 : Math.abs(amount-w.amount);
+    w._dateDiff = (rowDate && w.date) ? Math.abs(new Date(w.date)-rowDate) : 999999999999;
+    w._bankMatch = bankMatchesWallet(bankText,w) ? 0 : 1;
+  });
+  candidates.sort((a,b)=> a._bankMatch-b._bankMatch || a._amtDiff-b._amtDiff || a._dateDiff-b._dateDiff);
+
+  $('#pick-info').innerHTML = `الصف: <b>${row.byCol['العميل']||'—'}</b> · القيمة <b style="color:var(--accent-dark);">${fmtNum(amount)} ج</b> · البنك <b>${bankText||'—'}</b>`;
+  const list=$('#pick-list');
+  if(!candidates.length){
+    list.innerHTML='<div class="empty-hint">مفيش معاملات متاحة في هذا الفرع</div>';
+  }else{
+    list.innerHTML=candidates.slice(0,40).map(w=>{
+      const diffTxt = w._amtDiff===0 ? '<span style="color:#15803d;font-weight:800;">مطابق تماماً</span>' : ('فرق '+fmtNum(w._amtDiff)+' ج');
+      const bankTag = w._bankMatch===0 ? '<span style="background:#dcfce7;color:#15803d;border-radius:20px;padding:1px 8px;font-size:0.66rem;font-weight:700;margin-inline-start:6px;">نفس الماكينة</span>' : '';
+      const isCurrent = w.id===row.matchedWalletId;
+      return `<div onclick="pickWallet('${w.id}')" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 12px;border:1.5px solid ${isCurrent?'#16a34a':'#e2e8f0'};${isCurrent?'background:#f0fdf4;':''}border-radius:10px;margin-bottom:6px;cursor:pointer;">
+        <div style="font-size:0.8rem;color:var(--text-secondary);">
+          <b style="color:var(--text-primary);">${w.srcLabel}</b> ${bankTag}<br>
+          <span style="font-size:0.72rem;">${fmtDate(w.date)} ${w.terminal?(' · ترمنال '+w.terminal):''}</span><br>
+          <span style="font-size:0.72rem;color:var(--text-muted);">${diffTxt}</span>
+        </div>
+        <div style="font-weight:800;color:var(--accent-dark);white-space:nowrap;">${fmtNum(w.amount)} ج</div>
+      </div>`;
+    }).join('');
+  }
+  $('#pick-overlay').style.display='flex';
+}
+function closePicker(){ $('#pick-overlay').style.display='none'; PICK_FOR=null; }
+
+function pickWallet(walId){
+  if(!PICK_FOR)return;
+  // لو الصف ده كان مرتبط بمعاملة قبل كده، نسيبها (تتاح للصفوف التانية)
+  if(PICK_FOR.matchedWalletId) USED_WALLET.delete(PICK_FOR.matchedWalletId);
+  PICK_FOR.matchedWalletId=walId;
+  USED_WALLET.add(walId);
+  closePicker();
+  renderTable();
+  renderLeftover();
+}
+
+function unlinkRow(rowId){
+  const row=ROWS.find(r=>r.id===rowId);
+  if(!row||!row.matchedWalletId)return;
+  USED_WALLET.delete(row.matchedWalletId);
+  row.matchedWalletId=null;
+  renderTable();
+  renderLeftover();
+}
+
+/* ====== عرض المعاملات المتبقية بلا ربط ====== */
+function renderLeftover(){
+  const card=$('#leftover-card'), area=$('#leftover-area'), cnt=$('#leftover-count');
+  const left=WALLET.filter(w=>!USED_WALLET.has(w.id));
+  if(!WALLET.length){ card.style.display='none'; return; }
+  card.style.display='block';
+  cnt.textContent='('+left.length+' من '+WALLET.length+')';
+  if(!left.length){ area.innerHTML='<div class="empty-hint" style="padding:16px;">كل المعاملات اترَبطت ✓</div>'; return; }
+  area.innerHTML='<div class="table-wrap" style="max-height:40vh;"><table class="imp-table"><thead><tr><th>المصدر</th><th>الماكينة/ترمنال</th><th>القيمة</th><th>الوقت</th></tr></thead><tbody>'+
+    left.map(w=>`<tr><td>${w.srcLabel}</td><td>${w.to||'—'}${w.terminal?(' · '+w.terminal):''}</td><td class="col-amount">${fmtNum(w.amount)}</td><td>${fmtDate(w.date)}</td></tr>`).join('')+
+    '</tbody></table></div>';
+}
+
 /* ====== استقبال اللصق ====== */
 const zone=$('#paste-zone');
 zone.addEventListener('paste',e=>{
@@ -167,6 +317,7 @@ function renderTable(){
   $('#row-count').textContent=ROWS.length;
   const sum=ROWS.reduce((s,r)=>{const v=numFromCell(r.byCol['القيمة']);return s+(isNaN(v)?0:v);},0);
   $('#row-sum').textContent=fmtNum(sum);
+  $('#row-matched').textContent=ROWS.filter(r=>r.matchedWalletId).length;
 
   if(!ROWS.length){
     area.innerHTML='<div class="empty-hint">لسه مفيش بيانات ملصوقة. الصق الجدول في الخانة فوق.</div>';
@@ -174,7 +325,7 @@ function renderTable(){
   }
 
   const names=ROWS[0].names;
-  const thead='<tr>'+names.map(n=>'<th>'+n+'</th>').join('')+'</tr>';
+  const thead='<tr>'+names.map(n=>'<th>'+n+'</th>').join('')+'<th>المعاملة المقابلة</th></tr>';
   const tbody=ROWS.map(r=>{
     const cells=names.map(n=>{
       const v=r.byCol[n];
@@ -183,7 +334,14 @@ function renderTable(){
       if(n==='تحصيل')return '<td class="'+(v==='نعم'?'col-yes':'col-no')+'">'+v+'</td>';
       return '<td>'+v+'</td>';
     }).join('');
-    return '<tr data-id="'+r.id+'">'+cells+'</tr>';
+    const w=r.matchedWalletId?WALLET.find(x=>x.id===r.matchedWalletId):null;
+    const matchCell = w
+      ? `<td><div style="display:flex;align-items:center;gap:6px;">
+           <span style="background:#dcfce7;color:#15803d;border-radius:20px;padding:3px 10px;font-size:0.72rem;font-weight:700;white-space:nowrap;"><i class="fas fa-check"></i> ${fmtNum(w.amount)} ج · ${w.srcLabel}</span>
+           <button class="btn btn-ghost" style="padding:4px 7px;" onclick="event.stopPropagation();unlinkRow('${r.id}')" title="فك الربط"><i class="fas fa-link-slash"></i></button>
+         </div></td>`
+      : `<td><button class="btn btn-primary" style="padding:5px 12px;font-size:0.76rem;" onclick="openPicker('${r.id}')"><i class="fas fa-link"></i> اختار المعاملة</button></td>`;
+    return '<tr data-id="'+r.id+'">'+cells+matchCell+'</tr>';
   }).join('');
 
   area.innerHTML='<div class="table-wrap"><table class="imp-table"><thead>'+thead+'</thead><tbody>'+tbody+'</tbody></table></div>';
