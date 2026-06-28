@@ -1294,11 +1294,15 @@ async function confirmAddC2W(){
       transaction_value:String(val), customer_name:bill.cust_name_ar||'',
       created_at:new Date().toISOString(), disbursed:false, disbursed_at:''
     }});
-    if(res&&res.ok){
-      cancelC2WPreview(); const inp=$('#c2w-bill'); if(inp)inp.value='';
-      toast('تمت الإضافة','ok'); await loadData();
-    }else{ toast('فشل الإضافة','err'); if(btn){btn.disabled=false;btn.innerHTML='<i class="fas fa-plus"></i> إضافة';} }
-  }catch(e){ toast('خطأ في الاتصال','err'); if(btn){btn.disabled=false;btn.innerHTML='<i class="fas fa-plus"></i> إضافة';} }
+    cancelC2WPreview(); const inp=$('#c2w-bill'); if(inp)inp.value='';
+    if(res&&res.ok)toast('تمت الإضافة','ok');
+    else toast('الرد غير واضح — بنحدّث الشاشة للتأكد من الحالة الفعلية','err');
+    await loadData();   // نحدّث دايماً، حتى لو الرد غامض، عشان نعرض الحقيقة الموجودة في القاعدة
+  }catch(e){
+    toast('تأخّر الرد أو انقطع الاتصال — العملية ممكن تكون نجحت فعلاً في القاعدة. بنحدّث الشاشة...','err');
+    cancelC2WPreview(); const inp=$('#c2w-bill'); if(inp)inp.value='';
+    await loadData();   // نحدّث برغم الخطأ الظاهر، لأن n8n ممكن يكون كمّل شغله في الخلفية
+  }
 }
 
 function editC2WValue(id,el,current){
@@ -1322,13 +1326,15 @@ async function disburseC2W(id){
   if(!confirm('تأكيد صرف المبلغ من نقطة البيع؟ السطر هيتشال من القائمة.'))return;
   try{
     await posUpdate({table:'cash_to_wallet',action:'update',id,data:{disbursed:true,disbursed_at:new Date().toISOString()}});
-    toast('تم الصرف','ok'); await loadData();
-  }catch(e){ toast('فشل التحديث','err'); }
+    toast('تم الصرف','ok');
+  }catch(e){ toast('تأخّر الرد — بنحدّث الشاشة للتأكد من الحالة الفعلية','err'); }
+  await loadData();
 }
 async function deleteC2W(id){
   if(!confirm('حذف هذا السطر نهائياً؟'))return;
-  try{ await posUpdate({table:'cash_to_wallet',action:'delete',id}); toast('تم الحذف','ok'); await loadData(); }
-  catch(e){ toast('فشل الحذف','err'); }
+  try{ await posUpdate({table:'cash_to_wallet',action:'delete',id}); toast('تم الحذف','ok'); }
+  catch(e){ toast('تأخّر الرد — بنحدّث الشاشة للتأكد من الحالة الفعلية','err'); }
+  await loadData();
 }
 
 async function loadData(){
