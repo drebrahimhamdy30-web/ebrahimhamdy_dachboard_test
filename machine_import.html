@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>استيراد جدول الماكينات - Phalix</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+<style>
+  :root{
+    --font: 'Tajawal',system-ui,sans-serif;
+    --surface:#fff; --surface-2:#1e293b; --surface-3:#f1f5f9;
+    --border:#e2e8f0; --text-primary:#0f172a; --text-secondary:#475569; --text-muted:#94a3b8;
+    --accent:#3b82f6; --accent-dark:#1d4ed8; --success:#16a34a; --danger:#dc2626; --warning:#d97706;
+    --radius-sm:8px; --radius-md:12px; --radius-lg:16px;
+  }
+  body{font-family:var(--font);background:#f8fafc;margin:0;color:var(--text-primary);}
+  .container{max-width:1300px;margin:0 auto;padding:20px;}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;box-shadow:0 1px 2px rgba(15,23,42,.05);}
+  .page-title{font-size:1.15rem;font-weight:800;display:flex;align-items:center;gap:8px;margin:0 0 14px;}
+  .page-title i{color:var(--accent);}
+
+  .paste-zone{
+    border:2px dashed #93c5fd;border-radius:var(--radius-md);background:#eff6ff;
+    min-height:140px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:8px;cursor:text;padding:20px;text-align:center;color:#1d4ed8;font-weight:700;
+    outline:none;transition:.15s;
+  }
+  .paste-zone:focus,.paste-zone.drag{background:#dbeafe;border-color:#3b82f6;}
+  .paste-zone .hint{font-size:0.82rem;color:#3b82f6;font-weight:600;}
+  .paste-zone .big-icon{font-size:1.8rem;}
+
+  .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:14px 0;}
+  .toolbar .stat{background:var(--surface-3);border:1px solid var(--border);border-radius:20px;padding:5px 14px;font-size:0.8rem;font-weight:700;color:var(--text-secondary);}
+  .toolbar .stat b{color:var(--text-primary);}
+  .btn{border:none;border-radius:var(--radius-sm);padding:8px 16px;font-family:var(--font);font-weight:700;font-size:0.85rem;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}
+  .btn-primary{background:var(--accent);color:#fff;}
+  .btn-primary:hover{background:var(--accent-dark);}
+  .btn-ghost{background:var(--surface-3);color:var(--text-secondary);}
+  .btn-ghost:hover{background:#e2e8f0;}
+  .btn-danger{background:#fee2e2;color:#b91c1c;}
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
+
+  table.imp-table{width:100%;border-collapse:collapse;font-size:0.82rem;margin-top:8px;}
+  table.imp-table th{background:var(--surface-3);padding:8px 10px;text-align:start;font-weight:800;border-bottom:2px solid var(--border);white-space:nowrap;position:sticky;top:0;}
+  table.imp-table td{padding:7px 10px;border-bottom:1px solid #f1f5f9;white-space:nowrap;}
+  table.imp-table tr:hover td{background:#fafbfc;}
+  .table-wrap{max-height:60vh;overflow:auto;border:1px solid var(--border);border-radius:var(--radius-md);}
+  .col-amount{font-weight:800;color:var(--accent-dark);font-variant-numeric:tabular-nums;}
+  .col-machine{display:inline-flex;align-items:center;gap:5px;background:#fae8ff;color:#a21caf;padding:2px 9px;border-radius:20px;font-size:0.72rem;font-weight:700;}
+  .col-yes{color:var(--success);font-weight:700;}
+  .col-no{color:var(--danger);font-weight:700;}
+  .empty-hint{text-align:center;color:var(--text-muted);padding:40px;font-size:0.9rem;}
+</style>
+</head>
+<body>
+<div class="nav-bar"></div>
+<div class="container">
+  <div class="card">
+    <div class="page-title"><i class="fas fa-file-import"></i> استيراد جدول الماكينات (لصق)</div>
+
+    <div id="paste-zone" class="paste-zone" contenteditable="true" tabindex="0">
+      <i class="fas fa-paste big-icon"></i>
+      <div>اضغط هنا والصق الجدول (Ctrl+V)</div>
+      <div class="hint">منسوخ مباشرة من السيستم — هيتفكك تلقائياً لصفوف وأعمدة</div>
+    </div>
+
+    <div class="toolbar">
+      <span class="stat">عدد الصفوف: <b id="row-count">0</b></span>
+      <span class="stat">إجمالي القيمة: <b id="row-sum">0.00</b> ج</span>
+      <button class="btn btn-ghost" id="btn-clear"><i class="fas fa-trash"></i> مسح والبدء من جديد</button>
+    </div>
+
+    <div id="table-area">
+      <div class="empty-hint">لسه مفيش بيانات ملصوقة. الصق الجدول في الخانة فوق.</div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" style="position:fixed;bottom:20px;inset-inline-start:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 20px;border-radius:10px;font-size:0.85rem;font-weight:700;display:none;z-index:9999;"></div>
+
+<script src="nav.js"></script>
+<script>
+const $=s=>document.querySelector(s);
+
+/* ====== توست بسيط ====== */
+let toastT=null;
+function toast(msg,type){
+  const t=$('#toast');
+  t.textContent=msg;
+  t.style.background= type==='err' ? '#dc2626' : (type==='ok' ? '#16a34a' : '#0f172a');
+  t.style.display='block';
+  clearTimeout(toastT);
+  toastT=setTimeout(()=>{t.style.display='none';},2500);
+}
+
+/* ====== الأعمدة المتوقعة من جدول الماكينات (حسب الصورة) ======
+   الترتيب من اليمين لليسار في السيستم الأصلي، لكن النسخ بيجي LTR
+   بالترتيب: العميل، الرقم، ت.صلاحية، البنك، الإسم، القيمة، ن.رسوم تحصيل، فاتورة بيع، تاريخ، تحصيل */
+const EXPECTED_COLS = ['العميل','الرقم','ت.صلاحية','البنك','الإسم','القيمة','ن.رسوم تحصيل','فاتورة بيع','تاريخ','تحصيل'];
+
+let ROWS=[];   // كل صف: {raw:[...], byCol:{...}}
+
+/* ====== تفكيك النص الملصوق لصفوف وأعمدة ====== */
+function parsePastedText(text){
+  // الصفوف بسطر جديد، الأعمدة بـ Tab (نسخ من جدول/Excel/شاشة بيانات)
+  const lines=text.split(/\r\n|\n|\r/).map(l=>l.trim()).filter(l=>l.length);
+  const rows=lines.map(l=>l.split('\t').map(c=>c.trim()));
+  return rows;
+}
+
+function numFromCell(s){
+  const n=parseFloat(String(s||'').replace(/,/g,'').trim());
+  return isFinite(n)?n:NaN;
+}
+
+function detectColumnCount(rows){
+  if(!rows.length)return 0;
+  // نفترض كل الصفوف بنفس عدد الأعمدة، أو ناخد الأكثر تكراراً
+  const counts={};
+  rows.forEach(r=>{counts[r.length]=(counts[r.length]||0)+1;});
+  return +Object.entries(counts).sort((a,b)=>b[1]-a[1])[0][0];
+}
+
+function buildRowsFromParsed(parsed){
+  const ncol=detectColumnCount(parsed);
+  const usable=parsed.filter(r=>r.length===ncol);
+  // لو عدد الأعمدة يطابق الأعمدة المتوقعة، نسمّيها بالاسم. غير كده أعمدة عامة col1..colN
+  const names = (ncol===EXPECTED_COLS.length) ? EXPECTED_COLS : Array.from({length:ncol},(_,i)=>'عمود '+(i+1));
+  return usable.map((cells,idx)=>{
+    const byCol={};
+    names.forEach((name,i)=>byCol[name]=cells[i]??'');
+    return { id:'imp-'+idx+'-'+Date.now(), raw:cells, byCol, names };
+  });
+}
+
+/* ====== استقبال اللصق ====== */
+const zone=$('#paste-zone');
+zone.addEventListener('paste',e=>{
+  e.preventDefault();
+  const text=e.clipboardData.getData('text/plain');
+  if(!text||!text.trim()){ toast('مفيش نص في الكليب بورد','err'); return; }
+  const parsed=parsePastedText(text);
+  if(!parsed.length){ toast('متقدرش أقرا الجدول الملصوق','err'); return; }
+  ROWS=buildRowsFromParsed(parsed);
+  zone.innerHTML='<i class="fas fa-check-circle" style="color:#16a34a;font-size:1.6rem;"></i><div>تم — '+ROWS.length+' صف. تقدر تلصق جدول جديد فوق ده لو حبيت.</div>';
+  renderTable();
+  toast('تم استيراد '+ROWS.length+' صف','ok');
+});
+
+$('#btn-clear').onclick=()=>{
+  ROWS=[];
+  zone.innerHTML='<i class="fas fa-paste big-icon"></i><div>اضغط هنا والصق الجدول (Ctrl+V)</div><div class="hint">منسوخ مباشرة من السيستم — هيتفكك تلقائياً لصفوف وأعمدة</div>';
+  renderTable();
+};
+
+/* ====== عرض الجدول ====== */
+function fmtNum(n){ return isNaN(n)?'—':n.toLocaleString('en-EG',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+function renderTable(){
+  const area=$('#table-area');
+  $('#row-count').textContent=ROWS.length;
+  const sum=ROWS.reduce((s,r)=>{const v=numFromCell(r.byCol['القيمة']);return s+(isNaN(v)?0:v);},0);
+  $('#row-sum').textContent=fmtNum(sum);
+
+  if(!ROWS.length){
+    area.innerHTML='<div class="empty-hint">لسه مفيش بيانات ملصوقة. الصق الجدول في الخانة فوق.</div>';
+    return;
+  }
+
+  const names=ROWS[0].names;
+  const thead='<tr>'+names.map(n=>'<th>'+n+'</th>').join('')+'</tr>';
+  const tbody=ROWS.map(r=>{
+    const cells=names.map(n=>{
+      const v=r.byCol[n];
+      if(n==='القيمة')return '<td class="col-amount">'+fmtNum(numFromCell(v))+'</td>';
+      if(n==='البنك')return '<td><span class="col-machine"><i class="fas fa-credit-card"></i> '+v+'</span></td>';
+      if(n==='تحصيل')return '<td class="'+(v==='نعم'?'col-yes':'col-no')+'">'+v+'</td>';
+      return '<td>'+v+'</td>';
+    }).join('');
+    return '<tr data-id="'+r.id+'">'+cells+'</tr>';
+  }).join('');
+
+  area.innerHTML='<div class="table-wrap"><table class="imp-table"><thead>'+thead+'</thead><tbody>'+tbody+'</tbody></table></div>';
+}
+
+renderTable();
+</script>
+</body>
+</html>
