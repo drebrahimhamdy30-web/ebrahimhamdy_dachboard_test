@@ -17,7 +17,7 @@ function injectNavbar() {
       '<nav class="nav-links">' +
         '<a href="inventory.html" class="active">' +
           '<i class="fas fa-clipboard-list"></i> جرد</a>' +
-      </nav>' +
+      '</nav>' +
       '<div class="user-info">' +
         '<span id="nav-user">' + displayInv + '</span>' +
         '<button class="btn-logout" onclick="logout()">' +
@@ -31,7 +31,6 @@ function injectNavbar() {
 
   var contractPages    = ['sales_contracts.html', 'claims.html', 'contracts.html', 'contracts_stats.html'];
   var csPages          = ['customer_service.html', 'shortages.html'];
-  // ✅ إضافة ملف صفحة فحص الأسعار هنا لتفعيل التظليل لزر القائمة الرئيسي
   var purchasesPages   = ['purchases.html', 'cosmo_order.html', 'price_check.html', 'inventory_management.html'];
   var visaPages        = ['visa_transactions.html', 'bank_monitor.html', 'paymob.html', 'sms.html', 'pos_reconciliation.html', 'machine_import.html'];
   
@@ -145,7 +144,6 @@ function injectNavbar() {
   purchasesItems.push(
     { href: 'cosmo_order.html', icon: 'fa-shopping-basket', label: 'طلبيات الكوزمو والشركات', active: currentPage === 'cosmo_order.html' }
   );
-  // ✅ إضافة التبويب الجديد هنا قبل خيار إدارة المخزون العام
   purchasesItems.push(
     { href: 'price_check.html', icon: 'fa-tags', label: 'فرق اسعار اذون الاستلام', active: currentPage === 'price_check.html' }
   );
