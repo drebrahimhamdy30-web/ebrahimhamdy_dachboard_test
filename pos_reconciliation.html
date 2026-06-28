@@ -956,12 +956,10 @@ function buildCloseView(){
     return;
   }
   if(!closeDraft.counts)closeDraft.counts={};
-  if(!closeDraft.custodies)closeDraft.custodies=[{name:'',amount:''}];
+  if(closeDraft.custodyTotal==null)closeDraft.custodyTotal='';
   if(closeDraft.notes==null)closeDraft.notes='';
 
-  const wt=branchWalletTotals(branch);const walletSum=wt.reduce((s,g)=>s+g.total,0);
   const c2w=cashToWalletForBranch(branch);const c2wSum=c2w.reduce((s,r)=>s+(r.transaction_value||0),0);
-  const autoTotal=walletSum+c2wSum;
 
   wrap.innerHTML=`
     <div class="card" style="margin-bottom:16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
@@ -978,12 +976,8 @@ function buildCloseView(){
       <div style="display:flex;flex-direction:column;gap:16px">
         <div class="card">
           <div class="card-mini-head"><i class="fas fa-motorcycle" style="color:#c2410c"></i> العهدة مع الطيارين <span class="htot mono" id="cust-h">0.00 ج</span></div>
-          <div id="custodies"></div>
-          <button class="add-line-btn" id="add-custody"><i class="fas fa-plus"></i> إضافة طيار / عهدة</button>
-        </div>
-        <div class="card">
-          <div class="card-mini-head"><i class="fas fa-wallet" style="color:#0369a1"></i> المحافظ والماكينات (تلقائي) <span class="htot mono" id="wallet-h">${money(walletSum)} ج</span></div>
-          <div>${wt.length?wt.map(g=>`<div class="wtot-line"><span class="src-chip src-${g.src}"><i class="fas ${SRC_ICON[g.src]}"></i> ${g.label}</span><span><span style="color:var(--text-muted);font-size:0.74rem">${g.count} معاملة · </span><b class="mono">${money(g.total)} ج</b></span></div>`).join(''):'<div class="empty-state" style="padding:20px"><i class="fas fa-inbox"></i>لا توجد معاملات محافظ لهذا الفرع في الشيفت الحالي.</div>'}</div>
+          <label class="modal-lbl" style="margin-top:0">إجمالي العهدة</label>
+          <input class="form-input mono" id="custody-total" type="number" step="0.01" placeholder="0.00" value="${closeDraft.custodyTotal}">
         </div>
         <div class="card">
           <div class="card-mini-head"><i class="fas fa-file-circle-plus" style="color:#0369a1"></i> فواتير كاش محوّلة لمحفظة <span class="htot mono" id="c2w-h">${money(c2wSum)} ج</span></div>
@@ -1005,18 +999,18 @@ function buildCloseView(){
       <div class="grand-card">
         <div class="grand-cell cash"><div class="gl">إجمالي الكاش</div><div class="gv mono" id="g-cash">0.00</div></div>
         <div class="grand-cell cust"><div class="gl">العهد مع الطيارين</div><div class="gv mono" id="g-cust">0.00</div></div>
-        <div class="grand-cell auto"><div class="gl">المحافظ والماكينات</div><div class="gv mono" id="g-auto">${money(autoTotal)}</div></div>
+        <div class="grand-cell auto"><div class="gl">فواتير كاش محوّلة</div><div class="gv mono" id="g-auto">${money(c2wSum)}</div></div>
         <div class="grand-cell total"><div class="gl">الإجمالي المرحَّل</div><div class="gv mono" id="g-total">0.00</div></div>
       </div>
     </div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:16px">
-      <span style="color:var(--text-muted);font-size:0.8rem">الإجمالي المرحَّل = الكاش + العهد + المحافظ (شامل فواتير الكاش المحوّلة) — ده اللي بيتصرف من نقطة البيع.</span>
+      <span style="color:var(--text-muted);font-size:0.8rem">الإجمالي المرحَّل = الكاش + العهد + فواتير الكاش المحوّلة — ده اللي بيتصرف من نقطة البيع.</span>
       <div style="flex:1"></div>
       <button class="btn btn-sm" style="background:var(--surface-3)" onclick="window.print()"><i class="fas fa-print"></i> طباعة</button>
       <button class="btn btn-success" id="btn-save-close"><i class="fas fa-lock"></i> حفظ وإغلاق الشيفت</button>
     </div>`;
 
-  renderDenoms();renderCustodies();
+  renderDenoms();
   document.querySelectorAll('.c2w-editable').forEach(td=>{
     td.style.cursor='pointer';td.title='اضغط للتعديل';
     td.onclick=()=>editC2WValue(+td.dataset.id,td,+td.dataset.v);
@@ -1024,8 +1018,8 @@ function buildCloseView(){
   $('#close-cashier').value=closeDraft.cashier||localStorage.getItem('activeUser')||'';
   $('#close-cashier').addEventListener('input',e=>{closeDraft.cashier=e.target.value;saveDraft();});
   $('#close-notes').addEventListener('input',e=>{closeDraft.notes=e.target.value;saveDraft();});
-  $('#add-custody').onclick=()=>{closeDraft.custodies.push({name:'',amount:''});saveDraft();renderCustodies();recalc();};
-  $('#btn-save-close').onclick=()=>saveClose(branch,wt,autoTotal);
+  $('#custody-total').addEventListener('input',e=>{closeDraft.custodyTotal=e.target.value;saveDraft();recalc();});
+  $('#btn-save-close').onclick=()=>saveClose(branch,c2wSum);
   recalc();
 }
 function renderDenoms(){
@@ -1042,41 +1036,26 @@ function renderDenoms(){
     const d=parseFloat(inp.dataset.d),c=parseInt(inp.value)||0,sub=el.querySelector('[data-sub="'+d+'"]');sub.textContent=money(d*c);sub.classList.toggle('zero',!(d*c));
   });
 }
-function renderCustodies(){
-  const el=$('#custodies');el.innerHTML='';
-  closeDraft.custodies.forEach((c,i)=>{
-    const row=document.createElement('div');row.className='cust-line';
-    row.innerHTML='<input class="table-input" placeholder="اسم الطيار / الجهة" data-i="'+i+'" data-k="name" value="'+(c.name||'')+'"><input class="table-input mono" type="number" step="0.01" placeholder="المبلغ" data-i="'+i+'" data-k="amount" value="'+(c.amount||'')+'" style="text-align:center"><button class="ibtn danger" data-del="'+i+'">×</button>';
-    el.appendChild(row);
-  });
-  el.querySelectorAll('input').forEach(inp=>inp.addEventListener('input',()=>{closeDraft.custodies[+inp.dataset.i][inp.dataset.k]=inp.value;saveDraft();recalc();}));
-  el.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{closeDraft.custodies.splice(+b.dataset.del,1);if(!closeDraft.custodies.length)closeDraft.custodies=[{name:'',amount:''}];saveDraft();renderCustodies();recalc();});
-}
 function recalc(){
   let cash=0;DENOMS.forEach(d=>cash+=d*(parseInt(closeDraft.counts[d])||0));
-  let cust=0;closeDraft.custodies.forEach(c=>cust+=parseFloat(c.amount)||0);
-  const walletSum=branchWalletTotals(ACTIVE_BRANCH).reduce((s,g)=>s+g.total,0);
+  const cust=parseFloat(closeDraft.custodyTotal)||0;
   const c2wSum=cashToWalletForBranch(ACTIVE_BRANCH).reduce((s,r)=>s+(r.transaction_value||0),0);
-  const autoTotal=walletSum+c2wSum;
   const set=(id,v)=>{const e=$(id);if(e)e.textContent=v;};
   set('#cash-h',money(cash)+' ج');set('#cust-h',money(cust)+' ج');set('#c2w-h',money(c2wSum)+' ج');
-  set('#g-cash',money(cash));set('#g-cust',money(cust));set('#g-auto',money(autoTotal));set('#g-total',money(cash+cust+autoTotal));
+  set('#g-cash',money(cash));set('#g-cust',money(cust));set('#g-auto',money(c2wSum));set('#g-total',money(cash+cust+c2wSum));
 }
-async function saveClose(branch,wt,walletSum){
+async function saveClose(branch,c2wSum){
   let cash=0;DENOMS.forEach(d=>cash+=d*(parseInt(closeDraft.counts[d])||0));
-  const custodies=closeDraft.custodies.filter(c=>(c.name||'').trim()||parseFloat(c.amount));
-  const custSum=custodies.reduce((s,c)=>s+(parseFloat(c.amount)||0),0);
+  const custSum=parseFloat(closeDraft.custodyTotal)||0;
   const cashier=($('#close-cashier')?.value||'').trim();
-  if(cash===0&&walletSum===0&&custSum===0){if(!confirm('كل المبالغ صفر. تأكيد إغلاق شيفت فاضي؟'))return;}
+  if(cash===0&&c2wSum===0&&custSum===0){if(!confirm('كل المبالغ صفر. تأكيد إغلاق شيفت فاضي؟'))return;}
 
-  const closedWalletIds=WALLET.filter(w=>!overlay.hidden[w.id]&&w.storeKey===normBranch(branch)).map(w=>(w.raw&&w.raw.id!=null)?w.raw.id:w.id);
   const record={
     branch,cashier,closed_at:new Date().toISOString(),
     cash_breakdown:Object.fromEntries(DENOMS.map(d=>[d,parseInt(closeDraft.counts[d])||0]).filter(x=>x[1])),
-    cash_total:+cash.toFixed(2),custodies,custody_total:+custSum.toFixed(2),
-    wallets:wt.map(g=>({label:g.label,src:g.src,count:g.count,total:+g.total.toFixed(2)})),
-    wallet_total:+walletSum.toFixed(2),grand_total:+(cash+custSum+walletSum).toFixed(2),
-    notes:closeDraft.notes||'',closed_wallet_ids:closedWalletIds
+    cash_total:+cash.toFixed(2),custody_total:+custSum.toFixed(2),
+    wallet_total:+c2wSum.toFixed(2),grand_total:+(cash+custSum+c2wSum).toFixed(2),
+    notes:closeDraft.notes||''
   };
 
   $('#btn-save-close').disabled=true;
@@ -1087,9 +1066,8 @@ async function saveClose(branch,wt,walletSum){
   local.unshift({...record,id:'local-'+Date.now(),_local:true,_synced:ok});
   localStorage.setItem('recon.closes.v1',JSON.stringify(local));
 
-  closedWalletIds.forEach(rid=>{const w=WALLET.find(x=>((x.raw&&x.raw.id)||x.id)===rid);if(w)overlay.hidden[w.id]={reason:'closed_shift',shift:record.closed_at,note:'مرحّلة بإغلاق شيفت '+branch,at:Date.now()};});
   saveOverlay();
-  closeDraft={counts:{},custodies:[{name:'',amount:''}],notes:'',cashier:''};saveDraft();
+  closeDraft={counts:{},custodyTotal:'',notes:'',cashier:''};saveDraft();
   $('#btn-save-close').disabled=false;
   toast(ok?'تم حفظ الإغلاق وترحيل الشيفت':'تم الحفظ محلياً (n8n غير موصّل)',ok?'ok':'bad');
   render();buildCloseView();
