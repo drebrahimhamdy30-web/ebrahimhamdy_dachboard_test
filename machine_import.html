@@ -32,7 +32,7 @@
   .toolbar .stat{background:var(--surface-3);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:0.75rem;font-weight:700;color:var(--text-secondary);}
   .toolbar .stat b{color:var(--text-primary);}
 
-  .split-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;}
+  .split-grid{display:grid;grid-template-columns:2fr 1fr;gap:14px;align-items:start;}
   @media (max-width:900px){.split-grid{grid-template-columns:1fr;}}
   .pane{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;display:flex;flex-direction:column;max-height:78vh;}
   .pane-head{padding:10px 14px;background:var(--surface-3);border-bottom:2px solid #16a34a;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
@@ -73,6 +73,21 @@
   .c2w-table th{font-size:0.7rem;color:var(--text-muted);font-weight:700;background:var(--surface-3);}
   .c2w-table td.num,.c2w-table th.num{width:90px;text-align:center;}
   .branch-group-head{background:#eff6ff;color:#1d4ed8;font-weight:800;font-size:0.8rem;padding:6px 12px;border-radius:8px;margin:10px 0 4px;}
+
+  /* جدول الاستيراد الكامل + تجميع زي الإكسيل */
+  .sum-bar{background:#0f172a;color:#4ade80;font-size:0.78rem;font-weight:800;padding:5px 12px;border-radius:8px;margin-inline-start:auto;white-space:nowrap;}
+  .imp-full-table{width:100%;border-collapse:collapse;font-size:0.78rem;}
+  .imp-full-table thead th{background:var(--surface-3);padding:6px 8px;border-bottom:2px solid #16a34a;text-align:start;white-space:nowrap;position:sticky;top:0;cursor:pointer;user-select:none;}
+  .imp-full-table thead th:hover{background:#e2f8e9;}
+  .imp-full-table thead th.pick-col{cursor:default;width:30px;}
+  .imp-full-table thead th.col-sel{background:#bbf7d0;}
+  .imp-full-table tbody td{padding:5px 8px;border-bottom:1px solid #f1f5f9;white-space:nowrap;cursor:cell;user-select:none;}
+  .imp-full-table tbody tr.linked{opacity:.5;}
+  .imp-full-table tbody tr.row-sel{background:#dcfce7;}
+  .imp-full-table tbody td.cell-sel{background:#bbf7d0;outline:1.5px solid #16a34a;outline-offset:-1px;}
+  .imp-full-table tbody td.pick-cell{cursor:pointer;text-align:center;}
+  .imp-full-table tbody tr:hover td{background:#fafbfc;}
+  .imp-full-table tbody tr:hover td.cell-sel{background:#bbf7d0;}
 </style>
 </head>
 <body>
@@ -108,6 +123,7 @@
       <div class="pane-head">
         <span class="ttl"><i class="fas fa-table-list" style="color:#0284c7"></i> الجدول المستورد</span>
         <span class="cnt" id="right-cnt">—</span>
+        <span class="sum-bar" id="sum-bar" style="display:none;"></span>
       </div>
       <div class="pane-filters">
         <select id="right-machine-filter"><option value="">كل الماكينات</option></select>
@@ -286,25 +302,90 @@ $('#left-show-linked').addEventListener('change',renderLeft);
 
 function renderAll(){ renderRight(); renderLeft(); renderConfirmBar(); }
 
+/* ====== تجميع زي الإكسيل: تحديد خلايا/أعمدة وجمعها ====== */
+let SUM_SEL=new Set();      // مفاتيح "rowIndex|colName" المحدّدة
+let SUM_LAST=null;          // آخر خلية ضغطنا عليها (لدعم التحديد بالسحب/Shift)
+let CUR_RIGHT_ROWS=[];      // الصفوف المعروضة حالياً بعد الفلترة (لحساب نطاق Shift)
+
+function cellKey(rowIdx,col){ return rowIdx+'|'+col; }
+
+function selectColumn(col){
+  // لو العمود ده محدّد بالكامل أصلاً، نشيله. غير كده نحدّده بالكامل (بدل أي تحديد سابق)
+  const allKeys=CUR_RIGHT_ROWS.map((r,i)=>cellKey(i,col));
+  const fullySelected=allKeys.length && allKeys.every(k=>SUM_SEL.has(k));
+  SUM_SEL=new Set();
+  if(!fullySelected) allKeys.forEach(k=>SUM_SEL.add(k));
+  SUM_LAST=null;
+  renderRightBody();
+}
+
+function clickCell(rowIdx,col,ev){
+  const key=cellKey(rowIdx,col);
+  if(ev.shiftKey && SUM_LAST && SUM_LAST.col===col){
+    // تحديد نطاق من آخر خلية لحد دلوقتي (في نفس العمود)، زي شِفت في الإكسيل
+    const a=Math.min(SUM_LAST.rowIdx,rowIdx), b=Math.max(SUM_LAST.rowIdx,rowIdx);
+    SUM_SEL=new Set();
+    for(let i=a;i<=b;i++) SUM_SEL.add(cellKey(i,col));
+  }else if(ev.ctrlKey||ev.metaKey){
+    // إضافة/إزالة خلية واحدة من التحديد الحالي
+    if(SUM_SEL.has(key)) SUM_SEL.delete(key); else SUM_SEL.add(key);
+    SUM_LAST={rowIdx,col};
+  }else{
+    // ضغطة عادية: تحديد خلية واحدة بس
+    SUM_SEL=new Set([key]);
+    SUM_LAST={rowIdx,col};
+  }
+  renderRightBody();
+}
+
+function computeSum(){
+  let sum=0,count=0;
+  SUM_SEL.forEach(key=>{
+    const [rowIdxStr,col]=key.split('|');
+    const r=CUR_RIGHT_ROWS[+rowIdxStr]; if(!r)return;
+    const v=num(r.byCol[col]);
+    if(!isNaN(v)){ sum+=v; count++; }
+  });
+  const bar=$('#sum-bar');
+  if(!SUM_SEL.size){ bar.style.display='none'; return; }
+  bar.style.display='inline-block';
+  bar.textContent='Σ المجموع: '+fmtNum(sum)+' ('+count+' من '+SUM_SEL.size+' خلية)';
+}
+
 function renderRight(){
-  const body=$('#right-body');
   const mf=$('#right-machine-filter').value;
   const showLinked=$('#right-show-linked').checked;
-  let rows=ROWS.filter(r=>(!mf||r.byCol['البنك']===mf) && (showLinked || !(r.links&&r.links.length)));
-  $('#right-cnt').textContent=rows.length+' صف';
+  CUR_RIGHT_ROWS=ROWS.filter(r=>(!mf||r.byCol['البنك']===mf) && (showLinked || !(r.links&&r.links.length)));
+  $('#right-cnt').textContent=CUR_RIGHT_ROWS.length+' صف';
   $('#row-count').textContent=ROWS.length;
+  SUM_SEL=new Set(); SUM_LAST=null;
+  renderRightBody();
+}
+
+function renderRightBody(){
+  const body=$('#right-body');
+  const rows=CUR_RIGHT_ROWS;
+  computeSum();
   if(!rows.length){ body.innerHTML='<div class="empty-hint">لا توجد صفوف مطابقة. الصق جدول أو غيّر الفلتر.</div>'; return; }
-  body.innerHTML=rows.map(r=>{
-    const amt=num(r.byCol['القيمة']);
+  const names=rows[0].names;
+  const thead='<tr><th class="pick-col"></th>'+names.map(n=>{
+    const allKeys=rows.map((r,i)=>cellKey(i,n));
+    const fullySel=allKeys.length && allKeys.every(k=>SUM_SEL.has(k));
+    return '<th class="'+(fullySel?'col-sel':'')+'" onclick="selectColumn(\''+n+'\')" title="اضغط لتحديد/تجميع العمود كله">'+n+'</th>';
+  }).join('')+'</tr>';
+  const tbody=rows.map((r,idx)=>{
     const linked=r.links&&r.links.length;
     const sel=SEL_R.has(r.id);
-    return '<div class="row-item '+(linked?'linked':'')+' '+(sel?'sel':'')+'" data-id="'+r.id+'" onclick="toggleSel(\'R\',\''+r.id+'\')">'+
-      '<div class="pick-dot">'+(sel?'<i class="fas fa-check" style="font-size:0.6rem"></i>':'')+'</div>'+
-      '<div class="row-body">'+
-        '<div class="row-top"><span class="row-amt">'+fmtNum(amt)+' ج</span><span class="mchip">'+(r.byCol['البنك']||'—')+'</span>'+(linked?'<span class="lchip">مرتبط ('+r.links.length+')</span>':'')+'</div>'+
-        '<div class="row-meta"><span>'+(r.byCol['العميل']||'—')+'</span><span>فاتورة '+(r.byCol['فاتورة بيع']||'—')+'</span><span>'+(r.byCol['تاريخ']||'')+'</span></div>'+
-      '</div></div>';
+    const cells=names.map(n=>{
+      const v=r.byCol[n];
+      const csel=SUM_SEL.has(cellKey(idx,n));
+      return '<td class="'+(csel?'cell-sel':'')+'" onclick="clickCell('+idx+',\''+n+'\',event)">'+(v||'')+'</td>';
+    }).join('');
+    return '<tr class="'+(linked?'linked':'')+' '+(sel?'row-sel':'')+'" data-id="'+r.id+'">'+
+      '<td class="pick-cell" onclick="event.stopPropagation();toggleSel(\'R\',\''+r.id+'\')"><div class="pick-dot" style="margin:0 auto;">'+(sel?'<i class="fas fa-check" style="font-size:0.55rem"></i>':'')+'</div></td>'+
+      cells+'</tr>';
   }).join('');
+  body.innerHTML='<table class="imp-full-table"><thead>'+thead+'</thead><tbody>'+tbody+'</tbody></table>';
 }
 function renderLeft(){
   const body=$('#left-body');
@@ -329,7 +410,7 @@ function renderLeft(){
 function toggleSel(side,id){
   const set=side==='R'?SEL_R:SEL_L;
   if(set.has(id))set.delete(id);else set.add(id);
-  if(side==='R')renderRight();else renderLeft();
+  if(side==='R')renderRightBody();else renderLeft();
   renderConfirmBar();
 }
 
