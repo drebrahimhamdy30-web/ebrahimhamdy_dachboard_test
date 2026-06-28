@@ -234,15 +234,13 @@ let LINKS=[];
 let LINKS_BY_SIG={};
 function buildLinksIndex(){
   LINKS_BY_SIG={};
-  LINKS.filter(l=>!(l.closed===true||l.closed==='true')&&String(l.bill_no||'').startsWith('IMP-')).forEach(l=>{
-    LINKS_BY_SIG[l.bill_no]=l;
-  });
+  LINKS.forEach(l=>{ if(l.row_sig) LINKS_BY_SIG[l.row_sig]=l; });
 }
 
 /* لو الصفوف المستوردة دلوقتي اتربط جزء منها قبل كده (نفس التوقيع بالظبط)، نطبّق الربط تلقائياً */
 function applyExistingLinks(){
   ROWS.forEach(row=>{
-    const sigKey='IMP-'+hashStr(rowSignature(row));
+    const sigKey=hashStr(rowSignature(row));
     row.sigKey=sigKey;
     const link=LINKS_BY_SIG[sigKey];
     if(!link)return;
@@ -321,23 +319,31 @@ async function pickWallet(walId){
   // تسجيل الربط في جدول links — بتوقيع الصف الكامل عشان نمنع تكراره لو لُصق تاني
   try{
     const rawWalId=(w.raw&&w.raw.id!=null)?w.raw.id:w.id;
-    const sigKey=row.sigKey||('IMP-'+hashStr(rowSignature(row)));
+    const sigKey=row.sigKey||hashStr(rowSignature(row));
     row.sigKey=sigKey;
     const res=await posUpdate({table:'links',action:'insert',data:{
-      wallet_id:String(rawWalId), bill_no:sigKey, branch:USER_BRANCH,
-      amount:String(w.amount||''), created_at:new Date().toISOString(), closed:false
+      wallet_id:String(rawWalId),
+      row_sig:sigKey,
+      branch:USER_BRANCH,
+      amount:String(w.amount||''),
+      customer_name: row.byCol['العميل']||'',
+      card_number: row.byCol['الرقم']||'',
+      sale_invoice_no: row.byCol['فاتورة بيع']||'',
+      row_date: row.byCol['تاريخ']||'',
+      machine: row.byCol['البنك']||'',
+      created_at:new Date().toISOString()
     }});
     const newId = res?.result?.id ?? res?.result?.[0]?.id;
-    if(newId!=null){ row.linkId=newId; LINKS.push({id:newId,wallet_id:String(rawWalId),bill_no:sigKey,branch:USER_BRANCH,amount:String(w.amount||''),closed:false}); buildLinksIndex(); }
+    if(newId!=null){ row.linkId=newId; LINKS.push({id:newId,wallet_id:String(rawWalId),row_sig:sigKey}); buildLinksIndex(); }
   }catch(e){ toast('تم الربط محلياً، لكن فشل تسجيله في القاعدة','err'); }
 }
 
 async function unlinkRowBackend(row){
   if(!row.linkId)return;
   try{
-    await posUpdate({table:'links',action:'update',id:row.linkId,data:{
-      wallet_id:'', bill_no:'', branch:'', amount:'0', created_at:'', closed:true
-    }});
+    await posUpdate({table:'links',action:'delete',id:row.linkId});
+    LINKS=LINKS.filter(l=>l.id!==row.linkId);
+    buildLinksIndex();
   }catch(e){}
   row.linkId=null;
 }
