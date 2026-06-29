@@ -947,17 +947,22 @@ function cashToWalletForBranch(branch){
   return CASH2WALLET.filter(r=>!r.disbursed && (!bk || normBranch(r.branch)===bk));
 }
 
-/* أسباب اختلاف قيمة الفاتورة عن قيمة السداد، وتأثير كل سبب على إجمالي التقفيل */
+/* أسباب اختلاف قيمة الفاتورة عن قيمة إيصال الدفع/التحويل، وتأثير كل سبب على إجمالي التقفيل.
+   mode='full' → التأثير = قيمة الإيصال كاملة (مفيش فاتورة حقيقية بديلة، الإيصال هو الحقيقة).
+   mode='diff' → التأثير = قيمة الإيصال − قيمة الفاتورة (الفرق بينهم، يطلع +/− تلقائياً حسب الحالة).
+   mode='none' → بدون أي تأثير، للعلم بس. */
 const C2W_REASONS={
-  cash_as_visa: {label:'تم الحفظ كاش عن طريق الخطا ', sign:+1},
-  driver_fee:   {label:'فرق لصالح الطيار (خدمة توصيل)',                sign:+1},
-  partial_cash: {label:'جزء كاش وجزء فيزا',                        sign:-1},
-  return_new:   {label:'مرتجع + فاتورة جديدة أعلى',                     sign:-1},
-  transfer_fee: {label:'ضريبة/رسوم تحويل',    sign:0}
+  cash_as_visa: {label:'تم الحفظ كاش عن طريق الخطأ', mode:'full'},
+  driver_fee:   {label:'فرق لصالح الطيار (خدمة توصيل)', mode:'diff'},
+  partial_cash: {label:'جزء كاش وجزء فيزا', mode:'diff'},
+  return_new:   {label:'مرتجع + فاتورة جديدة أعلى', mode:'diff'},
+  transfer_fee: {label:'ضريبة/رسوم تحويل', mode:'none'}
 };
 function c2wEffect(r){
-  const sign=(C2W_REASONS[r.reason]||C2W_REASONS.cash_as_visa).sign;
-  return sign*(r.transaction_value||0);
+  const cfg=C2W_REASONS[r.reason]||C2W_REASONS.cash_as_visa;
+  if(cfg.mode==='full') return r.transaction_value||0;
+  if(cfg.mode==='diff') return (r.transaction_value||0)-(r.invoice_amount||0);
+  return 0;
 }
 
 function buildCloseView(){
@@ -991,7 +996,7 @@ function buildCloseView(){
             c2w.map(r=>{
               const rs=C2W_REASONS[r.reason]||C2W_REASONS.cash_as_visa;
               const eff=c2wEffect(r);
-              const effColor=rs.sign>0?'#15803d':(rs.sign<0?'#b91c1c':'#94a3b8');
+              const effColor=eff>0?'#15803d':(eff<0?'#b91c1c':'#94a3b8');
               return `<tr><td>${r.bill_no}</td><td>${r.customer_name||'—'}</td><td class="num mono">${money(r.invoice_amount)}</td><td class="num mono c2w-editable" data-id="${r.id}" data-v="${r.transaction_value}" style="color:${effColor};font-weight:800;">${eff>0?'+':''}${money(eff)}</td><td style="font-size:0.72rem;">${rs.label}</td><td class="actions"><button class="btn btn-sm btn-success" style="padding:4px 9px;font-size:0.72rem" onclick="disburseC2W(${r.id})"><i class="fas fa-check"></i> تم الصرف</button><button class="ibtn danger" onclick="deleteC2W(${r.id})" title="حذف"><i class="fas fa-trash"></i></button></td></tr>`;
             }).join('')+
             `</tbody></table>`:'<div class="empty-state" style="padding:14px;font-size:0.8rem"><i class="fas fa-inbox"></i> لا توجد فواتير حالياً.</div>'}
@@ -1286,19 +1291,13 @@ function showC2WPreview(bill,branch){
       <span style="color:var(--text-muted);">قيمة الفاتورة: ${net.toFixed(2)} ج</span>
       <label style="font-weight:700;">السبب:</label>
       <select id="c2w-reason-select" class="form-select" style="width:auto;font-size:0.78rem;padding:5px 8px;">${reasonOptions}</select>
-      <label style="font-weight:700;">قيمة ايصال الدفع او التحويل:</label>
+      <label style="font-weight:700;">قيمة إيصال الدفع أو التحويل:</label>
       <input id="c2w-value-input" class="table-input mono" type="number" step="0.01" value="${net}" style="width:90px;text-align:center;">
       <button class="btn btn-success btn-sm" id="c2w-confirm-btn"><i class="fas fa-plus"></i> إضافة</button>
       <button class="btn btn-sm" style="background:var(--surface-3)" onclick="cancelC2WPreview()">إلغاء</button>
     </div>
-    <div class="modal-hint" style="margin-bottom:8px;">«فاتورة كاش بالغلط» = قيمة الفاتورة كاملة. أي سبب تاني = اكتب الفرق بس (مش الفاتورة كاملة).</div>`;
+    <div class="modal-hint" style="margin-bottom:8px;">اكتب قيمة الإيصال الفعلية اللي معاك (مش الفرق) — النظام بيحسب الفرق مع الفاتورة تلقائياً حسب السبب المختار.</div>`;
   $('#c2w-confirm-btn').onclick=confirmAddC2W;
-  $('#c2w-reason-select').addEventListener('change',e=>{
-    const r=C2W_REASONS[e.target.value];
-    const valInp=$('#c2w-value-input');
-    if(e.target.value==='cash_as_visa') valInp.value=net;
-    else if(valInp.value==String(net)) valInp.value=0;
-  });
 }
 function cancelC2WPreview(){ PENDING_C2W=null; const el=$('#c2w-preview'); if(el)el.innerHTML=''; }
 
