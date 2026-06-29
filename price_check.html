@@ -470,14 +470,14 @@
       }, 1600);
     }
 
-    // ===== السؤال اللحظي عن صنف واحد عبر الـ webhook =====
-    // يرسل {code, branch} ويتوقع رد فيه: found, sell_price, balance, itm_name_ar
+    // ===== السؤال اللحظي عن صنف واحد عبر الـ webhook (GET — يتفادى preflight) =====
+    // يرسل code & branch في الـ query string، ويتوقع رد فيه: found, sell_price, balance, itm_name_ar
     async function searchItemLive(code, branchAr){
-      var res = await fetch(SEARCH_URL, {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ code:String(code).trim(), branch:branchAr })
-      });
+      var url = SEARCH_URL +
+        (SEARCH_URL.indexOf('?')>-1 ? '&' : '?') +
+        'code='   + encodeURIComponent(String(code).trim()) +
+        '&branch='+ encodeURIComponent(branchAr);
+      var res = await fetch(url, { method:'GET' });
       var raw = await res.json();
       // الرد قد يأتي ككائن واحد أو مصفوفة أو داخل data
       var obj = Array.isArray(raw) ? (raw[0]||{}) : (raw.data && !raw.found ? raw.data : raw);
@@ -561,6 +561,7 @@
 
       var foundRows=results.filter(function(r){return r.found;});
       var nfRows=results.filter(function(r){return !r.found;});
+      var errorRows=results.filter(function(r){return r.error;});
       var mismatchRows=foundRows.filter(function(r){return !r.match;});
       var matchRows=foundRows.filter(function(r){return r.match;});
 
@@ -575,12 +576,24 @@
         results.length+' صنف · '+mismatchRows.length+' مختلف · '+matchRows.length+' مطابق'+(nfRows.length?' · '+nfRows.length+' غير موجود':'');
       document.getElementById('excel-btn').disabled = mismatchRows.length===0 && nfRows.length===0;
 
+      // تحذير: لو كل (أو معظم) الأصناف خطأ اتصال، فالمشكلة في الـ webhook (CORS غالباً) مش في الأصناف
+      var html='';
+      if(errorRows.length){
+        var allErr = errorRows.length===results.length;
+        html+='<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:var(--radius-md);padding:14px 16px;margin-bottom:14px;color:#991b1b;font-size:0.85rem;line-height:1.7">'+
+          '<div style="font-weight:800;margin-bottom:4px">⚠️ '+errorRows.length+' صنف تعذّر الاتصال بالنظام'+(allErr?' (كل الأصناف)':'')+'</div>'+
+          (allErr?'<div>غالباً مشكلة في الـ webhook (CORS أو غير مفعّل). تأكد أن الـ Webhook node في n8n يقبل POST، وأن خانة Allowed Origins فيها رابط الموقع، وأن الـ workflow مُفعّل (Active).</div>':'<div>بعض الأصناف فشل الاتصال بها — جرّب إعادة المحاولة.</div>')+
+          '<button class="btn-calc" style="margin-top:10px;padding:8px 18px;font-size:0.82rem" onclick="calculate()"><i class="fas fa-rotate-right"></i> إعادة المحاولة</button>'+
+        '</div>';
+      }
+
       // ملخص
-      var html='<div class="summary-bar">'+
+      html+='<div class="summary-bar">'+
         '<div class="summary-item">إجمالي المنسوخ: <b>'+results.length+'</b></div>'+
         '<div class="summary-item danger">أسعار مختلفة: <b>'+mismatchRows.length+'</b></div>'+
         '<div class="summary-item ok">مطابقة: <b>'+matchRows.length+'</b></div>'+
         (nfRows.length?'<div class="summary-item warn">غير موجود عندي: <b>'+nfRows.length+'</b></div>':'')+
+        (errorRows.length?'<div class="summary-item danger">خطأ اتصال: <b>'+errorRows.length+'</b></div>':'')+
         '</div>';
 
       if(!view.length){ container.innerHTML=html+'<div class="loading-overlay">لا توجد أصناف مختلفة 🎉 كل الأسعار مطابقة.</div>'; return; }
