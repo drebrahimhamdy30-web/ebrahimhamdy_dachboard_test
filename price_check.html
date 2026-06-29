@@ -204,6 +204,17 @@
     const LS_BRANCH='pricecheck_branch';
 
     // ===== تحديد الفرع من اليوزر المفتوح =====
+    // المصدر الأساسي: localStorage.userBranch (نفس اللي يعتمده الـ nav) — قيمته بالعربي
+    function resolveBranchFromStorage(){
+      var v = localStorage.getItem('userBranch');
+      if(v==null) return null;
+      var key=String(v).trim();
+      if(USER_BRANCH_MAP.hasOwnProperty(key)) return USER_BRANCH_MAP[key];
+      for(var nm in USER_BRANCH_MAP){
+        if(key.indexOf(nm)>-1) return USER_BRANCH_MAP[nm];
+      }
+      return null;
+    }
     function resolveBranchFromUser(user){
       if(!user) return null;
       var candidates=[user.branch, user.branch_code, user.branchName, user.branch_name,
@@ -238,17 +249,26 @@
     }
 
     // ===== تشغيل =====
+    // 1) جرّب localStorage.userBranch أولاً (المصدر الموثوق ومتاح فوراً)
+    // 2) ثم بيانات اليوزر من checkAuth()
+    // 3) ثم آخر اختيار يدوي محفوظ، وإلا المعمورة
+    var resolvedFromStorage = resolveBranchFromStorage();
+    if(resolvedFromStorage){
+      setMyBranch(resolvedFromStorage, true);
+    }
     checkAuth().then(function(user){
       if(!user) return;
+      // لو الفرع اتحدد من localStorage خلاص، نسيبه
+      if(resolvedFromStorage) return;
       var fromUser = resolveBranchFromUser(user);
       if(fromUser){
         setMyBranch(fromUser, true);
       } else {
-        // fallback: آخر اختيار محفوظ، وإلا المعمورة
         var saved=localStorage.getItem(LS_BRANCH);
         setMyBranch(saved && BRANCHES[saved] ? saved : 'mamora', false);
       }
     }).catch(function(){
+      if(resolvedFromStorage) return;
       var saved=localStorage.getItem(LS_BRANCH);
       setMyBranch(saved && BRANCHES[saved] ? saved : 'mamora', false);
     });
