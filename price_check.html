@@ -132,12 +132,13 @@
                   <tr>
                     <th style="width:90px">الكود</th>
                     <th>إسم الصنف</th>
-                    <th style="width:120px">سعر البيع</th>
+                    <th style="width:110px">سعر البيع</th>
+                    <th style="width:90px">التكلفة</th>
                     <th style="width:44px"></th>
                   </tr>
                 </thead>
                 <tbody id="paste-tbody">
-                  <tr><td colspan="4" class="paste-empty">لا توجد أصناف بعد — الصق الجدول في الصندوق فوق</td></tr>
+                  <tr><td colspan="5" class="paste-empty">لا توجد أصناف بعد — الصق الجدول في الصندوق فوق</td></tr>
                 </tbody>
               </table>
             </div>
@@ -306,30 +307,40 @@
     }
 
     // ===== تحليل النص الملصوق =====
-    // المنطق: في كل سطر، الكود = أول رقم صحيح "كبير" (>=1000) عادةً في آخر/أول خلية،
-    // سعر البيع = العمود قبل التكلفة (آخر عمودين أرقام عشرية).
-    // لكن أبسط وأأمن طريقة: نقسم بالـ tab أو الفراغات المتعددة، الكود رقم طويل، الاسم = النص العربي،
-    // والأسعار = الأرقام العشرية. سعر البيع هو الرقم العشري قبل الأخير (التكلفة آخر رقم) — حسب جدولك.
+    // ترتيب أعمدة برنامج المخزون (من النسخ، RTL يظهر مقلوب بصرياً لكن النص بالترتيب ده):
+    //  0:كود  1:إسم الصنف  2:المطلوب  3:كمية  4:وحدة  5:ت.صلاحية  6:الرصيد الكلي  7:س.بيع  8:تكلفة  [9:تشغيلة]
+    // المنطق: نحافظ على الخلايا الفاضية (مهم!) ونعتمد على الموضع الثابت.
+    // الكود = أول خلية رقم صحيح، التكلفة = آخر رقم في الصف، سعر البيع = العمود قبل التكلفة.
+    function parseNum(s){
+      if(s==null) return null;
+      var t=String(s).replace(/,/g,'').replace(/[^\d.\-]/g,'').trim();
+      if(t==='' || t==='.' || t==='-') return null;
+      var n=parseFloat(t);
+      return isNaN(n)?null:n;
+    }
     function parsePaste(text){
-      var lines=text.split(/\r?\n/).map(function(l){return l.trim();}).filter(function(l){return l.length;});
+      var lines=text.split(/\r?\n/);
       var out=[];
-      lines.forEach(function(line){
+      lines.forEach(function(rawLine){
+        var line=rawLine.replace(/\s+$/,''); // شيل المسافات من آخر السطر فقط
+        if(!line.trim()) return;
         // تجاهل سطر العناوين
         if(/إسم الصنف|اسم الصنف|س\.?بيع|الرصيد الكل|تكلفة|كمية|وحدة/.test(line) && !/\d{3,}/.test(line)) return;
 
-        // قسّم بالتاب أولاً، وإلا بمسافتين أو أكثر
-        var cells = line.indexOf('\t')>-1 ? line.split('\t') : line.split(/\s{2,}/);
-        cells = cells.map(function(c){return c.trim();}).filter(function(c){return c.length;});
+        // قسّم بالتاب مع الحفاظ على الخلايا الفاضية؛ لو مفيش تاب نقسم بمسافتين+
+        var hasTab = line.indexOf('\t')>-1;
+        var cells = hasTab ? line.split('\t') : line.trim().split(/\s{2,}/);
+        cells = cells.map(function(c){return (c==null?'':String(c)).trim();});
         if(cells.length<2) return;
 
-        // الكود: أول/آخر خلية تكون رقم صحيح من 3 خانات فأكثر بدون نقطة
+        // الكود = أول خلية رقم صحيح من 3 خانات فأكثر
         var code=null, codeIdx=-1;
         for(var i=0;i<cells.length;i++){
           if(/^\d{3,}$/.test(cells[i])){ code=cells[i]; codeIdx=i; break; }
         }
         if(!code) return;
 
-        // اسم الصنف: أطول خلية تحتوي حروف عربية
+        // اسم الصنف = أطول خلية فيها حروف عربية
         var name='', nameLen=-1;
         cells.forEach(function(c){
           if(/[\u0600-\u06FF]/.test(c) && !/^\d+\/\d+$/.test(c)){
@@ -337,21 +348,32 @@
           }
         });
 
-        // الأرقام العشرية (تحتوي نقطة) = أسعار/تكلفة محتملة، بترتيب ظهورها
-        var decimals=[];
-        cells.forEach(function(c, idx){
-          if(idx===codeIdx) return;
-          var num=c.replace(/,/g,'');
-          if(/^\d+\.\d+$/.test(num)) decimals.push(parseFloat(num));
-        });
+        // ===== سعر البيع =====
+        // الطريقة الأساسية: نأخذ كل الخلايا الرقمية بعد الاسم، آخرها = التكلفة، واللي قبلها = سعر البيع.
+        // (الكمية/الرصيد أرقام أيضاً، لكن سعر البيع والتكلفة دائماً آخر رقمين على اليسار في الترتيب).
+        var sellPrice=null, costPrice=null;
 
-        // في جدولك الترتيب: ... س.بيع ثم تكلفة (آخر رقمين). سعر البيع = قبل الأخير.
-        var sellPrice=null;
-        if(decimals.length>=2) sellPrice=decimals[decimals.length-2];
-        else if(decimals.length===1) sellPrice=decimals[0];
+        // اجمع الأرقام مع مواضعها (نتجاهل الكود نفسه)
+        var nums=[];
+        for(var k=0;k<cells.length;k++){
+          if(k===codeIdx) continue;
+          var v=cells[k];
+          if(v==='') continue;
+          // رقم (صحيح أو عشري) وليس تاريخ صلاحية مثل 02/2028
+          if(/^\d+(\.\d+)?$/.test(v.replace(/,/g,''))){
+            nums.push(parseNum(v));
+          }
+        }
+
+        if(nums.length>=2){
+          costPrice = nums[nums.length-1];   // آخر رقم = التكلفة
+          sellPrice = nums[nums.length-2];   // قبل الأخير = سعر البيع
+        } else if(nums.length===1){
+          sellPrice = nums[0];
+        }
 
         if(sellPrice==null || isNaN(sellPrice)) return;
-        out.push({ code:String(code).trim(), name:name||'(بدون اسم)', sellPrice:sellPrice });
+        out.push({ code:String(code).trim(), name:name||'(بدون اسم)', sellPrice:sellPrice, cost:costPrice });
       });
 
       // دمج التكرارات (نفس الكود) — نحتفظ بأول سعر
@@ -384,7 +406,7 @@
       document.getElementById('paste-count').textContent=parsedRows.length+' صنف';
       document.getElementById('paste-zone').classList.toggle('has-data', parsedRows.length>0);
       if(!parsedRows.length){
-        tbody.innerHTML='<tr><td colspan="4" class="paste-empty">لا توجد أصناف بعد — الصق الجدول في الصندوق فوق</td></tr>';
+        tbody.innerHTML='<tr><td colspan="5" class="paste-empty">لا توجد أصناف بعد — الصق الجدول في الصندوق فوق</td></tr>';
         return;
       }
       var html='';
@@ -393,6 +415,7 @@
           '<td>'+r.code+'</td>'+
           '<td class="pt-name">'+r.name+'</td>'+
           '<td class="pt-price">'+r2(r.sellPrice)+'</td>'+
+          '<td style="color:var(--text-muted)">'+(r.cost!=null?r2(r.cost):'—')+'</td>'+
           '<td><button class="pt-del" title="حذف الصنف" onclick="removeRow('+i+')"><i class="fas fa-times"></i></button></td>'+
         '</tr>';
       });
