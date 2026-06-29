@@ -307,14 +307,14 @@
     }
 
     // ===== تحليل النص الملصوق =====
-    // ترتيب أعمدة برنامج المخزون (من النسخ، RTL يظهر مقلوب بصرياً لكن النص بالترتيب ده):
-    //  0:كود  1:إسم الصنف  2:المطلوب  3:كمية  4:وحدة  5:ت.صلاحية  6:الرصيد الكلي  7:س.بيع  8:تكلفة  [9:تشغيلة]
-    // المنطق: نحافظ على الخلايا الفاضية (مهم!) ونعتمد على الموضع الثابت.
-    // الكود = أول خلية رقم صحيح، التكلفة = آخر رقم في الصف، سعر البيع = العمود قبل التكلفة.
+    // ترتيب أعمدة برنامج المخزون عند النسخ (من بداية السطر / الشمال):
+    //  [تشغيلة] · التكلفة · س.بيع · الرصيد الكلي · ت.صلاحية · وحدة · كمية · المطلوب · إسم الصنف · كود
+    // أي أن: الكود = آخر خلية في السطر، الاسم = الخلية العربية،
+    //        أول رقمين عشريين (فيهما نقطة) من جهة الشمال = التكلفة ثم سعر البيع.
     function parseNum(s){
       if(s==null) return null;
-      var t=String(s).replace(/,/g,'').replace(/[^\d.\-]/g,'').trim();
-      if(t==='' || t==='.' || t==='-') return null;
+      var t=String(s).replace(/,/g,'').trim();
+      if(!/^\d+(\.\d+)?$/.test(t)) return null;
       var n=parseFloat(t);
       return isNaN(n)?null:n;
     }
@@ -322,20 +322,20 @@
       var lines=text.split(/\r?\n/);
       var out=[];
       lines.forEach(function(rawLine){
-        var line=rawLine.replace(/\s+$/,''); // شيل المسافات من آخر السطر فقط
-        if(!line.trim()) return;
+        if(!rawLine.trim()) return;
         // تجاهل سطر العناوين
-        if(/إسم الصنف|اسم الصنف|س\.?بيع|الرصيد الكل|تكلفة|كمية|وحدة/.test(line) && !/\d{3,}/.test(line)) return;
+        if(/إسم الصنف|اسم الصنف/.test(rawLine) && /كود/.test(rawLine)) return;
+        if(/تكلفة/.test(rawLine) && /س\.?بيع/.test(rawLine) && !/\d{3,}/.test(rawLine)) return;
 
         // قسّم بالتاب مع الحفاظ على الخلايا الفاضية؛ لو مفيش تاب نقسم بمسافتين+
-        var hasTab = line.indexOf('\t')>-1;
-        var cells = hasTab ? line.split('\t') : line.trim().split(/\s{2,}/);
+        var hasTab = rawLine.indexOf('\t')>-1;
+        var cells = hasTab ? rawLine.split('\t') : rawLine.trim().split(/\s{2,}/);
         cells = cells.map(function(c){return (c==null?'':String(c)).trim();});
         if(cells.length<2) return;
 
-        // الكود = أول خلية رقم صحيح من 3 خانات فأكثر
+        // الكود = آخر خلية رقم صحيح من 3 خانات فأكثر (من جهة اليمين)
         var code=null, codeIdx=-1;
-        for(var i=0;i<cells.length;i++){
+        for(var i=cells.length-1;i>=0;i--){
           if(/^\d{3,}$/.test(cells[i])){ code=cells[i]; codeIdx=i; break; }
         }
         if(!code) return;
@@ -348,29 +348,21 @@
           }
         });
 
-        // ===== سعر البيع =====
-        // الطريقة الأساسية: نأخذ كل الخلايا الرقمية بعد الاسم، آخرها = التكلفة، واللي قبلها = سعر البيع.
-        // (الكمية/الرصيد أرقام أيضاً، لكن سعر البيع والتكلفة دائماً آخر رقمين على اليسار في الترتيب).
-        var sellPrice=null, costPrice=null;
-
-        // اجمع الأرقام مع مواضعها (نتجاهل الكود نفسه)
-        var nums=[];
+        // الأرقام العشرية (فيها نقطة) بترتيب ظهورها من الشمال:
+        // أول واحدة = التكلفة، التانية = سعر البيع.
+        // (الكمية/الرصيد/المطلوب قيم مثل 1.00 و 0.00 وهي أيضاً عشرية، لكن
+        //  التكلفة والسعر دائماً أول رقمين بعد عمود التشغيلة الفارغ — والرصيد=0.00 يأتي بعدهما.
+        //  لذا نلتقط أول رقمين عشريين "غير صفر بالضرورة"؛ ولأمان أكبر: السعر هو ثاني عشري،
+        //  والتكلفة أول عشري — وكلاهما عادةً > القيم الصغيرة 0/1/2.)
+        var decimals=[];
         for(var k=0;k<cells.length;k++){
           if(k===codeIdx) continue;
-          var v=cells[k];
-          if(v==='') continue;
-          // رقم (صحيح أو عشري) وليس تاريخ صلاحية مثل 02/2028
-          if(/^\d+(\.\d+)?$/.test(v.replace(/,/g,''))){
-            nums.push(parseNum(v));
-          }
+          var v=cells[k].replace(/,/g,'');
+          if(/^\d+\.\d+$/.test(v)) decimals.push(parseFloat(v));
         }
-
-        if(nums.length>=2){
-          costPrice = nums[nums.length-1];   // آخر رقم = التكلفة
-          sellPrice = nums[nums.length-2];   // قبل الأخير = سعر البيع
-        } else if(nums.length===1){
-          sellPrice = nums[0];
-        }
+        var costPrice=null, sellPrice=null;
+        if(decimals.length>=2){ costPrice=decimals[0]; sellPrice=decimals[1]; }
+        else if(decimals.length===1){ sellPrice=decimals[0]; }
 
         if(sellPrice==null || isNaN(sellPrice)) return;
         out.push({ code:String(code).trim(), name:name||'(بدون اسم)', sellPrice:sellPrice, cost:costPrice });
