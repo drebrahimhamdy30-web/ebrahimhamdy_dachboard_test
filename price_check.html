@@ -320,21 +320,38 @@
           }
         });
 
-        // الأرقام العشرية (فيها نقطة) بترتيب ظهورها من الشمال:
-        // أول واحدة = التكلفة، التانية = سعر البيع.
-        // (الكمية/الرصيد/المطلوب قيم مثل 1.00 و 0.00 وهي أيضاً عشرية، لكن
-        //  التكلفة والسعر دائماً أول رقمين بعد عمود التشغيلة الفارغ — والرصيد=0.00 يأتي بعدهما.
-        //  لذا نلتقط أول رقمين عشريين "غير صفر بالضرورة"؛ ولأمان أكبر: السعر هو ثاني عشري،
-        //  والتكلفة أول عشري — وكلاهما عادةً > القيم الصغيرة 0/1/2.)
-        var decimals=[];
+        // ===== استخراج التكلفة وسعر البيع =====
+        // يدعم شكلين من التقارير:
+        //   البسيط: [تشغيلة] التكلفة س.بيع رصيد ت.صلاحية ... اسم كود
+        //   الكامل: مسلسل تشغيلة موقع رصيد_استلام التكلفة س.بيع رصيد_صرف ت.صلاحية ... الشركة اسم كود
+        // السمة الثابتة: التكلفة = أول رقم عشري كسوره ليست .00 (محسوبة بدقة مثل 669.290)،
+        // وسعر البيع = الرقم العشري التالي لها مباشرة. أما الرصيد/الكمية فكسورها .00 وقيمها صغيرة.
+        var decs=[];
         for(var k=0;k<cells.length;k++){
           if(k===codeIdx) continue;
           var v=cells[k].replace(/,/g,'');
-          if(/^\d+\.\d+$/.test(v)) decimals.push(parseFloat(v));
+          if(/^\d+\.\d+$/.test(v)){
+            var val=parseFloat(v);
+            decs.push({ val:val, frac: Math.round((val - Math.floor(val))*1000) });
+          }
         }
+
         var costPrice=null, sellPrice=null;
-        if(decimals.length>=2){ costPrice=decimals[0]; sellPrice=decimals[1]; }
-        else if(decimals.length===1){ sellPrice=decimals[0]; }
+        // التكلفة = أول رقم كسوره != 0
+        var costPos=-1;
+        for(var d=0; d<decs.length; d++){
+          if(decs[d].frac !== 0){ costPrice=decs[d].val; costPos=d; break; }
+        }
+        // سعر البيع = الرقم العشري التالي للتكلفة
+        if(costPos>-1 && costPos+1 < decs.length){
+          sellPrice=decs[costPos+1].val;
+        }
+        // احتياطي: لو كل الكسور .00 (تكلفة وسعر صحيحان مثل 35.00/55.00) → أكبر رقمين
+        if(sellPrice==null){
+          var vals=decs.map(function(o){return o.val;}).sort(function(a,b){return b-a;});
+          if(vals.length>=2){ sellPrice=vals[0]; costPrice=vals[1]; }
+          else if(vals.length===1){ sellPrice=vals[0]; }
+        }
 
         if(sellPrice==null || isNaN(sellPrice)) return;
         out.push({ code:String(code).trim(), name:name||'(بدون اسم)', sellPrice:sellPrice, cost:costPrice });
