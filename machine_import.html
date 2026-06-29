@@ -111,12 +111,12 @@
   </div>
 
   <div id="confirm-bar">
-    <span class="cb-tag"><i class="fas fa-link"></i> وضع الربط</span>
+    <span class="cb-tag"><i class="fas fa-link"></i> وضع المراجعة</span>
     <span class="cb-stat">المستورد: <b id="cb-right">0</b> (<span id="cb-right-sum">0.00</span> ج)</span>
     <span class="cb-stat">المحافظ: <b id="cb-left">0</b> (<span id="cb-left-sum">0.00</span> ج)</span>
     <div class="cb-actions">
       <button class="cb-cancel" id="cb-cancel">إلغاء</button>
-      <button class="cb-confirm" id="cb-confirm"><i class="fas fa-check"></i> تأكيد الربط</button>
+      <button class="cb-confirm" id="cb-confirm"><i class="fas fa-check"></i> تأكيد التحديث</button>
     </div>
   </div>
 
@@ -265,7 +265,8 @@ function normWallet(r){
     id:'wal-'+(r.id??Math.random()),raw:r,
     amount:num(r.ammount??r.amount),store,storeKey:normBranchKey(store),
     to:r.to||'',terminal:r.terminal_id||'',src,srcLabel,
-    date:r.transaction_time||r.createdAt,bill_no:String(r.bill_no??'').trim()
+    date:r.transaction_time||r.createdAt,bill_no:String(r.bill_no??'').trim(),
+    closed:(r.closed===true||r.closed==='true')
   };
 }
 async function loadWallet(){
@@ -420,17 +421,16 @@ function renderLeft(){
   const body=$('#left-body');
   const mf=$('#left-machine-filter').value;
   const showLinked=$('#left-show-linked').checked;
-  let rows=WALLET.filter(w=>(!mf||(w.to===mf||w.srcLabel===mf)) && (showLinked || !(w.links&&w.links.length)));
+  let rows=WALLET.filter(w=>(!mf||(w.to===mf||w.srcLabel===mf)) && (showLinked || !w.closed));
   rows.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
   $('#left-cnt').textContent=rows.length+' معاملة';
   if(!rows.length){ body.innerHTML='<div class="empty-hint">لا توجد معاملات مطابقة.</div>'; return; }
   body.innerHTML=rows.map(w=>{
-    const linked=w.links&&w.links.length;
     const sel=SEL_L.has(w.id);
-    return '<div class="row-item '+(linked?'linked':'')+' '+(sel?'sel':'')+'" data-id="'+w.id+'" onclick="toggleSel(\'L\',\''+w.id+'\')">'+
+    return '<div class="row-item '+(w.closed?'linked':'')+' '+(sel?'sel':'')+'" data-id="'+w.id+'" onclick="toggleSel(\'L\',\''+w.id+'\')">'+
       '<div class="pick-dot">'+(sel?'<i class="fas fa-check" style="font-size:0.6rem"></i>':'')+'</div>'+
       '<div class="row-body">'+
-        '<div class="row-top"><span class="row-amt">'+fmtNum(w.amount)+' ج</span><span class="mchip">'+(w.to||w.srcLabel)+'</span>'+(w.terminal?'<span class="lchip">'+w.terminal+'</span>':'')+(linked?'<span class="lchip">مرتبط ('+w.links.length+')</span>':'')+'</div>'+
+        '<div class="row-top"><span class="row-amt">'+fmtNum(w.amount)+' ج</span><span class="mchip">'+(w.to||w.srcLabel)+'</span>'+(w.terminal?'<span class="lchip">'+w.terminal+'</span>':'')+(w.closed?'<span class="lchip">تم ✓</span>':'')+'</div>'+
         '<div class="row-meta"><span>'+w.srcLabel+'</span><span>'+new Date(w.date||0).toLocaleString('ar-EG',{dateStyle:'short',timeStyle:'short'})+'</span></div>'+
       '</div></div>';
   }).join('');
@@ -456,30 +456,37 @@ $('#cb-cancel').onclick=()=>{ SEL_R=new Set(); SEL_L=new Set(); renderAll(); };
 $('#cb-confirm').onclick=confirmLinking;
 
 async function confirmLinking(){
-  if(!SEL_R.size || !SEL_L.size){ toast('لازم تختار من الجهتين علشان تربط','err'); return; }
+  if(!SEL_R.size && !SEL_L.size){ toast('اختَر صفوف أو معاملات أولاً','err'); return; }
   const btn=$('#cb-confirm'); btn.disabled=true; btn.innerHTML='<i class="fas fa-spinner fa-spin"></i>';
   const rightRows=[...SEL_R].map(id=>ROWS.find(r=>r.id===id)).filter(Boolean);
   const leftWals=[...SEL_L].map(id=>WALLET.find(w=>w.id===id)).filter(Boolean);
   const now=new Date().toISOString();
   try{
+    // يمين: كل صف لوحده — لو مش متسجّل في links يتسجّل، لو متسجّل يتمسح (تراجع)
     for(const r of rightRows){
-      for(const w of leftWals){
-        const rawWalId=(w.raw&&w.raw.id!=null)?w.raw.id:w.id;
+      if(r.links && r.links.length){
+        for(const l of r.links){ if(l.id!=null) await posUpdate({table:'links',action:'delete',id:l.id}); }
+      }else{
         await posUpdate({table:'links',action:'insert',data:{
-          wallet_id:String(rawWalId), row_sig:r.sigKey, branch:USER_BRANCH,
-          amount:String(w.amount||''), customer_name:r.byCol['العميل']||'',
+          wallet_id:'', row_sig:r.sigKey, branch:USER_BRANCH,
+          amount:String(num(r.byCol['القيمة'])||''), customer_name:r.byCol['العميل']||'',
           card_number:r.byCol['الرقم']||'', sale_invoice_no:r.byCol['فاتورة بيع']||'',
           row_date:r.byCol['تاريخ']||'', machine:r.byCol['البنك']||'', created_at:now
         }});
       }
     }
-    toast('تم الربط','ok');
+    // شمال: كل معاملة لوحدها — تبديل closed (اتربطت/اتراجعت) على جدول wallet نفسه
+    for(const w of leftWals){
+      const rawWalId=(w.raw&&w.raw.id!=null)?w.raw.id:w.id;
+      await posUpdate({table:'wallet',action:'update',id:rawWalId,data:{closed:!w.closed}});
+    }
+    toast('تم التحديث','ok');
   }catch(e){
     toast('تأخّر الرد — بنحدّث الشاشة للتأكد من الحالة الفعلية','err');
   }
   SEL_R=new Set(); SEL_L=new Set();
   await loadWallet();
-  btn.disabled=false; btn.innerHTML='<i class="fas fa-check"></i> تأكيد الربط';
+  btn.disabled=false; btn.innerHTML='<i class="fas fa-check"></i> تأكيد التحديث';
 }
 
 async function disburseC2W(id){
