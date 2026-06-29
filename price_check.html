@@ -206,6 +206,7 @@
     var currentPage=1;
     const PAGE_SIZE=40;
     const LS_BRANCH='pricecheck_branch';
+    const LS_ROWS='pricecheck_rows';   // حفظ الأصناف الملصوقة عبر الريفريش
 
     // ===== تحديد الفرع من اليوزر المفتوح =====
     // المصدر الأساسي: localStorage.userBranch (نفس اللي يعتمده الـ nav) — قيمته بالعربي
@@ -350,6 +351,19 @@
     }
 
     // ===== التقاط اللصق وتراكم الصفوف في الجدول =====
+    // ===== حفظ/تحميل الأصناف الملصوقة عبر الريفريش =====
+    function saveRows(){
+      try { localStorage.setItem(LS_ROWS, JSON.stringify(parsedRows)); } catch(e){}
+    }
+    function loadRows(){
+      try {
+        var raw=localStorage.getItem(LS_ROWS);
+        if(!raw) return;
+        var arr=JSON.parse(raw);
+        if(Array.isArray(arr)) parsedRows=arr.filter(function(r){ return r && r.code; });
+      } catch(e){ parsedRows=[]; }
+    }
+
     function addRows(newRows){
       var existing={};
       parsedRows.forEach(function(r){ existing[r.code]=true; });
@@ -360,6 +374,7 @@
         parsedRows.push(r);
         added++;
       });
+      saveRows();
       renderPasteTable();
       return added;
     }
@@ -387,6 +402,7 @@
 
     function removeRow(idx){
       parsedRows.splice(idx,1);
+      saveRows();
       renderPasteTable();
     }
 
@@ -419,6 +435,10 @@
       catcher.addEventListener('input', function(){
         if(catcher.textContent.length>0){ /* يُنظّف عند اللصق */ }
       });
+
+      // استرجاع الأصناف المحفوظة من جلسة سابقة (تبقى بعد الريفريش)
+      loadRows();
+      renderPasteTable();
     })();
 
     var flashTimer=null;
@@ -627,6 +647,7 @@
     function clearAll(){
       var c=document.getElementById('paste-catcher'); if(c) c.textContent='';
       parsedRows=[]; results=[]; hasCalculated=false; currentPage=1;
+      try { localStorage.removeItem(LS_ROWS); } catch(e){}
       renderPasteTable();
       document.getElementById('result-count').textContent='';
       document.getElementById('excel-btn').disabled=true;
