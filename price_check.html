@@ -186,7 +186,12 @@
   <script src="nav.js"></script>
   <script>
     const INV_URL = 'https://agent.ebrahimhamdy.com/webhook/inventory';
+    // مسار السؤال اللحظي عن صنف واحد (POST body: {code, branch})
+    // لو الـ webhook مختلف، غيّر السطر ده فقط:
+    const SEARCH_URL = 'https://agent.ebrahimhamdy.com/webhook/inventory';
     const BRANCHES = { mamora: 'المعمورة', san: 'سان ستيفانو', bishr: 'سيدى بشر' };
+    // الإملاء العربي للفرع كما يتوقعه الـ Switch/branchMap في n8n
+    const BRANCH_AR_FOR_API = { mamora:'المعمورة', san:'سان ستيفانو', bishr:'سيدى بشر' };
     // ربط اسم الفرع كما قد يظهر في بيانات اليوزر بكود الفرع
     const USER_BRANCH_MAP = {
       'mamora':'mamora', 'المعمورة':'mamora', 'الصيدلية':'mamora',
@@ -241,7 +246,7 @@
     }
     function renderBranchBanner(fromUser){
       document.getElementById('branch-banner-wrap').innerHTML=
-        '<div class="branch-banner"><i class="fas fa-store"></i> أقارن بأسعار فرع: '+BRANCHES[myBranch]+
+        '<div class="branch-banner"><i class="fas fa-bolt"></i> أسعار لحظية — فرع: '+BRANCHES[myBranch]+
         (fromUser?' <span style="font-weight:600;color:var(--text-muted);font-size:0.7rem">(من حسابك)</span>':'')+'</div>';
     }
     function onBranchChange(){
@@ -465,25 +470,78 @@
       }, 1600);
     }
 
+    // ===== السؤال اللحظي عن صنف واحد عبر الـ webhook =====
+    // يرسل {code, branch} ويتوقع رد فيه: found, sell_price, balance, itm_name_ar
+    async function searchItemLive(code, branchAr){
+      var res = await fetch(SEARCH_URL, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ code:String(code).trim(), branch:branchAr })
+      });
+      var raw = await res.json();
+      // الرد قد يأتي ككائن واحد أو مصفوفة أو داخل data
+      var obj = Array.isArray(raw) ? (raw[0]||{}) : (raw.data && !raw.found ? raw.data : raw);
+      if(Array.isArray(obj)) obj = obj[0]||{};
+      var found = (obj.found===true || obj.found==='true' || obj.found===1);
+      var price = obj.sell_price!=null ? parseFloat(obj.sell_price) : null;
+      // لو مفيش حقل found لكن فيه سعر، اعتبره موجوداً
+      if(!('found' in obj) && price!=null && !isNaN(price)) found=true;
+      return {
+        found: found,
+        price: (price!=null && !isNaN(price)) ? price : null,
+        name: obj.itm_name_ar || '',
+        balance: obj.balance!=null ? parseFloat(obj.balance) : null
+      };
+    }
+
+    var calcAbort=false;
     async function calculate(){
       if(!parsedRows.length){ alert('الصق الجدول الأول — مفيش أصناف في القائمة.'); return; }
 
-      document.getElementById('result-container').innerHTML='<div class="loading-overlay">⏳ جاري تحميل أسعار مخزونك...</div>';
-      var ok=await loadStockData();
-      if(!ok){ document.getElementById('result-container').innerHTML='<div class="loading-overlay" style="color:var(--danger)">❌ فشل تحميل المخزون</div>'; return; }
+      var branchAr = BRANCH_AR_FOR_API[myBranch] || BRANCHES[myBranch];
+      var total = parsedRows.length;
+      calcAbort=false;
+      results=[];
+      hasCalculated=false;
 
-      var map=myStockMap();
-      results=parsedRows.map(function(r){
-        var mine=map[r.code];
-        if(!mine){
-          return { code:r.code, name:r.name, newPrice:r.sellPrice, myPrice:null, found:false, diff:null, match:false };
+      // زر إيقاف أثناء السؤال
+      var container=document.getElementById('result-container');
+      function progressHTML(done){
+        var pct = Math.round((done/total)*100);
+        return '<div class="loading-overlay">'+
+          '<div style="font-size:1rem;font-weight:800;color:var(--text-secondary);margin-bottom:10px">⏳ جاري سؤال النظام عن الأسعار اللحظية...</div>'+
+          '<div style="max-width:420px;margin:0 auto">'+
+            '<div style="background:var(--surface-3);border-radius:20px;height:14px;overflow:hidden;border:1px solid var(--border)">'+
+              '<div style="background:var(--primary);height:100%;width:'+pct+'%;transition:width 0.2s"></div>'+
+            '</div>'+
+            '<div style="margin-top:8px;font-size:0.85rem;color:var(--text-muted)">'+done+' / '+total+' صنف ('+pct+'%)</div>'+
+          '</div>'+
+          '<button class="btn-clear" style="margin-top:14px" onclick="calcAbort=true"><i class="fas fa-stop"></i> إيقاف</button>'+
+        '</div>';
+      }
+      container.innerHTML=progressHTML(0);
+
+      for(var i=0;i<parsedRows.length;i++){
+        if(calcAbort) break;
+        var r=parsedRows[i];
+        var live;
+        try {
+          live = await searchItemLive(r.code, branchAr);
+        } catch(e){
+          live = { error:true, found:false, price:null, name:'', balance:null };
         }
-        var diff=r.sellPrice - mine.price; // موجب = الجاي أغلى من سعري
-        return {
-          code:r.code, name:r.name, newPrice:r.sellPrice,
-          myPrice:mine.price, myName:mine.name, found:true, diff:diff, match:false
-        };
-      });
+        if(live.error){
+          results.push({ code:r.code, name:r.name, newPrice:r.sellPrice, myPrice:null, found:false, error:true, diff:null, match:false, balance:null });
+        } else if(!live.found || live.price==null){
+          results.push({ code:r.code, name:r.name, newPrice:r.sellPrice, myPrice:null, found:false, diff:null, match:false, balance:live.balance });
+        } else {
+          var diff=r.sellPrice - live.price;
+          results.push({ code:r.code, name:r.name, newPrice:r.sellPrice,
+            myPrice:live.price, myName:live.name, found:true, diff:diff, match:false, balance:live.balance });
+        }
+        container.innerHTML=progressHTML(i+1);
+      }
+
       hasCalculated=true;
       currentPage=1;
       render();
@@ -541,13 +599,16 @@
 
       pageRows.forEach(function(r){
         if(!r.found){
+          var nfBadge = r.error
+            ? '<span class="badge-nf" style="background:#fee2e2;color:#991b1b" title="تعذّر الاتصال بالنظام لهذا الصنف">⚠️ خطأ اتصال</span>'
+            : '<span class="badge-nf" title="الكود غير مسجّل في مخزون فرعك">غير مسجّل عندي</span>';
           html+='<tr class="notfound-row">'+
             '<td class="name-cell"><div style="font-weight:600">'+r.name+'</div></td>'+
             '<td>'+r.code+'</td>'+
             '<td class="price-new">'+r2(r.newPrice)+'</td>'+
             '<td class="zero-stock">—</td>'+
             '<td>—</td>'+
-            '<td><span class="badge-nf">غير موجود عندي</span></td></tr>';
+            '<td>'+nfBadge+'</td></tr>';
         } else {
           var diffCls = r.diff>0 ? 'diff-up' : (r.diff<0 ? 'diff-down' : '');
           var diffTxt = r.diff>0 ? '+'+r2(r.diff) : r2(r.diff);
