@@ -320,37 +320,48 @@
           }
         });
 
-        // ===== استخراج التكلفة وسعر البيع =====
-        // يدعم شكلين من التقارير:
-        //   البسيط: [تشغيلة] التكلفة س.بيع رصيد ت.صلاحية ... اسم كود
-        //   الكامل: مسلسل تشغيلة موقع رصيد_استلام التكلفة س.بيع رصيد_صرف ت.صلاحية ... الشركة اسم كود
-        // السمة الثابتة: التكلفة = أول رقم عشري كسوره ليست .00 (محسوبة بدقة مثل 669.290)،
-        // وسعر البيع = الرقم العشري التالي لها مباشرة. أما الرصيد/الكمية فكسورها .00 وقيمها صغيرة.
-        var decs=[];
-        for(var k=0;k<cells.length;k++){
-          if(k===codeIdx) continue;
-          var v=cells[k].replace(/,/g,'');
-          if(/^\d+\.\d+$/.test(v)){
-            var val=parseFloat(v);
-            decs.push({ val:val, frac: Math.round((val - Math.floor(val))*1000) });
-          }
+        // ===== استخراج التكلفة وسعر البيع (بالاعتماد على موقع عمود التاريخ) =====
+        // في الشكلين، الترتيب ثابت حول عمود ت.صلاحية (MM/YYYY):
+        //   ... التكلفة · س.بيع · رصيد · ت.صلاحية ...
+        // إذن: التكلفة = خانة التاريخ − 3، وسعر البيع = خانة التاريخ − 2.
+        // هذا يعمل للشكل البسيط (10 أعمدة) والكامل (14 عمود) معاً.
+        function cellNum(idx){
+          if(idx<0 || idx>=cells.length) return null;
+          var v=cells[idx].replace(/,/g,'');
+          return /^\d+(\.\d+)?$/.test(v) ? parseFloat(v) : null;
         }
 
-        var costPrice=null, sellPrice=null;
-        // التكلفة = أول رقم كسوره != 0
-        var costPos=-1;
-        for(var d=0; d<decs.length; d++){
-          if(decs[d].frac !== 0){ costPrice=decs[d].val; costPos=d; break; }
+        var sellPrice=null, costPrice=null;
+        // ابحث عن عمود التاريخ MM/YYYY كنقطة مرجعية
+        var dateIdx=-1;
+        for(var k=0;k<cells.length;k++){
+          if(/^\d{1,2}\/\d{4}$/.test(cells[k])){ dateIdx=k; break; }
         }
-        // سعر البيع = الرقم العشري التالي للتكلفة
-        if(costPos>-1 && costPos+1 < decs.length){
-          sellPrice=decs[costPos+1].val;
+        if(dateIdx>=3){
+          costPrice = cellNum(dateIdx-3);
+          sellPrice = cellNum(dateIdx-2);
         }
-        // احتياطي: لو كل الكسور .00 (تكلفة وسعر صحيحان مثل 35.00/55.00) → أكبر رقمين
+
+        // احتياطي: صف بدون تاريخ (ت.صلاحية فاضية) — نعتمد على سمة التكلفة:
+        // التكلفة = أول رقم عشري كسوره ليست .00، وسعر البيع = الرقم العشري التالي له.
         if(sellPrice==null){
-          var vals=decs.map(function(o){return o.val;}).sort(function(a,b){return b-a;});
-          if(vals.length>=2){ sellPrice=vals[0]; costPrice=vals[1]; }
-          else if(vals.length===1){ sellPrice=vals[0]; }
+          var decs=[];
+          for(var m=0;m<cells.length;m++){
+            if(m===codeIdx) continue;
+            var dv=cells[m].replace(/,/g,'');
+            if(/^\d+\.\d+$/.test(dv)) decs.push(parseFloat(dv));
+          }
+          var cp=-1;
+          for(var d=0;d<decs.length;d++){
+            if(Math.round((decs[d]-Math.floor(decs[d]))*1000)!==0){ costPrice=decs[d]; cp=d; break; }
+          }
+          if(cp>-1 && cp+1<decs.length) sellPrice=decs[cp+1];
+          if(sellPrice==null && decs.length>=2){
+            var srt=decs.slice().sort(function(a,b){return b-a;});
+            sellPrice=srt[0]; costPrice=srt[1];
+          } else if(sellPrice==null && decs.length===1){
+            sellPrice=decs[0];
+          }
         }
 
         if(sellPrice==null || isNaN(sellPrice)) return;
