@@ -28,7 +28,7 @@
     .paste-catcher:focus { background:color-mix(in srgb, var(--accent) 4%, transparent); }
 
     /* جدول معاينة الملصوق برؤوس ثابتة */
-    .paste-table-wrap { max-height:300px;overflow:auto;border-top:1px solid var(--border);background:var(--surface); }
+    .paste-table-wrap { max-height:460px;overflow:auto;border-top:1px solid var(--border);background:var(--surface); }
     .paste-table { width:100%;border-collapse:collapse; }
     .paste-table th { background:var(--primary);color:#fff;padding:9px 8px;font-size:0.73rem;font-weight:800;text-align:center;white-space:nowrap;position:sticky;top:0;z-index:5; }
     .paste-table td { padding:7px 8px;font-size:0.8rem;border-bottom:1px solid var(--surface-3);text-align:center;vertical-align:middle; }
@@ -331,7 +331,7 @@
           return /^\d+(\.\d+)?$/.test(v) ? parseFloat(v) : null;
         }
 
-        var sellPrice=null, costPrice=null;
+        var sellPrice=null, costPrice=null, priceIdx=-1;
         // ابحث عن عمود التاريخ MM/YYYY كنقطة مرجعية
         var dateIdx=-1;
         for(var k=0;k<cells.length;k++){
@@ -340,32 +340,34 @@
         if(dateIdx>=3){
           costPrice = cellNum(dateIdx-3);
           sellPrice = cellNum(dateIdx-2);
+          priceIdx  = dateIdx-2;
         }
 
         // احتياطي: صف بدون تاريخ (ت.صلاحية فاضية) — نعتمد على سمة التكلفة:
         // التكلفة = أول رقم عشري كسوره ليست .00، وسعر البيع = الرقم العشري التالي له.
         if(sellPrice==null){
-          var decs=[];
+          var decs=[];   // {val, idx}
           for(var m=0;m<cells.length;m++){
             if(m===codeIdx) continue;
             var dv=cells[m].replace(/,/g,'');
-            if(/^\d+\.\d+$/.test(dv)) decs.push(parseFloat(dv));
+            if(/^\d+\.\d+$/.test(dv)) decs.push({val:parseFloat(dv), idx:m});
           }
           var cp=-1;
           for(var d=0;d<decs.length;d++){
-            if(Math.round((decs[d]-Math.floor(decs[d]))*1000)!==0){ costPrice=decs[d]; cp=d; break; }
+            if(Math.round((decs[d].val-Math.floor(decs[d].val))*1000)!==0){ costPrice=decs[d].val; cp=d; break; }
           }
-          if(cp>-1 && cp+1<decs.length) sellPrice=decs[cp+1];
+          if(cp>-1 && cp+1<decs.length){ sellPrice=decs[cp+1].val; priceIdx=decs[cp+1].idx; }
           if(sellPrice==null && decs.length>=2){
-            var srt=decs.slice().sort(function(a,b){return b-a;});
-            sellPrice=srt[0]; costPrice=srt[1];
+            var srt=decs.slice().sort(function(a,b){return b.val-a.val;});
+            sellPrice=srt[0].val; priceIdx=srt[0].idx; costPrice=srt[1].val;
           } else if(sellPrice==null && decs.length===1){
-            sellPrice=decs[0];
+            sellPrice=decs[0].val; priceIdx=decs[0].idx;
           }
         }
 
         if(sellPrice==null || isNaN(sellPrice)) return;
-        out.push({ code:String(code).trim(), name:name||'(بدون اسم)', sellPrice:sellPrice, cost:costPrice });
+        out.push({ code:String(code).trim(), name:name||'(بدون اسم)', sellPrice:sellPrice, cost:costPrice,
+                   cells:cells, priceIdx:priceIdx, codeIdx:codeIdx });
       });
 
       // دمج التكرارات (نفس الكود) — نحتفظ بأول سعر
@@ -434,22 +436,41 @@
       renderPasteTable();
     }
 
+    // استخراج نص جدولي من HTML (يحافظ على الصفوف والأعمدة بـ tab/newline)
+    function htmlToTable(html){
+      var tmp=document.createElement('div'); tmp.innerHTML=html;
+      var table=tmp.querySelector('table');
+      if(table){
+        var lines=[];
+        table.querySelectorAll('tr').forEach(function(tr){
+          var cellsArr=[];
+          tr.querySelectorAll('th,td').forEach(function(td){
+            cellsArr.push((td.innerText||td.textContent||'').replace(/\s+/g,' ').trim());
+          });
+          if(cellsArr.length) lines.push(cellsArr.join('\t'));
+        });
+        if(lines.length) return lines.join('\n');
+      }
+      return tmp.innerText||tmp.textContent||'';
+    }
+
     // التقاط حدث اللصق في الصندوق
     (function(){
       var catcher=document.getElementById('paste-catcher');
       catcher.addEventListener('paste', function(e){
         e.preventDefault();
-        var txt='';
+        var plain='', fromHtml='';
         if(e.clipboardData){
-          // فضّل النص العادي؛ ولو HTML (جدول) استخرج منه النص
-          txt = e.clipboardData.getData('text/plain') || '';
-          if(!txt){
-            var html=e.clipboardData.getData('text/html');
-            if(html){
-              var tmp=document.createElement('div'); tmp.innerHTML=html;
-              txt=tmp.innerText||tmp.textContent||'';
-            }
-          }
+          plain = e.clipboardData.getData('text/plain') || '';
+          var html = e.clipboardData.getData('text/html');
+          if(html) fromHtml = htmlToTable(html);
+        }
+        // اختر المصدر الأطول (HTML للجدول يحافظ على كل الصفوف؛ يتفادى القصّ في النص العادي)
+        var txt = plain;
+        if(fromHtml){
+          var plainRows = plain.split(/\r?\n/).filter(function(l){return l.trim();}).length;
+          var htmlRows  = fromHtml.split(/\r?\n/).filter(function(l){return l.trim();}).length;
+          if(htmlRows >= plainRows) txt = fromHtml;
         }
         if(!txt.trim()) return;
         var rows=parsePaste(txt);
@@ -509,7 +530,89 @@
     }
 
     var calcAbort=false;
-    async function calculate(){
+
+    // عند الضغط على "قارن": اعرض تأكيد عمود سعر البيع أولاً
+    function calculate(){
+      if(!parsedRows.length){ alert('الصق الجدول الأول — مفيش أصناف في القائمة.'); return; }
+      showPriceColumnConfirm();
+    }
+
+    // ===== نافذة تأكيد عمود سعر البيع =====
+    function showPriceColumnConfirm(){
+      // خذ صفاً نموذجياً (أول صف فيه أكبر عدد خلايا) لعرض الأعمدة
+      var sample=parsedRows[0];
+      parsedRows.forEach(function(r){ if(r.cells && (!sample.cells || r.cells.length>sample.cells.length)) sample=r; });
+      var cells = sample.cells || [];
+      var curIdx = (sample.priceIdx!=null && sample.priceIdx>-1) ? sample.priceIdx : -1;
+
+      // ابنِ خيارات الأعمدة التي تبدو أرقاماً (الأنسب لسعر بيع)
+      var opts='';
+      cells.forEach(function(c, i){
+        var isNum = /^\d+(\.\d+)?$/.test(String(c).replace(/,/g,''));
+        var label = 'عمود '+(i+1)+' — '+(c===''?'(فارغ)':c)+(isNum?'':' [نص]');
+        opts += '<option value="'+i+'"'+(i===curIdx?' selected':'')+'>'+label+'</option>';
+      });
+
+      var ov=document.createElement('div');
+      ov.id='price-col-modal';
+      ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,0.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
+      ov.innerHTML=
+        '<div style="background:var(--surface);border-radius:var(--radius-lg);max-width:560px;width:100%;max-height:85vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,0.4)">'+
+          '<div style="padding:14px 18px;background:var(--surface-3);border-bottom:1px solid var(--border);font-weight:800;color:var(--text-secondary);font-size:0.9rem;display:flex;align-items:center;gap:8px"><i class="fas fa-circle-check" style="color:var(--accent)"></i> تأكيد عمود سعر البيع</div>'+
+          '<div style="padding:18px">'+
+            '<div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.7;margin-bottom:14px">قبل المقارنة، تأكد من عمود <b>سعر البيع</b>. لو موظف نسخ بدون عمود التكلفة، قد يختلف مكان السعر. اختر العمود الصحيح من القائمة وراجع القيمة النموذجية بالأسفل.</div>'+
+            '<div class="mini-field" style="margin-bottom:14px">'+
+              '<span class="filter-label">عمود سعر البيع</span>'+
+              '<select id="price-col-select" onchange="updatePriceColPreview()" style="min-width:280px">'+opts+'</select>'+
+            '</div>'+
+            '<div id="price-col-preview" style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 14px;font-size:0.8rem"></div>'+
+            '<div style="display:flex;gap:8px;justify-content:flex-start;margin-top:18px">'+
+              '<button class="btn-calc" onclick="confirmPriceColumn()"><i class="fas fa-check"></i> أكّد وابدأ المقارنة</button>'+
+              '<button class="btn-clear" onclick="closePriceColModal()">إلغاء</button>'+
+            '</div>'+
+          '</div>'+
+        '</div>';
+      document.body.appendChild(ov);
+      updatePriceColPreview();
+    }
+    function closePriceColModal(){
+      var m=document.getElementById('price-col-modal'); if(m) m.remove();
+    }
+    function updatePriceColPreview(){
+      var sel=document.getElementById('price-col-select');
+      if(!sel) return;
+      var idx=parseInt(sel.value);
+      // اعرض 3 صفوف نموذجية: الاسم + القيمة في العمود المختار
+      var rows=parsedRows.slice(0,3);
+      var html='<div style="font-weight:700;color:var(--text-muted);margin-bottom:6px">معاينة (أول '+rows.length+' أصناف):</div>';
+      rows.forEach(function(r){
+        var val = (r.cells && idx<r.cells.length) ? r.cells[idx] : '—';
+        html+='<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px dashed var(--border)">'+
+          '<span style="color:var(--text-secondary)">'+r.name+'</span>'+
+          '<b style="color:var(--accent-dark)">'+val+'</b></div>';
+      });
+      document.getElementById('price-col-preview').innerHTML=html;
+    }
+    function confirmPriceColumn(){
+      var sel=document.getElementById('price-col-select');
+      var idx = sel ? parseInt(sel.value) : -1;
+      // طبّق العمود المختار على كل الصفوف (أعد قراءة السعر من نفس موقع العمود)
+      if(idx>-1){
+        parsedRows.forEach(function(r){
+          if(r.cells && idx<r.cells.length){
+            var v=String(r.cells[idx]).replace(/,/g,'');
+            var n=/^\d+(\.\d+)?$/.test(v) ? parseFloat(v) : null;
+            if(n!=null && !isNaN(n)){ r.sellPrice=n; r.priceIdx=idx; }
+          }
+        });
+        saveRows();
+        renderPasteTable();
+      }
+      closePriceColModal();
+      runComparison();
+    }
+
+    async function runComparison(){
       if(!parsedRows.length){ alert('الصق الجدول الأول — مفيش أصناف في القائمة.'); return; }
 
       var branchAr = BRANCH_AR_FOR_API[myBranch] || BRANCHES[myBranch];
@@ -597,7 +700,7 @@
         html+='<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:var(--radius-md);padding:14px 16px;margin-bottom:14px;color:#991b1b;font-size:0.85rem;line-height:1.7">'+
           '<div style="font-weight:800;margin-bottom:4px">⚠️ '+errorRows.length+' صنف تعذّر الاتصال بالنظام'+(allErr?' (كل الأصناف)':'')+'</div>'+
           (allErr?'<div>غالباً مشكلة في الـ webhook (CORS أو غير مفعّل). تأكد أن الـ Webhook node في n8n يقبل POST، وأن خانة Allowed Origins فيها رابط الموقع، وأن الـ workflow مُفعّل (Active).</div>':'<div>بعض الأصناف فشل الاتصال بها — جرّب إعادة المحاولة.</div>')+
-          '<button class="btn-calc" style="margin-top:10px;padding:8px 18px;font-size:0.82rem" onclick="calculate()"><i class="fas fa-rotate-right"></i> إعادة المحاولة</button>'+
+          '<button class="btn-calc" style="margin-top:10px;padding:8px 18px;font-size:0.82rem" onclick="runComparison()"><i class="fas fa-rotate-right"></i> إعادة المحاولة</button>'+
         '</div>';
       }
 
