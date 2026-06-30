@@ -56,6 +56,8 @@
   .row-meta{font-size:0.7rem;color:var(--text-muted);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;}
   .mchip{background:#fae8ff;color:#a21caf;padding:1px 8px;border-radius:20px;font-size:0.66rem;font-weight:700;}
   .lchip{background:#dbeafe;color:#1d4ed8;padding:1px 7px;border-radius:20px;font-size:0.62rem;font-weight:700;}
+  .dchip-in{background:#dcfce7;color:#15803d;padding:1px 8px;border-radius:20px;font-size:0.66rem;font-weight:700;}
+  .dchip-out{background:#fee2e2;color:#b91c1c;padding:1px 8px;border-radius:20px;font-size:0.66rem;font-weight:700;}
   .empty-hint{text-align:center;color:var(--text-muted);padding:30px 10px;font-size:0.85rem;}
 
   #confirm-bar{position:sticky;top:0;z-index:50;background:#0f172a;color:#e2e8f0;border-radius:12px;padding:10px 16px;margin-bottom:12px;display:none;align-items:center;gap:16px;flex-wrap:wrap;box-shadow:0 6px 20px rgba(15,23,42,.25);}
@@ -185,6 +187,7 @@ async function posUpdate(payload){
 
 const EXPECTED_COLS=['العميل','الرقم','ت.صلاحية','البنك','الإسم','القيمة','ن.رسوم تحصيل','فاتورة بيع','تاريخ','تحصيل'];
 let ROWS=[],WALLET=[],LINKS=[],CASH2WALLET=[];
+let C2W_BILL_NOS=new Set();
 let SEL_R=new Set(),SEL_L=new Set();
 
 /* ====== حفظ مؤقت للجدول المستورد في المتصفح — يمنع ضياعه لو حصل Refresh بالغلط ====== */
@@ -261,10 +264,14 @@ function normWallet(r){
   else if(to.includes('vodafone')){src='vodafone';srcLabel='فودافون كاش';}
   else if(to.includes('instapay')){src='instapay';srcLabel='إنستاباي';}
   else if(to.includes('fawry')||to.includes('فورى')||to.includes('فوري')){src='fawry';srcLabel='فوري';}
+  const typeRaw=String(r.type||'').trim();
+  let dir=null,dirLabel='';
+  if(typeRaw==='استلام'){dir='in';dirLabel='استلام';}
+  else if(typeRaw==='إرسال'||typeRaw==='ارسال'){dir='out';dirLabel='إرسال';}
   return{
     id:'wal-'+(r.id??Math.random()),raw:r,
     amount:num(r.ammount??r.amount),store,storeKey:normBranchKey(store),
-    to:r.to||'',terminal:r.terminal_id||'',src,srcLabel,
+    to:r.to||'',terminal:r.terminal_id||'',src,srcLabel,dir,dirLabel,
     date:r.transaction_time||r.createdAt,bill_no:String(r.bill_no??'').trim(),
     closed:(r.closed===true||r.closed==='true')
   };
@@ -284,6 +291,7 @@ async function loadWallet(){
       customer_name:r.customer_name,created_at:r.created_at,
       disbursed:(r.disbursed===true||r.disbursed==='true'),disbursed_at:r.disbursed_at
     }));
+    C2W_BILL_NOS=new Set(CASH2WALLET.map(r=>String(r.bill_no||'').trim()).filter(Boolean));
     applyLinksToData();
     buildMachineFilters();
     renderAll();
@@ -406,12 +414,14 @@ function renderRightBody(){
   const tbody=rows.map((r,idx)=>{
     const linked=r.links&&r.links.length;
     const sel=SEL_R.has(r.id);
+    const billNo=String(r.byCol['فاتورة بيع']||'').trim();
+    const flagged=billNo && C2W_BILL_NOS.has(billNo);
     const cells=names.map(n=>{
       const v=r.byCol[n];
       const csel=SUM_SEL.has(cellKey(idx,n));
       return '<td class="'+colClass(n)+' '+(csel?'cell-sel':'')+'" onclick="clickCell('+idx+',\''+n+'\',event)">'+(v||'')+'</td>';
     }).join('');
-    return '<tr class="'+(linked?'linked':'')+' '+(sel?'row-sel':'')+'" data-id="'+r.id+'">'+
+    return '<tr class="'+(linked?'linked':'')+' '+(sel?'row-sel':'')+'" data-id="'+r.id+'"'+(flagged?' style="background:#fee2e2;" title="فاتورة بيع موجودة في فواتير مختلفة عن قيم التحويل أو إيصال الفيزا — ايصال الدفع بتاعها مختلف"':'')+'>'+
       '<td class="pick-cell" onclick="event.stopPropagation();toggleSel(\'R\',\''+r.id+'\')"><div class="pick-dot" style="margin:0 auto;">'+(sel?'<i class="fas fa-check" style="font-size:0.55rem"></i>':'')+'</div></td>'+
       cells+'</tr>';
   }).join('');
@@ -427,10 +437,11 @@ function renderLeft(){
   if(!rows.length){ body.innerHTML='<div class="empty-hint">لا توجد معاملات مطابقة.</div>'; return; }
   body.innerHTML=rows.map(w=>{
     const sel=SEL_L.has(w.id);
+    const dirChip=w.dir?('<span class="dchip-'+w.dir+'"><i class="fas fa-arrow-'+(w.dir==='in'?'down':'up')+'"></i> '+w.dirLabel+'</span>'):'';
     return '<div class="row-item '+(w.closed?'linked':'')+' '+(sel?'sel':'')+'" data-id="'+w.id+'" onclick="toggleSel(\'L\',\''+w.id+'\')">'+
       '<div class="pick-dot">'+(sel?'<i class="fas fa-check" style="font-size:0.6rem"></i>':'')+'</div>'+
       '<div class="row-body">'+
-        '<div class="row-top"><span class="row-amt">'+fmtNum(w.amount)+' ج</span><span class="mchip">'+(w.to||w.srcLabel)+'</span>'+(w.terminal?'<span class="lchip">'+w.terminal+'</span>':'')+(w.closed?'<span class="lchip">تم ✓</span>':'')+'</div>'+
+        '<div class="row-top"><span class="row-amt">'+fmtNum(w.amount)+' ج</span>'+dirChip+'<span class="mchip">'+(w.to||w.srcLabel)+'</span>'+(w.terminal?'<span class="lchip">'+w.terminal+'</span>':'')+(w.closed?'<span class="lchip">تم ✓</span>':'')+'</div>'+
         '<div class="row-meta"><span>'+w.srcLabel+'</span><span>'+new Date(w.date||0).toLocaleString('ar-EG',{dateStyle:'short',timeStyle:'short'})+'</span></div>'+
       '</div></div>';
   }).join('');
