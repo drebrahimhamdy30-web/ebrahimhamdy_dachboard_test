@@ -78,9 +78,11 @@
 
     /* ===== مودال (نوافذ منبثقة) ===== */
     .modal-overlay {
-      position:fixed; inset:0; background:rgba(0,0,0,0.55);
+      position:fixed; top:0; left:0; right:0; bottom:0;
+      width:100vw; height:100dvh;
+      background:rgba(0,0,0,0.55);
       display:flex; align-items:center; justify-content:center;
-      z-index:1000; padding:16px;
+      z-index:999999; padding:16px; margin:0;
     }
     .modal-box {
       background:var(--surface,#fff); border-radius:14px; padding:20px;
@@ -134,7 +136,7 @@
       .pagination { justify-content:center; width:100%; }
       .filter-toggle { width:100%; text-align:center; box-sizing:border-box; }
 
-      .table-wrap { overflow-x:visible; }
+      .inv-table-wrap { overflow-x:visible; }
 
       /* تحويل الجدول لبطاقات مدمجة على الموبايل — بدون مسافات فاضية كبيرة ولا سكرول يمين/شمال */
       table#inv-table thead { display:none; }
@@ -153,6 +155,23 @@
       }
       table#inv-table td > *:not(:only-child) { flex:1; min-width:0; }
       table#inv-table td > div { display:flex; flex-wrap:wrap; gap:5px; }
+
+      /* رسائل التحميل / الفراغ / الخطأ — تندمج مع الكارد بدل ما تظهر كبوكس منفصل */
+      table#inv-table tr.empty-row {
+        border:none !important; box-shadow:none !important; background:transparent !important;
+        margin-bottom:0 !important; padding:0 !important;
+      }
+      table#inv-table tr.empty-row td {
+        display:block !important; padding:30px 10px !important; text-align:center !important;
+      }
+      table#inv-table tr.empty-row td::before { content:none !important; }
+
+      /* فلتر التاريخ في التقرير — يبقى عمودي وبعرض كامل على الموبايل */
+      #report-modal .report-date-filter { flex-direction:column; align-items:stretch; }
+      #report-modal .report-date-filter > div { width:100%; }
+      #report-modal #report-date-from,
+      #report-modal #report-date-to { width:100% !important; box-sizing:border-box; }
+      #report-modal .report-date-filter .btn { width:100%; justify-content:center; }
 
       .modal-overlay { padding:0; align-items:stretch; }
       .modal-box, .modal-box.report-box {
@@ -241,11 +260,11 @@
         <div id="balance-result" style="font-size:0.85rem;"></div>
       </div>
 
-      <div class="table-wrap">
+      <div class="table-wrap inv-table-wrap">
         <table id="inv-table">
           <thead id="inv-thead"></thead>
           <tbody id="table-body">
-            <tr class="loading-row"><td colspan="6">⏳ جاري التحميل...</td></tr>
+            <tr class="loading-row empty-row"><td colspan="6">⏳ جاري التحميل...</td></tr>
           </tbody>
         </table>
       </div>
@@ -273,7 +292,7 @@
     <div class="modal-box report-box">
       <div class="modal-title">📊 تقرير الجرد — <span id="report-tab-name"></span></div>
 
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;padding:10px 12px;background:var(--surface-3);border-radius:10px;">
+      <div class="report-date-filter" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;padding:10px 12px;background:var(--surface-3);border-radius:10px;">
         <div>
           <label class="modal-label" style="margin-bottom:4px;">من تاريخ</label>
           <input type="date" id="report-date-from" class="form-input" style="width:150px;">
@@ -408,7 +427,7 @@
     async function loadCurrentTab() {
       const tbody = document.getElementById('table-body');
       const cols  = TAB_COLS[currentTab] || ['code', 'itm_name_ar'];
-      tbody.innerHTML = `<tr class="loading-row"><td colspan="${cols.length + 2}">⏳ جاري جلب البيانات...</td></tr>`;
+      tbody.innerHTML = `<tr class="loading-row empty-row"><td colspan="${cols.length + 2}">⏳ جاري جلب البيانات...</td></tr>`;
 
       try {
         const items = await fetchInventory();
@@ -427,7 +446,7 @@
         buildTableHeader();
         applyFilter();
       } catch(e) {
-        tbody.innerHTML = `<tr><td colspan="${cols.length + 2}" style="text-align:center;color:var(--danger);padding:30px;">❌ خطأ في الاتصال</td></tr>`;
+        tbody.innerHTML = `<tr class="empty-row"><td colspan="${cols.length + 2}" style="text-align:center;color:var(--danger);padding:30px;">❌ خطأ في الاتصال</td></tr>`;
       }
     }
 
@@ -530,9 +549,13 @@
                <i class="fas fa-chart-bar"></i> عرض التقرير
              </button>`
           : 'لا توجد أصناف';
-        tbody.innerHTML = `<tr><td colspan="${cols.length + 2}" style="text-align:center;padding:40px;color:var(--text-muted);">
+        const emptyTr = document.createElement('tr');
+        emptyTr.className = 'empty-row';
+        emptyTr.innerHTML = `<td colspan="${cols.length + 2}" style="text-align:center;padding:40px;color:var(--text-muted);">
           ${emptyMsg}
-        </td></tr>`;
+        </td>`;
+        tbody.innerHTML = '';
+        tbody.appendChild(emptyTr);
         return;
       }
 
@@ -655,7 +678,34 @@
       }
     }
 
-    // ===== مودال عدم المطابقة =====
+    // ===== ضمان إن أي مودال ياخد الشاشة كاملة ومايتأثرش بأي عنصر أب في الصفحة =====
+    let savedScrollY = 0;
+    function openModalFullScreen(modalEl) {
+      // ننقل المودال ليكون آخر طفل مباشر في body — عشان يهرب من أي ancestor فيه
+      // transform أو position معينة بتكسر position:fixed وتمنعه ياخد الشاشة كاملة
+      if (modalEl.parentElement !== document.body) {
+        document.body.appendChild(modalEl);
+      }
+      savedScrollY = window.scrollY || document.documentElement.scrollTop || 0;
+      document.documentElement.style.overflow = 'hidden';
+      document.body.style.overflow  = 'hidden';
+      document.body.style.position  = 'fixed';
+      document.body.style.top       = `-${savedScrollY}px`;
+      document.body.style.width     = '100%';
+      modalEl.style.display = 'flex';
+    }
+
+    function closeModalFullScreen(modalEl) {
+      modalEl.style.display = 'none';
+      document.documentElement.style.overflow = '';
+      document.body.style.overflow  = '';
+      document.body.style.position  = '';
+      document.body.style.top       = '';
+      document.body.style.width     = '';
+      window.scrollTo(0, savedScrollY);
+    }
+
+
     function openMismatchModal(id) {
       mismatchTargetId = id;
       const item = rawData.find(x => String(x.id) === String(id));
@@ -672,12 +722,12 @@
       const balInput = document.getElementById('mismatch-balance-input');
       balInput.value = '';
       balInput.style.borderColor = '';
-      document.getElementById('mismatch-modal').style.display = 'flex';
+      openModalFullScreen(document.getElementById('mismatch-modal'));
       setTimeout(() => balInput.focus(), 100);
     }
 
     function closeMismatchModal() {
-      document.getElementById('mismatch-modal').style.display = 'none';
+      closeModalFullScreen(document.getElementById('mismatch-modal'));
       mismatchTargetId = null;
     }
 
@@ -822,7 +872,7 @@
       document.getElementById('report-date-from').value = '';
       document.getElementById('report-date-to').value   = '';
       document.getElementById('report-tab-name').textContent = TAB_DISPLAY_NAMES[currentTab] || currentTab;
-      document.getElementById('report-modal').style.display  = 'flex';
+      openModalFullScreen(document.getElementById('report-modal'));
       renderReportContent();
     }
 
@@ -902,7 +952,7 @@
     }
 
     function closeReport() {
-      document.getElementById('report-modal').style.display = 'none';
+      closeModalFullScreen(document.getElementById('report-modal'));
     }
 
     function printReport() {
