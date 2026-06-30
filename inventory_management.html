@@ -412,31 +412,59 @@
       await loadStockData(true);
     }
 
-    var stockLoaded=false;
-    async function loadStockData(silent){
-      if(stockLoaded) return true;
-      if(!silent && currentTab!=='disbursement') document.getElementById('result-container').innerHTML='<div class="loading-overlay">⏳ جاري تحميل البيانات...</div>';
-      try {
-        var r = await Promise.all([
-          fetch(INV_URL+'?type=stock_mamora_all').then(function(x){return x.json();}),
-          fetch(INV_URL+'?type=stock_san_all').then(function(x){return x.json();}),
-          fetch(INV_URL+'?type=stock_bishr_all').then(function(x){return x.json();}),
-          fetch(INV_URL+'?type=sales_monthly').then(function(x){return x.json();})
-        ]);
-        stockMamora=Array.isArray(r[0])?r[0]:(r[0].data||[]);
-        stockSan   =Array.isArray(r[1])?r[1]:(r[1].data||[]);
-        stockBishr =Array.isArray(r[2])?r[2]:(r[2].data||[]);
-        salesData  =Array.isArray(r[3])?r[3]:(r[3].data||[]);
-        dataLoaded=true;
-        stockLoaded=true;
-        computeBranchUpdates();
-        renderBranchUpdates();
-        return true;
-      } catch(e){
-        if(!silent && currentTab!=='disbursement') document.getElementById('result-container').innerHTML='<div class="loading-overlay" style="color:var(--danger);">❌ فشل التحميل</div>';
-        return false;
-      }
+var branchEmpty = {mamora:false, san:false, bishr:false};
+
+async function loadStockData(silent){
+  if(stockLoaded) return true;
+  if(!silent && currentTab!=='disbursement')
+    document.getElementById('result-container').innerHTML='<div class="loading-overlay">⏳ جاري تحميل البيانات...</div>';
+
+  function norm(x){
+    if(Array.isArray(x)) return x;
+    if(x && Array.isArray(x.data)) return x.data;
+    return [];
+  }
+  async function getStock(type){
+    try {
+      var res = await fetch(INV_URL+'?type='+type);
+      return norm(await res.json());
+    } catch(e){
+      console.error('فشل تحميل '+type, e);
+      return [];   // فرع فاضي/فشل = مصفوفة فاضية، مش رمي خطأ
     }
+  }
+
+  var r = await Promise.allSettled([
+    getStock('stock_mamora_all'),
+    getStock('stock_san_all'),
+    getStock('stock_bishr_all'),
+    getStock('sales_monthly')
+  ]);
+  var val = function(i){ return r[i].status==='fulfilled' ? r[i].value : []; };
+
+  stockMamora = val(0);
+  stockSan    = val(1);
+  stockBishr  = val(2);
+  salesData   = val(3);
+
+  branchEmpty.mamora = stockMamora.length===0;
+  branchEmpty.san    = stockSan.length===0;
+  branchEmpty.bishr  = stockBishr.length===0;
+
+  dataLoaded=true;
+  stockLoaded=true;
+  computeBranchUpdates();
+  renderBranchUpdates();
+
+  // لو الثلاثة فاضيين فعلاً = مشكلة حقيقية
+  if(stockMamora.length===0 && stockSan.length===0 && stockBishr.length===0){
+    if(!silent && currentTab!=='disbursement')
+      document.getElementById('result-container').innerHTML=
+        '<div class="loading-overlay" style="color:var(--danger);">❌ كل المخازن فارغة — تأكد من تشغيل سحب الأرصدة</div>';
+    return false;
+  }
+  return true;  // فرع واحد أو اتنين فاضيين؟ نكمّل عادي
+}
 
     // ===== آخر تحديث للفروع =====
     function latestUpdate(arr){
@@ -465,20 +493,25 @@
       var days=Math.floor(hrs/24);
       return 'منذ '+days+' يوم';
     }
-    function renderBranchUpdates(){
-      var wrap=document.getElementById('branch-updates');
-      var html='';
-      Object.keys(BRANCHES).forEach(function(key){
-        var ts=branchUpdates[key];
-        var stale = !ts || (Date.now()-ts > STALE_HOURS*3600000);
-        html+='<div class="branch-card">'+
-          '<span class="b-name">'+BRANCHES[key]+'</span>'+
-          '<span class="b-time '+(stale?'stale':'')+'">'+(stale?'⚠️ ':'🟢 ')+timeAgo(ts)+'</span>'+
-          '<button class="btn-refresh-branch" onclick="refreshBranch(\''+key+'\')"><i class="fas fa-sync-alt"></i> تحديث</button>'+
-        '</div>';
-      });
-      wrap.innerHTML=html;
-    }
+function renderBranchUpdates(){
+  var wrap=document.getElementById('branch-updates');
+  var html='';
+  Object.keys(BRANCHES).forEach(function(key){
+    var ts=branchUpdates[key];
+    var empty = branchEmpty[key];
+    var stale = !empty && (!ts || (Date.now()-ts > STALE_HOURS*3600000));
+    var label, cls;
+    if(empty){ label='⛔ فارغ — لم يُسحب'; cls='stale'; }
+    else if(stale){ label='⚠️ '+timeAgo(ts); cls='stale'; }
+    else { label='🟢 '+timeAgo(ts); cls=''; }
+    html+='<div class="branch-card">'+
+      '<span class="b-name">'+BRANCHES[key]+'</span>'+
+      '<span class="b-time '+cls+'">'+label+'</span>'+
+      '<button class="btn-refresh-branch" onclick="refreshBranch(\''+key+'\')"><i class="fas fa-sync-alt"></i> تحديث</button>'+
+    '</div>';
+  });
+  wrap.innerHTML=html;
+}
     async function refreshBranch(key){
       var url=REFRESH_URLS[key];
       if(!url){ alert('رابط تشغيل سحب رصيد '+BRANCHES[key]+' غير مضبوط بعد.'); return; }
