@@ -30,7 +30,7 @@ function injectNavbar() {
   }
 
   var contractPages    = ['sales_contracts.html', 'claims.html', 'contracts.html', 'contracts_stats.html'];
-  var csPages          = ['customer_service.html', 'shortages.html'];
+  var csPages          = ['customer_service.html', 'shortages.html', 'print_invoice.html'];
   var purchasesPages   = ['purchases.html', 'cosmo_order.html', 'price_check.html', 'inventory_management.html'];
   var visaPages        = ['visa_transactions.html', 'bank_monitor.html', 'paymob.html', 'sms.html', 'pos_reconciliation.html', 'machine_import.html'];
   
@@ -154,7 +154,8 @@ function injectNavbar() {
 
   createFloatingDropdown('cs-dropdown', [
     { href: 'customer_service.html', icon: 'fa-headset',               label: 'خدمة العملاء', active: currentPage === 'customer_service.html' },
-    { href: 'shortages.html',        icon: 'fa-exclamation-triangle', label: 'نواقص',         active: currentPage === 'shortages.html' }
+    { href: 'shortages.html',        icon: 'fa-exclamation-triangle', label: 'نواقص',         active: currentPage === 'shortages.html' },
+    { href: 'print_invoice.html',    icon: 'fa-print',                label: 'طباعة فاتورة بيع', active: currentPage === 'print_invoice.html' }
   ]);
 
   createFloatingDropdown('contracts-dropdown', [
