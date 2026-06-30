@@ -6,6 +6,7 @@
   <title>سجل الجرد - صيدليات د. إبراهيم</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
     /* ===== تبويبات ===== */
     .tabs-bar { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
@@ -133,22 +134,25 @@
       .pagination { justify-content:center; width:100%; }
       .filter-toggle { width:100%; text-align:center; box-sizing:border-box; }
 
-      /* تحويل الجدول لبطاقات على الموبايل */
+      .table-wrap { overflow-x:visible; }
+
+      /* تحويل الجدول لبطاقات مدمجة على الموبايل — بدون مسافات فاضية كبيرة ولا سكرول يمين/شمال */
       table#inv-table thead { display:none; }
       table#inv-table, table#inv-table tbody, table#inv-table tr, table#inv-table td { display:block; width:100%; }
       table#inv-table tr {
-        margin-bottom:12px; border:1px solid var(--border); border-radius:12px;
-        padding:10px 12px; background:var(--surface); box-shadow:0 1px 4px rgba(0,0,0,0.04);
+        margin-bottom:8px; border:1px solid var(--border); border-radius:10px;
+        padding:6px 10px; background:var(--surface); box-shadow:0 1px 3px rgba(0,0,0,0.04);
       }
       table#inv-table td {
-        padding:6px 0; border:none !important; display:flex;
-        justify-content:space-between; align-items:center; gap:10px; text-align:left;
+        padding:3px 0; border:none !important; display:flex;
+        align-items:center; gap:8px; text-align:right;
       }
       table#inv-table td::before {
         content: attr(data-label); font-weight:700; color:var(--text-secondary);
-        font-size:0.75rem; flex-shrink:0;
+        font-size:0.7rem; flex:0 0 auto; min-width:60px; max-width:60px;
       }
-      table#inv-table td[data-label] > div { width:100%; justify-content:flex-end; }
+      table#inv-table td > *:not(:only-child) { flex:1; min-width:0; }
+      table#inv-table td > div { display:flex; flex-wrap:wrap; gap:5px; }
 
       .modal-box { padding:16px; }
       .report-table th, .report-table td { font-size:0.74rem; padding:5px 6px; }
@@ -261,6 +265,25 @@
   <div id="report-modal" class="modal-overlay" style="display:none;">
     <div class="modal-box report-box">
       <div class="modal-title">📊 تقرير الجرد — <span id="report-tab-name"></span></div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;padding:10px 12px;background:var(--surface-3);border-radius:10px;">
+        <div>
+          <label class="modal-label" style="margin-bottom:4px;">من تاريخ</label>
+          <input type="date" id="report-date-from" class="form-input" style="width:150px;">
+        </div>
+        <div>
+          <label class="modal-label" style="margin-bottom:4px;">إلى تاريخ</label>
+          <input type="date" id="report-date-to" class="form-input" style="width:150px;">
+        </div>
+        <button class="btn btn-secondary" onclick="applyReportDateFilter()">
+          <i class="fas fa-filter"></i> تطبيق
+        </button>
+        <button class="btn btn-secondary" onclick="clearReportDateFilter()">
+          <i class="fas fa-xmark"></i> مسح
+        </button>
+      </div>
+      <div id="report-filter-note" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:10px;"></div>
+
       <div class="report-summary" id="report-summary"></div>
 
       <div class="report-section">
@@ -284,6 +307,9 @@
       </div>
 
       <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="exportReportToExcel()">
+          <i class="fas fa-file-excel"></i> تصدير إكسل
+        </button>
         <button class="btn btn-secondary" onclick="printReport()">
           <i class="fas fa-print"></i> طباعة
         </button>
@@ -558,7 +584,7 @@
           ${colCells}
           <td id="bal-cell-${id}" data-label="الرصيد الحالي">
             <button class="btn-balance" onclick="fetchBalance('${id}', '${(item.code||'').replace(/'/g,"\\'")}', this)">
-              <i class="fas fa-database"></i> جلب الرصيد
+              <i class="fas fa-database"></i> الرصيد
             </button>
           </td>
           ${actionCell}`;
@@ -683,6 +709,7 @@
 
       const clicked = rawData.find(x => x.id == id);
       const code    = String(clicked?.code || '').trim();
+      const nowIso  = new Date().toISOString();
 
       // كل النسخ pending بنفس الكود + نفس القسم (الفرع مضمون لأن rawData متفلتر بالفرع)
       const sameCode = (code && code !== '---')
@@ -702,12 +729,13 @@
         const itMismatch  = isPrimaryItem ? isMismatch : false;
 
         const payload = {
-          id:       it.id,
-          done:     itDone,
-          skip:     itSkip,
-          mismatch: itMismatch,
-          type:     "جرد",
-          action:   "update_status"
+          id:          it.id,
+          done:        itDone,
+          skip:        itSkip,
+          mismatch:    itMismatch,
+          action_time: nowIso,
+          type:        "جرد",
+          action:      "update_status"
         };
         if (isPrimaryItem && isMismatch) {
           payload.actual_balance = extra.actual_balance;
@@ -728,6 +756,7 @@
           it.done     = isPrimaryItem ? isDone : false;
           it.skip      = isPrimaryItem ? isSkip : true;
           it.mismatch  = isPrimaryItem ? isMismatch : false;
+          it.action_time = nowIso;
           if (isPrimaryItem && isMismatch) {
             it.actual_balance = extra.actual_balance;
             if (extra.system_balance !== undefined) it.system_balance = extra.system_balance;
@@ -740,6 +769,7 @@
           const orig = sameCode.find(it => String(it.id) === String(f.id));
           if (!orig) return;
           f.done = orig.done; f.skip = orig.skip; f.mismatch = orig.mismatch;
+          f.action_time = orig.action_time;
           if (orig.actual_balance !== undefined) f.actual_balance = orig.actual_balance;
         });
 
@@ -779,13 +809,56 @@
     }
 
     // ===== التقرير =====
-    function openReport() {
-      const matched    = rawData.filter(isItemDone);
-      const mismatched = rawData.filter(isItemMismatch);
-      const skipped     = rawData.filter(isItemSkip);
-      const pending     = rawData.length - matched.length - mismatched.length - skipped.length;
+    let currentReportData = { matched: [], mismatched: [] };
 
-      document.getElementById('report-tab-name').textContent      = TAB_DISPLAY_NAMES[currentTab] || currentTab;
+    function openReport() {
+      document.getElementById('report-date-from').value = '';
+      document.getElementById('report-date-to').value   = '';
+      document.getElementById('report-tab-name').textContent = TAB_DISPLAY_NAMES[currentTab] || currentTab;
+      document.getElementById('report-modal').style.display  = 'flex';
+      renderReportContent();
+    }
+
+    function applyReportDateFilter() {
+      renderReportContent();
+    }
+
+    function clearReportDateFilter() {
+      document.getElementById('report-date-from').value = '';
+      document.getElementById('report-date-to').value   = '';
+      renderReportContent();
+    }
+
+    function renderReportContent() {
+      const fromVal = document.getElementById('report-date-from').value;
+      const toVal   = document.getElementById('report-date-to').value;
+      const hasDateFilter = !!(fromVal || toVal);
+
+      const fromTime = fromVal ? new Date(fromVal + 'T00:00:00').getTime() : -Infinity;
+      const toTime   = toVal   ? new Date(toVal   + 'T23:59:59').getTime() :  Infinity;
+
+      const inRange = (item) => {
+        if (!hasDateFilter) return true;
+        if (!item.action_time) return false;
+        const t = new Date(item.action_time).getTime();
+        return t >= fromTime && t <= toTime;
+      };
+
+      const allMatched    = rawData.filter(isItemDone);
+      const allMismatched = rawData.filter(isItemMismatch);
+      const skipped        = rawData.filter(isItemSkip);
+      const pending         = rawData.length - allMatched.length - allMismatched.length - skipped.length;
+
+      const matched    = allMatched.filter(inRange);
+      const mismatched = allMismatched.filter(inRange);
+
+      currentReportData = { matched, mismatched };
+
+      const noteEl = document.getElementById('report-filter-note');
+      noteEl.textContent = hasDateFilter
+        ? `🔎 الفلتر مفعّل (${fromVal || 'البداية'} → ${toVal || 'الآن'}) — الأصناف اللي اتجردت قبل إضافة هذه الميزة لن تظهر هنا لعدم توفر تاريخ لها.`
+        : '';
+
       document.getElementById('report-matched-count').textContent  = matched.length;
       document.getElementById('report-mismatch-count').textContent = mismatched.length;
 
@@ -819,8 +892,6 @@
                     </tr>`;
           }).join('')
         : `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">لا توجد أصناف</td></tr>`;
-
-      document.getElementById('report-modal').style.display = 'flex';
     }
 
     function closeReport() {
@@ -829,6 +900,45 @@
 
     function printReport() {
       window.print();
+    }
+
+    function exportReportToExcel() {
+      if (typeof XLSX === 'undefined') {
+        alert('⚠️ مكتبة التصدير لسه بتتحمّل، جرب تاني بعد ثانية');
+        return;
+      }
+
+      const matchedRows = currentReportData.matched.length
+        ? currentReportData.matched.map(i => ({ 'الكود': i.code || '---', 'الاسم': i.itm_name_ar || '---' }))
+        : [{ 'الكود': '', 'الاسم': 'لا توجد أصناف' }];
+
+      const mismatchRows = currentReportData.mismatched.length
+        ? currentReportData.mismatched.map(i => {
+            const sys    = (i.system_balance !== undefined && i.system_balance !== '') ? i.system_balance : '';
+            const actual = (i.actual_balance !== undefined && i.actual_balance !== '') ? i.actual_balance : '';
+            let diff = '';
+            if (sys !== '' && actual !== '' && !isNaN(Number(sys)) && !isNaN(Number(actual))) {
+              diff = Number(actual) - Number(sys);
+            }
+            return {
+              'الكود': i.code || '---',
+              'الاسم': i.itm_name_ar || '---',
+              'رصيد النظام': sys,
+              'الرصيد الفعلي': actual,
+              'الفرق': diff
+            };
+          })
+        : [{ 'الكود': '', 'الاسم': 'لا توجد أصناف', 'رصيد النظام': '', 'الرصيد الفعلي': '', 'الفرق': '' }];
+
+      const wb  = XLSX.utils.book_new();
+      const ws1 = XLSX.utils.json_to_sheet(matchedRows);
+      const ws2 = XLSX.utils.json_to_sheet(mismatchRows);
+      XLSX.utils.book_append_sheet(wb, ws1, 'مطابق');
+      XLSX.utils.book_append_sheet(wb, ws2, 'غير مطابق');
+
+      const tabName  = (TAB_DISPLAY_NAMES[currentTab] || currentTab).replace(/[^\p{L}\p{N}]+/gu, '_');
+      const dateStr  = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `تقرير_الجرد_${tabName}_${dateStr}.xlsx`);
     }
   </script>
 </body>
