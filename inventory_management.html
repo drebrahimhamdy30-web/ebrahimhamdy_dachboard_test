@@ -193,6 +193,14 @@
                 <input type="number" id="min-stock" value="1" min="0" step="1" oninput="onFilterChange()">
               </div>
               <div class="mini-field">
+                <span class="filter-label">أقل معدل للمصدر <span class="help-ic">؟<span class="tip">تجاهل الفرع كمصدر فائض لو معدل استهلاكه الشهري أقل من هذا الرقم — الفرع اللي مفيش عليه حركة مش مصدر فائض.</span></span></span>
+                <input type="number" id="min-src-avg" value="1" min="0" step="0.5" oninput="onFilterChange()">
+              </div>
+              <div class="mini-field">
+                <span class="filter-label">المتبقّي بعد الفائض <span class="help-ic">؟<span class="tip">اترك هذا العدد على الأقل في الفرع المصدر بعد خصم الفائض.</span></span></span>
+                <input type="number" id="keep-after" value="1" min="0" step="1" oninput="onFilterChange()">
+              </div>
+              <div class="mini-field">
                 <span class="filter-label">فترة الفائض (يوم) <span class="help-ic">؟<span class="tip">كل فرع يحتفظ بمخزون يكفي استهلاك هذا العدد من الأيام، وأي زيادة فوقه تُعتبر فائضاً.</span></span></span>
                 <input type="number" id="surplus-days" value="60" min="1" step="1" oninput="onFilterChange()">
               </div>
@@ -322,6 +330,8 @@
         itemType: itemType,
         search: document.getElementById('search-input').value,
         minStock: document.getElementById('min-stock').value,
+        minSrcAvg: document.getElementById('min-src-avg').value,
+        keepAfter: document.getElementById('keep-after').value,
         surplusDays: document.getElementById('surplus-days').value,
         needDays: document.getElementById('need-days').value,
         minSurplus: document.getElementById('min-surplus').value,
@@ -346,6 +356,8 @@
         }
         if(s.search!=null) document.getElementById('search-input').value=s.search;
         if(s.minStock!=null)    document.getElementById('min-stock').value=s.minStock;
+        if(s.minSrcAvg!=null)   document.getElementById('min-src-avg').value=s.minSrcAvg;
+        if(s.keepAfter!=null)   document.getElementById('keep-after').value=s.keepAfter;
         if(s.surplusDays!=null) document.getElementById('surplus-days').value=s.surplusDays;
         if(s.needDays!=null)    document.getElementById('need-days').value=s.needDays;
         if(s.minSurplus!=null)  document.getElementById('min-surplus').value=s.minSurplus;
@@ -411,59 +423,60 @@
       } catch(e){ }
       await loadStockData(true);
     }
-var stockLoaded=false;
-var branchEmpty = {mamora:false, san:false, bishr:false};
-async function loadStockData(silent){
-  if(stockLoaded) return true;
-  if(!silent && currentTab!=='disbursement')
-    document.getElementById('result-container').innerHTML='<div class="loading-overlay">⏳ جاري تحميل البيانات...</div>';
 
-  function norm(x){
-    if(Array.isArray(x)) return x;
-    if(x && Array.isArray(x.data)) return x.data;
-    return [];
-  }
-  async function getStock(type){
-    try {
-      var res = await fetch(INV_URL+'?type='+type);
-      return norm(await res.json());
-    } catch(e){
-      console.error('فشل تحميل '+type, e);
-      return [];   // فرع فاضي/فشل = مصفوفة فاضية، مش رمي خطأ
+    var stockLoaded=false;
+    var branchEmpty = {mamora:false, san:false, bishr:false};
+    async function loadStockData(silent){
+      if(stockLoaded) return true;
+      if(!silent && currentTab!=='disbursement')
+        document.getElementById('result-container').innerHTML='<div class="loading-overlay">⏳ جاري تحميل البيانات...</div>';
+
+      function norm(x){
+        if(Array.isArray(x)) return x;
+        if(x && Array.isArray(x.data)) return x.data;
+        return [];
+      }
+      async function getStock(type){
+        try {
+          var res = await fetch(INV_URL+'?type='+type);
+          return norm(await res.json());
+        } catch(e){
+          console.error('فشل تحميل '+type, e);
+          return [];   // فرع فاضي/فشل = مصفوفة فاضية، مش رمي خطأ
+        }
+      }
+
+      var r = await Promise.allSettled([
+        getStock('stock_mamora_all'),
+        getStock('stock_san_all'),
+        getStock('stock_bishr_all'),
+        getStock('sales_monthly')
+      ]);
+      var val = function(i){ return r[i].status==='fulfilled' ? r[i].value : []; };
+
+      stockMamora = val(0);
+      stockSan    = val(1);
+      stockBishr  = val(2);
+      salesData   = val(3);
+
+      branchEmpty.mamora = stockMamora.length===0;
+      branchEmpty.san    = stockSan.length===0;
+      branchEmpty.bishr  = stockBishr.length===0;
+
+      dataLoaded=true;
+      stockLoaded=true;
+      computeBranchUpdates();
+      renderBranchUpdates();
+
+      // لو الثلاثة فاضيين فعلاً = مشكلة حقيقية
+      if(stockMamora.length===0 && stockSan.length===0 && stockBishr.length===0){
+        if(!silent && currentTab!=='disbursement')
+          document.getElementById('result-container').innerHTML=
+            '<div class="loading-overlay" style="color:var(--danger);">❌ كل المخازن فارغة — تأكد من تشغيل سحب الأرصدة</div>';
+        return false;
+      }
+      return true;  // فرع واحد أو اتنين فاضيين؟ نكمّل عادي
     }
-  }
-
-  var r = await Promise.allSettled([
-    getStock('stock_mamora_all'),
-    getStock('stock_san_all'),
-    getStock('stock_bishr_all'),
-    getStock('sales_monthly')
-  ]);
-  var val = function(i){ return r[i].status==='fulfilled' ? r[i].value : []; };
-
-  stockMamora = val(0);
-  stockSan    = val(1);
-  stockBishr  = val(2);
-  salesData   = val(3);
-
-  branchEmpty.mamora = stockMamora.length===0;
-  branchEmpty.san    = stockSan.length===0;
-  branchEmpty.bishr  = stockBishr.length===0;
-
-  dataLoaded=true;
-  stockLoaded=true;
-  computeBranchUpdates();
-  renderBranchUpdates();
-
-  // لو الثلاثة فاضيين فعلاً = مشكلة حقيقية
-  if(stockMamora.length===0 && stockSan.length===0 && stockBishr.length===0){
-    if(!silent && currentTab!=='disbursement')
-      document.getElementById('result-container').innerHTML=
-        '<div class="loading-overlay" style="color:var(--danger);">❌ كل المخازن فارغة — تأكد من تشغيل سحب الأرصدة</div>';
-    return false;
-  }
-  return true;  // فرع واحد أو اتنين فاضيين؟ نكمّل عادي
-}
 
     // ===== آخر تحديث للفروع =====
     function latestUpdate(arr){
@@ -492,25 +505,25 @@ async function loadStockData(silent){
       var days=Math.floor(hrs/24);
       return 'منذ '+days+' يوم';
     }
-function renderBranchUpdates(){
-  var wrap=document.getElementById('branch-updates');
-  var html='';
-  Object.keys(BRANCHES).forEach(function(key){
-    var ts=branchUpdates[key];
-    var empty = branchEmpty[key];
-    var stale = !empty && (!ts || (Date.now()-ts > STALE_HOURS*3600000));
-    var label, cls;
-    if(empty){ label='⛔ فارغ — لم يُسحب'; cls='stale'; }
-    else if(stale){ label='⚠️ '+timeAgo(ts); cls='stale'; }
-    else { label='🟢 '+timeAgo(ts); cls=''; }
-    html+='<div class="branch-card">'+
-      '<span class="b-name">'+BRANCHES[key]+'</span>'+
-      '<span class="b-time '+cls+'">'+label+'</span>'+
-      '<button class="btn-refresh-branch" onclick="refreshBranch(\''+key+'\')"><i class="fas fa-sync-alt"></i> تحديث</button>'+
-    '</div>';
-  });
-  wrap.innerHTML=html;
-}
+    function renderBranchUpdates(){
+      var wrap=document.getElementById('branch-updates');
+      var html='';
+      Object.keys(BRANCHES).forEach(function(key){
+        var ts=branchUpdates[key];
+        var empty = branchEmpty[key];
+        var stale = !empty && (!ts || (Date.now()-ts > STALE_HOURS*3600000));
+        var label, cls;
+        if(empty){ label='⛔ فارغ — لم يُسحب'; cls='stale'; }
+        else if(stale){ label='⚠️ '+timeAgo(ts); cls='stale'; }
+        else { label='🟢 '+timeAgo(ts); cls=''; }
+        html+='<div class="branch-card">'+
+          '<span class="b-name">'+BRANCHES[key]+'</span>'+
+          '<span class="b-time '+cls+'">'+label+'</span>'+
+          '<button class="btn-refresh-branch" onclick="refreshBranch(\''+key+'\')"><i class="fas fa-sync-alt"></i> تحديث</button>'+
+        '</div>';
+      });
+      wrap.innerHTML=html;
+    }
     async function refreshBranch(key){
       var url=REFRESH_URLS[key];
       if(!url){ alert('رابط تشغيل سحب رصيد '+BRANCHES[key]+' غير مضبوط بعد.'); return; }
@@ -584,8 +597,14 @@ function renderBranchUpdates(){
       var minStock    = parseFloat(document.getElementById('min-stock').value)||0;
       var surplusDays = parseFloat(document.getElementById('surplus-days').value)||0;
       var minSurplus  = parseFloat(document.getElementById('min-surplus').value)||1;
+      var minSrcAvg   = parseFloat(document.getElementById('min-src-avg').value)||0;
+      var keepAfter   = parseFloat(document.getElementById('keep-after').value)||0;
+
       if(branchObj.stock <= minStock) return 0;
-      var surplus = Math.floor(branchObj.stock - coverQty(branchObj, surplusDays));
+      // فرع بلا حركة (معدل أقل من الحد) لا يُعتبر مصدر فائض
+      if((branchObj.avg||0) < minSrcAvg) return 0;
+
+      var surplus = Math.floor(branchObj.stock - coverQty(branchObj, surplusDays) - keepAfter);
       if(surplus < minSurplus) return 0;
       return surplus;
     }
