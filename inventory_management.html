@@ -193,11 +193,7 @@
                 <input type="number" id="min-stock" value="1" min="0" step="1" oninput="onFilterChange()">
               </div>
               <div class="mini-field">
-                <span class="filter-label">أقل معدل للمصدر <span class="help-ic">؟<span class="tip">تجاهل الفرع كمصدر فائض لو معدل استهلاكه الشهري أقل من هذا الرقم — الفرع اللي مفيش عليه حركة مش مصدر فائض.</span></span></span>
-                <input type="number" id="min-src-avg" value="1" min="0" step="0.5" oninput="onFilterChange()">
-              </div>
-              <div class="mini-field">
-                <span class="filter-label">المتبقّي بعد الفائض <span class="help-ic">؟<span class="tip">اترك هذا العدد على الأقل في الفرع المصدر بعد خصم الفائض.</span></span></span>
+                <span class="filter-label">المتبقّي (لو المعدل صفر) <span class="help-ic">؟<span class="tip">للأصناف التي معدل استهلاكها صفر فقط: يُترك هذا العدد في الفرع المصدر ويُعتبر الباقي فائضاً. لا يؤثّر على الأصناف التي عليها حركة.</span></span></span>
                 <input type="number" id="keep-after" value="1" min="0" step="1" oninput="onFilterChange()">
               </div>
               <div class="mini-field">
@@ -210,7 +206,7 @@
               </div>
               <div class="mini-field">
                 <span class="filter-label">يظهر الفائض ≥ <span class="help-ic">؟<span class="tip">لا تعرض الفائض إلا إذا بلغ هذا الرقم على الأقل.</span></span></span>
-                <input type="number" id="min-surplus" value="2" min="1" step="1" oninput="onFilterChange()">
+                <input type="number" id="min-surplus" value="1" min="1" step="1" oninput="onFilterChange()">
               </div>
             </div>
 
@@ -330,7 +326,6 @@
         itemType: itemType,
         search: document.getElementById('search-input').value,
         minStock: document.getElementById('min-stock').value,
-        minSrcAvg: document.getElementById('min-src-avg').value,
         keepAfter: document.getElementById('keep-after').value,
         surplusDays: document.getElementById('surplus-days').value,
         needDays: document.getElementById('need-days').value,
@@ -356,7 +351,6 @@
         }
         if(s.search!=null) document.getElementById('search-input').value=s.search;
         if(s.minStock!=null)    document.getElementById('min-stock').value=s.minStock;
-        if(s.minSrcAvg!=null)   document.getElementById('min-src-avg').value=s.minSrcAvg;
         if(s.keepAfter!=null)   document.getElementById('keep-after').value=s.keepAfter;
         if(s.surplusDays!=null) document.getElementById('surplus-days').value=s.surplusDays;
         if(s.needDays!=null)    document.getElementById('need-days').value=s.needDays;
@@ -597,14 +591,18 @@
       var minStock    = parseFloat(document.getElementById('min-stock').value)||0;
       var surplusDays = parseFloat(document.getElementById('surplus-days').value)||0;
       var minSurplus  = parseFloat(document.getElementById('min-surplus').value)||1;
-      var minSrcAvg   = parseFloat(document.getElementById('min-src-avg').value)||0;
       var keepAfter   = parseFloat(document.getElementById('keep-after').value)||0;
 
       if(branchObj.stock <= minStock) return 0;
-      // فرع بلا حركة (معدل أقل من الحد) لا يُعتبر مصدر فائض
-      if((branchObj.avg||0) < minSrcAvg) return 0;
 
-      var surplus = Math.floor(branchObj.stock - coverQty(branchObj, surplusDays) - keepAfter);
+      var surplus;
+      if((branchObj.avg||0) === 0){
+        // صنف بلا حركة: اترك "المتبقّي" واعتبر الباقي فائضاً
+        surplus = Math.floor(branchObj.stock - keepAfter);
+      } else {
+        // صنف عليه حركة: اخصم تغطية فترة الفائض فقط (بدون المتبقّي)
+        surplus = Math.floor(branchObj.stock - coverQty(branchObj, surplusDays));
+      }
       if(surplus < minSurplus) return 0;
       return surplus;
     }
