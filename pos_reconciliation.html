@@ -1070,7 +1070,7 @@ async function saveClose(branch,c2wSum){
 
   const record={
     branch,cashier,closed_at:new Date().toISOString(),
-    cash_breakdown:Object.fromEntries(DENOMS.map(d=>[d,parseInt(closeDraft.counts[d])||0]).filter(x=>x[1])),
+    cash_breakdown:JSON.stringify(Object.fromEntries(DENOMS.map(d=>[d,parseInt(closeDraft.counts[d])||0]).filter(x=>x[1]))),
     cash_total:+cash.toFixed(2),custody_total:+custSum.toFixed(2),
     wallet_total:+c2wSum.toFixed(2),grand_total:+(cash+custSum+c2wSum).toFixed(2),
     notes:closeDraft.notes||''
@@ -1078,7 +1078,15 @@ async function saveClose(branch,c2wSum){
 
   $('#btn-save-close').disabled=true;
   let ok=false;
-  if(typeof postShiftClose==='function'){try{ok=await postShiftClose(record);}catch(e){console.warn(e);}}
+  if(typeof postShiftClose==='function'){
+    try{ok=await postShiftClose(record);}catch(e){console.warn(e);}
+  }else{
+    // نداء مباشر عبر posupdate لو postShiftClose مش معرّفة في api.js
+    try{
+      const res=await posUpdate({table:'shift_closes',action:'insert',data:record});
+      ok=!!(res&&(res.ok||res.id||res.insertedId||Array.isArray(res)));
+    }catch(e){console.warn('shift close save failed:',e);}
+  }
 
   const local=JSON.parse(localStorage.getItem('recon.closes.v1')||'[]');
   local.unshift({...record,id:'local-'+Date.now(),_local:true,_synced:ok});
@@ -1098,9 +1106,16 @@ async function loadHistory(){
   if(!IS_ADMIN){ $('#hist-body').innerHTML='<div class="empty-state"><i class="fas fa-lock"></i> غير مصرح.</div>'; return; }
   const body=$('#hist-body');body.innerHTML='<div class="empty-state"><i class="fas fa-spinner fa-spin"></i>جاري التحميل…</div>';
   let rows=[];
-  if(typeof fetchShiftCloses==='function'){try{const d=await fetchShiftCloses();rows=Array.isArray(d)?d:[];}catch(e){}}
+  try{
+    const res=await fetch(POSMGMT_URL);
+    const data=await res.json();
+    const o=Array.isArray(data)?data[0]:data;
+    rows=Array.isArray(o.shift_closes)?o.shift_closes:[];
+  }catch(e){}
+  // دمج المحفوظ محلياً مع ما جاء من n8n
   const local=JSON.parse(localStorage.getItem('recon.closes.v1')||'[]');
-  const seen=new Set(rows.map(r=>r.closed_at));local.forEach(l=>{if(!seen.has(l.closed_at))rows.push(l);});
+  const seen=new Set(rows.map(r=>r.closed_at));
+  local.forEach(l=>{if(!seen.has(l.closed_at))rows.push(l);});
   if(!IS_ADMIN)rows=rows.filter(r=>normBranch(r.branch)===normBranch(USER_BRANCH));
   rows.sort((a,b)=>new Date(b.closed_at)-new Date(a.closed_at));
   if(!rows.length){body.innerHTML='<div class="empty-state"><i class="fas fa-folder-open"></i>مفيش إغلاقات محفوظة بعد.</div>';return;}
