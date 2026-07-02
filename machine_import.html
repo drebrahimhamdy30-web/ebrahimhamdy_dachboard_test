@@ -139,6 +139,7 @@
     <div class="pane">
       <div class="pane-head">
         <span class="ttl"><i class="fas fa-wallet" style="color:#a855f7"></i> معاملات المحافظ والفيزا</span>
+        <input id="left-amt-search" type="number" step="0.01" placeholder="ابحث بالقيمة..." style="width:130px;padding:4px 8px;font-size:0.76rem;border:1px solid var(--border);border-radius:8px;font-family:var(--font);background:#fff;color:var(--text-primary);">
         <span class="cnt" id="left-cnt">—</span>
       </div>
       <div class="pane-filters">
@@ -333,6 +334,7 @@ $('#right-machine-filter').addEventListener('change',renderRight);
 $('#left-machine-filter').addEventListener('change',renderLeft);
 $('#right-show-linked').addEventListener('change',renderRight);
 $('#left-show-linked').addEventListener('change',renderLeft);
+$('#left-amt-search').addEventListener('input',renderLeft);
 
 function renderAll(){ renderRight(); renderLeft(); renderConfirmBar(); }
 
@@ -432,17 +434,29 @@ function renderLeft(){
   const body=$('#left-body');
   const mf=$('#left-machine-filter').value;
   const showLinked=$('#left-show-linked').checked;
+  const searchAmt=parseFloat($('#left-amt-search').value);
   let rows=WALLET.filter(w=>(!mf||(w.to===mf||w.srcLabel===mf)) && (showLinked || !w.closed));
-  rows.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
+  if(!isNaN(searchAmt)){
+    // رتّب بالأقرب للقيمة المبحوث عنها، ولو تساوى الفرق رتّب بالأحدث
+    rows.sort((a,b)=>{
+      const da=Math.abs((a.amount||0)-searchAmt), db=Math.abs((b.amount||0)-searchAmt);
+      if(Math.abs(da-db)>0.001) return da-db;
+      return new Date(b.date||0)-new Date(a.date||0);
+    });
+  }else{
+    rows.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
+  }
   $('#left-cnt').textContent=rows.length+' معاملة';
   if(!rows.length){ body.innerHTML='<div class="empty-hint">لا توجد معاملات مطابقة.</div>'; return; }
-  body.innerHTML=rows.map(w=>{
+  body.innerHTML=rows.map((w,idx)=>{
     const sel=SEL_L.has(w.id);
     const dirChip=w.dir?('<span class="dchip-'+w.dir+'"><i class="fas fa-arrow-'+(w.dir==='in'?'down':'up')+'"></i> '+w.dirLabel+'</span>'):'';
-    return '<div class="row-item '+(w.closed?'linked':'')+' '+(sel?'sel':'')+'" data-id="'+w.id+'" onclick="toggleSel(\'L\',\''+w.id+'\')">'+
+    const isClosest=!isNaN(searchAmt)&&idx===0;
+    return '<div class="row-item '+(w.closed?'linked':'')+' '+(sel?'sel':'')+'" data-id="'+w.id+'" onclick="toggleSel(\'L\',\''+w.id+'\')"'+(isClosest?' style="border-right:3px solid #f59e0b;"':'')+'>'+
       '<div class="pick-dot">'+(sel?'<i class="fas fa-check" style="font-size:0.6rem"></i>':'')+'</div>'+
       '<div class="row-body">'+
-        '<div class="row-top"><span class="row-amt">'+fmtNum(w.amount)+' ج</span>'+dirChip+'<span class="mchip">'+(w.to||w.srcLabel)+'</span>'+(w.terminal?'<span class="lchip">'+w.terminal+'</span>':'')+(w.closed?'<span class="lchip">تم ✓</span>':'')+'</div>'+
+        '<div class="row-top"><span class="row-amt">'+fmtNum(w.amount)+' ج</span>'+dirChip+(isClosest?'<span style="background:#fef3c7;color:#92400e;padding:1px 7px;border-radius:20px;font-size:0.66rem;font-weight:700;">الأقرب</span>':'')+
+        '<span class="mchip">'+(w.to||w.srcLabel)+'</span>'+(w.terminal?'<span class="lchip">'+w.terminal+'</span>':'')+(w.closed?'<span class="lchip">تم ✓</span>':'')+'</div>'+
         '<div class="row-meta"><span>'+w.srcLabel+'</span><span>'+new Date(w.date||0).toLocaleString('ar-EG',{dateStyle:'short',timeStyle:'short'})+'</span></div>'+
       '</div></div>';
   }).join('');
