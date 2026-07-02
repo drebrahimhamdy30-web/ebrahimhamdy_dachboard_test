@@ -253,12 +253,24 @@ async function fetchBranchSales() { return await fetchFromN8N('branch_visa_sales
 // وكمان ياخد closed_wallet_ids ويعلّم المعاملات دي كـ "مرحّلة" عشان متظهرش في الشيفت الجديد
 async function postShiftClose(data) {
   try {
-    const response = await fetch(POST_URL, {
+    const response = await fetch('https://agent.ebrahimhamdy.com/webhook/posupdate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'shift_close', ...data })
+      body: JSON.stringify({
+        table: 'shift_closes',
+        action: 'insert',
+        data: {
+          ...data,
+          cash_breakdown: typeof data.cash_breakdown === 'object'
+            ? JSON.stringify(data.cash_breakdown)
+            : data.cash_breakdown
+        }
+      })
     });
-    return response.ok;
+    const text = await response.text();
+    const json = text ? JSON.parse(text) : {};
+    const d = Array.isArray(json) ? json[0] : json;
+    return !!(d && d.ok);
   } catch (e) {
     console.error('postShiftClose error:', e);
     return false;
