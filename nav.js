@@ -29,11 +29,55 @@ function injectNavbar() {
     return;
   }
 
-  var contractPages    = ['sales_contracts.html', 'claims.html', 'contracts.html', 'contracts_stats.html'];
-  var csPages          = ['customer_service.html', 'shortages.html', 'print_invoice.html'];
-  var purchasesPages   = ['purchases.html', 'cosmo_order.html', 'price_check.html', 'inventory_management.html'];
-  var visaPages        = ['visa_transactions.html', 'bank_monitor.html', 'paymob.html', 'sms.html', 'pos_reconciliation.html', 'machine_import.html'];
-  
+  // ===== تقييد المحاسب: يرى فقط صفحاته المخصصة =====
+  var accountantPages = [
+    'bank_monitor.html', 'visa_transactions.html', 'machine_import.html',
+    'sales_contracts.html', 'claims.html', 'contracts.html', 'contracts_stats.html',
+    'main.html', 'notifications.html'
+  ];
+  if (userRoleEarly === 'accountant') {
+    if (!accountantPages.includes(currentPage)) {
+      window.location.replace('bank_monitor.html');
+      return;
+    }
+    var isContractAcc   = ['sales_contracts.html','claims.html','contracts.html','contracts_stats.html'].includes(currentPage);
+    var activeUserAcc   = localStorage.getItem('activeUser');
+    var displayAcc      = activeUserAcc ? String(activeUserAcc).replace(/['"<>]/g,'') : '';
+    var navBarAcc       = document.querySelector('.nav-bar');
+    if (navBarAcc) navBarAcc.innerHTML =
+      '<div class="nav-logo"><span style="font-weight:900;font-size:1.1rem;letter-spacing:1px;">Phalix</span></div>' +
+      '<nav class="nav-links">' +
+        '<a href="main.html" class="'+(currentPage==='main.html'?'active':'')+'">' +
+          '<i class="fas fa-plus-circle"></i> مدخلات</a>' +
+        '<a href="bank_monitor.html" class="'+(currentPage==='bank_monitor.html'?'active':'')+'">' +
+          '<i class="fas fa-university"></i> متابعة البنك</a>' +
+        '<a href="visa_transactions.html" class="'+(currentPage==='visa_transactions.html'?'active':'')+'">' +
+          '<i class="fas fa-wallet"></i> معاملات المحافظ</a>' +
+        '<a href="machine_import.html" class="'+(currentPage==='machine_import.html'?'active':'')+'">' +
+          '<i class="fas fa-file-import"></i> استيراد جدول الماكينات</a>' +
+        '<a id="acc-contracts-toggle" href="#" style="color:'+(isContractAcc?'var(--primary)':'#94a3b8')+';background:'+(isContractAcc?'var(--accent)':'transparent')+';padding:7px 12px;border-radius:8px;font-size:0.8rem;font-weight:'+(isContractAcc?'700':'500')+';display:flex;align-items:center;gap:5px;text-decoration:none;white-space:nowrap;cursor:pointer;">' +
+          '<i class="fas fa-file-contract"></i> تعاقدات<i class="fas fa-chevron-down" style="font-size:0.6rem;margin-right:2px;"></i></a>' +
+        '<a href="notifications.html" class="'+(currentPage==='notifications.html'?'active':'')+'" style="position:relative;">' +
+          '<i class="fas fa-bell"></i>' +
+          '<span id="notif-badge" style="display:none;position:absolute;top:-4px;right:-8px;background:#ef4444;color:#fff;border-radius:50%;width:16px;height:16px;font-size:0.6rem;font-weight:700;align-items:center;justify-content:center;line-height:16px;text-align:center;">0</span>' +
+          ' إشعارات</a>' +
+      '</nav>' +
+      '<div class="user-info"><span id="nav-user">'+displayAcc+'</span>' +
+        '<button class="btn-logout" onclick="logout()"><i class="fas fa-sign-out-alt"></i></button>' +
+      '</div>';
+    createFloatingDropdown('acc-contracts-dropdown',[
+      {href:'sales_contracts.html', icon:'fa-file-invoice',        label:'فواتير التعاقد',         active:currentPage==='sales_contracts.html'},
+      {href:'claims.html',          icon:'fa-file-invoice-dollar', label:'مطالبات',                active:currentPage==='claims.html'},
+      {href:'contracts.html',       icon:'fa-file-contract',       label:'لنا فواتير لدى العملاء', active:currentPage==='contracts.html'},
+      {href:'contracts_stats.html', icon:'fa-chart-bar',           label:'إحصائيات',               active:currentPage==='contracts_stats.html'}
+    ]);
+    return;
+  }
+
+  var csPages          = ['customer_service.html', 'shortages.html'];
+  var purchasesPages   = ['purchases.html', 'cosmo_order.html', 'inventory_management.html'];
+  // ✅ تعديل ١: ضفنا sms.html لصفحات الفيزا عشان زرار "فيزا" يفضل مظلّل
+var visaPages        = ['visa_transactions.html', 'bank_monitor.html', 'paymob.html', 'sms.html', 'pos_reconciliation.html', 'machine_import.html'];
   var isContractPage   = contractPages.includes(currentPage);
   var isCSPage         = csPages.includes(currentPage);
   var isPurchasesPage  = purchasesPages.includes(currentPage);
@@ -44,7 +88,7 @@ function injectNavbar() {
   var isAdmin          = userRole === 'admin';
   var isManager        = userRole === 'manager';
 
-  var navContent =
+var navContent =
     '<div class="nav-logo">' +
       '<span style="font-weight:900;font-size:1.1rem;letter-spacing:1px;">Phalix</span>' +
     '</div>' +
@@ -86,7 +130,7 @@ function injectNavbar() {
           'background:#ef4444;color:#fff;border-radius:50%;width:16px;height:16px;' +
           'font-size:0.6rem;font-weight:700;align-items:center;justify-content:center;' +
           'line-height:16px;text-align:center;">0</span>' +
-         ' إشعارات</a>' +
+        ' إشعارات</a>' +
 
       '<a href="offers.html" class="' + (currentPage === 'offers.html' ? 'active' : '') + '">' +
         '<i class="fas fa-tags"></i> عروض</a>' +
@@ -145,17 +189,13 @@ function injectNavbar() {
     { href: 'cosmo_order.html', icon: 'fa-shopping-basket', label: 'طلبيات الكوزمو والشركات', active: currentPage === 'cosmo_order.html' }
   );
   purchasesItems.push(
-    { href: 'price_check.html', icon: 'fa-tags', label: 'فرق اسعار اذون الاستلام', active: currentPage === 'price_check.html' }
-  );
-  purchasesItems.push(
     { href: 'inventory_management.html', icon: 'fa-warehouse', label: 'إدارة المخزون', active: currentPage === 'inventory_management.html' }
   );
   createFloatingDropdown('purchases-dropdown', purchasesItems);
 
   createFloatingDropdown('cs-dropdown', [
-    { href: 'customer_service.html', icon: 'fa-headset',               label: 'خدمة العملاء', active: currentPage === 'customer_service.html' },
-    { href: 'shortages.html',        icon: 'fa-exclamation-triangle', label: 'نواقص',         active: currentPage === 'shortages.html' },
-    { href: 'print_invoice.html',    icon: 'fa-print',                label: 'طباعة فاتورة بيع', active: currentPage === 'print_invoice.html' }
+    { href: 'customer_service.html', icon: 'fa-headset',             label: 'خدمة العملاء', active: currentPage === 'customer_service.html' },
+    { href: 'shortages.html',        icon: 'fa-exclamation-triangle', label: 'نواقص',        active: currentPage === 'shortages.html' }
   ]);
 
   createFloatingDropdown('contracts-dropdown', [
@@ -166,13 +206,15 @@ function injectNavbar() {
   ]);
 
   // Dropdown: فيزا
-  createFloatingDropdown('visa-dropdown', [
-    { href: 'visa_transactions.html', icon: 'fa-credit-card',           label: 'معاملات الفيزا',  active: currentPage === 'visa_transactions.html' },
+  // ✅ تعديل ٢: ضفنا "معاملات المحافظ" كآخر عنصر في القائمة
+  // ✅ تعديل ٣: ضفنا "استيراد جدول الماكينات" بعد "تسوية وإغلاق"
+createFloatingDropdown('visa-dropdown', [
+    { href: 'visa_transactions.html', icon: 'fa-credit-card',          label: 'معاملات الفيزا',  active: currentPage === 'visa_transactions.html' },
     { href: 'bank_monitor.html',      icon: 'fa-university',           label: 'متابعة البنك',    active: currentPage === 'bank_monitor.html' },
     { href: 'paymob.html',            icon: 'fa-mobile-screen-button', label: 'معاملات باي موب', active: currentPage === 'paymob.html' },
     { href: 'sms.html',               icon: 'fa-wallet',               label: 'معاملات المحافظ', active: currentPage === 'sms.html' },
     { href: 'pos_reconciliation.html', icon: 'fa-scale-balanced',      label: 'تسوية وإغلاق',    active: currentPage === 'pos_reconciliation.html' },
-    { href: 'machine_import.html',    icon: 'fa-file-import',          label: 'استيراد جدول الماكينات', active: currentPage === 'machine_import.html' }
+    { href: 'machine_import.html',    icon: 'fa-file-import',         label: 'استيراد جدول الماكينات', active: currentPage === 'machine_import.html' }
   ]);
   
 
