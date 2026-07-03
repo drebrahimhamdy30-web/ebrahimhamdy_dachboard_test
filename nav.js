@@ -71,6 +71,7 @@ function injectNavbar() {
       {href:'contracts.html',       icon:'fa-file-contract',       label:'لنا فواتير لدى العملاء', active:currentPage==='contracts.html'},
       {href:'contracts_stats.html', icon:'fa-chart-bar',           label:'إحصائيات',               active:currentPage==='contracts_stats.html'}
     ]);
+    bindToggle('acc-contracts-toggle','acc-contracts-dropdown');
     return;
   }
 
@@ -257,7 +258,7 @@ function bindToggle(toggleId, menuId) {
   var menu = document.getElementById(menuId);
   if (!btn || !menu) return;
 
-  var allDropdowns = ['purchases-dropdown', 'cs-dropdown', 'contracts-dropdown', 'visa-dropdown'];
+  var allDropdowns = ['purchases-dropdown', 'cs-dropdown', 'contracts-dropdown', 'visa-dropdown', 'acc-contracts-dropdown'];
 
   btn.addEventListener('click', function(e) {
     e.preventDefault();
@@ -280,7 +281,7 @@ function bindToggle(toggleId, menuId) {
   });
 }
 
-var allDropdowns = ['purchases-dropdown', 'cs-dropdown', 'contracts-dropdown', 'visa-dropdown'];
+var allDropdowns = ['purchases-dropdown', 'cs-dropdown', 'contracts-dropdown', 'visa-dropdown', 'acc-contracts-dropdown'];
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', function() {
