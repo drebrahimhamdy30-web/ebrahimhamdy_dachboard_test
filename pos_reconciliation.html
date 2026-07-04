@@ -1322,20 +1322,29 @@ function showC2WPreview(bill,branch){
 
     if(reasonKey==='cash_as_visa'){
       if(hasDiff){
-        // كاش بالخطأ + فيه فرق — تنبيه مزدوج بارز
+        const diffReasons=Object.entries(C2W_REASONS)
+          .filter(([k])=>k!=='cash_as_visa')
+          .map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('');
         msgEl.innerHTML=`
           <div style="background:#fef2f2;border:2px solid #ef4444;border-radius:10px;padding:12px 14px;margin-top:4px;">
-            <div style="display:flex;align-items:center;gap:8px;font-weight:800;color:#b91c1c;font-size:0.88rem;margin-bottom:8px;">
-              <i class="fas fa-triangle-exclamation" style="font-size:1rem;"></i> تنبيه: قيمة الإيصال مختلفة عن الفاتورة بفارق ${money(absDiff)} ج
+            <div style="display:flex;align-items:center;gap:8px;font-weight:800;color:#b91c1c;font-size:0.88rem;margin-bottom:10px;">
+              <i class="fas fa-triangle-exclamation" style="font-size:1rem;"></i>
+              فيه فرق بين الإيصال والفاتورة (<span style="background:#fee2e2;padding:1px 8px;border-radius:6px;">${money(absDiff)} ج</span>) — اختار سبب الفرق وهيتضاف تلقائياً:
             </div>
-            <div style="font-size:0.8rem;color:#7f1d1d;line-height:1.7;">
-              السطر ده بيضيف <b>${money(net)} ج</b> (قيمة الفاتورة) للإجمالي.<br>
-              عشان الحساب يبقى صح، لازم <b>تضيف سطر تاني</b> بعده للفرق:<br>
-              <span style="background:#fff;border:1px solid #fca5a5;border-radius:6px;padding:3px 8px;display:inline-block;margin-top:4px;">
-                ${diff<0?'اختار «جزء كاش وجزء فيزا» أو «مرتجع» وادخل نفس قيمة الإيصال ('+money(val)+' ج)':'اختار «فرق لصالح الطيار» أو «فرق لحساب العميل» وادخل نفس قيمة الإيصال ('+money(val)+' ج)'}
-              </span>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <label style="font-weight:700;color:#b91c1c;font-size:0.82rem;white-space:nowrap;"><i class="fas fa-list-check"></i> سبب الفرق:</label>
+              <select id="c2w-diff-reason" class="form-select" style="font-size:0.78rem;padding:5px 8px;border-color:#ef4444;flex:1;min-width:180px;">${diffReasons}</select>
             </div>
+            <div id="c2w-diff-action" style="margin-top:8px;font-size:0.8rem;font-weight:700;color:#92400e;"></div>
           </div>`;
+        const diffSel=$('#c2w-diff-reason');
+        const updDiffMsg=()=>{
+          const dk=diffSel.value; const dEl=$('#c2w-diff-action'); if(!dEl)return;
+          if(dk==='driver_fee') dEl.innerHTML='<i class="fas fa-motorcycle"></i> برجاء إعطاء الطيار '+money(absDiff)+' ج من نقطة البيع دون أي صرف.';
+          else if(dk='customer_account') dEl.innerHTML='<i class="fas fa-user-plus"></i> برجاء توريد '+money(absDiff)+' ج من العميل إلى نقطة البيع.';
+          else dEl.innerHTML='';
+        };
+        diffSel.addEventListener('change',updDiffMsg); updDiffMsg();
       }else{
         msgEl.innerHTML='<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px 12px;font-size:0.8rem;color:#15803d;font-weight:700;"><i class="fas fa-circle-check"></i> قيمة الإيصال مطابقة للفاتورة — لا يوجد فرق.</div>';
       }
@@ -1344,11 +1353,8 @@ function showC2WPreview(bill,branch){
     }else if(reasonKey==='customer_account'){
       msgEl.innerHTML=`<div style="background:#eff6ff;border:2px solid #93c5fd;border-radius:10px;padding:10px 14px;font-size:0.82rem;font-weight:700;color:#1d4ed8;display:flex;align-items:center;gap:8px;"><i class="fas fa-user-plus" style="font-size:1rem;"></i> برجاء توريد <span style="background:#dbeafe;padding:1px 8px;border-radius:6px;font-size:0.9rem;">${money(absDiff)} ج</span> من العميل إلى نقطة البيع.</div>`;
     }else if(reasonKey==='partial_cash'||reasonKey==='return_new'){
-      if(hasDiff){
-        msgEl.innerHTML=`<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:8px;padding:8px 12px;font-size:0.8rem;color:#9a3412;font-weight:700;"><i class="fas fa-circle-info"></i> سيُخصم <b>${money(absDiff)} ج</b> من إجمالي النقدية بالدرج.</div>`;
-      }else{
-        msgEl.innerHTML='';
-      }
+      if(hasDiff) msgEl.innerHTML=`<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:8px;padding:8px 12px;font-size:0.8rem;color:#9a3412;font-weight:700;"><i class="fas fa-circle-info"></i> سيُخصم <b>${money(absDiff)} ج</b> من إجمالي النقدية بالدرج.</div>`;
+      else msgEl.innerHTML='';
     }else{
       msgEl.innerHTML='<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;font-size:0.78rem;color:#64748b;"><i class="fas fa-info-circle"></i> لا يوجد تأثير على إجمالي النقدية بالدرج — للمعرفة والمتابعة فقط.</div>';
     }
@@ -1365,23 +1371,37 @@ async function confirmAddC2W(){
   const val=num($('#c2w-value-input').value);
   const reason=$('#c2w-reason-select')?.value||'cash_as_visa';
   if(isNaN(val)){ toast('اكتب قيمة صحيحة','bad'); return; }
+  const net=parseFloat(bill.total_bill_net??bill.total_bill??0);
+  const diffReason=$('#c2w-diff-reason')?.value||null;
+  const hasTwoRows=reason==='cash_as_visa' && diffReason && Math.abs(val-net)>0.01;
   const btn=$('#c2w-confirm-btn');
   if(btn){btn.disabled=true;btn.innerHTML='<i class="fas fa-spinner fa-spin"></i>';}
   try{
-    const res=await posUpdate({table:'cash_to_wallet',action:'insert',data:{
+    // السطر الأول دايماً
+    await posUpdate({table:'cash_to_wallet',action:'insert',data:{
       bill_no:String(bill.bill_no||''), branch,
-      invoice_amount:String(bill.total_bill_net??bill.total_bill??''),
+      invoice_amount:String(net),
       transaction_value:String(val), customer_name:bill.cust_name_ar||'', reason,
       created_at:new Date().toISOString(), disbursed:false, disbursed_at:''
     }});
+    // السطر الثاني تلقائياً لو فيه فرق وتم اختيار سببه
+    if(hasTwoRows){
+      await posUpdate({table:'cash_to_wallet',action:'insert',data:{
+        bill_no:String(bill.bill_no||''), branch,
+        invoice_amount:String(net),
+        transaction_value:String(val), customer_name:bill.cust_name_ar||'', reason:diffReason,
+        created_at:new Date().toISOString(), disbursed:false, disbursed_at:''
+      }});
+      toast('تمت الإضافة — سطرين (كاش بالخطأ + الفرق)','ok');
+    }else{
+      toast('تمت الإضافة','ok');
+    }
     cancelC2WPreview(); const inp=$('#c2w-bill'); if(inp)inp.value='';
-    if(res&&res.ok)toast('تمت الإضافة','ok');
-    else toast('الرد غير واضح — بنحدّث الشاشة للتأكد من الحالة الفعلية','err');
-    await loadData();   // نحدّث دايماً، حتى لو الرد غامض، عشان نعرض الحقيقة الموجودة في القاعدة
+    await loadData();
   }catch(e){
-    toast('تأخّر الرد أو انقطع الاتصال — العملية ممكن تكون نجحت فعلاً في القاعدة. بنحدّث الشاشة...','err');
+    toast('تأخّر الرد — بنحدّث الشاشة للتأكد من الحالة الفعلية','err');
     cancelC2WPreview(); const inp=$('#c2w-bill'); if(inp)inp.value='';
-    await loadData();   // نحدّث برغم الخطأ الظاهر، لأن n8n ممكن يكون كمّل شغله في الخلفية
+    await loadData();
   }
 }
 
