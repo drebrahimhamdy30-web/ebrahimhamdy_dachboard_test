@@ -1,4 +1,5 @@
 function injectNavbar() {
+  if (window.top !== window.self) { return; }
   var currentPage      = window.location.pathname.split("/").pop();
   var userRoleEarly    = localStorage.getItem('userRole') || '';
 
