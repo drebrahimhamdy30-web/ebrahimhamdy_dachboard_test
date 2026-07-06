@@ -1,7 +1,9 @@
 function injectNavbar() {
-  if (window.top !== window.self) { return; }
-  var currentPage      = window.location.pathname.split("/").pop();
-  var userRoleEarly    = localStorage.getItem('userRole') || '';
+  if (window.top !== window.self) {
+    var navBarEl = document.querySelector('.nav-bar');
+    if (navBarEl) navBarEl.style.display = 'none';
+    return;
+  }
 
   // ===== تقييد مسؤول الجرد: لا يرى ولا يصل لأي شاشة غير الجرد =====
   if (userRoleEarly === 'inventory') {
