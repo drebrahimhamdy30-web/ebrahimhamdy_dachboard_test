@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>تسجيل الدخول — نظام التوصيل</title>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -181,21 +180,30 @@
 
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .role-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    padding: 0.2rem 0.6rem;
-    border-radius: 6px;
-    font-size: 0.75rem;
-    font-weight: 600;
-  }
-
   .footer-note {
     text-align: center;
     margin-top: 1.5rem;
     font-size: 0.8rem;
     color: var(--text-muted);
+  }
+
+  /* شاشة التحقق الأولي (لما يكون فيه جلسة محفوظة بالفعل) */
+  .checking-screen {
+    text-align: center;
+    padding: 2rem;
+  }
+  .checking-screen .spinner {
+    display: block;
+    margin: 0 auto 1rem;
+    border-top-color: var(--primary);
+    border: 3px solid var(--primary-light);
+    border-top-color: var(--primary);
+    width: 32px;
+    height: 32px;
+  }
+  .checking-screen p {
+    color: var(--text-muted);
+    font-size: 0.9rem;
   }
 </style>
 </head>
@@ -212,7 +220,14 @@
     <p>سجّل دخولك للمتابعة</p>
   </div>
 
-  <div class="card">
+  <div class="card" id="checkingCard">
+    <div class="checking-screen">
+      <div class="spinner"></div>
+      <p>جاري التحقق من الجلسة...</p>
+    </div>
+  </div>
+
+  <div class="card" id="loginCard" style="display:none">
     <div class="form-group">
       <label for="username">اسم المستخدم</label>
       <div class="input-wrap">
@@ -251,20 +266,68 @@
   <p class="footer-note">نظام إدارة التوصيل &copy; 2025</p>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-  const SUPABASE_URL = 'https://rxtjoqulmgkkcohmgzgi.supabase.co';
-  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
-  const { createClient } = supabase;
-  const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+  const LOGIN_URL  = 'https://agent.ebrahimhamdy.com/webhook/login';
+  const VERIFY_URL = 'https://agent.ebrahimhamdy.com/webhook/verify_token';
 
-  // لو مسجل دخول خليه يروح الداشبورد
-  const existing = sessionStorage.getItem('delivery_user');
-  if (existing) redirectByRole(JSON.parse(existing).role);
+  function redirectByRole(role) {
+    if (role === 'driver') {
+      window.location.href = 'driver.html';
+    } else {
+      window.location.href = 'app.html';
+    }
+  }
 
-  document.getElementById('password').addEventListener('keypress', e => {
-    if (e.key === 'Enter') handleLogin();
-  });
+  function showLoginForm() {
+    document.getElementById('checkingCard').style.display = 'none';
+    document.getElementById('loginCard').style.display = 'block';
+    document.getElementById('password').addEventListener('keypress', e => {
+      if (e.key === 'Enter') handleLogin();
+    });
+  }
+
+  // ===== تحقق أول: هل فيه جلسة صالحة بالفعل (من الـ ERP أو دخول سابق)؟ =====
+  async function checkExistingSession() {
+    const token = localStorage.getItem('authToken');
+    if (!token) return false;
+
+    try {
+      const response = await fetch(VERIFY_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
+      });
+      if (!response.ok) return false;
+      const data = await response.json();
+      if (data && data.valid === true) {
+        redirectByRole(data.role || localStorage.getItem('userRole'));
+        return true;
+      }
+    } catch (e) {
+      console.warn('checkExistingSession failed', e);
+    }
+    return false;
+  }
+
+  (async () => {
+    const hasSession = await checkExistingSession();
+    if (!hasSession) showLoginForm();
+  })();
+
+  // ===== تسجيل الدخول عبر الـ login workflow الموحّد =====
+  async function loginRequest(username, password) {
+    try {
+      const response = await fetch(LOGIN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ user: username, pass: password })
+      });
+      if (!response.ok) return { status: 'error', message: 'السيرفر لا يستجيب' };
+      return await response.json();
+    } catch (e) {
+      return { status: 'error', message: 'فشل الاتصال بالإنترنت أو السيرفر' };
+    }
+  }
 
   async function handleLogin() {
     const username = document.getElementById('username').value.trim();
@@ -282,50 +345,26 @@
     errorMsg.classList.remove('show');
 
     try {
-      const { data, error } = await db
-        .from('users')
-        .select('*')
-        .eq('username', username)
-        .eq('is_active', true)
-        .single();
+      const result = await loginRequest(username, password);
 
-      if (error || !data) {
-        showError('اسم المستخدم غير موجود أو الحساب غير نشط');
-        return;
+      if (result && result.status === 'success') {
+        localStorage.setItem('authToken',  result.token);
+        localStorage.setItem('activeUser', result.user);
+        localStorage.setItem('userBranch', result.branch);
+        localStorage.setItem('userRole',   result.role || 'employee');
+        localStorage.setItem('fullName',   result.full_name || result.user);
+        localStorage.setItem('loginTime',  Date.now());
+
+        redirectByRole(result.role);
+      } else {
+        showError(result?.message || 'اسم المستخدم أو كلمة المرور غير صحيحة');
       }
-
-      // مقارنة بسيطة للباسورد (هنحسّنها لاحقاً بـ hashing)
-      if (data.password_hash !== password) {
-        showError('كلمة المرور غير صحيحة');
-        return;
-      }
-
-      // حفظ بيانات المستخدم
-      const userSession = {
-        id: data.id,
-        username: data.username,
-        full_name: data.full_name,
-        role: data.role,
-        branch_id: data.branch_id,
-      };
-      sessionStorage.setItem('delivery_user', JSON.stringify(userSession));
-
-      redirectByRole(data.role);
-
     } catch (err) {
       showError('حدث خطأ، حاول مرة أخرى');
       console.error(err);
     } finally {
       btn.classList.remove('loading');
       btn.disabled = false;
-    }
-  }
-
-  function redirectByRole(role) {
-    if (role === 'driver') {
-      window.location.href = 'driver.html';
-    } else {
-window.location.href = 'app.html';
     }
   }
 
