@@ -10,7 +10,8 @@ function getCurrentUser() {
     username: activeUser,
     full_name: localStorage.getItem('fullName') || activeUser,
     role: localStorage.getItem('userRole') || '',
-    branch: localStorage.getItem('userBranch') || ''
+    branch: localStorage.getItem('userBranch') || '',
+    branch_id: localStorage.getItem('userBranchId') || null
   };
 }
 
@@ -31,6 +32,7 @@ function logout() {
   localStorage.removeItem('authToken');
   localStorage.removeItem('activeUser');
   localStorage.removeItem('userBranch');
+  localStorage.removeItem('userBranchId');
   localStorage.removeItem('userRole');
   localStorage.removeItem('fullName');
   localStorage.removeItem('legacyId');
