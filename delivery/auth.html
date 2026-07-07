@@ -358,9 +358,17 @@
         localStorage.setItem('loginTime',  Date.now());
 
         // جلب وتخزين branch_id (uuid) مرة واحدة وقت الدخول لغير الـ admin
+        // (مع timeout 3 ثواني عشان لو الاتصال بـ Supabase تعطل، تسجيل الدخول يكمل عادي)
         if (result.role !== 'admin' && result.branch) {
-          const { data: b } = await db.from('branches').select('id').eq('name', result.branch).maybeSingle();
-          localStorage.setItem('userBranchId', b?.id || '');
+          try {
+            const branchIdPromise = db.from('branches').select('id').eq('name', result.branch).maybeSingle();
+            const timeoutPromise = new Promise(resolve => setTimeout(() => resolve({ data: null }), 3000));
+            const { data: b } = await Promise.race([branchIdPromise, timeoutPromise]);
+            localStorage.setItem('userBranchId', b?.id || '');
+          } catch (e) {
+            console.warn('تعذر جلب branch_id، هيتم تجاهله دلوقتي', e);
+            localStorage.setItem('userBranchId', '');
+          }
         } else {
           localStorage.setItem('userBranchId', '');
         }
