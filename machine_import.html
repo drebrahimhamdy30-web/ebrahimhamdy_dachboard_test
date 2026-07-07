@@ -688,18 +688,32 @@ function renderC2W(){
         '<span style="color:#94a3b8;">('+s.count+')</span></span>';
     }).join(' ');
 
+    const C2W_REASONS_MI={
+      cash_as_visa:'كاش بالخطأ', driver_fee:'فرق للطيار',
+      partial_cash:'جزء كاش وجزء فيزا', return_new:'مرتجع + فاتورة جديدة',
+      customer_account:'فرق لحساب العميل', transfer_fee:'ضريبة/رسوم تحويل'
+    };
     const sum=rows.reduce((s,r)=>s+(r.transaction_value||0),0);
+    const allChecked=rows.every(r=>C2W_CHECKED_MI.has(String(r.id)));
     return '<div class="branch-group-head">'+branch+' — '+fmtNum(sum)+' ج ('+rows.length+')</div>'+
       '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 8px;padding:0 4px;">'+bankSummary+'</div>'+
-      '<table class="c2w-table"><thead><tr><th>الفاتورة</th><th>العميل</th><th>البنك</th><th class="num">قيمة الفاتورة</th><th class="num">قيمة المعاملة</th><th class="num">الفرق</th><th></th></tr></thead><tbody>'+
+      '<table class="c2w-table"><thead><tr>'+
+        '<th style="width:32px;text-align:center"><input type="checkbox" '+(allChecked?'checked':'')+' title="تحديد الكل" onchange="toggleAllC2WMI(this.checked,\''+branch.replace(/'/g,"\\'")+'\')"></th>'+
+        '<th>الفاتورة</th><th>العميل</th><th>البنك</th><th class="num">قيمة الفاتورة</th><th class="num">قيمة المعاملة</th><th class="num">الفرق</th><th>السبب</th><th></th>'+
+      '</tr></thead><tbody>'+
       rows.map(r=>{
         const col=r.diff>0?'#15803d':r.diff<0?'#b91c1c':'#64748b';
-        return '<tr><td>'+r.bill_no+'</td><td>'+(r.customer_name||'—')+'</td>'+
+        const reasonLabel=C2W_REASONS_MI[r.reason]||r.reason||'—';
+        const checked=C2W_CHECKED_MI.has(String(r.id));
+        return '<tr data-c2w-id="'+r.id+'" style="opacity:'+(checked?'1':'0.5')+'">'+
+          '<td style="text-align:center"><input type="checkbox" '+(checked?'checked':'')+' onchange="toggleC2WCheckMI('+r.id+')"></td>'+
+          '<td>'+r.bill_no+'</td><td>'+(r.customer_name||'—')+'</td>'+
           '<td style="font-size:0.72rem;color:#6d28d9;font-weight:700;">'+(r.bank||'—')+'</td>'+
           '<td class="num mono">'+fmtNum(r.invoice_amount)+'</td>'+
           '<td class="num mono">'+fmtNum(r.transaction_value)+'</td>'+
           '<td class="num mono" style="color:'+col+';font-weight:800;">'+(r.diff>0?'+':'')+fmtNum(r.diff)+'</td>'+
-          '<td><button class="btn btn-ghost" style="padding:4px 9px;font-size:0.7rem;color:#dc2626" onclick="deleteC2W('+r.id+')"><i class="fas fa-trash"></i></button></td></tr>';
+          '<td style="font-size:0.7rem;color:#475569;">'+reasonLabel+'</td>'+
+          '<td><button class="btn btn-ghost" style="padding:4px 9px;font-size:0.7rem;color:#15803d;white-space:nowrap;" onclick="disburseC2W('+r.id+')"><i class="fas fa-check"></i> تم التحصيل</button></td></tr>';
       }).join('')+
       '</tbody></table>';
   }).join('');
