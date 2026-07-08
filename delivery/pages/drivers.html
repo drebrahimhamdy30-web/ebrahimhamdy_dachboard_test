@@ -232,12 +232,16 @@ async function init(){
   try{
     // الأدمن يشوف كل الفروع؛ أي دور تاني يشوف فرعه بس
     const isAdmin = user.role==='admin';
-    const userBranch = user.branch_id;
+    let userBranchId = null;
+    if(!isAdmin && user.branch){
+      const {data:b} = await db.from('branches').select('id').eq('name', user.branch).maybeSingle();
+      userBranchId = b?.id || null;
+    }
 
     let driversQuery = db.from('drivers').select('*,branches(name)').order('full_name');
-    if(!isAdmin && userBranch) driversQuery = driversQuery.eq('branch_id', userBranch);
+    if(!isAdmin && userBranchId) driversQuery = driversQuery.eq('branch_id', userBranchId);
 
-const [dR,bR,rR]=await Promise.all([
+    const [dR,bR,rR]=await Promise.all([
       driversQuery,
       db.from('branches').select('*').order('name'),
       db.from('regions').select('*').eq('is_active',true).order('name')
@@ -335,8 +339,6 @@ function renderDrivers(){
   }).join('');
 }
 
-
-
 // ===== ADD/EDIT =====
 function openAddModal(){
   document.getElementById('modalTitle').textContent='إضافة طيار جديد';
@@ -391,35 +393,31 @@ async function saveDriver(){
   if(!branchId){alert('الفرع مطلوب');return;}
   if(!id&&(!username||!password)){alert('اسم المستخدم وكلمة المرور مطلوبان');return;}
 
-  // التصنيفات المغطاة
   const coveredTypes=['inside','outside','permit','hard'].filter(t=>document.getElementById(`cov-${t}`).checked);
 
   showLoading(true);
   try{
-    const payload={
-      full_name:name,
-      phone:document.getElementById('d-phone').value.trim()||null,
-      national_id:document.getElementById('d-national').value.trim()||null,
-      branch_id:branchId,
-      vehicle_type:document.getElementById('d-vtype').value||null,
-      vehicle_plate:document.getElementById('d-vplate').value.trim()||null,
-      is_active:document.getElementById('d-active').checked,
-      is_online:document.getElementById('d-online').checked,
-      has_vehicle_license:document.getElementById('d-lic-vehicle').checked,
-      has_drive_license:document.getElementById('d-lic-drive').checked,
-      covered_types:coveredTypes,
-    };
-    if(id){
-      await db.from('drivers').update(payload).eq('id',id);
-    }else{
-      const {data:newUser,error:userError}=await db.from('users').insert({
-        full_name:name,username,password_hash:password,
-        role:'driver',is_active:true,branch_id:branchId,
-      }).select().single();
-      if(userError)throw new Error('خطأ في إنشاء الحساب: '+userError.message);
-      payload.user_id=newUser.id;
-      await db.from('drivers').insert(payload);
+    const { data, error } = await db.rpc('manager_upsert_driver', {
+      p_driver_id: id || null,
+      p_full_name: name,
+      p_phone: document.getElementById('d-phone').value.trim() || null,
+      p_national_id: document.getElementById('d-national').value.trim() || null,
+      p_branch_id: branchId,
+      p_username: username || null,
+      p_password: password || null,
+      p_vehicle_type: document.getElementById('d-vtype').value || null,
+      p_vehicle_plate: document.getElementById('d-vplate').value.trim() || null,
+      p_is_active: document.getElementById('d-active').checked,
+      p_is_online: document.getElementById('d-online').checked,
+      p_has_vehicle_license: document.getElementById('d-lic-vehicle').checked,
+      p_has_drive_license: document.getElementById('d-lic-drive').checked,
+      p_covered_types: coveredTypes
+    });
+
+    if (error || (data && data.success === false)) {
+      throw new Error(error?.message || data?.error);
     }
+
     closeModal('driverModal');
     await init();
     showToast(id?'✓ تم تحديث بيانات الطيار':'✓ تم إضافة الطيار');
@@ -444,9 +442,7 @@ function confirmToggleActive(id,isActive,name){
 
 async function toggleActive(id,isActive){
   showLoading(true);
-  await db.from('drivers').update({is_active:!isActive,is_online:isActive?false:undefined}).eq('id',id);
-  const driver=allDrivers.find(d=>d.id===id);
-  if(driver?.user_id) await db.from('users').update({is_active:!isActive}).eq('id',driver.user_id);
+  await db.rpc('manager_toggle_driver', { p_driver_id: id, p_is_active: !isActive });
   closeModal('confirmModal');
   await init();
   showToast(isActive?'تم تعطيل الطيار':'✓ تم تفعيل الطيار');
