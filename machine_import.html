@@ -232,8 +232,37 @@ function toggleC2WCheckMI(id){
   const sid=String(id);
   if(C2W_CHECKED_MI.has(sid)) C2W_CHECKED_MI.delete(sid); else C2W_CHECKED_MI.add(sid);
   saveC2WCheckedMI();
+  // تحديث مظهر الصف فوراً
   const row=document.querySelector(`tr[data-c2w-id="${sid}"]`);
   if(row){ const cb=row.querySelector('input[type=checkbox]'); if(cb) cb.checked=C2W_CHECKED_MI.has(sid); row.style.opacity=C2W_CHECKED_MI.has(sid)?'1':'0.5'; }
+  // تحديث شريط التجميع لحظياً بدون إعادة رسم الجدول كله
+  updateC2WSummary();
+}
+function updateC2WSummary(){
+  // أعد حساب وتحديث شرائط التجميع والعناوين فقط
+  const bk=normBranchKey(USER_BRANCH);
+  const active=CASH2WALLET.filter(r=>!r.disbursed&&(!bk||normBranchKey(r.branch||'')===bk));
+  const billToBank={};
+  ROWS.forEach(r=>{ const bill=String(r.byCol['فاتورة بيع']||'').trim(); const bank=String(r.byCol['البنك']||'').trim(); if(bill&&bank) billToBank[bill]=bank; });
+  const enriched=active.map(r=>({...r, bank:r._bank||billToBank[String(r.bill_no||'').trim()]||'غير محدد', diff:(r.transaction_value||0)-(r.invoice_amount||0)}));
+  const byBranch={};
+  enriched.forEach(r=>{ const b=r.branch||'—'; (byBranch[b]=byBranch[b]||[]).push(r); });
+  Object.keys(byBranch).forEach(branch=>{
+    const rows=byBranch[branch];
+    const checkedRows=rows.filter(r=>C2W_CHECKED_MI.has(String(r.id)));
+    const checkedSum=checkedRows.reduce((s,r)=>s+(r.transaction_value||0),0);
+    // تحديث العنوان
+    const heads=document.querySelectorAll('.branch-group-head');
+    heads.forEach(h=>{ if(h.textContent.startsWith(branch)) h.textContent=branch+' — المحدد: '+fmtNum(checkedSum)+' ج ('+checkedRows.length+'/'+rows.length+')'; });
+    // تحديث شريط البنوك
+    const bankSums={};
+    checkedRows.forEach(r=>{ (bankSums[r.bank]=bankSums[r.bank]||{count:0,diff:0}).count++; bankSums[r.bank].diff+=r.diff; });
+    const summaryHtml=Object.entries(bankSums).length
+      ? Object.entries(bankSums).map(([bank,s])=>{ const col=s.diff>0?'#15803d':s.diff<0?'#b91c1c':'#64748b'; return '<span style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:3px 10px;font-size:0.72rem;font-weight:700;display:inline-flex;align-items:center;gap:5px;"><span style="color:#475569;">'+bank+'</span><span style="color:'+col+';">'+(s.diff>0?'+':'')+fmtNum(s.diff)+' ج</span><span style="color:#94a3b8;">('+s.count+')</span></span>'; }).join(' ')
+      : '<span style="color:#94a3b8;font-size:0.72rem;">لا توجد عناصر محددة</span>';
+    // إيجاد شريط البنوك التابع لهذا الفرع وتحديثه
+    heads.forEach(h=>{ if(h.textContent.startsWith(branch)){ const next=h.nextElementSibling; if(next&&next.style.display!==undefined) next.innerHTML=summaryHtml; }});
+  });
 }
 function toggleAllC2WMI(checked,branch){
   CASH2WALLET.filter(r=>!r.disbursed&&(r.branch||'—')===branch).forEach(r=>{
@@ -762,7 +791,7 @@ function renderC2W(){
       '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 8px;padding:0 4px;">'+bankSummary+'</div>'+
       '<table class="c2w-table"><thead><tr>'+
         '<th style="width:32px;text-align:center"><input type="checkbox" '+(allChecked?'checked':'')+' title="تحديد الكل" onchange="toggleAllC2WMI(this.checked,\''+branch.replace(/'/g,"\\'")+'\')"></th>'+
-        '<th>الفاتورة</th><th>العميل</th><th>البنك</th><th class="num">قيمة الفاتورة</th><th class="num">قيمة المعاملة</th><th class="num">الفرق</th><th>السبب</th><th></th>'+
+        '<th>الفاتورة</th><th>العميل</th><th>البنك</th><th class="num">قيمة الفاتورة</th><th class="num">قيمة المعاملة</th><th class="num">الفرق</th><th>السبب</th><th>وقت الإضافة</th><th></th>'+
       '</tr></thead><tbody>'+
       rows.map(r=>{
         const col=r.diff>0?'#15803d':r.diff<0?'#b91c1c':'#64748b';
@@ -776,6 +805,7 @@ function renderC2W(){
           '<td class="num mono">'+fmtNum(r.transaction_value)+'</td>'+
           '<td class="num mono" style="color:'+col+';font-weight:800;">'+(r.diff>0?'+':'')+fmtNum(r.diff)+'</td>'+
           '<td style="font-size:0.7rem;color:#475569;">'+reasonLabel+'</td>'+
+          '<td style="font-size:0.68rem;color:var(--text-muted);white-space:nowrap;">'+(r.created_at?new Date(r.created_at).toLocaleString('ar-EG',{dateStyle:'short',timeStyle:'short'}):'—')+'</td>'+
           '<td><button class="btn btn-ghost" style="padding:4px 9px;font-size:0.7rem;color:#15803d;white-space:nowrap;" onclick="disburseC2W('+r.id+')"><i class="fas fa-check"></i> تم التحصيل</button></td></tr>';
       }).join('')+
       '</tbody></table>';
