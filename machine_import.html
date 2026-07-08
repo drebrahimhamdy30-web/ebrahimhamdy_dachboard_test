@@ -366,7 +366,8 @@ function normWallet(r){
     amount:num(r.ammount??r.amount),store,storeKey:normBranchKey(store),
     to:r.to||'',terminal:r.terminal_id||'',src,srcLabel,dir,dirLabel,
     date:r.transaction_time||r.createdAt,bill_no:String(r.bill_no??'').trim(),
-    closed:(r.closed===true||r.closed==='true')
+    closed:(r.closed===true||r.closed==='true'),
+    extra_received:(r.done===true||r.done==='true')
   };
 }
 async function loadWallet(){
@@ -597,16 +598,26 @@ function renderLeft(){
   }).join('');
 }
 
-function toggleExtraReceived(walId,val){
-  // التراجع محدود للمدير والأدمن فقط
+async function toggleExtraReceived(walId,val){
   if(!val){
     const role=(localStorage.getItem('userRole')||'').trim();
-    if(role!=='admin'&&role!=='manager'){
-      toast('التراجع يحتاج مدير الفرع','err'); return;
-    }
+    if(role!=='admin'&&role!=='manager'){ toast('التراجع يحتاج مدير الفرع','err'); return; }
   }
-  const w=WALLET.find(x=>x.id===walId);
-  if(w){ w.extra_received=val; renderLeft(); }
+  const w=WALLET.find(x=>x.id===walId); if(!w) return;
+  const rawId=(w.raw&&w.raw.id!=null)?w.raw.id:walId;
+  const isInstapay=w.src==='instapay'||String(rawId).startsWith('bm');
+  try{
+    if(isInstapay){
+      await posUpdate({_route:'instapay',id:rawId,data:{done:val}});
+    }else{
+      await posUpdate({table:'wallet',action:'update',id:rawId,data:{done:val}});
+    }
+    w.extra_received=val;
+    toast(val?'تم تسجيل وصلت زيادة':'تم التراجع','ok');
+    renderLeft();
+  }catch(e){
+    toast('تأخّر الرد — جرّب تاني','err');
+  }
 }
 
 function toggleSel(side,id){
