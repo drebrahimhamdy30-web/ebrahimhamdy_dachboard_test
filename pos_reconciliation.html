@@ -90,7 +90,7 @@
   #link-bar .lb-confirm:hover{background:#15803d}
 
   /* ===== Close shift ===== */
-  .close-grid{display:grid;grid-template-columns:.78fr 1.22fr;gap:16px;align-items:start}
+  .close-grid{display:grid;grid-template-columns:.65fr 1fr .65fr;gap:14px;align-items:start}
   .denom-row{display:grid;grid-template-columns:80px 1fr 110px;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--surface-3)}
   .denom-row:last-child{border-bottom:none}
   .denom-face{text-align:center;font-weight:800;font-size:0.9rem;padding:6px 0;border-radius:var(--radius-sm);background:var(--surface-3)}
@@ -393,7 +393,8 @@ function normWallet(r){
     store,storeKey:normBranch(store),
     dir:String(r.type||'').trim(),
     ref:r.order_id||r.to||r.from||'',terminal:r.terminal_id||'',
-    closed:r.closed===true||r.closed==='true'||r.closed===1};
+    closed:r.closed===true||r.closed==='true'||r.closed===1,
+    is_excess:r.is_excess===true||r.is_excess==='true'||r.is_excess===1};
 }
 
 /* ============ matching engine ============ */
@@ -977,15 +978,18 @@ function buildCloseView(){
   if(closeDraft.notes==null)closeDraft.notes='';
 
   const c2w=cashToWalletForBranch(branch);const c2wSum=c2w.reduce((s,r)=>s+c2wEffect(r),0);
+  // معاملات المحافظ التي وصلت زيادة وغير مغلقة بعد
+  const bk=branch?normBranch(branch):'';
+  const excessWallet=WALLET.filter(w=>w.is_excess && !w.closed && (!bk||w.storeKey===bk));
 
   wrap.innerHTML=`
     <div class="close-grid">
-      <div class="card">
+      <div class="card" style="min-height:320px;max-height:480px;overflow-y:auto;display:flex;flex-direction:column;">
         <div class="card-mini-head"><i class="fas fa-calculator" style="color:var(--accent-dark)"></i> جرد النقدية والعهدة <span class="htot mono" id="cash-h">0.00 ج</span></div>
         <div id="denoms"></div>
       </div>
       <div style="display:flex;flex-direction:column;gap:16px">
-        <div class="card">
+        <div class="card" style="min-height:320px;max-height:480px;overflow-y:auto;display:flex;flex-direction:column;">
           <div class="card-mini-head"><i class="fas fa-file-circle-plus" style="color:#0369a1"></i> فواتير مختلفة عن قيم التحويل أو إيصال الفيزا <span class="htot mono" id="c2w-h">${money(c2wSum)} ج</span></div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
             <input class="form-input" id="c2w-bill" style="width:auto;flex:1;min-width:100px;max-width:140px" placeholder="رقم الفاتورة" inputmode="numeric" onkeydown="if(event.key==='Enter')lookupCashToWallet()">
@@ -993,12 +997,13 @@ function buildCloseView(){
             <span id="c2w-msg" class="lk-msg"></span>
           </div>
           <div id="c2w-preview"></div>
-          ${c2w.length?`<table class="c2w-table"><thead><tr><th>الفاتورة</th><th>العميل</th><th class="num">قيمة الفاتورة</th><th class="num">قيمة الإيصال</th><th class="num">الفرق المؤثّر</th><th>السبب</th><th class="actions"></th></tr></thead><tbody>`+
+          ${c2w.length?`<table class="c2w-table"><thead><tr><th>الفاتورة</th><th>العميل</th><th class="num">قيمة الفاتورة</th><th class="num">قيمة الإيصال</th><th class="num">الفرق المؤثّر</th><th>السبب</th><th>وقت الإضافة</th><th class="actions"></th></tr></thead><tbody>`+
             c2w.map(r=>{
               const rs=C2W_REASONS[r.reason]||C2W_REASONS.cash_as_visa;
               const eff=c2wEffect(r);
               const effColor=eff>0?'#15803d':(eff<0?'#b91c1c':'#94a3b8');
-              return `<tr><td>${r.bill_no}</td><td>${r.customer_name||'—'}</td><td class="num mono">${money(r.invoice_amount)}</td><td class="num mono c2w-editable" data-id="${r.id}" data-v="${r.transaction_value}">${money(r.transaction_value)}</td><td class="num mono" style="color:${effColor};font-weight:800;">${eff>0?'+':''}${money(eff)}</td><td style="font-size:0.72rem;">${rs.label}</td><td class="actions"></td></tr>`;
+              const timeStr=r.created_at?new Date(r.created_at).toLocaleString('ar-EG',{dateStyle:'short',timeStyle:'short'}):'—';
+              return `<tr><td>${r.bill_no}</td><td>${r.customer_name||'—'}</td><td class="num mono">${money(r.invoice_amount)}</td><td class="num mono c2w-editable" data-id="${r.id}" data-v="${r.transaction_value}">${money(r.transaction_value)}</td><td class="num mono" style="color:${effColor};font-weight:800;">${eff>0?'+':''}${money(eff)}</td><td style="font-size:0.72rem;">${rs.label}</td><td style="font-size:0.68rem;color:var(--text-muted);white-space:nowrap;">${timeStr}</td><td class="actions"><button class="btn btn-sm btn-success" style="padding:3px 8px;font-size:0.7rem;" onclick="disburseC2W(${r.id})"><i class="fas fa-check"></i> تم التحصيل</button></td></tr>`;
             }).join('')+
             `</tbody></table>`:'<div class="empty-state" style="padding:14px;font-size:0.8rem"><i class="fas fa-inbox"></i> لا توجد فواتير حالياً.</div>'}
         </div>
@@ -1006,6 +1011,20 @@ function buildCloseView(){
           <div class="card-mini-head"><i class="fas fa-note-sticky" style="color:var(--text-secondary)"></i> ملاحظات</div>
           <textarea class="form-input" id="close-notes" rows="2" placeholder="أي ملاحظات…">${closeDraft.notes||''}</textarea>
         </div>
+      </div>
+      <div class="card" style="min-height:320px;max-height:480px;overflow-y:auto;">
+        <div class="card-mini-head"><i class="fas fa-triangle-exclamation" style="color:#b45309"></i> معاملات وصلت زيادة
+          <span class="htot mono" style="color:#b45309;">${excessWallet.length} معاملة</span>
+        </div>
+        ${excessWallet.length?
+          `<table class="c2w-table"><thead><tr><th class="num">القيمة</th><th>المحفظة/البنك</th><th>وقت المعاملة</th></tr></thead><tbody>`+
+          excessWallet.map(w=>`<tr style="background:#fffbeb;">
+            <td class="num mono" style="font-weight:800;color:#92400e;">${money(w.amount)} ج</td>
+            <td style="font-size:0.78rem;">${w.srcLabel||w.ref||'—'}</td>
+            <td style="font-size:0.68rem;color:var(--text-muted);white-space:nowrap;">${w.date?new Date(w.date).toLocaleString('ar-EG',{dateStyle:'short',timeStyle:'short'}):'—'}</td>
+          </tr>`).join('')+
+          `</tbody></table>`
+          :'<div class="empty-state" style="padding:14px;font-size:0.8rem"><i class="fas fa-check-circle" style="color:#16a34a;"></i> لا توجد معاملات زيادة.</div>'}
       </div>
       <div class="grand-card">
         <div class="grand-cell cash"><div class="gl">إجمالي الكاش</div><div class="gv mono" id="g-cash">0.00</div></div>
