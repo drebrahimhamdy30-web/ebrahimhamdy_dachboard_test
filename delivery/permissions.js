@@ -36,6 +36,7 @@ function logout() {
   localStorage.removeItem('userRole');
   localStorage.removeItem('fullName');
   localStorage.removeItem('legacyId');
+  localStorage.removeItem('userDbId');   // ← جديد
   localStorage.removeItem('loginTime');
   window.location.href = 'auth.html';
 }
