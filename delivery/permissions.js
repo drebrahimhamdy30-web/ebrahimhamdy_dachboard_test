@@ -5,7 +5,7 @@ function getCurrentUser() {
   const activeUser = localStorage.getItem('activeUser');
   if (!token || !activeUser) return null;
   return {
-    id: activeUser,
+    id: localStorage.getItem('userDbId') || null,
     legacyId: localStorage.getItem('legacyId') || null,
     username: activeUser,
     full_name: localStorage.getItem('fullName') || activeUser,
