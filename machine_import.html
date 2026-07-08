@@ -367,7 +367,7 @@ function normWallet(r){
     to:r.to||'',terminal:r.terminal_id||'',src,srcLabel,dir,dirLabel,
     date:r.transaction_time||r.createdAt,bill_no:String(r.bill_no??'').trim(),
     closed:(r.closed===true||r.closed==='true'),
-    extra_received:(r.done===true||r.done==='true')
+    extra_received:(r.is_excess===true||r.is_excess==='true')
   };
 }
 async function loadWallet(){
@@ -607,13 +607,15 @@ async function toggleExtraReceived(walId,val){
   const rawId=(w.raw&&w.raw.id!=null)?w.raw.id:walId;
   const isInstapay=w.src==='instapay'||String(rawId).startsWith('bm');
   try{
+    // is_excess مستقل عن closed — كل واحد له دوره
+    const payload={is_excess:val};
     if(isInstapay){
-      await posUpdate({_route:'instapay',id:rawId,data:{done:val}});
+      await posUpdate({_route:'instapay_excess',id:rawId,data:payload});
     }else{
-      await posUpdate({table:'wallet',action:'update',id:rawId,data:{done:val}});
+      await posUpdate({_route:'wallet_excess',id:rawId,data:payload});
     }
     w.extra_received=val;
-    toast(val?'تم تسجيل وصلت زيادة':'تم التراجع','ok');
+    toast(val?'تم تسجيل وصلت زيادة — لسه قيد المراجعة':'تم التراجع','ok');
     renderLeft();
   }catch(e){
     toast('تأخّر الرد — جرّب تاني','err');
