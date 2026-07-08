@@ -583,14 +583,30 @@ function renderLeft(){
     const sel=SEL_L.has(w.id);
     const dirChip=w.dir?('<span class="dchip-'+w.dir+'"><i class="fas fa-arrow-'+(w.dir==='in'?'down':'up')+'"></i> '+w.dirLabel+'</span>'):'';
     const isClosest=!isNaN(searchAmt)&&idx===0;
+    const extraBadge=w.extra_received?'<span style="background:#fef9c3;color:#854d0e;padding:1px 8px;border-radius:20px;font-size:0.65rem;font-weight:700;border:1px solid #fde047;">⚠ وصلت زيادة</span>':'';
+    const extraBtn=w.extra_received
+      ? '<button style="border:none;background:#fee2e2;color:#b91c1c;border-radius:6px;padding:2px 7px;font-size:0.65rem;font-weight:700;cursor:pointer;font-family:var(--font);" onclick="event.stopPropagation();toggleExtraReceived(\''+w.id+'\',false)" title="تراجع (يحتاج مدير الفرع)">↩ تراجع</button>'
+      : '<button style="border:none;background:#fef9c3;color:#854d0e;border-radius:6px;padding:2px 7px;font-size:0.65rem;font-weight:700;cursor:pointer;font-family:var(--font);" onclick="event.stopPropagation();toggleExtraReceived(\''+w.id+'\',true)" title="وصلت زيادة">⚠ وصلت زيادة</button>';
     return '<div class="row-item '+(w.closed?'linked':'')+' '+(sel?'sel':'')+'" data-id="'+w.id+'" onclick="toggleSel(\'L\',\''+w.id+'\')"'+(isClosest?' style="border-right:3px solid #f59e0b;"':'')+'>'+
       '<div class="pick-dot">'+(sel?'<i class="fas fa-check" style="font-size:0.6rem"></i>':'')+'</div>'+
       '<div class="row-body">'+
         '<div class="row-top"><span class="row-amt">'+fmtNum(w.amount)+' ج</span>'+dirChip+(isClosest?'<span style="background:#fef3c7;color:#92400e;padding:1px 7px;border-radius:20px;font-size:0.66rem;font-weight:700;">الأقرب</span>':'')+
-        '<span class="mchip">'+(w.to||w.srcLabel)+'</span>'+(w.terminal?'<span class="lchip">'+w.terminal+'</span>':'')+(w.closed?'<span class="lchip">تم ✓</span>':'')+'</div>'+
-        '<div class="row-meta"><span>'+w.srcLabel+'</span><span>'+new Date(w.date||0).toLocaleString('ar-EG',{dateStyle:'short',timeStyle:'short'})+'</span></div>'+
+        '<span class="mchip">'+(w.to||w.srcLabel)+'</span>'+(w.terminal?'<span class="lchip">'+w.terminal+'</span>':'')+(w.closed?'<span class="lchip">تم ✓</span>':'')+extraBadge+'</div>'+
+        '<div class="row-meta"><span>'+w.srcLabel+'</span><span>'+new Date(w.date||0).toLocaleString('ar-EG',{dateStyle:'short',timeStyle:'short'})+'</span>'+extraBtn+'</div>'+
       '</div></div>';
   }).join('');
+}
+
+function toggleExtraReceived(walId,val){
+  // التراجع محدود للمدير والأدمن فقط
+  if(!val){
+    const role=(localStorage.getItem('userRole')||'').trim();
+    if(role!=='admin'&&role!=='manager'){
+      toast('التراجع يحتاج مدير الفرع','err'); return;
+    }
+  }
+  const w=WALLET.find(x=>x.id===walId);
+  if(w){ w.extra_received=val; renderLeft(); }
 }
 
 function toggleSel(side,id){
@@ -663,13 +679,31 @@ async function deleteC2W(id){
   catch(e){ toast('تأخّر الرد — بنحدّث الشاشة','err'); }
   await loadWallet();
 }
+function editC2WBank(id, currentVal, tdEl){
+  const bankOptions=[...new Set(ROWS.map(r=>r.byCol['البنك']).filter(Boolean))].sort();
+  const dlId='c2w-bank-dl-'+Date.now();
+  const dl=document.createElement('datalist'); dl.id=dlId;
+  bankOptions.forEach(b=>{ const o=document.createElement('option'); o.value=b; dl.appendChild(o); });
+  document.body.appendChild(dl);
+  const inp=document.createElement('input');
+  inp.value=currentVal; inp.setAttribute('list',dlId);
+  inp.style.cssText='width:100px;font-size:0.72rem;border:1px solid #6366f1;border-radius:4px;padding:2px 5px;font-family:var(--font);color:#4c1d95;font-weight:700;';
+  tdEl.innerHTML=''; tdEl.appendChild(inp); inp.focus(); inp.select();
+  const save=()=>{
+    const newVal=inp.value.trim()||currentVal;
+    const r=CASH2WALLET.find(x=>x.id===id); if(r) r._bank=newVal;
+    dl.remove(); renderC2W();
+  };
+  inp.addEventListener('blur',save);
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter')inp.blur(); if(e.key==='Escape'){inp.value=currentVal;dl.remove();inp.blur();} });
+}
+
 function renderC2W(){
   const area=$('#c2w-area');
   const bk=normBranchKey(USER_BRANCH);
   const active=CASH2WALLET.filter(r=>!r.disbursed && (!bk || normBranchKey(r.branch||'')===bk));
   if(!active.length){ area.innerHTML='<div class="empty-hint">لا توجد فواتير محوّلة معلّقة حالياً.</div>'; return; }
 
-  // بناء خريطة رقم الفاتورة → البنك من الجدول المستورد
   const billToBank={};
   ROWS.forEach(r=>{
     const bill=String(r.byCol['فاتورة بيع']||'').trim();
@@ -677,42 +711,44 @@ function renderC2W(){
     if(bill&&bank) billToBank[bill]=bank;
   });
 
-  // إضافة البنك لكل سطر + حساب الفرق
   const enriched=active.map(r=>({
     ...r,
-    bank: billToBank[String(r.bill_no||'').trim()]||'غير محدد',
+    bank: r._bank || billToBank[String(r.bill_no||'').trim()]||'غير محدد',
     diff: (r.transaction_value||0)-(r.invoice_amount||0)
   }));
 
-  // تجميع بالفرع أولاً ثم بالبنك
   const byBranch={};
   enriched.forEach(r=>{ const b=r.branch||'—'; (byBranch[b]=byBranch[b]||[]).push(r); });
 
   area.innerHTML=Object.keys(byBranch).sort().map(branch=>{
     const rows=byBranch[branch];
 
-    // تجميع الفروق بالبنك
+    // تجميع فقط على المحدد بالـcheckbox
+    const checkedRows=rows.filter(r=>C2W_CHECKED_MI.has(String(r.id)));
     const bankSums={};
-    rows.forEach(r=>{ (bankSums[r.bank]=bankSums[r.bank]||{count:0,diff:0}).count++; bankSums[r.bank].diff+=r.diff; });
-    const bankSummary=Object.entries(bankSums).map(([bank,s])=>{
-      const col=s.diff>0?'#15803d':s.diff<0?'#b91c1c':'#64748b';
-      return '<span style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:3px 10px;font-size:0.72rem;font-weight:700;display:inline-flex;align-items:center;gap:5px;">'+
-        '<span style="color:#475569;">'+bank+'</span>'+
-        '<span style="color:'+col+';">'+(s.diff>0?'+':'')+fmtNum(s.diff)+' ج</span>'+
-        '<span style="color:#94a3b8;">('+s.count+')</span></span>';
-    }).join(' ');
+    checkedRows.forEach(r=>{ (bankSums[r.bank]=bankSums[r.bank]||{count:0,diff:0}).count++; bankSums[r.bank].diff+=r.diff; });
+    const bankSummary=Object.entries(bankSums).length
+      ? Object.entries(bankSums).map(([bank,s])=>{
+          const col=s.diff>0?'#15803d':s.diff<0?'#b91c1c':'#64748b';
+          return '<span style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:3px 10px;font-size:0.72rem;font-weight:700;display:inline-flex;align-items:center;gap:5px;">'+
+            '<span style="color:#475569;">'+bank+'</span>'+
+            '<span style="color:'+col+';">'+(s.diff>0?'+':'')+fmtNum(s.diff)+' ج</span>'+
+            '<span style="color:#94a3b8;">('+s.count+')</span></span>';
+        }).join(' ')
+      : '<span style="color:#94a3b8;font-size:0.72rem;">لا توجد عناصر محددة</span>';
 
     const C2W_REASONS_MI={
-      cash_as_visa:'تم الحفظ كاش عن طريق الخطأ', driver_fee:'فرق لصالح الطيار',
-      partial_cash:'جزء كاش وجزء فيزا', return_new:'مرتجع + فاتورة جديدة أعلى',
-      customer_account:'فرق لحساب العميل', transfer_fee:'ضريبة/رسوم تحويل'
+      cash_as_visa:'كاش بالخطأ', driver_fee:'فرق للطيار',
+      partial_cash:'جزء كاش وجزء فيزا', return_new:'مرتجع + فاتورة جديدة',
+      customer_account:'فرق لحساب العميل', transfer_fee:'ضريبة/رسوم'
     };
-    const sum=rows.reduce((s,r)=>s+(r.transaction_value||0),0);
-    const allChecked=rows.every(r=>C2W_CHECKED_MI.has(String(r.id)));
-    return '<div class="branch-group-head">'+branch+' — '+fmtNum(sum)+' ج ('+rows.length+')</div>'+
+    const checkedSum=checkedRows.reduce((s,r)=>s+(r.transaction_value||0),0);
+    const allChecked=rows.length>0&&rows.every(r=>C2W_CHECKED_MI.has(String(r.id)));
+    return '<div class="branch-group-head">'+branch+
+      ' — المحدد: '+fmtNum(checkedSum)+' ج ('+checkedRows.length+'/'+rows.length+')</div>'+
       '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 8px;padding:0 4px;">'+bankSummary+'</div>'+
       '<table class="c2w-table"><thead><tr>'+
-        '<th style="width:32px;text-align:center"><input type="checkbox" '+(allChecked?'checked':'')+' title="تحديد الكل" onchange="toggleAllC2WMI(this.checked,\''+branch.replace(/'/g,"\\'")+'\')" ></th>'+
+        '<th style="width:32px;text-align:center"><input type="checkbox" '+(allChecked?'checked':'')+' title="تحديد الكل" onchange="toggleAllC2WMI(this.checked,\''+branch.replace(/'/g,"\\'")+'\')"></th>'+
         '<th>الفاتورة</th><th>العميل</th><th>البنك</th><th class="num">قيمة الفاتورة</th><th class="num">قيمة المعاملة</th><th class="num">الفرق</th><th>السبب</th><th></th>'+
       '</tr></thead><tbody>'+
       rows.map(r=>{
@@ -722,7 +758,7 @@ function renderC2W(){
         return '<tr data-c2w-id="'+r.id+'" style="opacity:'+(checked?'1':'0.5')+'">'+
           '<td style="text-align:center"><input type="checkbox" '+(checked?'checked':'')+' onchange="toggleC2WCheckMI('+r.id+')"></td>'+
           '<td>'+r.bill_no+'</td><td>'+(r.customer_name||'—')+'</td>'+
-          '<td style="font-size:0.72rem;color:#6d28d9;font-weight:700;">'+(r.bank||'—')+'</td>'+
+          '<td style="font-size:0.72rem;color:#6d28d9;font-weight:700;cursor:pointer;" ondblclick="editC2WBank('+r.id+',\''+String(r.bank).replace(/'/g,"\\'")+'\',this)" title="دوبل كليك للتعديل">'+(r.bank||'—')+' <span style="opacity:.4;font-size:0.6rem;">✎</span></td>'+
           '<td class="num mono">'+fmtNum(r.invoice_amount)+'</td>'+
           '<td class="num mono">'+fmtNum(r.transaction_value)+'</td>'+
           '<td class="num mono" style="color:'+col+';font-weight:800;">'+(r.diff>0?'+':'')+fmtNum(r.diff)+'</td>'+
