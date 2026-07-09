@@ -225,6 +225,23 @@ async function posUpdate(payload){
 }
 
 const EXPECTED_COLS=['تاريخ','فاتورة بيع','ن.رسوم تحصيل','القيمة','الإسم','البنك','ت.صلاحية','الرقم','العميل','تحصيل'];
+
+// ===== جدول مركزي لأسباب فواتير الكاش المحوّلة لمحفظة (label + طريقة حساب الفرق) =====
+const C2W_REASONS={
+  cash_as_visa:     {label:'كاش بالخطأ',            mode:'receipt'},
+  driver_fee:       {label:'فرق للطيار',              mode:'diff'},
+  partial_cash:     {label:'جزء كاش وجزء فيزا',       mode:'diff'},
+  return_new:       {label:'مرتجع + فاتورة جديدة',    mode:'diff'},
+  customer_account: {label:'فرق لحساب العميل',        mode:'diff'},
+  transfer_fee:     {label:'ضريبة/رسوم',              mode:'diff'}
+};
+function computeC2WDiff(r){
+  const cfg=C2W_REASONS[r.reason]||C2W_REASONS.cash_as_visa;
+  if(cfg.mode==='invoice') return r.invoice_amount||0;
+  if(cfg.mode==='receipt') return r.transaction_value||0;
+  return (r.transaction_value||0)-(r.invoice_amount||0);
+}
+
 let ROWS=[],WALLET=[],LINKS=[],CASH2WALLET=[];
 let C2W_CHECKED_MI=new Set(JSON.parse(localStorage.getItem('c2w.mi.checked.v1')||'[]'));
 function saveC2WCheckedMI(){ localStorage.setItem('c2w.mi.checked.v1',JSON.stringify([...C2W_CHECKED_MI])); }
@@ -241,7 +258,7 @@ function updateC2WSummary(){
   const active=CASH2WALLET.filter(r=>!r.disbursed&&(!bk||normBranchKey(r.branch||'')===bk));
   const billToBank={};
   ROWS.forEach(r=>{ const bill=String(r.byCol['فاتورة بيع']||'').trim(); const bank=String(r.byCol['البنك']||'').trim(); if(bill&&bank) billToBank[bill]=bank; });
-const enriched=active.map(r=>({...r, bank:r._bank||billToBank[String(r.bill_no||'').trim()]||'غير محدد', diff: r.reason==='cash_as_visa' ? (r.transaction_value||0) : (r.transaction_value||0)-(r.invoice_amount||0)}));
+  const enriched=active.map(r=>({...r, bank:r._bank||billToBank[String(r.bill_no||'').trim()]||'غير محدد', diff: computeC2WDiff(r)}));
   const byBranch={};
   enriched.forEach(r=>{ const b=r.branch||'—'; (byBranch[b]=byBranch[b]||[]).push(r); });
   Object.keys(byBranch).forEach(branch=>{
@@ -708,11 +725,11 @@ function renderC2W(){
     if(bill&&bank) billToBank[bill]=bank;
   });
 
-const enriched=active.map(r=>({
-  ...r,
-  bank: r._bank || billToBank[String(r.bill_no||'').trim()]||'غير محدد',
-  diff: r.reason==='cash_as_visa' ? (r.transaction_value||0) : (r.transaction_value||0)-(r.invoice_amount||0)
-}));
+  const enriched=active.map(r=>({
+    ...r,
+    bank: r._bank || billToBank[String(r.bill_no||'').trim()]||'غير محدد',
+    diff: computeC2WDiff(r)
+  }));
 
   const byBranch={};
   enriched.forEach(r=>{ const b=r.branch||'—'; (byBranch[b]=byBranch[b]||[]).push(r); });
@@ -734,11 +751,6 @@ const enriched=active.map(r=>({
         }).join(' ')
       : '<span style="color:#94a3b8;font-size:0.72rem;">لا توجد عناصر محددة</span>';
 
-    const C2W_REASONS_MI={
-      cash_as_visa:'كاش بالخطأ', driver_fee:'فرق للطيار',
-      partial_cash:'جزء كاش وجزء فيزا', return_new:'مرتجع + فاتورة جديدة',
-      customer_account:'فرق لحساب العميل', transfer_fee:'ضريبة/رسوم'
-    };
     const checkedSum=checkedRows.reduce((s,r)=>s+(r.transaction_value||0),0);
     const allChecked=rows.length>0&&rows.every(r=>C2W_CHECKED_MI.has(String(r.id)));
     return '<div class="branch-group-head">'+branch+
@@ -751,7 +763,7 @@ const enriched=active.map(r=>({
       rows.map(r=>{
         const col=r.diff>0?'#15803d':r.diff<0?'#b91c1c':'#64748b';
         const checked=C2W_CHECKED_MI.has(String(r.id));
-        const reasonLabel=C2W_REASONS_MI[r.reason]||r.reason||'—';
+        const reasonLabel=(C2W_REASONS[r.reason]||{}).label||r.reason||'—';
         return '<tr data-c2w-id="'+r.id+'" style="opacity:'+(checked?'1':'0.5')+'">'+
           '<td style="text-align:center"><input type="checkbox" '+(checked?'checked':'')+' onchange="toggleC2WCheckMI('+r.id+')"></td>'+
           '<td>'+r.bill_no+'</td><td>'+(r.customer_name||'—')+'</td>'+
