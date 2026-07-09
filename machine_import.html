@@ -224,7 +224,7 @@ async function posUpdate(payload){
   const t=await r.text();let d=t&&t.trim()?JSON.parse(t):{};if(Array.isArray(d))d=d[0]||{};return d;
 }
 
-const EXPECTED_COLS=['العميل','الرقم','ت.صلاحية','البنك','الإسم','القيمة','ن.رسوم تحصيل','فاتورة بيع','تاريخ','تحصيل'];
+const EXPECTED_COLS=['تاريخ','فاتورة بيع','ن.رسوم تحصيل','القيمة','الإسم','البنك','ت.صلاحية','الرقم','العميل','تحصيل'];
 let ROWS=[],WALLET=[],LINKS=[],CASH2WALLET=[];
 let C2W_CHECKED_MI=new Set(JSON.parse(localStorage.getItem('c2w.mi.checked.v1')||'[]'));
 function saveC2WCheckedMI(){ localStorage.setItem('c2w.mi.checked.v1',JSON.stringify([...C2W_CHECKED_MI])); }
@@ -232,14 +232,11 @@ function toggleC2WCheckMI(id){
   const sid=String(id);
   if(C2W_CHECKED_MI.has(sid)) C2W_CHECKED_MI.delete(sid); else C2W_CHECKED_MI.add(sid);
   saveC2WCheckedMI();
-  // تحديث مظهر الصف فوراً
   const row=document.querySelector(`tr[data-c2w-id="${sid}"]`);
   if(row){ const cb=row.querySelector('input[type=checkbox]'); if(cb) cb.checked=C2W_CHECKED_MI.has(sid); row.style.opacity=C2W_CHECKED_MI.has(sid)?'1':'0.5'; }
-  // تحديث شريط التجميع لحظياً بدون إعادة رسم الجدول كله
   updateC2WSummary();
 }
 function updateC2WSummary(){
-  // أعد حساب وتحديث شرائط التجميع والعناوين فقط
   const bk=normBranchKey(USER_BRANCH);
   const active=CASH2WALLET.filter(r=>!r.disbursed&&(!bk||normBranchKey(r.branch||'')===bk));
   const billToBank={};
@@ -251,16 +248,13 @@ function updateC2WSummary(){
     const rows=byBranch[branch];
     const checkedRows=rows.filter(r=>C2W_CHECKED_MI.has(String(r.id)));
     const checkedSum=checkedRows.reduce((s,r)=>s+(r.transaction_value||0),0);
-    // تحديث العنوان
     const heads=document.querySelectorAll('.branch-group-head');
     heads.forEach(h=>{ if(h.textContent.startsWith(branch)) h.textContent=branch+' — المحدد: '+fmtNum(checkedSum)+' ج ('+checkedRows.length+'/'+rows.length+')'; });
-    // تحديث شريط البنوك
     const bankSums={};
     checkedRows.forEach(r=>{ (bankSums[r.bank]=bankSums[r.bank]||{count:0,diff:0}).count++; bankSums[r.bank].diff+=r.diff; });
     const summaryHtml=Object.entries(bankSums).length
       ? Object.entries(bankSums).map(([bank,s])=>{ const col=s.diff>0?'#15803d':s.diff<0?'#b91c1c':'#64748b'; return '<span style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:3px 10px;font-size:0.72rem;font-weight:700;display:inline-flex;align-items:center;gap:5px;"><span style="color:#475569;">'+bank+'</span><span style="color:'+col+';">'+(s.diff>0?'+':'')+fmtNum(s.diff)+' ج</span><span style="color:#94a3b8;">('+s.count+')</span></span>'; }).join(' ')
       : '<span style="color:#94a3b8;font-size:0.72rem;">لا توجد عناصر محددة</span>';
-    // إيجاد شريط البنوك التابع لهذا الفرع وتحديثه
     heads.forEach(h=>{ if(h.textContent.startsWith(branch)){ const next=h.nextElementSibling; if(next&&next.style.display!==undefined) next.innerHTML=summaryHtml; }});
   });
 }
@@ -292,64 +286,25 @@ function parsePastedText(text){
   const lines=text.split(/\r\n|\n|\r/).map(l=>l.trim()).filter(l=>l.length);
   return lines.map(l=>l.split('\t').map(c=>c.trim()));
 }
-function detectColumnCount(rows){
-  if(!rows.length)return 0;
-  const counts={};rows.forEach(r=>{counts[r.length]=(counts[r.length]||0)+1;});
-  return +Object.entries(counts).sort((a,b)=>b[1]-a[1])[0][0];
-}
 function hashStr(s){let h=0;for(let i=0;i<s.length;i++)h=((h<<5)-h+s.charCodeAt(i))|0;return (h>>>0).toString(36);}
 function rowSignature(row){return row.names.map(n=>String(row.byCol[n]??'').trim()).join('|');}
 
-const EXPECTED_SET=new Set(EXPECTED_COLS);
-
-function isHeaderRow(cells){
-  return cells.filter(c=>EXPECTED_SET.has(String(c).trim())).length>=3;
-}
-
+// الشكل الوحيد المدعوم: تاريخ، فاتورة بيع، ن.رسوم تحصيل، القيمة، الإسم، البنك، ت.صلاحية، الرقم، العميل، تحصيل (True/False)
 function buildRowsFromParsed(parsed){
   if(!parsed.length)return[];
-  let names=null,dataRows=parsed;
 
-  for(let i=0;i<Math.min(3,parsed.length);i++){
-    const fwd=parsed[i].map(c=>String(c).trim());
-    const rev=[...fwd].reverse();
-    const fwdMatch=fwd.filter(c=>EXPECTED_SET.has(c)).length;
-    const revMatch=rev.filter(c=>EXPECTED_SET.has(c)).length;
-    if(fwdMatch>=3||revMatch>=3){
-      // اختار الاتجاه اللي "العميل" فيه أول (اليمين) أو الأكثر تطابقاً
-      const fwdFirst=fwd.indexOf('العميل');
-      const revFirst=rev.indexOf('العميل');
-      if(fwdFirst>=0||revFirst>=0){
-        names=(fwdFirst===0||(revFirst>0&&fwdFirst<0))?fwd:rev;
-      }else{
-        names=fwdMatch>=revMatch?fwd:rev;
-      }
-      dataRows=parsed.slice(i+1);
-      break;
-    }
-  }
-
-  if(names){
-    return dataRows
-      .filter(cells=>cells.some(v=>String(v).trim()!==''))
-      .map((cells,idx)=>{
-        const byCol={};names.forEach((name,i)=>byCol[name]=String(cells[i]??'').trim());
-        const row={id:'imp-'+idx+'-'+Date.now()+'-'+Math.floor(Math.random()*9999),byCol,names};
-        row.sigKey=hashStr(rowSignature(row));return row;
+  return parsed
+    .filter(cells=>cells.length===EXPECTED_COLS.length && cells.some(v=>String(v).trim()!==''))
+    .map((cells,idx)=>{
+      const byCol={};
+      EXPECTED_COLS.forEach((name,i)=>{
+        let val=String(cells[i]??'').trim();
+        if(name==='تحصيل') val = /^true$/i.test(val) ? 'تم' : '';
+        byCol[name]=val;
       });
-  }
-
-  // مفيش رأس — اعكس الخلايا (RTL) واستخدم الأعمدة المتوقعة
-  const ncol=detectColumnCount(parsed);
-  const usable=parsed.filter(r=>r.length===ncol);
-  const isExpected=ncol===EXPECTED_COLS.length;
-  const colNames=isExpected?EXPECTED_COLS:Array.from({length:ncol},(_,i)=>'عمود '+(i+1));
-  return usable.map((cells,idx)=>{
-    const ordered=isExpected?[...cells].reverse():cells;
-    const byCol={};colNames.forEach((name,i)=>byCol[name]=ordered[i]??'');
-    const row={id:'imp-'+idx+'-'+Date.now()+'-'+Math.floor(Math.random()*9999),byCol,names:colNames};
-    row.sigKey=hashStr(rowSignature(row));return row;
-  });
+      const row={id:'imp-'+idx+'-'+Date.now()+'-'+Math.floor(Math.random()*9999),byCol,names:EXPECTED_COLS};
+      row.sigKey=hashStr(rowSignature(row));return row;
+    });
 }
 
 const zone=$('#paste-zone');
