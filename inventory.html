@@ -369,21 +369,39 @@
       'erp':      '🖥️ ERP'
     };
 
-    const CATEGORY_RULES = [
-      { key: 'اقراص',   order: 0, label: '💊 أقراص وكبسولات', ar: ['قرص', 'اقراص', 'أقراص', 'كبسول', 'كبسولة', 'كبسولات'], en: ['tab', 'cap'] },
-      { key: 'اشربة',   order: 1, label: '🧴 أشربة',           ar: ['شراب', 'شرب'],                                        en: ['syr'] },
-      { key: 'حقن',     order: 2, label: '💉 حقن',             ar: ['حقنة', 'حقن', 'امبول', 'أمبول'],                     en: ['inj', 'amp', 'vial'] },
-      { key: 'لبوس',    order: 3, label: '🔹 لبوس',            ar: ['لبوس'],                                               en: ['supp'] },
-      { key: 'كريمات',  order: 4, label: '🧪 كريمات ومراهم',   ar: ['كريم', 'كريمات', 'مرهم'],                            en: ['cream', 'oint', 'gel'] }
-    ];
+    // ===== تصنيف شكل الصنف الدوائي (أقراص/أشربة/حقن/لبوس/كريمات) لترتيب العرض =====
+    // القواعد بتتحمل من jard_settings (قابلة للتعديل من صفحة الإعدادات)، مش ثابتة في الكود
+    const FORM_CATEGORY_NAMES = ['أقراص', 'أشربة', 'حقن', 'لبوس', 'كريمات'];
+    const FORM_ICON_MAP = { 'أقراص': '💊', 'أشربة': '🧴', 'حقن': '💉', 'لبوس': '🔹', 'كريمات': '🧪' };
     const OTHER_CATEGORY = { key: 'اخرى', order: 99, label: '📦 أصناف أخرى' };
+
+    let formCategoryRules = []; // بيتملى من loadFormCategoryRules() عند التحميل
+
+    async function loadFormCategoryRules() {
+      try {
+        const settings = await getJardSettings();
+        formCategoryRules = settings
+          .filter(s => FORM_CATEGORY_NAMES.includes(s.category))
+          .map(s => ({
+            key: s.category,
+            order: s.sort_order ?? 0,
+            label: `${FORM_ICON_MAP[s.category] || '📦'} ${s.category}`,
+            ar: (s.keywords_ar || []).map(k => String(k).toLowerCase()),
+            en: (s.keywords_en || []).map(k => String(k).toLowerCase())
+          }))
+          .sort((a, b) => a.order - b.order);
+      } catch(e) {
+        console.error('loadFormCategoryRules failed', e);
+        formCategoryRules = [];
+      }
+    }
 
     function detectCategory(item) {
       const nameAr = String(item.itm_name_ar || '').toLowerCase();
       const nameEn = String(item.itm_name_en || '').toLowerCase();
-      for (const cat of CATEGORY_RULES) {
-        if (cat.ar.some(k => nameAr.includes(k))) return cat;
-        if (cat.en.some(k => nameEn.includes(k))) return cat;
+      for (const cat of formCategoryRules) {
+        if (cat.ar.some(k => k && nameAr.includes(k))) return cat;
+        if (cat.en.some(k => k && nameEn.includes(k))) return cat;
       }
       return OTHER_CATEGORY;
     }
@@ -416,7 +434,7 @@
     let mismatchTargetId = null;
     let mismatchIsLive   = false;
 
-    checkAuth().then(user => {
+    checkAuth().then(async user => {
       activeUser = user;
       if (user) {
         userBranch = (localStorage.getItem('userBranch') || '').trim();
@@ -424,6 +442,7 @@
         document.getElementById('branch-tag').textContent = userBranch;
         updateFilterBtn();
         updateTabUIVisibility();
+        await loadFormCategoryRules();
         loadCurrentTab();
       }
     });
