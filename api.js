@@ -407,6 +407,43 @@ async function fetchStaleItems(branch, months) {
   }
 }
 
+// ---- معدل الجرد اليومي لكل موظف ----
+const JARD_DAILY_STATS_URL = "https://agent.ebrahimhamdy.com/webhook/jard_daily_stats";
+async function fetchDailyJardStats(date) {
+  try {
+    const params = date ? new URLSearchParams({ date }) : new URLSearchParams();
+    const response = await fetch(`${JARD_DAILY_STATS_URL}?${params.toString()}`);
+    if (!response.ok) return [];
+    const text = await response.text();
+    if (!text || text.trim() === '') return [];
+    const data = JSON.parse(text);
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.error('fetchDailyJardStats error:', e);
+    return [];
+  }
+}
+
+// ---- التقرير الشامل لكل عمليات الجرد (كل الفئات مع بعض) ----
+const JARD_FULL_REPORT_URL = "https://agent.ebrahimhamdy.com/webhook/jard_full_report";
+async function fetchFullJardReport({ branch, category, dateFrom, dateTo }) {
+  try {
+    const params = new URLSearchParams({ branch });
+    if (category) params.set('category', category);
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo)   params.set('date_to', dateTo);
+    const response = await fetch(`${JARD_FULL_REPORT_URL}?${params.toString()}`);
+    if (!response.ok) return [];
+    const text = await response.text();
+    if (!text || text.trim() === '') return [];
+    const data = JSON.parse(text);
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.error('fetchFullJardReport error:', e);
+    return [];
+  }
+}
+
 function logout() {
   localStorage.clear();
   window.location.replace('index.html');
