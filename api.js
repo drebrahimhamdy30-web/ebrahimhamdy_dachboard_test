@@ -390,6 +390,23 @@ async function submitJardAudit(payload) {
 // جلب سجل الإغلاقات السابقة — بنفس fetchFromN8N بنوع shift_closes
 async function fetchShiftCloses() { return await fetchFromN8N('shift_closes'); }
 
+// ---- تقرير الأصناف اللي لم تُجرد خلال مدة معينة ----
+const JARD_STALE_REPORT_URL = "https://agent.ebrahimhamdy.com/webhook/jard_stale_report";
+async function fetchStaleItems(branch, months) {
+  try {
+    const params = new URLSearchParams({ branch, months: months || 3 });
+    const response = await fetch(`${JARD_STALE_REPORT_URL}?${params.toString()}`);
+    if (!response.ok) return [];
+    const text = await response.text();
+    if (!text || text.trim() === '') return [];
+    const data = JSON.parse(text);
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.error('fetchStaleItems error:', e);
+    return [];
+  }
+}
+
 function logout() {
   localStorage.clear();
   window.location.replace('index.html');
