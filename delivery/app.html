@@ -48,6 +48,8 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text);min-h
 .user-role{font-size:.78rem;color:var(--text-muted);font-weight:600;margin-top:.1rem}
 .logout-btn{width:100%;padding:.6rem;border:1.5px solid var(--border);background:none;border-radius:10px;font-family:'Cairo',sans-serif;font-size:.85rem;font-weight:700;color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:.4rem;transition:all .15s}
 .logout-btn:hover{border-color:var(--red);color:var(--red);background:#fff5f5}
+.update-btn{border-color:var(--primary);color:var(--primary-dark)}
+.update-btn:hover{border-color:var(--primary);color:#fff;background:var(--primary)}
 
 .main{margin-right:var(--sidebar-w);flex:1;display:flex;flex-direction:column;height:100vh;overflow:hidden}
 .header{height:var(--header-h);background:var(--white);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 1.25rem;flex-shrink:0}
@@ -109,6 +111,9 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text);min-h
         <div class="user-role" id="userRoleLabel">...</div>
       </div>
     </div>
+    <button class="logout-btn update-btn" onclick="forceUpdateToLatest()" style="margin-bottom:.5rem">
+      🔄 تحديث لآخر إصدار
+    </button>
     <button class="logout-btn" onclick="openChangePassword()" style="margin-bottom:.5rem">
       🔑 تغيير كلمة المرور
     </button>
@@ -187,7 +192,7 @@ const ERP_PAGES = new Set([
   'customer_service.html','shortages.html','print_invoice.html','sales_contracts.html',
   'claims.html','contracts.html','contracts_stats.html','visa_transactions.html',
   'bank_monitor.html','paymob.html','sms.html','pos_reconciliation.html','machine_import.html',
-  'jard_settings.html','jard_list.html'
+  'jard_settings.html'
 ]);
 
 // بيانات عرض كل صفحة (العنوان + المجموعة + شارة اختيارية)
@@ -220,7 +225,6 @@ const PAGE_META = {
   'pos_reconciliation.html':{title:'تسوية وإغلاق', group:'الصيدلية'},
   'machine_import.html':{title:'استيراد جدول الماكينات', group:'الصيدلية'},
   'jard_settings.html':{title:'إعدادات الجرد', group:'الصيدلية'},
-  'jard_list.html':{title:'الجرد الجديد', group:'الصيدلية'},
 
   'overview.html':{title:'نظرة عامة', group:'التوصيل'},
   'operations.html':{title:'غرفة العمليات', group:'التوصيل', badge:'operations'},
@@ -360,6 +364,13 @@ async function loadHeaderStats() {
   }
 }
 
+// كل رابط للـ iframe بياخد رقم فريد (cache-bust) عشان يضمن إن المتصفح
+// دايمًا يجيب أحدث نسخة من الصفحة، مش نسخة متخزنة (cached) قديمة
+function buildFrameSrc(page) {
+  const base = ERP_PAGES.has(page) ? `../${page}` : `pages/${page}`;
+  return `${base}?_v=${Date.now()}`;
+}
+
 function navigate(page, title, el) {
   if (currentPage === page) return;
   currentPage = page;
@@ -369,8 +380,7 @@ function navigate(page, title, el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
   showLoading(true);
-  const src = ERP_PAGES.has(page) ? `../${page}` : `pages/${page}`;
-  document.getElementById('mainFrame').src = src;
+  document.getElementById('mainFrame').src = buildFrameSrc(page);
   if (window.innerWidth <= 768) closeSidebar();
 }
 
@@ -379,8 +389,32 @@ function frameLoaded() { showLoading(false); }
 function reloadCurrentPage() {
   if (!currentPage) return;
   showLoading(true);
-  const src = ERP_PAGES.has(currentPage) ? `../${currentPage}` : `pages/${currentPage}`;
-  document.getElementById('mainFrame').src = src;
+  document.getElementById('mainFrame').src = buildFrameSrc(currentPage);
+}
+
+// زرار "تحديث لآخر إصدار" — بيعمل Hard Reload كامل للبورتال نفسه (مش بس الـ iframe)
+// من غير ما يمسح تسجيل الدخول، فقط يجبر المتصفح يجيب كل الملفات (HTML/JS/CSS) من جديد
+async function forceUpdateToLatest() {
+  if (!confirm('هيتم تحديث التطبيق لآخر إصدار. هتفضل مسجّل دخول، بس الصفحة الحالية هتتحمّل من جديد. تكمل؟')) return;
+
+  try {
+    // مسح أي كاش متخزن عن طريق Cache Storage API (لو موجود)
+    if (window.caches && caches.keys) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+    // إلغاء أي Service Worker مسجّل (احتياطي، حتى لو مش متوقع وجوده هنا)
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+  } catch (e) {
+    console.warn('forceUpdateToLatest cache cleanup failed (غير حرج):', e);
+  }
+
+  // إعادة تحميل البورتال نفسه برابط فريد يجبر المتصفح يجيب نسخة جديدة تمامًا
+  const url = window.location.pathname + '?_v=' + Date.now();
+  window.location.replace(url);
 }
 
 function showLoading(show) {
