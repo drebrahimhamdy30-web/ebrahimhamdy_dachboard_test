@@ -85,7 +85,15 @@
   <script src="nav.js"></script>
   <script>
     let currentSettings = [];
-    let currentTags = { 'تلاجه': { ar: [], en: [] }, 'غوالى': { ar: [], en: [] } };
+    let currentTags = {};
+
+    const SCHEDULE_CATEGORIES = ['تلاجه', 'غوالى'];
+    const FORM_CATEGORIES = ['أقراص', 'أشربة', 'حقن', 'لبوس', 'كريمات'];
+    const ALL_KEYWORD_CATEGORIES = [...SCHEDULE_CATEGORIES, ...FORM_CATEGORIES];
+    const ICON_MAP = {
+      'تلاجه': '🧊', 'غوالى': '💊',
+      'أقراص': '💊', 'أشربة': '🧴', 'حقن': '💉', 'لبوس': '🔹', 'كريمات': '🧪'
+    };
 
     checkAuth().then(user => {
       if (user) {
@@ -113,7 +121,14 @@
 
     function renderSettings() {
       const container = document.getElementById('settings-container');
-      const cats = currentSettings.filter(s => s.category === 'تلاجه' || s.category === 'غوالى');
+      const cats = currentSettings
+        .filter(s => ALL_KEYWORD_CATEGORIES.includes(s.category))
+        .sort((a, b) => {
+          const aSchedule = SCHEDULE_CATEGORIES.includes(a.category);
+          const bSchedule = SCHEDULE_CATEGORIES.includes(b.category);
+          if (aSchedule !== bSchedule) return aSchedule ? -1 : 1;
+          return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+        });
 
       if (!cats.length) {
         container.innerHTML = '<div class="loading-note">لا توجد إعدادات محفوظة</div>';
@@ -125,8 +140,9 @@
           ar: Array.isArray(cat.keywords_ar) ? [...cat.keywords_ar] : [],
           en: Array.isArray(cat.keywords_en) ? [...cat.keywords_en] : []
         };
-        const icon = cat.category === 'تلاجه' ? '🧊' : '💊';
+        const icon = ICON_MAP[cat.category] || '📦';
         const isGhawaly = cat.category === 'غوالى';
+        const isFormCategory = FORM_CATEGORIES.includes(cat.category);
 
         return `
           <div class="card settings-card">
@@ -156,10 +172,16 @@
               </div>
             `}
 
-            <div class="field-group" style="max-width:180px;">
-              <label>دورة الجرد (بالأيام)</label>
-              <input type="number" id="cycle-days-${cat.category}" class="form-input" value="${cat.cycle_days ?? 7}" min="1">
-            </div>
+            ${!isFormCategory ? `
+              <div class="field-group" style="max-width:180px;">
+                <label>دورة الجرد (بالأيام)</label>
+                <input type="number" id="cycle-days-${cat.category}" class="form-input" value="${cat.cycle_days ?? 7}" min="1">
+              </div>
+            ` : `
+              <p style="font-size:0.75rem;color:var(--text-muted);margin-bottom:12px;">
+                💡 دي فئة تصنيف شكل الصنف (بتستخدم بس لترتيب العرض في صفحة الجرد)، مش محتاجة دورة جرد خاصة بيها.
+              </p>
+            `}
 
             <button class="btn-save-cat" onclick="saveCategory('${cat.category}')">
               <i class="fas fa-save"></i> حفظ ${cat.category}
@@ -204,8 +226,12 @@
     }
 
     async function saveCategory(category) {
-      const cycleDaysEl = document.getElementById(`cycle-days-${category}`);
-      const cycleDays = parseInt(cycleDaysEl.value) || 7;
+      const isFormCategory = FORM_CATEGORIES.includes(category);
+      const original = currentSettings.find(s => s.category === category) || {};
+
+      const cycleDays = isFormCategory
+        ? (original.cycle_days || 7)
+        : (parseInt(document.getElementById(`cycle-days-${category}`).value) || 7);
 
       const payload = {
         category: category,
