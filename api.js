@@ -276,6 +276,8 @@ async function postShiftClose(data) {
     return false;
   }
 }
+
+// ===================== نظام الجرد الجديد (Supabase) =====================
 const JARD_URL = "https://agent.ebrahimhamdy.com/webhook/inventory_audit_erp";
 
 async function fetchInventoryAudit() {
@@ -305,6 +307,86 @@ async function updateInventoryAudit(payload) {
     return false;
   }
 }
+
+// ---- إعدادات فئات الجرد (تلاجه/غوالى) وأكواد fastmove ----
+const JARD_SETTINGS_URL = "https://agent.ebrahimhamdy.com/webhook/jard_settings_manage";
+
+async function jardSettingsAction(payload) {
+  try {
+    const response = await fetch(JARD_SETTINGS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) return null;
+    const text = await response.text();
+    if (!text || text.trim() === '') return [];
+    const data = JSON.parse(text);
+    return Array.isArray(data) ? data : [data];
+  } catch (e) {
+    console.error('jardSettingsAction error:', e);
+    return null;
+  }
+}
+
+async function getJardSettings() {
+  const res = await jardSettingsAction({ action: 'get_settings' });
+  return res || [];
+}
+
+async function updateJardSettings(data) {
+  const res = await jardSettingsAction({ action: 'update_settings', ...data });
+  return res !== null;
+}
+
+async function getFastmoveCodes() {
+  const res = await jardSettingsAction({ action: 'get_fastmove' });
+  return res || [];
+}
+
+async function addFastmoveCode(code) {
+  const res = await jardSettingsAction({ action: 'add_fastmove', code });
+  return res !== null;
+}
+
+async function deleteFastmoveCode(id) {
+  const res = await jardSettingsAction({ action: 'delete_fastmove', id });
+  return res !== null;
+}
+
+// ---- أصناف الجرد الحية (فرع + فئة) — لصفحة الجرد الجديدة ----
+const JARD_ITEMS_URL = "https://agent.ebrahimhamdy.com/webhook/jard_items";
+async function fetchJardItems(branch, category) {
+  try {
+    const params = new URLSearchParams({ branch, category });
+    const response = await fetch(`${JARD_ITEMS_URL}?${params.toString()}`);
+    if (!response.ok) return [];
+    const text = await response.text();
+    if (!text || text.trim() === '') return [];
+    const data = JSON.parse(text);
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.error('fetchJardItems error:', e);
+    return [];
+  }
+}
+
+// ---- تسجيل نتيجة جرد صنف — لصفحة الجرد الجديدة ----
+const JARD_AUDIT_LOG_URL = "https://agent.ebrahimhamdy.com/webhook/jard_audit_log";
+async function submitJardAudit(payload) {
+  try {
+    const response = await fetch(JARD_AUDIT_LOG_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return response.ok;
+  } catch (e) {
+    console.error('submitJardAudit error:', e);
+    return false;
+  }
+}
+
 // جلب سجل الإغلاقات السابقة — بنفس fetchFromN8N بنوع shift_closes
 async function fetchShiftCloses() { return await fetchFromN8N('shift_closes'); }
 
