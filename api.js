@@ -409,11 +409,12 @@ async function fetchStaleItems(branch, months) {
 
 // ---- معدل الجرد اليومي لكل موظف (يدعم نطاق تاريخ من - إلى) ----
 const JARD_DAILY_STATS_URL = "https://agent.ebrahimhamdy.com/webhook/jard_daily_stats";
-async function fetchDailyJardStats(dateFrom, dateTo) {
+async function fetchDailyJardStats(dateFrom, dateTo, branch) {
   try {
     const params = new URLSearchParams();
     if (dateFrom) params.set('date_from', dateFrom);
     if (dateTo)   params.set('date_to', dateTo || dateFrom);
+    if (branch)   params.set('branch', branch);
     const response = await fetch(`${JARD_DAILY_STATS_URL}?${params.toString()}`);
     if (!response.ok) return [];
     const text = await response.text();
