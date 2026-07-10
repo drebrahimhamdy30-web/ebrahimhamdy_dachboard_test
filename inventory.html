@@ -189,7 +189,7 @@
         </div>
         <div class="header-actions">
           <span id="my-daily-count" style="font-size:0.82rem;font-weight:700;color:var(--primary);padding:6px 12px;background:var(--surface-3);border-radius:20px;white-space:nowrap;">
-            📊 معدلك اليوم: <b>0</b>
+            📊 معدلك اليومي: <b>0</b>
           </span>
           <button class="btn btn-secondary" onclick="openFullReport()">
             <i class="fas fa-list-check"></i> تقرير شامل
@@ -310,10 +310,10 @@
       <div class="table-wrap">
         <table class="report-table">
           <thead>
-            <tr><th>كود</th><th>الاسم عربي</th><th>الاسم إنجليزي</th><th>آخر جرد</th></tr>
+            <tr><th>كود</th><th>الاسم عربي</th><th>الاسم إنجليزي</th><th>آخر جرد</th><th>الرصيد</th><th>إجراء</th></tr>
           </thead>
           <tbody id="stale-report-body">
-            <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:20px;">اكتب عدد الشهور واضغط بحث</td></tr>
+            <tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">اكتب عدد الشهور واضغط بحث</td></tr>
           </tbody>
         </table>
       </div>
@@ -527,7 +527,7 @@
     let currentPage      = 1;
     let showPending      = true;
     let mismatchTargetId = null;
-    let mismatchIsLive   = false;
+    let mismatchSource   = 'old'; // 'old' | 'live' | 'stale'
 
     checkAuth().then(async user => {
       activeUser = user;
@@ -977,15 +977,18 @@
       window.scrollTo(0, savedScrollY);
     }
 
-    function openMismatchModal(idOrCode) {
-      mismatchIsLive   = isLiveTab(currentTab);
+    function openMismatchModal(idOrCode, source) {
+      // source: 'stale' لو جايه من شاشة "لم يُجرد منذ مدة"، وإلا بيتحدد تلقائيًا من التبويب الحالي
+      mismatchSource   = source || (isLiveTab(currentTab) ? 'live' : 'old');
       mismatchTargetId = idOrCode;
 
-      const item = mismatchIsLive
-        ? rawData.find(x => x.code === idOrCode)
-        : rawData.find(x => String(x.id) === String(idOrCode));
+      const item = mismatchSource === 'stale'
+        ? currentStaleData.find(x => x.code === idOrCode)
+        : mismatchSource === 'live'
+          ? rawData.find(x => x.code === idOrCode)
+          : rawData.find(x => String(x.id) === String(idOrCode));
 
-      const sys  = mismatchIsLive ? item?._systemQty : item?.system_balance;
+      const sys  = mismatchSource === 'old' ? item?.system_balance : item?._systemQty;
       const info = document.getElementById('mismatch-item-info');
 
       info.innerHTML = `
@@ -1020,7 +1023,9 @@
       const id = mismatchTargetId;
       closeMismatchModal();
 
-      if (mismatchIsLive) {
+      if (mismatchSource === 'stale') {
+        await submitStaleMismatchResult(id, val);
+      } else if (mismatchSource === 'live') {
         await submitLiveMismatchResult(id, val);
       } else {
         const item = rawData.find(x => String(x.id) === String(id));
@@ -1261,11 +1266,14 @@
     // ===== معدل الجرد اليومي (شخصي + فريق) =====
     async function loadMyDailyCount() {
       try {
-        const today = new Date().toISOString().slice(0, 10);
-        const stats = await fetchDailyJardStats(today, today, userBranch);
+        const todayStr = new Date().toISOString().slice(0, 10);
+        // بنجيب كل تاريخ الموظف (من بداية النظام لحد النهاردة) عشان نحسب معدل حقيقي
+        const stats = await fetchDailyJardStats('2020-01-01', todayStr, userBranch);
         const mine  = stats.filter(s => s.audited_by === employeeName);
         const total = mine.reduce((sum, s) => sum + (parseInt(s.audits_count) || 0), 0);
-        document.getElementById('my-daily-count').innerHTML = `📊 معدلك اليوم: <b>${total}</b>`;
+        const daysWorked = new Set(mine.map(s => s.audit_date)).size;
+        const avg = daysWorked > 0 ? (total / daysWorked).toFixed(1) : '0';
+        document.getElementById('my-daily-count').innerHTML = `📊 معدلك اليومي: <b>${avg}</b>`;
       } catch(e) {
         // تجاهل بصمت لو فشل، مش حرج للصفحة الأساسية
       }
@@ -1382,34 +1390,160 @@
       const months = parseInt(document.getElementById('stale-months-input').value) || 3;
       const body   = document.getElementById('stale-report-body');
       const summary = document.getElementById('stale-summary');
-      body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري البحث...</td></tr>';
+      body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري البحث...</td></tr>';
       summary.textContent = '';
 
       try {
         const items = await fetchStaleItems(userBranch, months);
-        currentStaleData = items;
+        // نفس منطق الترتيب حسب الفئة (أقراص/أشربة/حقن/لبوس/كريمات) ثم أبجديًا، المستخدم في باقي الصفحة
+        currentStaleData = sortItemsForAudit(items).map(it => ({
+          ...it,
+          _balanceFetched: false,
+          _systemQty: null
+        }));
 
-        summary.textContent = `📦 عدد الأصناف: ${items.length} — لم تُجرد منذ ${months} شهر أو أكتر (أو لم تُجرد أبدًا)`;
+        summary.textContent = `📦 عدد الأصناف: ${currentStaleData.length} — لم تُجرد منذ ${months} شهر أو أكتر (أو لم تُجرد أبدًا)`;
 
-        if (!items.length) {
-          body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--success,#16a34a);padding:20px;">✅ كل الأصناف اتجردت خلال المدة المحددة</td></tr>';
+        if (!currentStaleData.length) {
+          body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--success,#16a34a);padding:20px;">✅ كل الأصناف اتجردت خلال المدة المحددة</td></tr>';
           return;
         }
 
-        body.innerHTML = items.map(item => {
-          let lastAudited = 'لم يُجرد أبدًا';
-          if (item.last_audited) {
-            try { lastAudited = new Date(item.last_audited).toLocaleDateString('ar-EG'); } catch(e) {}
-          }
-          return `<tr>
-            <td>${item.code || '---'}</td>
-            <td>${item.itm_name_ar || '---'}</td>
-            <td>${item.itm_name_en || '---'}</td>
-            <td style="${!item.last_audited ? 'color:var(--danger,#dc2626);font-weight:700;' : ''}">${lastAudited}</td>
-          </tr>`;
-        }).join('');
+        renderStaleTable();
       } catch(e) {
-        body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--danger);padding:20px;">❌ فشل تحميل التقرير</td></tr>';
+        body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--danger);padding:20px;">❌ فشل تحميل التقرير</td></tr>';
+      }
+    }
+
+    function renderStaleTable() {
+      const body = document.getElementById('stale-report-body');
+      body.innerHTML = '';
+      let lastCategoryKey = null;
+
+      currentStaleData.forEach(item => {
+        const cat = detectCategory(item);
+        if (cat.key !== lastCategoryKey) {
+          lastCategoryKey = cat.key;
+          const catTr = document.createElement('tr');
+          catTr.className = 'category-header-row';
+          catTr.innerHTML = `<td colspan="6">${cat.label}</td>`;
+          body.appendChild(catTr);
+        }
+
+        let lastAudited = 'لم يُجرد أبدًا';
+        if (item.last_audited) {
+          try { lastAudited = new Date(item.last_audited).toLocaleDateString('ar-EG'); } catch(e) {}
+        }
+
+        let balCell, actionCell;
+        if (!item._balanceFetched) {
+          balCell = `<td id="stale-bal-${item.code}">
+              <button class="btn-balance" onclick="fetchStaleBalance('${item.code}', this)">
+                <i class="fas fa-database"></i> الرصيد
+              </button>
+            </td>`;
+          actionCell = `<td><span style="font-size:0.75rem;color:var(--text-muted);">اضغط الرصيد أولاً</span></td>`;
+        } else {
+          balCell = `<td id="stale-bal-${item.code}"><span class="balance-val">${item._systemQty}</span></td>`;
+          actionCell = `<td>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <button class="btn-done" onclick="submitStaleMatched('${item.code}')">✅ مطابق</button>
+                <button class="btn-mismatch" onclick="openMismatchModal('${item.code}', 'stale')">❌ غير مطابق</button>
+              </div>
+            </td>`;
+        }
+
+        const tr = document.createElement('tr');
+        tr.id = `stale-row-${item.code}`;
+        tr.innerHTML = `
+          <td>${item.code || '---'}</td>
+          <td>${item.itm_name_ar || '---'}</td>
+          <td>${item.itm_name_en || '---'}</td>
+          <td style="${!item.last_audited ? 'color:var(--danger,#dc2626);font-weight:700;' : ''}">${lastAudited}</td>
+          ${balCell}
+          ${actionCell}
+        `;
+        body.appendChild(tr);
+      });
+    }
+
+    async function fetchStaleBalance(code, btn) {
+      const item = currentStaleData.find(x => x.code === code);
+      if (!item) return;
+      btn.disabled  = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+      try {
+        const res  = await fetch(`${BALANCE_URL}?code=${encodeURIComponent(code)}&branch=${encodeURIComponent(userBranch)}`);
+        const raw  = await res.json();
+        const data = Array.isArray(raw) ? raw[0] : raw;
+
+        if (data && data.found) {
+          item._systemQty      = data.balance;
+          item._balanceFetched = true;
+          renderStaleTable();
+        } else {
+          btn.disabled  = false;
+          btn.innerHTML = '<i class="fas fa-database"></i> الرصيد';
+          alert('⚠️ الكود غير موجود في مخزون الفرع حاليًا');
+        }
+      } catch(e) {
+        btn.disabled  = false;
+        btn.innerHTML = '<i class="fas fa-database"></i> الرصيد';
+        alert('❌ فشل الاتصال، حاول تاني');
+      }
+    }
+
+    // بنسجّل جرد الأصناف اللي جايه من شاشة "لم يُجرد منذ مدة" بفئة "عام"
+    // (لأنها مش تابعة لفئة محددة من الفئات الرسمية الخمسة، هي مراجعة عامة على كل المخزون)
+    const STALE_AUDIT_CATEGORY = 'عام';
+
+    async function submitStaleMatched(code) {
+      const item = currentStaleData.find(x => x.code === code);
+      if (!item || !item._balanceFetched) return;
+
+      const ok = await submitJardAudit({
+        branch:      userBranch,
+        category:    STALE_AUDIT_CATEGORY,
+        code:        item.code,
+        itm_name_ar: item.itm_name_ar,
+        itm_name_en: item.itm_name_en,
+        matched:     true,
+        system_qty:  item._systemQty,
+        actual_qty:  item._systemQty,
+        audited_by:  employeeName
+      });
+
+      if (ok) {
+        currentStaleData = currentStaleData.filter(x => x.code !== code);
+        renderStaleTable();
+        loadMyDailyCount();
+      } else {
+        alert('⚠️ فشل الحفظ، يرجى المحاولة مجدداً');
+      }
+    }
+
+    async function submitStaleMismatchResult(code, actualVal) {
+      const item = currentStaleData.find(x => x.code === code);
+      if (!item) return;
+
+      const ok = await submitJardAudit({
+        branch:      userBranch,
+        category:    STALE_AUDIT_CATEGORY,
+        code:        item.code,
+        itm_name_ar: item.itm_name_ar,
+        itm_name_en: item.itm_name_en,
+        matched:     false,
+        system_qty:  item._systemQty,
+        actual_qty:  Number(actualVal),
+        audited_by:  employeeName
+      });
+
+      if (ok) {
+        currentStaleData = currentStaleData.filter(x => x.code !== code);
+        renderStaleTable();
+        loadMyDailyCount();
+      } else {
+        alert('⚠️ فشل الحفظ، يرجى المحاولة مجدداً');
       }
     }
 
