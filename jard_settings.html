@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>إعدادات الجرد - صيدليات د. إبراهيم</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    .settings-card { margin-bottom: 20px; }
+    .cat-title { font-size: 1rem; font-weight: 800; color: var(--text-primary); margin-bottom: 14px; display:flex; align-items:center; gap:8px; }
+    .field-group { margin-bottom: 14px; }
+    .field-group label { display:block; font-size:0.82rem; font-weight:700; color:var(--text-secondary); margin-bottom:6px; }
+    .tags-input-wrap {
+      display:flex; flex-wrap:wrap; gap:6px; padding:8px; border:1.5px solid var(--border);
+      border-radius: var(--radius-sm); min-height:44px; align-items:center; background:var(--surface);
+    }
+    .tag-chip {
+      display:inline-flex; align-items:center; gap:6px; background:#e0f2fe; color:var(--accent-dark);
+      border-radius:16px; padding:4px 10px; font-size:0.8rem; font-weight:700; white-space:nowrap;
+    }
+    .tag-chip .x { cursor:pointer; font-weight:900; color:var(--danger); }
+    .tags-input-wrap input {
+      flex:1; min-width:120px; border:none; outline:none; background:transparent; font-family:var(--font); font-size:0.85rem;
+    }
+    .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    @media(max-width:600px){ .grid-2 { grid-template-columns:1fr; } }
+    .btn-save-cat {
+      padding:9px 20px; background:var(--primary); color:#fff; border:none; border-radius:var(--radius-md);
+      font-family:var(--font); font-size:0.85rem; font-weight:700; cursor:pointer; display:inline-flex; align-items:center; gap:6px;
+    }
+    .btn-save-cat:hover { filter:brightness(1.08); }
+    .fastmove-add-row { display:flex; gap:8px; margin-bottom:14px; }
+    .fastmove-add-row input { flex:1; }
+    .fastmove-list { display:flex; flex-direction:column; gap:6px; max-height:340px; overflow-y:auto; }
+    .fastmove-item {
+      display:flex; align-items:center; justify-content:space-between; padding:8px 12px;
+      background:var(--surface-3); border-radius:var(--radius-sm); font-size:0.85rem;
+    }
+    .fastmove-item .code { font-weight:800; color:var(--text-primary); }
+    .fastmove-item .date { font-size:0.72rem; color:var(--text-muted); }
+    .btn-del-code { background:none; border:none; color:var(--danger); cursor:pointer; font-size:1rem; padding:4px 8px; }
+    .save-toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+      background: #166534; color: #dcfce7; padding: 12px 24px; border-radius: 30px;
+      font-weight: 700; font-size: 0.9rem; opacity: 0; transition: all 0.3s; z-index: 9999; white-space: nowrap;
+    }
+    .save-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .loading-note { color: var(--text-muted); font-size: 0.85rem; padding: 20px; text-align:center; }
+  </style>
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+      <div class="page-header">
+        <div class="page-title"><i class="fas fa-sliders-h"></i> إعدادات الجرد</div>
+      </div>
+      <p style="font-size:0.85rem;color:var(--text-muted);margin-top:-6px;margin-bottom:16px;">
+        حدد الكلمات اللي بتدل على كل فئة، وأضف أكواد الأصناف السريعة (fastmove) يدويًا.
+      </p>
+    </div>
+
+    <div id="settings-container">
+      <div class="loading-note">⏳ جاري تحميل الإعدادات...</div>
+    </div>
+
+    <div class="card settings-card">
+      <div class="cat-title">⚡ أكواد fastmove</div>
+      <div class="fastmove-add-row">
+        <input type="text" id="fastmove-new-code" class="form-input" placeholder="اكتب كود الصنف ثم أضف...">
+        <button class="btn btn-primary" onclick="addFastmove()">
+          <i class="fas fa-plus"></i> إضافة
+        </button>
+      </div>
+      <div id="fastmove-list" class="fastmove-list">
+        <div class="loading-note">⏳ جاري التحميل...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="save-toast" id="toast">✅ تم الحفظ بنجاح!</div>
+
+  <script src="api.js"></script>
+  <script src="nav.js"></script>
+  <script>
+    let currentSettings = [];
+    let currentTags = { 'تلاجه': { ar: [], en: [] }, 'غوالى': { ar: [], en: [] } };
+
+    checkAuth().then(user => {
+      if (user) {
+        loadSettings();
+        loadFastmoveCodes();
+      }
+    });
+
+    function showToast() {
+      const t = document.getElementById('toast');
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2500);
+    }
+
+    async function loadSettings() {
+      const container = document.getElementById('settings-container');
+      container.innerHTML = '<div class="loading-note">⏳ جاري تحميل الإعدادات...</div>';
+      try {
+        currentSettings = await getJardSettings();
+        renderSettings();
+      } catch(e) {
+        container.innerHTML = '<div class="loading-note" style="color:var(--danger)">❌ فشل تحميل الإعدادات</div>';
+      }
+    }
+
+    function renderSettings() {
+      const container = document.getElementById('settings-container');
+      const cats = currentSettings.filter(s => s.category === 'تلاجه' || s.category === 'غوالى');
+
+      if (!cats.length) {
+        container.innerHTML = '<div class="loading-note">لا توجد إعدادات محفوظة</div>';
+        return;
+      }
+
+      container.innerHTML = cats.map(cat => {
+        currentTags[cat.category] = {
+          ar: Array.isArray(cat.keywords_ar) ? [...cat.keywords_ar] : [],
+          en: Array.isArray(cat.keywords_en) ? [...cat.keywords_en] : []
+        };
+        const icon = cat.category === 'تلاجه' ? '🧊' : '💊';
+        const isGhawaly = cat.category === 'غوالى';
+
+        return `
+          <div class="card settings-card">
+            <div class="cat-title">${icon} ${cat.category}</div>
+
+            ${!isGhawaly ? `
+              <div class="grid-2">
+                <div class="field-group">
+                  <label>كلمات عربي (اكتب الكلمة واضغط Enter)</label>
+                  <div class="tags-input-wrap" id="tags-ar-${cat.category}">
+                    ${renderTags(cat.category, 'ar')}
+                    <input type="text" placeholder="أضف كلمة..." onkeydown="handleTagInput(event, '${cat.category}', 'ar')">
+                  </div>
+                </div>
+                <div class="field-group">
+                  <label>كلمات إنجليزي (اكتب الكلمة واضغط Enter)</label>
+                  <div class="tags-input-wrap" id="tags-en-${cat.category}">
+                    ${renderTags(cat.category, 'en')}
+                    <input type="text" placeholder="أضف كلمة..." onkeydown="handleTagInput(event, '${cat.category}', 'en')">
+                  </div>
+                </div>
+              </div>
+            ` : `
+              <div class="field-group" style="max-width:220px;">
+                <label>أقل سعر (أكبر من)</label>
+                <input type="number" id="min-price-${cat.category}" class="form-input" value="${cat.min_price ?? ''}" placeholder="مثال: 400" step="0.01">
+              </div>
+            `}
+
+            <div class="field-group" style="max-width:180px;">
+              <label>دورة الجرد (بالأيام)</label>
+              <input type="number" id="cycle-days-${cat.category}" class="form-input" value="${cat.cycle_days ?? 7}" min="1">
+            </div>
+
+            <button class="btn-save-cat" onclick="saveCategory('${cat.category}')">
+              <i class="fas fa-save"></i> حفظ ${cat.category}
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderTags(category, lang) {
+      const tags = currentTags[category][lang] || [];
+      return tags.map((tag, idx) => `
+        <span class="tag-chip">
+          ${tag}
+          <span class="x" onclick="removeTag('${category}', '${lang}', ${idx})">&times;</span>
+        </span>
+      `).join('');
+    }
+
+    function handleTagInput(event, category, lang) {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      const val = event.target.value.trim();
+      if (!val) return;
+      currentTags[category][lang].push(val);
+      event.target.value = '';
+      refreshTagsWrap(category, lang);
+    }
+
+    function removeTag(category, lang, idx) {
+      currentTags[category][lang].splice(idx, 1);
+      refreshTagsWrap(category, lang);
+    }
+
+    function refreshTagsWrap(category, lang) {
+      const wrap = document.getElementById(`tags-${lang}-${category}`);
+      const input = wrap.querySelector('input');
+      const inputVal = input ? input.value : '';
+      wrap.innerHTML = renderTags(category, lang) +
+        `<input type="text" placeholder="أضف كلمة..." onkeydown="handleTagInput(event, '${category}', '${lang}')" value="${inputVal}">`;
+      wrap.querySelector('input').focus();
+    }
+
+    async function saveCategory(category) {
+      const cycleDaysEl = document.getElementById(`cycle-days-${category}`);
+      const cycleDays = parseInt(cycleDaysEl.value) || 7;
+
+      const payload = {
+        category: category,
+        keywords_ar: currentTags[category].ar || [],
+        keywords_en: currentTags[category].en || [],
+        cycle_days: cycleDays
+      };
+
+      if (category === 'غوالى') {
+        const priceEl = document.getElementById(`min-price-${category}`);
+        payload.min_price = priceEl.value !== '' ? parseFloat(priceEl.value) : null;
+      }
+
+      const ok = await updateJardSettings(payload);
+      if (ok) {
+        showToast();
+        loadSettings();
+      } else {
+        alert('❌ فشل الحفظ، حاول تاني');
+      }
+    }
+
+    // ===== fastmove =====
+    async function loadFastmoveCodes() {
+      const listEl = document.getElementById('fastmove-list');
+      listEl.innerHTML = '<div class="loading-note">⏳ جاري التحميل...</div>';
+      try {
+        const codes = await getFastmoveCodes();
+        renderFastmoveList(codes);
+      } catch(e) {
+        listEl.innerHTML = '<div class="loading-note" style="color:var(--danger)">❌ فشل تحميل الأكواد</div>';
+      }
+    }
+
+    function renderFastmoveList(codes) {
+      const listEl = document.getElementById('fastmove-list');
+      if (!codes.length) {
+        listEl.innerHTML = '<div class="loading-note">لا توجد أكواد مضافة بعد</div>';
+        return;
+      }
+      listEl.innerHTML = codes.map(item => {
+        let dateStr = '';
+        try { dateStr = new Date(item.added_at).toLocaleDateString('ar-EG'); } catch(e) {}
+        return `
+          <div class="fastmove-item">
+            <div>
+              <span class="code">${item.code}</span>
+              <span class="date"> — أُضيف في ${dateStr}</span>
+            </div>
+            <button class="btn-del-code" onclick="removeFastmove(${item.id})" title="حذف">
+              <i class="fas fa-trash-alt"></i>
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function addFastmove() {
+      const input = document.getElementById('fastmove-new-code');
+      const code = input.value.trim();
+      if (!code) { alert('اكتب كود الصنف أولاً'); return; }
+
+      const ok = await addFastmoveCode(code);
+      if (ok) {
+        input.value = '';
+        showToast();
+        loadFastmoveCodes();
+      } else {
+        alert('❌ فشل الإضافة، حاول تاني');
+      }
+    }
+
+    async function removeFastmove(id) {
+      if (!confirm('متأكد إنك عايز تحذف الكود ده من قائمة fastmove؟')) return;
+      const ok = await deleteFastmoveCode(id);
+      if (ok) {
+        showToast();
+        loadFastmoveCodes();
+      } else {
+        alert('❌ فشل الحذف، حاول تاني');
+      }
+    }
+  </script>
+</body>
+</html>
