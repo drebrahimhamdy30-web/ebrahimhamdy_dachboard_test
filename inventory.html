@@ -76,6 +76,13 @@
 
     .header-actions { display:flex; gap:8px; }
 
+    /* ===== عناوين تجميع الفئة داخل الجدول ===== */
+    .category-header-row td {
+      background:var(--surface-3) !important;
+      font-weight:800; font-size:0.82rem; color:var(--text-secondary);
+      padding:8px 10px !important; border:none !important;
+    }
+
     /* ===== مودال (نوافذ منبثقة) ===== */
     .modal-overlay {
       position:fixed; top:0; left:0; right:0; bottom:0;
@@ -145,6 +152,10 @@
         margin-bottom:8px; border:1px solid var(--border); border-radius:10px;
         padding:6px 10px; background:var(--surface); box-shadow:0 1px 3px rgba(0,0,0,0.04);
       }
+      table#inv-table tr.category-header-row {
+        border:none; box-shadow:none; background:transparent; padding:10px 4px 4px;
+      }
+      table#inv-table tr.category-header-row td { display:block !important; }
       table#inv-table td {
         padding:3px 0; border:none !important; display:flex;
         align-items:center; gap:8px; text-align:right;
@@ -374,6 +385,46 @@
       'erp':      '🖥️ ERP'
     };
 
+    // ===== تصنيف الأصناف حسب الفئة الدوائية (لترتيب العرض على موظف الجرد) =====
+    // الترتيب: أقراص → أشربة → حقن → لبوس → كريمات → غير مصنف
+    const CATEGORY_RULES = [
+      { key: 'اقراص',   order: 0, label: '💊 أقراص وكبسولات', ar: ['قرص', 'اقراص', 'أقراص', 'كبسول', 'كبسولة', 'كبسولات'], en: ['tab', 'cap'] },
+      { key: 'اشربة',   order: 1, label: '🧴 أشربة',           ar: ['شراب', 'شرب'],                                        en: ['syr'] },
+      { key: 'حقن',     order: 2, label: '💉 حقن',             ar: ['حقنة', 'حقن', 'امبول', 'أمبول'],                     en: ['inj', 'amp', 'vial'] },
+      { key: 'لبوس',    order: 3, label: '🔹 لبوس',            ar: ['لبوس'],                                               en: ['supp'] },
+      { key: 'كريمات',  order: 4, label: '🧪 كريمات ومراهم',   ar: ['كريم', 'كريمات', 'مرهم'],                            en: ['cream', 'oint', 'gel'] }
+    ];
+    const OTHER_CATEGORY = { key: 'اخرى', order: 99, label: '📦 أصناف أخرى' };
+
+    function detectCategory(item) {
+      const nameAr = String(item.itm_name_ar || '').toLowerCase();
+      const nameEn = String(item.itm_name_en || '').toLowerCase();
+      for (const cat of CATEGORY_RULES) {
+        if (cat.ar.some(k => nameAr.includes(k))) return cat;
+        if (cat.en.some(k => nameEn.includes(k))) return cat;
+      }
+      return OTHER_CATEGORY;
+    }
+
+    // اسم الترتيب الأبجدي: إنجليزي أولاً، لو فاضي نستخدم العربي
+    function sortDisplayName(item) {
+      const en = String(item.itm_name_en || '').trim();
+      if (en) return en;
+      return String(item.itm_name_ar || '').trim();
+    }
+
+    // ترتيب مركّب: الفئة أولاً، وبعدين أبجديًا داخل كل فئة
+    function sortItemsForAudit(items) {
+      return items.slice().sort((a, b) => {
+        const catA = detectCategory(a);
+        const catB = detectCategory(b);
+        if (catA.order !== catB.order) return catA.order - catB.order;
+        const nameA = sortDisplayName(a);
+        const nameB = sortDisplayName(b);
+        return nameA.localeCompare(nameB, undefined, { sensitivity: 'base', numeric: true });
+      });
+    }
+
     let activeUser      = null;
     let rawData         = [];
     let filteredData    = [];
@@ -430,19 +481,16 @@
       tbody.innerHTML = `<tr class="loading-row empty-row"><td colspan="${cols.length + 2}">⏳ جاري جلب البيانات...</td></tr>`;
 
       try {
-        const items = await fetchInventoryAudit();   // بدل fetchInventory()
+        const items = await fetchInventoryAudit();
         rawData = items.filter(item => {
           const typeMatch   = (item.type   || '').toLowerCase() === currentTab.toLowerCase();
           const branchMatch = (item.branch || '') === userBranch;
           return typeMatch && branchMatch;
         });
 
-        // ترتيب بالكود — عشان النسخ المكررة تتجمّع تحت بعضها
-        rawData.sort((a, b) => {
-          const codeA = String(a.code || '').trim();
-          const codeB = String(b.code || '').trim();
-          return codeA.localeCompare(codeB, 'ar', { numeric: true });
-        });
+        // ترتيب حسب الفئة (أقراص، أشربة، حقن، لبوس، كريمات، أخرى) ثم أبجديًا (إنجليزي، أو عربي لو مفيش إنجليزي)
+        rawData = sortItemsForAudit(rawData);
+
         buildTableHeader();
         applyFilter();
       } catch(e) {
@@ -562,12 +610,24 @@
       const primaryFlags = computePrimaryFlags(items);
 
       tbody.innerHTML = '';
+      let lastCategoryKey = null;
+
       items.forEach(item => {
         const id        = item.id;
         const isDone     = isItemDone(item);
         const isSkip     = isItemSkip(item);
         const isMismatch = isItemMismatch(item);
         const isPrimary  = primaryFlags.get(String(id)) !== false;
+
+        // صف عنوان الفئة — يظهر مرة واحدة قبل أول صنف من كل فئة (طالما البيانات مرتبة بالفئة)
+        const cat = detectCategory(item);
+        if (cat.key !== lastCategoryKey) {
+          lastCategoryKey = cat.key;
+          const catTr = document.createElement('tr');
+          catTr.className = 'category-header-row';
+          catTr.innerHTML = `<td colspan="${cols.length + 2}">${cat.label}</td>`;
+          tbody.appendChild(catTr);
+        }
 
         let timeVal = item.time || '';
         if (timeVal) {
@@ -799,7 +859,7 @@
           payload.system_balance = extra.system_balance ?? (it.system_balance ?? '');
         }
 
-const ok = await updateInventoryAudit(payload);   // بدل updateData(payload)
+        const ok = await updateInventoryAudit(payload);
         if (!ok) success = false;
       }
 
