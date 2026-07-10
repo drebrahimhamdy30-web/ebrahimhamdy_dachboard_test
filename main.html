@@ -151,7 +151,7 @@
           </div>
         </div>
 
-        <!-- كود + اسم الصنف -->
+        <!-- كود + اسم الصنف (عربي وإنجليزي) -->
         <div id="item-section">
           <div class="grid-code-name">
             <div class="field-group">
@@ -166,11 +166,18 @@
               <div class="lookup-found"  id="item-found">✅ تم العثور على الصنف</div>
             </div>
             <div class="field-group" id="item-name-div">
-              <label>اسم الصنف</label>
+              <label>اسم الصنف (عربي)</label>
               <div class="field-icon-wrap">
                 <i class="fas fa-capsules field-icon"></i>
                 <input type="text" id="item_name" class="form-input">
               </div>
+            </div>
+          </div>
+          <div class="field-group" id="item-name-en-div">
+            <label>اسم الصنف بالإنجليزي</label>
+            <div class="field-icon-wrap">
+              <i class="fas fa-language field-icon"></i>
+              <input type="text" id="item_name_en" class="form-input">
             </div>
           </div>
         </div>
@@ -397,14 +404,20 @@
     let currentType = 'شراء';
     let rowCount    = 0;
 
-    // ===== إلغاء اسم الصنف وفك قفله عند تعديل الكود =====
+    // ===== إلغاء اسم الصنف (عربي + إنجليزي) وفك قفلهم عند تعديل الكود =====
     function clearItemName() {
-      const nameEl  = document.getElementById('item_name');
-      const foundEl = document.getElementById('item-found');
+      const nameEl    = document.getElementById('item_name');
+      const nameEnEl  = document.getElementById('item_name_en');
+      const foundEl   = document.getElementById('item-found');
       if (nameEl.readOnly) {        // اتجاب تلقائياً → نمسحه ونفك القفل
         nameEl.value    = '';
         nameEl.readOnly = false;
         nameEl.classList.remove('readonly-field');
+      }
+      if (nameEnEl.readOnly) {
+        nameEnEl.value    = '';
+        nameEnEl.readOnly = false;
+        nameEnEl.classList.remove('readonly-field');
       }
       foundEl.classList.remove('show');
     }
@@ -421,13 +434,14 @@
       foundEl.classList.remove('show');
     }
 
-    // ===== Lookup: كود الصنف =====
+    // ===== Lookup: كود الصنف (يجيب الاسم عربي وإنجليزي مع بعض) =====
     async function lookupItem() {
-      const code    = document.getElementById('item_code').value.trim();
+      const code      = document.getElementById('item_code').value.trim();
       if (!code) return;
-      const nameEl  = document.getElementById('item_name');
-      const loadEl  = document.getElementById('item-loading');
-      const foundEl = document.getElementById('item-found');
+      const nameEl    = document.getElementById('item_name');
+      const nameEnEl  = document.getElementById('item_name_en');
+      const loadEl    = document.getElementById('item-loading');
+      const foundEl   = document.getElementById('item-found');
       if (nameEl.value.trim()) return;
       loadEl.classList.add('show');
       foundEl.classList.remove('show');
@@ -435,12 +449,18 @@
         const resp = await fetch(FETCH_URL + '?type=item_lookup&code=' + encodeURIComponent(code));
         const raw  = await resp.json();
         const item = Array.isArray(raw) ? raw[0] : raw;
-        const name = item?.itm_name_ar || item?.data?.[0]?.itm_name_ar || '';
-        if (name) {
-          nameEl.value       = name;
-          nameEl.readOnly    = true;
+        const nameAr = item?.itm_name_ar || item?.data?.[0]?.itm_name_ar || '';
+        const nameEn = item?.itm_name_en || item?.data?.[0]?.itm_name_en || '';
+        if (nameAr) {
+          nameEl.value    = nameAr;
+          nameEl.readOnly = true;
           nameEl.classList.add('readonly-field');
           foundEl.classList.add('show');
+        }
+        if (nameEn) {
+          nameEnEl.value    = nameEn;
+          nameEnEl.readOnly = true;
+          nameEnEl.classList.add('readonly-field');
         }
       } catch(e) { console.log('item lookup failed:', e); }
       finally { loadEl.classList.remove('show'); }
@@ -529,6 +549,7 @@
       const branchLabel        = document.getElementById('branch-label');
       const itemSection        = document.getElementById('item-section');
       const itemNameDiv        = document.getElementById('item-name-div');
+      const itemNameEnDiv      = document.getElementById('item-name-en-div');
       const extraSection       = document.getElementById('extra-section');
       const noteSection        = document.getElementById('note-section');
       const orderTypeDiv       = document.getElementById('order-type-div');
@@ -538,6 +559,7 @@
       // reset
       itemSection.style.display        = '';
       itemNameDiv.style.display        = '';
+      itemNameEnDiv.style.display      = '';
       extraSection.style.display       = '';
       jarrdNoteDiv.style.display       = 'none';
       noteSection.classList.remove('visible');
@@ -563,7 +585,7 @@
         // فرع افتراضي = فرع المستخدم
         branchEl.value    = userBranch;
         branchEl.disabled = false;
-        // إخفاء بيانات العميل والكمية — إظهار اسم الصنف + ملاحظات الجرد
+        // إخفاء بيانات العميل والكمية — إظهار اسم الصنف (عربي + إنجليزي) + ملاحظات الجرد
         extraSection.style.display = 'none';
         jarrdNoteDiv.style.display = '';
         document.getElementById('jarrd-note').value = '';
@@ -594,9 +616,10 @@
     }
 
     async function submitOrder() {
-      const btn      = document.getElementById('submitBtn');
-      const itemCode = document.getElementById('item_code').value.trim();
-      const itemName = document.getElementById('item_name').value.trim();
+      const btn        = document.getElementById('submitBtn');
+      const itemCode   = document.getElementById('item_code').value.trim();
+      const itemName   = document.getElementById('item_name').value.trim();
+      const itemNameEn = document.getElementById('item_name_en').value.trim();
 
       if (currentType === 'إشعار') {
         const targetType = document.getElementById('note-target-type').value;
@@ -650,7 +673,8 @@
         target_branch: availableBranch || document.getElementById('branch').value,
         item_code:     itemCode  || null,
         item:          itemName  || null,
-        itm_name_ar:   itemName  || null,
+        item_name_ar:  itemName  || null,
+        item_name_en:  itemNameEn || null,
         customer_code: document.getElementById('customer_code')?.value.trim() || null,
         customer_name: document.getElementById('customer_name')?.value.trim() || null,
         qty:           document.getElementById('qty')?.value || 1,
@@ -782,13 +806,17 @@
     }
 
     function resetOriginalForm() {
-      // إعادة تعيين كود الصنف واسمه
-      const itemCodeEl = document.getElementById('item_code');
-      const itemNameEl = document.getElementById('item_name');
-      itemCodeEl.value    = '';
-      itemNameEl.value    = '';
-      itemNameEl.readOnly = false;
+      // إعادة تعيين كود الصنف واسمه (عربي + إنجليزي)
+      const itemCodeEl  = document.getElementById('item_code');
+      const itemNameEl  = document.getElementById('item_name');
+      const itemNameEnEl = document.getElementById('item_name_en');
+      itemCodeEl.value     = '';
+      itemNameEl.value     = '';
+      itemNameEl.readOnly  = false;
       itemNameEl.classList.remove('readonly-field');
+      itemNameEnEl.value    = '';
+      itemNameEnEl.readOnly = false;
+      itemNameEnEl.classList.remove('readonly-field');
       document.getElementById('item-found').classList.remove('show');
 
       // إعادة تعيين كود العميل واسمه
