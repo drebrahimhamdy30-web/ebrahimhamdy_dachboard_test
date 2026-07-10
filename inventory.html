@@ -161,6 +161,31 @@
         display:block !important; padding:30px 10px !important; text-align:center !important;
       }
       table#inv-table tr.empty-row td::before { content:none !important; }
+
+      /* ===== تحويل جداول التقارير (لم يُجرد منذ مدة / معدل الجرد اليومي / تقرير شامل) لكروت على الموبايل ===== */
+      table.report-table thead { display:none; }
+      table.report-table, table.report-table tbody, table.report-table tr, table.report-table td { display:block; width:100%; }
+      table.report-table tr {
+        margin-bottom:8px; border:1px solid var(--border); border-radius:10px;
+        padding:6px 10px; background:var(--surface); box-shadow:0 1px 3px rgba(0,0,0,0.04);
+      }
+      table.report-table tr.category-header-row {
+        border:none; box-shadow:none; background:transparent; padding:10px 4px 4px; margin-bottom:2px;
+      }
+      table.report-table tr.category-header-row td { display:block !important; }
+      table.report-table td {
+        padding:3px 0; border:none !important; display:flex;
+        align-items:flex-start; gap:8px; text-align:right;
+      }
+      table.report-table td::before {
+        content: attr(data-label); font-weight:700; color:var(--text-secondary);
+        font-size:0.68rem; flex:0 0 auto; min-width:80px; max-width:100px;
+      }
+      table.report-table td > *:not(:only-child) { flex:1; min-width:0; }
+      table.report-table td > div { display:flex; flex-wrap:wrap; gap:5px; }
+      /* لو الخلية مالهاش data-label (مفيش عنوان مناسب)، منعرضش سطر فاضي قبلها */
+      table.report-table td:not([data-label])::before { content:none; }
+
       #report-modal .report-date-filter { flex-direction:column; align-items:stretch; }
       #report-modal .report-date-filter > div { width:100%; }
       #report-modal #report-date-from,
@@ -316,6 +341,16 @@
             <tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">اكتب عدد الشهور واضغط بحث</td></tr>
           </tbody>
         </table>
+      </div>
+
+      <div class="pagination" style="justify-content:center;margin-top:12px;">
+        <button class="page-btn" id="stale-btn-prev" onclick="changeStalePage(-1)">
+          <i class="fas fa-chevron-right"></i>
+        </button>
+        <span id="stale-page-info" style="font-size:0.8rem;color:var(--text-secondary);white-space:nowrap;">1 / 1</span>
+        <button class="page-btn" id="stale-btn-next" onclick="changeStalePage(1)">
+          <i class="fas fa-chevron-left"></i>
+        </button>
       </div>
 
       <div class="modal-actions">
@@ -1223,14 +1258,14 @@
           let dateStr = '';
           try { dateStr = new Date(i.audited_at).toLocaleString('ar-EG'); } catch(e) {}
           return `<tr>
-            <td>${i.code || '---'}</td>
-            <td>${i.itm_name_ar || '---'}</td>
-            <td>${FULL_REPORT_CATEGORY_LABELS[i.category] || i.category || '---'}</td>
-            <td style="color:${isMatched ? 'var(--success,#16a34a)' : 'var(--danger,#dc2626)'};font-weight:700;">${isMatched ? '✅ مطابق' : '❌ غير مطابق'}</td>
-            <td>${i.system_qty ?? '—'}</td>
-            <td>${i.actual_qty ?? '—'}</td>
-            <td>${i.audited_by || '—'}</td>
-            <td style="font-size:0.72rem;">${dateStr}</td>
+            <td data-label="الكود">${i.code || '---'}</td>
+            <td data-label="الاسم">${i.itm_name_ar || '---'}</td>
+            <td data-label="الفئة">${FULL_REPORT_CATEGORY_LABELS[i.category] || i.category || '---'}</td>
+            <td data-label="الحالة" style="color:${isMatched ? 'var(--success,#16a34a)' : 'var(--danger,#dc2626)'};font-weight:700;">${isMatched ? '✅ مطابق' : '❌ غير مطابق'}</td>
+            <td data-label="رصيد النظام">${i.system_qty ?? '—'}</td>
+            <td data-label="الرصيد الفعلي">${i.actual_qty ?? '—'}</td>
+            <td data-label="بواسطة">${i.audited_by || '—'}</td>
+            <td data-label="التاريخ" style="font-size:0.72rem;">${dateStr}</td>
           </tr>`;
         }).join('');
       } catch(e) {
@@ -1355,7 +1390,7 @@
         byDateBody.innerHTML = sortedDates.map(d => {
           let dStr = d;
           try { dStr = new Date(d).toLocaleDateString('ar-EG'); } catch(e) {}
-          return `<tr><td>${dStr}</td><td style="font-weight:700;">${byDate[d]}</td></tr>`;
+          return `<tr><td data-label="التاريخ">${dStr}</td><td data-label="عدد الأصناف" style="font-weight:700;">${byDate[d]}</td></tr>`;
         }).join('');
 
         // جدول: إجمالي كل موظف (مرتب تنازليًا حسب العدد)
@@ -1363,9 +1398,9 @@
         byEmpBody.innerHTML = employeeRows.map(e => {
           const isMe = e.audited_by === employeeName;
           return `<tr style="${isMe ? 'background:var(--surface-3);font-weight:800;' : ''}">
-            <td>${e.audited_by || 'غير معروف'} ${isMe ? '⭐ (أنت)' : ''}</td>
-            <td>${e.branch || '---'}</td>
-            <td>${e.total}</td>
+            <td data-label="الموظف">${e.audited_by || 'غير معروف'} ${isMe ? '⭐ (أنت)' : ''}</td>
+            <td data-label="الفرع">${e.branch || '---'}</td>
+            <td data-label="الإجمالي">${e.total}</td>
           </tr>`;
         }).join('');
       } catch(e) {
@@ -1376,6 +1411,8 @@
 
     // ===== تقرير الأصناف اللي لم تُجرد منذ مدة =====
     let currentStaleData = [];
+    let staleCurrentPage  = 1;
+    const STALE_PAGE_SIZE = 20;
 
     function openStaleReport() {
       openModalFullScreen(document.getElementById('stale-modal'));
@@ -1392,6 +1429,7 @@
       const summary = document.getElementById('stale-summary');
       body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري البحث...</td></tr>';
       summary.textContent = '';
+      staleCurrentPage = 1;
 
       try {
         const items = await fetchStaleItems(userBranch, months);
@@ -1406,6 +1444,7 @@
 
         if (!currentStaleData.length) {
           body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--success,#16a34a);padding:20px;">✅ كل الأصناف اتجردت خلال المدة المحددة</td></tr>';
+          updateStalePagination();
           return;
         }
 
@@ -1415,12 +1454,29 @@
       }
     }
 
+    function updateStalePagination() {
+      const totalPages = Math.max(1, Math.ceil(currentStaleData.length / STALE_PAGE_SIZE));
+      if (staleCurrentPage > totalPages) staleCurrentPage = totalPages;
+      document.getElementById('stale-page-info').textContent = `${staleCurrentPage} / ${totalPages}`;
+      document.getElementById('stale-btn-prev').disabled = staleCurrentPage <= 1;
+      document.getElementById('stale-btn-next').disabled = staleCurrentPage >= totalPages;
+    }
+
+    function changeStalePage(dir) {
+      const totalPages = Math.max(1, Math.ceil(currentStaleData.length / STALE_PAGE_SIZE));
+      staleCurrentPage = Math.min(Math.max(1, staleCurrentPage + dir), totalPages);
+      renderStaleTable();
+    }
+
     function renderStaleTable() {
-      const body = document.getElementById('stale-report-body');
+      const body  = document.getElementById('stale-report-body');
+      const start = (staleCurrentPage - 1) * STALE_PAGE_SIZE;
+      const pageItems = currentStaleData.slice(start, start + STALE_PAGE_SIZE);
+
       body.innerHTML = '';
       let lastCategoryKey = null;
 
-      currentStaleData.forEach(item => {
+      pageItems.forEach(item => {
         const cat = detectCategory(item);
         if (cat.key !== lastCategoryKey) {
           lastCategoryKey = cat.key;
@@ -1437,15 +1493,15 @@
 
         let balCell, actionCell;
         if (!item._balanceFetched) {
-          balCell = `<td id="stale-bal-${item.code}">
+          balCell = `<td id="stale-bal-${item.code}" data-label="الرصيد">
               <button class="btn-balance" onclick="fetchStaleBalance('${item.code}', this)">
                 <i class="fas fa-database"></i> الرصيد
               </button>
             </td>`;
-          actionCell = `<td><span style="font-size:0.75rem;color:var(--text-muted);">اضغط الرصيد أولاً</span></td>`;
+          actionCell = `<td data-label="إجراء"><span style="font-size:0.75rem;color:var(--text-muted);">اضغط الرصيد أولاً</span></td>`;
         } else {
-          balCell = `<td id="stale-bal-${item.code}"><span class="balance-val">${item._systemQty}</span></td>`;
-          actionCell = `<td>
+          balCell = `<td id="stale-bal-${item.code}" data-label="الرصيد"><span class="balance-val">${item._systemQty}</span></td>`;
+          actionCell = `<td data-label="إجراء">
               <div style="display:flex;gap:6px;flex-wrap:wrap;">
                 <button class="btn-done" onclick="submitStaleMatched('${item.code}')">✅ مطابق</button>
                 <button class="btn-mismatch" onclick="openMismatchModal('${item.code}', 'stale')">❌ غير مطابق</button>
@@ -1456,15 +1512,17 @@
         const tr = document.createElement('tr');
         tr.id = `stale-row-${item.code}`;
         tr.innerHTML = `
-          <td>${item.code || '---'}</td>
-          <td>${item.itm_name_ar || '---'}</td>
-          <td>${item.itm_name_en || '---'}</td>
-          <td style="${!item.last_audited ? 'color:var(--danger,#dc2626);font-weight:700;' : ''}">${lastAudited}</td>
+          <td data-label="كود">${item.code || '---'}</td>
+          <td data-label="الاسم عربي">${item.itm_name_ar || '---'}</td>
+          <td data-label="الاسم إنجليزي">${item.itm_name_en || '---'}</td>
+          <td data-label="آخر جرد" style="${!item.last_audited ? 'color:var(--danger,#dc2626);font-weight:700;' : ''}">${lastAudited}</td>
           ${balCell}
           ${actionCell}
         `;
         body.appendChild(tr);
       });
+
+      updateStalePagination();
     }
 
     async function fetchStaleBalance(code, btn) {
