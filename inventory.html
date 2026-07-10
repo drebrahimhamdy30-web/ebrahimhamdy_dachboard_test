@@ -392,25 +392,42 @@
 
       <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;padding:10px 12px;background:var(--surface-3);border-radius:10px;">
         <div>
-          <label class="modal-label" style="margin-bottom:4px;">التاريخ</label>
-          <input type="date" id="daily-stats-date" class="form-input" style="width:160px;">
+          <label class="modal-label" style="margin-bottom:4px;">من تاريخ</label>
+          <input type="date" id="daily-stats-from" class="form-input" style="width:150px;">
+        </div>
+        <div>
+          <label class="modal-label" style="margin-bottom:4px;">إلى تاريخ</label>
+          <input type="date" id="daily-stats-to" class="form-input" style="width:150px;">
         </div>
         <button class="btn btn-primary" onclick="loadDailyStats()">
           <i class="fas fa-search"></i> عرض
         </button>
       </div>
 
-      <div id="daily-stats-summary" style="font-size:0.82rem;color:var(--text-muted);margin-bottom:10px;"></div>
+      <div id="daily-stats-summary" style="font-size:0.85rem;font-weight:700;color:var(--text-primary);margin-bottom:14px;padding:8px 12px;background:var(--surface-3);border-radius:10px;"></div>
 
-      <div class="table-wrap">
-        <table class="report-table">
-          <thead>
-            <tr><th>الموظف</th><th>الفرع</th><th>عدد الأصناف المجرودة</th></tr>
-          </thead>
-          <tbody id="daily-stats-body">
-            <tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>
-          </tbody>
-        </table>
+      <div class="report-section">
+        <div class="report-section-title">📅 إجمالي الأصناف كل يوم</div>
+        <div class="table-wrap">
+          <table class="report-table">
+            <thead><tr><th>التاريخ</th><th>عدد الأصناف المجرودة</th></tr></thead>
+            <tbody id="daily-stats-by-date-body">
+              <tr><td colspan="2" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="report-section">
+        <div class="report-section-title">👤 إجمالي كل موظف خلال المدة</div>
+        <div class="table-wrap">
+          <table class="report-table">
+            <thead><tr><th>الموظف</th><th>الفرع</th><th>إجمالي الأصناف</th></tr></thead>
+            <tbody id="daily-stats-by-employee-body">
+              <tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div class="modal-actions">
@@ -1391,7 +1408,8 @@
     // ===== معدل الجرد اليومي (شخصي + فريق) =====
     async function loadMyDailyCount() {
       try {
-        const stats = await fetchDailyJardStats(); // اليوم افتراضيًا
+        const today = new Date().toISOString().slice(0, 10);
+        const stats = await fetchDailyJardStats(today, today);
         const mine  = stats.filter(s => s.audited_by === employeeName);
         const total = mine.reduce((sum, s) => sum + (parseInt(s.audits_count) || 0), 0);
         document.getElementById('my-daily-count').innerHTML = `📊 معدلك اليوم: <b>${total}</b>`;
@@ -1401,8 +1419,11 @@
     }
 
     function openDailyStats() {
-      const dateInput = document.getElementById('daily-stats-date');
-      if (!dateInput.value) dateInput.value = new Date().toISOString().slice(0, 10);
+      const fromInput = document.getElementById('daily-stats-from');
+      const toInput   = document.getElementById('daily-stats-to');
+      const today = new Date().toISOString().slice(0, 10);
+      if (!fromInput.value) fromInput.value = today;
+      if (!toInput.value)   toInput.value   = today;
       openModalFullScreen(document.getElementById('daily-stats-modal'));
       loadDailyStats();
     }
@@ -1411,33 +1432,84 @@
       closeModalFullScreen(document.getElementById('daily-stats-modal'));
     }
 
+    // بيحسب عدد الأيام (شامل الطرفين) بين تاريخين — لازم للمتوسط اليومي
+    function daysBetweenInclusive(fromStr, toStr) {
+      const from = new Date(fromStr + 'T00:00:00');
+      const to   = new Date(toStr   + 'T00:00:00');
+      const diff = Math.round((to - from) / 86400000);
+      return Math.max(1, diff + 1);
+    }
+
     async function loadDailyStats() {
-      const date = document.getElementById('daily-stats-date').value;
-      const body = document.getElementById('daily-stats-body');
-      const summary = document.getElementById('daily-stats-summary');
-      body.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>';
+      const dateFrom = document.getElementById('daily-stats-from').value;
+      const dateTo   = document.getElementById('daily-stats-to').value;
+      const summary  = document.getElementById('daily-stats-summary');
+      const byDateBody = document.getElementById('daily-stats-by-date-body');
+      const byEmpBody   = document.getElementById('daily-stats-by-employee-body');
+
+      byDateBody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>';
+      byEmpBody.innerHTML  = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>';
+      summary.textContent = '';
 
       try {
-        const stats = await fetchDailyJardStats(date);
-        if (!stats.length) {
-          summary.textContent = 'لا توجد عمليات جرد مسجلة في هذا اليوم';
-          body.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:20px;">لا توجد بيانات</td></tr>';
+        const rows = await fetchDailyJardStats(dateFrom, dateTo);
+
+        if (!rows.length) {
+          summary.textContent = 'لا توجد عمليات جرد مسجلة خلال هذه المدة';
+          byDateBody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--text-muted);padding:20px;">لا توجد بيانات</td></tr>';
+          byEmpBody.innerHTML  = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:20px;">لا توجد بيانات</td></tr>';
           return;
         }
 
-        const totalAll = stats.reduce((sum, s) => sum + (parseInt(s.audits_count) || 0), 0);
-        summary.textContent = `📦 إجمالي الأصناف المجرودة في هذا اليوم (كل الفروع): ${totalAll}`;
+        // إجمالي كل يوم (تجميع كل الموظفين مع بعض لكل تاريخ)
+        const byDate = {};
+        // إجمالي كل موظف خلال المدة كلها
+        const byEmployee = {};
 
-        body.innerHTML = stats.map(s => {
-          const isMe = s.audited_by === employeeName;
+        rows.forEach(r => {
+          const count = parseInt(r.audits_count) || 0;
+          const date  = r.audit_date;
+          byDate[date] = (byDate[date] || 0) + count;
+
+          const key = `${r.audited_by}|${r.branch}`;
+          if (!byEmployee[key]) byEmployee[key] = { audited_by: r.audited_by, branch: r.branch, total: 0 };
+          byEmployee[key].total += count;
+        });
+
+        const totalAll  = Object.values(byDate).reduce((s, c) => s + c, 0);
+        const daysCount = daysBetweenInclusive(dateFrom, dateTo);
+        const avgPerDay = (totalAll / daysCount).toFixed(1);
+        const workedDays = Object.keys(byDate).length;
+        const avgPerWorkedDay = workedDays > 0 ? (totalAll / workedDays).toFixed(1) : '0';
+
+        summary.innerHTML = `
+          📦 إجمالي الأصناف المجرودة: <b>${totalAll}</b> &nbsp;|&nbsp;
+          📅 عدد أيام المدة: <b>${daysCount}</b> &nbsp;|&nbsp;
+          📊 المتوسط اليومي (على كل المدة): <b>${avgPerDay}</b> &nbsp;|&nbsp;
+          📊 المتوسط في أيام الشغل الفعلية (${workedDays} يوم): <b>${avgPerWorkedDay}</b>
+        `;
+
+        // جدول: إجمالي كل يوم (مرتب من الأحدث للأقدم)
+        const sortedDates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
+        byDateBody.innerHTML = sortedDates.map(d => {
+          let dStr = d;
+          try { dStr = new Date(d).toLocaleDateString('ar-EG'); } catch(e) {}
+          return `<tr><td>${dStr}</td><td style="font-weight:700;">${byDate[d]}</td></tr>`;
+        }).join('');
+
+        // جدول: إجمالي كل موظف (مرتب تنازليًا حسب العدد)
+        const employeeRows = Object.values(byEmployee).sort((a, b) => b.total - a.total);
+        byEmpBody.innerHTML = employeeRows.map(e => {
+          const isMe = e.audited_by === employeeName;
           return `<tr style="${isMe ? 'background:var(--surface-3);font-weight:800;' : ''}">
-            <td>${s.audited_by || 'غير معروف'} ${isMe ? '⭐ (أنت)' : ''}</td>
-            <td>${s.branch || '---'}</td>
-            <td>${s.audits_count}</td>
+            <td>${e.audited_by || 'غير معروف'} ${isMe ? '⭐ (أنت)' : ''}</td>
+            <td>${e.branch || '---'}</td>
+            <td>${e.total}</td>
           </tr>`;
         }).join('');
       } catch(e) {
-        body.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--danger);padding:20px;">❌ فشل تحميل البيانات</td></tr>';
+        byDateBody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--danger);padding:20px;">❌ فشل تحميل البيانات</td></tr>';
+        byEmpBody.innerHTML  = '<tr><td colspan="3" style="text-align:center;color:var(--danger);padding:20px;">❌ فشل تحميل البيانات</td></tr>';
       }
     }
 
