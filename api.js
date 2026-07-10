@@ -276,7 +276,35 @@ async function postShiftClose(data) {
     return false;
   }
 }
+const JARD_URL = "https://agent.ebrahimhamdy.com/webhook/inventory_audit_erp";
 
+async function fetchInventoryAudit() {
+  try {
+    const response = await fetch(JARD_URL);
+    if (!response.ok) throw new Error('Network error');
+    const text = await response.text();
+    if (!text || text.trim() === '') return [];
+    const data = JSON.parse(text);
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.error('fetchInventoryAudit error:', e);
+    return [];
+  }
+}
+
+async function updateInventoryAudit(payload) {
+  try {
+    const response = await fetch(JARD_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    return response.ok;
+  } catch (e) {
+    console.error('updateInventoryAudit error:', e);
+    return false;
+  }
+}
 // جلب سجل الإغلاقات السابقة — بنفس fetchFromN8N بنوع shift_closes
 async function fetchShiftCloses() { return await fetchFromN8N('shift_closes'); }
 
