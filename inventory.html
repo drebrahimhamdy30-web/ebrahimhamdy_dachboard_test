@@ -188,6 +188,9 @@
           <span class="highlight" id="branch-tag"></span>
         </div>
         <div class="header-actions">
+          <button class="btn btn-secondary" onclick="openStaleReport()">
+            <i class="fas fa-hourglass-half"></i> لم يُجرد منذ مدة
+          </button>
           <button class="btn btn-secondary" id="report-btn" onclick="openReport()">
             <i class="fas fa-chart-bar"></i> التقرير
           </button>
@@ -332,6 +335,43 @@
           <i class="fas fa-print"></i> طباعة
         </button>
         <button class="btn btn-primary" onclick="closeReport()">إغلاق</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- مودال: الأصناف اللي لم تُجرد منذ مدة (مقارنة مباشرة بالمخزون الحالي) -->
+  <div id="stale-modal" class="modal-overlay" style="display:none;">
+    <div class="modal-box report-box">
+      <div class="modal-title">⏰ أصناف لم تُجرد منذ مدة</div>
+
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;padding:10px 12px;background:var(--surface-3);border-radius:10px;">
+        <div>
+          <label class="modal-label" style="margin-bottom:4px;">لم تُجرد منذ (بالشهور)</label>
+          <input type="number" id="stale-months-input" class="form-input" value="3" min="1" style="width:100px;">
+        </div>
+        <button class="btn btn-primary" onclick="loadStaleReport()">
+          <i class="fas fa-search"></i> بحث
+        </button>
+      </div>
+
+      <div id="stale-summary" style="font-size:0.82rem;color:var(--text-muted);margin-bottom:10px;"></div>
+
+      <div class="table-wrap">
+        <table class="report-table">
+          <thead>
+            <tr><th>كود</th><th>الاسم عربي</th><th>الاسم إنجليزي</th><th>آخر جرد</th></tr>
+          </thead>
+          <tbody id="stale-report-body">
+            <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:20px;">اكتب عدد الشهور واضغط بحث</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="exportStaleReportToExcel()">
+          <i class="fas fa-file-excel"></i> تصدير إكسل
+        </button>
+        <button class="btn btn-primary" onclick="closeStaleReport()">إغلاق</button>
       </div>
     </div>
   </div>
@@ -1145,6 +1185,74 @@
 
     function closeReport() { closeModalFullScreen(document.getElementById('report-modal')); }
     function printReport() { window.print(); }
+
+    // ===== تقرير الأصناف اللي لم تُجرد منذ مدة =====
+    let currentStaleData = [];
+
+    function openStaleReport() {
+      openModalFullScreen(document.getElementById('stale-modal'));
+      loadStaleReport();
+    }
+
+    function closeStaleReport() {
+      closeModalFullScreen(document.getElementById('stale-modal'));
+    }
+
+    async function loadStaleReport() {
+      const months = parseInt(document.getElementById('stale-months-input').value) || 3;
+      const body   = document.getElementById('stale-report-body');
+      const summary = document.getElementById('stale-summary');
+      body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري البحث...</td></tr>';
+      summary.textContent = '';
+
+      try {
+        const items = await fetchStaleItems(userBranch, months);
+        currentStaleData = items;
+
+        summary.textContent = `📦 عدد الأصناف: ${items.length} — لم تُجرد منذ ${months} شهر أو أكتر (أو لم تُجرد أبدًا)`;
+
+        if (!items.length) {
+          body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--success,#16a34a);padding:20px;">✅ كل الأصناف اتجردت خلال المدة المحددة</td></tr>';
+          return;
+        }
+
+        body.innerHTML = items.map(item => {
+          let lastAudited = 'لم يُجرد أبدًا';
+          if (item.last_audited) {
+            try { lastAudited = new Date(item.last_audited).toLocaleDateString('ar-EG'); } catch(e) {}
+          }
+          return `<tr>
+            <td>${item.code || '---'}</td>
+            <td>${item.itm_name_ar || '---'}</td>
+            <td>${item.itm_name_en || '---'}</td>
+            <td style="${!item.last_audited ? 'color:var(--danger,#dc2626);font-weight:700;' : ''}">${lastAudited}</td>
+          </tr>`;
+        }).join('');
+      } catch(e) {
+        body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--danger);padding:20px;">❌ فشل تحميل التقرير</td></tr>';
+      }
+    }
+
+    function exportStaleReportToExcel() {
+      if (typeof XLSX === 'undefined') {
+        alert('⚠️ مكتبة التصدير لسه بتتحمّل، جرب تاني بعد ثانية');
+        return;
+      }
+      if (!currentStaleData.length) { alert('لا توجد بيانات للتصدير'); return; }
+
+      const rows = currentStaleData.map(item => ({
+        'الكود': item.code || '---',
+        'الاسم عربي': item.itm_name_ar || '---',
+        'الاسم إنجليزي': item.itm_name_en || '---',
+        'آخر جرد': item.last_audited ? new Date(item.last_audited).toLocaleDateString('ar-EG') : 'لم يُجرد أبدًا'
+      }));
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, 'لم يُجرد منذ مدة');
+      const dateStr = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `اصناف_لم_تجرد_${userBranch}_${dateStr}.xlsx`);
+    }
 
     function exportReportToExcel() {
       if (typeof XLSX === 'undefined') {
