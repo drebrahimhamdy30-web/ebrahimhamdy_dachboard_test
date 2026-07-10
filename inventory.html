@@ -188,6 +188,15 @@
           <span class="highlight" id="branch-tag"></span>
         </div>
         <div class="header-actions">
+          <span id="my-daily-count" style="font-size:0.82rem;font-weight:700;color:var(--primary);padding:6px 12px;background:var(--surface-3);border-radius:20px;white-space:nowrap;">
+            📊 معدلك اليوم: <b>0</b>
+          </span>
+          <button class="btn btn-secondary" onclick="openFullReport()">
+            <i class="fas fa-list-check"></i> تقرير شامل
+          </button>
+          <button class="btn btn-secondary" onclick="openDailyStats()">
+            <i class="fas fa-users"></i> معدل الفريق اليوم
+          </button>
           <button class="btn btn-secondary" onclick="openStaleReport()">
             <i class="fas fa-hourglass-half"></i> لم يُجرد منذ مدة
           </button>
@@ -376,6 +385,92 @@
     </div>
   </div>
 
+  <!-- مودال: معدل الجرد اليومي (لكل الموظفين — بيبقى ظاهر للموظف نفسه وللإدارة) -->
+  <div id="daily-stats-modal" class="modal-overlay" style="display:none;">
+    <div class="modal-box report-box">
+      <div class="modal-title">📈 معدل الجرد اليومي</div>
+
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;padding:10px 12px;background:var(--surface-3);border-radius:10px;">
+        <div>
+          <label class="modal-label" style="margin-bottom:4px;">التاريخ</label>
+          <input type="date" id="daily-stats-date" class="form-input" style="width:160px;">
+        </div>
+        <button class="btn btn-primary" onclick="loadDailyStats()">
+          <i class="fas fa-search"></i> عرض
+        </button>
+      </div>
+
+      <div id="daily-stats-summary" style="font-size:0.82rem;color:var(--text-muted);margin-bottom:10px;"></div>
+
+      <div class="table-wrap">
+        <table class="report-table">
+          <thead>
+            <tr><th>الموظف</th><th>الفرع</th><th>عدد الأصناف المجرودة</th></tr>
+          </thead>
+          <tbody id="daily-stats-body">
+            <tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-primary" onclick="closeDailyStats()">إغلاق</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- مودال: التقرير الشامل لكل عمليات الجرد (كل الفئات مع بعض) -->
+  <div id="full-report-modal" class="modal-overlay" style="display:none;">
+    <div class="modal-box report-box">
+      <div class="modal-title">📋 تقرير شامل لكل عمليات الجرد</div>
+
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;padding:10px 12px;background:var(--surface-3);border-radius:10px;">
+        <div>
+          <label class="modal-label" style="margin-bottom:4px;">الفئة</label>
+          <select id="full-report-category" class="form-select" style="width:150px;">
+            <option value="">كل الفئات</option>
+            <option value="تلاجه">🧊 تلاجة</option>
+            <option value="غوالى">💊 غوالي</option>
+            <option value="fastmove">⚡ سريع</option>
+            <option value="مرتجعات">🔄 مرتجعات</option>
+            <option value="erp">🖥️ ERP</option>
+          </select>
+        </div>
+        <div>
+          <label class="modal-label" style="margin-bottom:4px;">من تاريخ</label>
+          <input type="date" id="full-report-from" class="form-input" style="width:150px;">
+        </div>
+        <div>
+          <label class="modal-label" style="margin-bottom:4px;">إلى تاريخ</label>
+          <input type="date" id="full-report-to" class="form-input" style="width:150px;">
+        </div>
+        <button class="btn btn-primary" onclick="loadFullReport()">
+          <i class="fas fa-search"></i> بحث
+        </button>
+      </div>
+
+      <div id="full-report-summary" style="font-size:0.82rem;color:var(--text-muted);margin-bottom:10px;"></div>
+
+      <div class="table-wrap">
+        <table class="report-table">
+          <thead>
+            <tr><th>الكود</th><th>الاسم</th><th>الفئة</th><th>الحالة</th><th>رصيد النظام</th><th>الرصيد الفعلي</th><th>بواسطة</th><th>التاريخ</th></tr>
+          </thead>
+          <tbody id="full-report-body">
+            <tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:20px;">اضغط بحث لعرض النتائج</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="exportFullReportToExcel()">
+          <i class="fas fa-file-excel"></i> تصدير إكسل
+        </button>
+        <button class="btn btn-primary" onclick="closeFullReport()">إغلاق</button>
+      </div>
+    </div>
+  </div>
+
 <script src="api.js"></script>
 <script src="nav.js" defer></script>
   <script>
@@ -464,6 +559,7 @@
     }
 
     let activeUser       = null;
+    let employeeName     = '';
     let rawData          = [];
     let filteredData      = [];
     let currentTab       = 'تلاجه';
@@ -477,13 +573,15 @@
     checkAuth().then(async user => {
       activeUser = user;
       if (user) {
-        userBranch = (localStorage.getItem('userBranch') || '').trim();
-        userRole   = (localStorage.getItem('userRole')   || 'employee').trim();
+        userBranch   = (localStorage.getItem('userBranch') || '').trim();
+        userRole     = (localStorage.getItem('userRole')   || 'employee').trim();
+        employeeName = (localStorage.getItem('fullName') || activeUser || '').trim();
         document.getElementById('branch-tag').textContent = userBranch;
         updateFilterBtn();
         updateTabUIVisibility();
         await loadFormCategoryRules();
         loadCurrentTab();
+        loadMyDailyCount();
       }
     });
 
@@ -798,7 +896,8 @@
         itm_name_en: item.itm_name_en,
         matched:     true,
         system_qty:  item._systemQty,
-        actual_qty:  item._systemQty
+        actual_qty:  item._systemQty,
+        audited_by:  employeeName
       });
 
       if (ok) {
@@ -808,6 +907,7 @@
         updateSummary();
         updatePagination();
         renderPage();
+        loadMyDailyCount();
       } else {
         alert('⚠️ فشل الحفظ، يرجى المحاولة مجدداً');
       }
@@ -825,7 +925,8 @@
         itm_name_en: item.itm_name_en,
         matched:     false,
         system_qty:  item._systemQty,
-        actual_qty:  Number(actualVal)
+        actual_qty:  Number(actualVal),
+        audited_by:  employeeName
       });
 
       if (ok) {
@@ -835,6 +936,7 @@
         updateSummary();
         updatePagination();
         renderPage();
+        loadMyDailyCount();
       } else {
         alert('⚠️ فشل الحفظ، يرجى المحاولة مجدداً');
       }
@@ -1023,6 +1125,23 @@
         if (!ok) success = false;
       }
 
+      // تسجيل موحّد في jard_audit_log كمان (عشان يدخل في التقرير الشامل ومعدل الفريق)
+      // بس لو الإجراء فعلي (مطابق أو غير مطابق)، مش تجاهل
+      if (success && (isDone || isMismatch)) {
+        await submitJardAudit({
+          branch:      userBranch,
+          category:    currentTab,
+          code:        clicked?.code,
+          itm_name_ar: clicked?.itm_name_ar,
+          itm_name_en: clicked?.itm_name_en,
+          matched:     isDone,
+          system_qty:  extra.system_balance ?? clicked?.system_balance ?? null,
+          actual_qty:  isDone ? (extra.system_balance ?? clicked?.system_balance ?? null) : extra.actual_balance,
+          audited_by:  employeeName
+        });
+        loadMyDailyCount();
+      }
+
       if (doneBtn)    doneBtn.disabled = false;
       if (skipBtn)     skipBtn.disabled = false;
       if (mismatchBtn) mismatchBtn.disabled = false;
@@ -1185,6 +1304,142 @@
 
     function closeReport() { closeModalFullScreen(document.getElementById('report-modal')); }
     function printReport() { window.print(); }
+
+    // ===== التقرير الشامل لكل عمليات الجرد (كل الفئات) =====
+    let currentFullReportData = [];
+    const FULL_REPORT_CATEGORY_LABELS = {
+      'تلاجه': '🧊 تلاجة', 'غوالى': '💊 غوالي', 'fastmove': '⚡ سريع',
+      'مرتجعات': '🔄 مرتجعات', 'erp': '🖥️ ERP'
+    };
+
+    function openFullReport() {
+      openModalFullScreen(document.getElementById('full-report-modal'));
+      if (!currentFullReportData.length) loadFullReport();
+    }
+
+    function closeFullReport() {
+      closeModalFullScreen(document.getElementById('full-report-modal'));
+    }
+
+    async function loadFullReport() {
+      const category = document.getElementById('full-report-category').value;
+      const dateFrom = document.getElementById('full-report-from').value;
+      const dateTo   = document.getElementById('full-report-to').value;
+      const body     = document.getElementById('full-report-body');
+      const summary  = document.getElementById('full-report-summary');
+
+      body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>';
+
+      try {
+        const items = await fetchFullJardReport({ branch: userBranch, category, dateFrom, dateTo });
+        currentFullReportData = items;
+
+        const matchedCount    = items.filter(i => i.matched === true || i.matched === 'true').length;
+        const mismatchedCount = items.length - matchedCount;
+        summary.textContent = `📦 الإجمالي: ${items.length} — ✅ مطابق: ${matchedCount} — ❌ غير مطابق: ${mismatchedCount}`;
+
+        if (!items.length) {
+          body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:20px;">لا توجد نتائج</td></tr>';
+          return;
+        }
+
+        body.innerHTML = items.map(i => {
+          const isMatched = (i.matched === true || i.matched === 'true');
+          let dateStr = '';
+          try { dateStr = new Date(i.audited_at).toLocaleString('ar-EG'); } catch(e) {}
+          return `<tr>
+            <td>${i.code || '---'}</td>
+            <td>${i.itm_name_ar || '---'}</td>
+            <td>${FULL_REPORT_CATEGORY_LABELS[i.category] || i.category || '---'}</td>
+            <td style="color:${isMatched ? 'var(--success,#16a34a)' : 'var(--danger,#dc2626)'};font-weight:700;">${isMatched ? '✅ مطابق' : '❌ غير مطابق'}</td>
+            <td>${i.system_qty ?? '—'}</td>
+            <td>${i.actual_qty ?? '—'}</td>
+            <td>${i.audited_by || '—'}</td>
+            <td style="font-size:0.72rem;">${dateStr}</td>
+          </tr>`;
+        }).join('');
+      } catch(e) {
+        body.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:20px;">❌ فشل تحميل التقرير</td></tr>';
+      }
+    }
+
+    function exportFullReportToExcel() {
+      if (typeof XLSX === 'undefined') {
+        alert('⚠️ مكتبة التصدير لسه بتتحمّل، جرب تاني بعد ثانية');
+        return;
+      }
+      if (!currentFullReportData.length) { alert('لا توجد بيانات للتصدير'); return; }
+
+      const rows = currentFullReportData.map(i => ({
+        'الكود': i.code || '---',
+        'الاسم': i.itm_name_ar || '---',
+        'الفئة': FULL_REPORT_CATEGORY_LABELS[i.category] || i.category || '---',
+        'الحالة': (i.matched === true || i.matched === 'true') ? 'مطابق' : 'غير مطابق',
+        'رصيد النظام': i.system_qty ?? '',
+        'الرصيد الفعلي': i.actual_qty ?? '',
+        'بواسطة': i.audited_by || '',
+        'التاريخ': i.audited_at ? new Date(i.audited_at).toLocaleString('ar-EG') : ''
+      }));
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, 'تقرير شامل');
+      const dateStr = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `تقرير_جرد_شامل_${userBranch}_${dateStr}.xlsx`);
+    }
+
+    // ===== معدل الجرد اليومي (شخصي + فريق) =====
+    async function loadMyDailyCount() {
+      try {
+        const stats = await fetchDailyJardStats(); // اليوم افتراضيًا
+        const mine  = stats.filter(s => s.audited_by === employeeName);
+        const total = mine.reduce((sum, s) => sum + (parseInt(s.audits_count) || 0), 0);
+        document.getElementById('my-daily-count').innerHTML = `📊 معدلك اليوم: <b>${total}</b>`;
+      } catch(e) {
+        // تجاهل بصمت لو فشل، مش حرج للصفحة الأساسية
+      }
+    }
+
+    function openDailyStats() {
+      const dateInput = document.getElementById('daily-stats-date');
+      if (!dateInput.value) dateInput.value = new Date().toISOString().slice(0, 10);
+      openModalFullScreen(document.getElementById('daily-stats-modal'));
+      loadDailyStats();
+    }
+
+    function closeDailyStats() {
+      closeModalFullScreen(document.getElementById('daily-stats-modal'));
+    }
+
+    async function loadDailyStats() {
+      const date = document.getElementById('daily-stats-date').value;
+      const body = document.getElementById('daily-stats-body');
+      const summary = document.getElementById('daily-stats-summary');
+      body.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>';
+
+      try {
+        const stats = await fetchDailyJardStats(date);
+        if (!stats.length) {
+          summary.textContent = 'لا توجد عمليات جرد مسجلة في هذا اليوم';
+          body.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:20px;">لا توجد بيانات</td></tr>';
+          return;
+        }
+
+        const totalAll = stats.reduce((sum, s) => sum + (parseInt(s.audits_count) || 0), 0);
+        summary.textContent = `📦 إجمالي الأصناف المجرودة في هذا اليوم (كل الفروع): ${totalAll}`;
+
+        body.innerHTML = stats.map(s => {
+          const isMe = s.audited_by === employeeName;
+          return `<tr style="${isMe ? 'background:var(--surface-3);font-weight:800;' : ''}">
+            <td>${s.audited_by || 'غير معروف'} ${isMe ? '⭐ (أنت)' : ''}</td>
+            <td>${s.branch || '---'}</td>
+            <td>${s.audits_count}</td>
+          </tr>`;
+        }).join('');
+      } catch(e) {
+        body.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--danger);padding:20px;">❌ فشل تحميل البيانات</td></tr>';
+      }
+    }
 
     // ===== تقرير الأصناف اللي لم تُجرد منذ مدة =====
     let currentStaleData = [];
