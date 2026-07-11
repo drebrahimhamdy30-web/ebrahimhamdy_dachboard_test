@@ -454,6 +454,13 @@
       return tmp.innerText||tmp.textContent||'';
     }
 
+    // كشف تلف الترميز (حروف � تعني ترميزاً مكسوراً)
+    function isMojibake(s){
+      if(!s) return false;
+      var bad=(s.match(/\uFFFD/g)||[]).length;
+      return bad > 2;
+    }
+
     // التقاط حدث اللصق في الصندوق
     (function(){
       var catcher=document.getElementById('paste-catcher');
@@ -465,13 +472,19 @@
           var html = e.clipboardData.getData('text/html');
           if(html) fromHtml = htmlToTable(html);
         }
-        // اختر المصدر الأطول (HTML للجدول يحافظ على كل الصفوف؛ يتفادى القصّ في النص العادي)
+
+        // القاعدة: النص العادي (text/plain) ترميزه سليم دائماً → نفضّله.
+        // لا نلجأ للـ HTML إلا إذا كان الـ plain فارغاً أو تالف الترميز،
+        // أو لو صفوف HTML أكثر بوضوح (قصّ محتمل في plain) وترميزه سليم.
         var txt = plain;
-        if(fromHtml){
+        if(!txt.trim() || isMojibake(txt)){
+          if(fromHtml && !isMojibake(fromHtml)) txt = fromHtml;
+        } else if(fromHtml && !isMojibake(fromHtml)){
           var plainRows = plain.split(/\r?\n/).filter(function(l){return l.trim();}).length;
           var htmlRows  = fromHtml.split(/\r?\n/).filter(function(l){return l.trim();}).length;
-          if(htmlRows >= plainRows) txt = fromHtml;
+          if(htmlRows > plainRows) txt = fromHtml;
         }
+
         if(!txt.trim()) return;
         var rows=parsePaste(txt);
         if(!rows.length){ alert('لم أتعرّف على أي صنف في اللصقة. تأكد إنك ناسخ صفوف الجدول كاملة.'); return; }
