@@ -23,6 +23,11 @@ class DispatchEngine {
     this.isRunning = false;
     this._interval = null;
     this.onLog = null;
+    this._isBusy = false; // منع تداخل دورتين تشغيل فوق بعض
+  }
+
+  _sleep(ms) {
+    return new Promise(function(resolve){ setTimeout(resolve, ms); });
   }
 
   stop() {
@@ -56,14 +61,23 @@ class DispatchEngine {
 
 async run() {
     if (!this.isRunning) return;
-    await this.loadSettings();
-    if (!this.settings || !this.settings.auto_dispatch) {
-      this.stop();
+
+    // منع تشغيل دورتين فوق بعض (لو الدورة القديمة لسه بتستنى بين الطلبات)
+    if (this._isBusy) {
+      this.log('⏸ الدورة السابقة لسه شغالة — تم تخطي هذه الدورة');
       return;
     }
+    this._isBusy = true;
 
-    this.log('🔄 جاري فحص الطلبات...');
     try {
+      await this.loadSettings();
+      if (!this.settings || !this.settings.auto_dispatch) {
+        this.stop();
+        return;
+      }
+
+      this.log('🔄 جاري فحص الطلبات...');
+
       // رجّع الطلبات المؤجلة اللي عدّى وقتها أولاً — قبل أي return
       await this.activateDuePostponed();
 
@@ -78,16 +92,30 @@ async run() {
       var routeMap = await this.buildRouteMap();
       var driverActiveTrip = await this.getDriverActiveTrip(drivers.map(function(d){return d.id;}), routeMap);
 
+      // الفاصل بالثواني بين توزيع كل طلب والتالي
+      var staggerMs = (this.settings.stagger_seconds || 5) * 1000;
+
       var assigned = 0;
       for (var i = 0; i < orders.length; i++) {
+        if (!this.isRunning) break; // لو الـ Engine اتوقف وسط الدورة، يقف فوراً
+
         var ok = await this.assignOrder(orders[i], drivers, routeMap, driverActiveTrip);
-        if (ok) assigned++;
+        if (ok) {
+          assigned++;
+          // استنى قبل ما توزّع اللي بعده (لو فيه طلبات لسه)
+          if (i < orders.length - 1) {
+            this.log('⏳ انتظار ' + (staggerMs/1000) + ' ثانية قبل توزيع الطلب التالي...');
+            await this._sleep(staggerMs);
+          }
+        }
       }
       this.log('✅ تم توزيع ' + assigned + ' طلب');
 
     } catch(e) {
       console.error('Engine error:', e);
       this.log('❌ خطأ: ' + e.message);
+    } finally {
+      this._isBusy = false;
     }
   }
   async activateDuePostponed() {
