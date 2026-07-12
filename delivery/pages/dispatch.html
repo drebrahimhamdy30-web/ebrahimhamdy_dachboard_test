@@ -507,7 +507,6 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../supabase-config.js"></script>
 <script src="../permissions.js"></script>
-<script src="../dispatch-engine.js"></script>
 <script>
 
 const DC=['#1a56db','#7c3aed','#16a34a','#ea580c','#0891b2','#ca8a04','#dc2626','#0d9488','#b45309','#1e40af','#065f46','#92400e','#4338ca','#0f766e'];
@@ -952,6 +951,7 @@ function renderTrips(){
     const tO=oIds.map(id=>allOrders.find(o=>o.id===id)).filter(Boolean);
     const tot=tO.reduce((s,o)=>s+Number(o.total_bill_net||0),0);
     const done=tO.filter(o=>['delivered','completed'].includes(o.status)).length;
+    const waitingPickup=tO.filter(o=>o.status==='assigned').length;
     return `<div class="trip-card ${filterDriver===trip.driver_id?'hl':''}" data-did="${trip.driver_id||''}">
       <div class="tc-hd">
         <div class="tc-av" style="background:${c}">${dn.charAt(0)}</div>
@@ -1002,7 +1002,10 @@ function renderTrips(){
       </div>
       <div class="tc-ft">
         <span class="tc-tot">${tot.toLocaleString()} ج.م</span>
-        <button class="tc-btn" onclick="completeTrip('${trip.id}')">إنهاء الرحلة</button>
+        <div style="display:flex;gap:.3rem">
+          ${waitingPickup>0?`<button class="tc-btn" style="background:var(--yellow-light);color:#a16207;border-color:#fde68a" onclick="pickupAllTrip('${trip.id}',event)">▶ استلام (${waitingPickup})</button>`:''}
+          <button class="tc-btn" onclick="completeTrip('${trip.id}')">إنهاء الرحلة</button>
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -1190,6 +1193,7 @@ async function confirmAssign(){
       }
       const {data:to}=await db.from('trip_orders').select('id').eq('trip_id',window._reassignTripId);
       await db.from('trips').update({orders_count:(to||[]).length,updated_at:now}).eq('id',window._reassignTripId);
+      await autoCloseTripIfEmpty(window._reassignTripId);
       window._reassignTripId=null;
     }
     await db.from('orders').update({
@@ -1223,7 +1227,7 @@ async function confirmAssign(){
       await addTripLog(tripId,'order_added',{driver:driver?.full_name,orders:orderIds.length});
     }else{
       // أنشئ رحلة جديدة
-      const {data:trip}=await db.from('trips').insert({
+      const {data:trip,error:tripErr}=await db.from('trips').insert({
         driver_id:driverId,
         driver_name:driver?.full_name,
         branch_id:branchId,
@@ -1232,7 +1236,23 @@ async function confirmAssign(){
         total_amount:newTotal,
         created_at:now
       }).select().single();
-      if(trip){
+
+      if(tripErr&&tripErr.code==='23505'){
+        // رحلة اتعملت للطيار في نفس اللحظة (التوزيع التلقائي من الخادم) → ضيف عليها بدل ما تفشل
+        const {data:races}=await db.from('trips').select('*').eq('driver_id',driverId).eq('status','active').limit(1);
+        const raceTrip=races?.[0];
+        if(raceTrip){
+          tripId=raceTrip.id;
+          await db.from('trip_orders').insert(orderIds.map(id=>({trip_id:tripId,order_id:id})));
+          const {data:curTO}=await db.from('trip_orders').select('id').eq('trip_id',tripId);
+          await db.from('trips').update({
+            orders_count:(curTO||[]).length,
+            total_amount:Number(raceTrip.total_amount||0)+newTotal,
+            updated_at:now
+          }).eq('id',tripId);
+          await addTripLog(tripId,'order_added',{driver:driver?.full_name,orders:orderIds.length,race_recovered:true});
+        }
+      }else if(trip){
         tripId=trip.id;
         await db.from('trip_orders').insert(orderIds.map(id=>({trip_id:tripId,order_id:id})));
         await addTripLog(tripId,'trip_created',{driver:driver?.full_name,orders:orderIds.length});
@@ -1296,6 +1316,7 @@ async function confirmPostpone(){
     await db.from('trip_orders').delete().eq('trip_id',tripId).eq('order_id',id);
     const {data:to}=await db.from('trip_orders').select('id').eq('trip_id',tripId);
     await db.from('trips').update({orders_count:(to||[]).length,updated_at:now}).eq('id',tripId);
+    await autoCloseTripIfEmpty(tripId);
   }
   await db.from('orders').update({
     status:'postponed',postpone_reason:reason,
@@ -1317,8 +1338,19 @@ async function confirmCancel(){
   const id=document.getElementById('cnl-id').value;
   const reason=document.getElementById('cnl-reason').value;
   showLoading(true);
-  await db.from('orders').update({status:'cancelled',cancelled_reason:reason,updated_at:new Date().toISOString()}).eq('id',id);
+  const now=new Date().toISOString();
+  // لو الطلب مرتبط برحلة → شيله منها كمان
+  const tripEntry=Object.entries(tripOrdersMap).find(([,ids])=>ids.includes(id));
+  let tripId=null;
+  if(tripEntry){
+    tripId=tripEntry[0];
+    await db.from('trip_orders').delete().eq('trip_id',tripId).eq('order_id',id);
+    const {data:to}=await db.from('trip_orders').select('id').eq('trip_id',tripId);
+    await db.from('trips').update({orders_count:(to||[]).length,updated_at:now}).eq('id',tripId);
+  }
+  await db.from('orders').update({status:'cancelled',cancelled_reason:reason,driver_id:null,deliveryman:null,updated_at:now}).eq('id',id);
   await addOrderLog(id,'order_cancelled',{reason:reason||'—'});
+  if(tripId) await autoCloseTripIfEmpty(tripId);
   closeModal('cancelModal');showToast('تم الإلغاء');await loadAll();showLoading(false);
 }
 
@@ -1401,14 +1433,51 @@ async function markUrgent(id,e){
   showToast('🚨 تم تحديده كعاجل');await loadAll();showLoading(false);
 }
 
-// تغيير حالة الطلب لـ picked (الطيار استلم)
+// تغيير حالة الطلب لـ picked (الاستلام بالنيابة عن الطيار من الداشبورد)
 async function markPicked(id,e){
   e?.stopPropagation();
+  const o=allOrders.find(x=>x.id===id);
+  if(!o){showToast('الطلب غير موجود');return;}
+  if(o.status!=='assigned'){showToast('❌ الطلب ليس في حالة "على رحلة" — لا يمكن تسجيل الاستلام');return;}
+  if(!o.driver_id){showToast('❌ الطلب غير معيّن على طيار');return;}
   showLoading(true);
   const now=new Date().toISOString();
   await db.from('orders').update({status:'picked',picked_at:now,updated_at:now}).eq('id',id);
-  await addOrderLog(id,'order_picked',{});
+  await addOrderLog(id,'order_picked',{by:'dispatch',driver:o.deliveryman||'—'});
   showToast('✓ تم تسجيل الاستلام');await loadAll();showLoading(false);
+}
+
+// استلام كل طلبات الرحلة مرة واحدة (بالنيابة عن الطيار)
+async function pickupAllTrip(tripId,e){
+  e?.stopPropagation();
+  const oIds=tripOrdersMap[tripId]||[];
+  const waiting=oIds.map(id=>allOrders.find(o=>o.id===id)).filter(o=>o&&o.status==='assigned');
+  if(!waiting.length){showToast('لا توجد طلبات بانتظار الاستلام في هذه الرحلة');return;}
+  const trip=activeTrips.find(t=>t.id===tripId);
+  if(!confirm(`تسجيل استلام ${waiting.length} طلب للطيار ${trip?.driver_name||'—'}؟`))return;
+  showLoading(true);
+  const now=new Date().toISOString();
+  const ids=waiting.map(o=>o.id);
+  await db.from('orders').update({status:'picked',picked_at:now,updated_at:now}).in('id',ids);
+  for(const id of ids) await addOrderLog(id,'order_picked',{by:'dispatch',bulk:true,trip_id:tripId});
+  showToast(`✓ تم تسجيل استلام ${ids.length} طلب`);
+  await loadAll();showLoading(false);
+}
+
+// يغلق الرحلة تلقائياً لو فضيت من كل الأوردرات — من غير ما يأثر على "دور" الطيار
+async function autoCloseTripIfEmpty(tripId){
+  if(!tripId) return;
+  const {data:to} = await db.from('trip_orders').select('id').eq('trip_id', tripId);
+  const count = (to||[]).length;
+  if(count === 0){
+    const {data:tripRow} = await db.from('trips').select('status,driver_id').eq('id', tripId).single();
+    if(tripRow && tripRow.status === 'active'){
+      const now = new Date().toISOString();
+      await db.from('trips').update({status:'completed', updated_at:now}).eq('id', tripId);
+      await addTripLog(tripId, 'trip_completed', {auto:true, reason:'empty_trip'});
+      // ملحوظة: لا نحدّث last_completed_at هنا عمداً — الطيار محتفظ بمكانه في الطابور
+    }
+  }
 }
 
 // إزالة أوردر من رحلة (يتأجل 5 دقائق ثم يعود للتوزيع)
@@ -1432,6 +1501,7 @@ async function removeFromTrip(orderId, tripId, e){
   // حدّث عدد الطلبات في الرحلة
   const {data:to} = await db.from('trip_orders').select('id').eq('trip_id', tripId);
   await db.from('trips').update({orders_count: (to||[]).length, updated_at: now}).eq('id', tripId);
+  await autoCloseTripIfEmpty(tripId);
   await addOrderLog(orderId, 'order_postponed', {action: 'removed_from_trip', trip_id: tripId, reactivate_at: reactivateAt});
   showToast('✓ تم تأجيل الطلب 1 دقائق');
   await loadAll();
@@ -1486,11 +1556,8 @@ function openTripOrderActions(orderId, tripId){
 
 async function toaPickup(){
   const id=document.getElementById('toa-id').value;
-  showLoading(true);
-  const now=new Date().toISOString();
-  await db.from('orders').update({status:'picked',picked_at:now,updated_at:now}).eq('id',id);
-  await addOrderLog(id,'order_picked',{by:'dispatch'});
-  closeModal('tripOrderActionsModal');showToast('✓ تم تسجيل الاستلام');await loadAll();showLoading(false);
+  closeModal('tripOrderActionsModal');
+  await markPicked(id,null);
 }
 
 function toaDeliver(){
@@ -1688,6 +1755,7 @@ if(o.delivered_at){
   footerBtns+=`<button class="btn btn-outline" onclick="closeModal('detailModal');openLog('${orderId}',null)">📋 سجل</button>`;
 
   if(o.status==='assigned'){
+    footerBtns+=`<button class="btn btn-green" onclick="closeModal('detailModal');markPicked('${orderId}',null)">▶️ تسجيل الاستلام</button>`;
     footerBtns+=`<button class="btn btn-primary" onclick="closeModal('detailModal');openReassign('${orderId}','${tripId}')">🔄 إعادة تعيين</button>`;
     footerBtns+=`<button class="btn btn-outline" onclick="closeModal('detailModal');removeFromTrip('${orderId}','${tripId}',{stopPropagation:()=>{}})">↩ إزالة من الرحلة</button>`;
     footerBtns+=`<button class="btn btn-red" onclick="closeModal('detailModal');openCancel('${orderId}',null)">إلغاء</button>`;
@@ -1732,6 +1800,7 @@ async function openCancelByCustomer(orderId){
     await db.from('trip_orders').delete().eq('trip_id',tripId).eq('order_id',orderId);
     const {data:to}=await db.from('trip_orders').select('id').eq('trip_id',tripId);
     await db.from('trips').update({orders_count:(to||[]).length,updated_at:now}).eq('id',tripId);
+    await autoCloseTripIfEmpty(tripId);
   }
   await db.from('orders').update({
     status:'cancelled',cancelled_reason:'العميل ألغى الطلب',
@@ -1781,10 +1850,15 @@ async function completeTrip(tripId){
   if(!confirm('إنهاء الرحلة؟'))return;
   showLoading(true);
   const nowC=new Date().toISOString();
+  const tripRow=activeTrips.find(t=>t.id===tripId);
   await db.from('trips').update({status:'completed',updated_at:nowC}).eq('id',tripId);
   if(oIds.length)await db.from('orders').update({status:'completed',completed_at:nowC,updated_at:nowC}).in('id',oIds);
   await addTripLog(tripId,'trip_completed',{orders:oIds.length});
   for(const id of oIds)await addOrderLog(id,'order_completed',{trip_id:tripId});
+  // الطيار فعلاً وصّل واستحق يترتيب آخر الطابور
+  if(tripRow?.driver_id){
+    await db.from('drivers').update({last_completed_at:nowC}).eq('id',tripRow.driver_id);
+  }
   showToast('✓ تم إنهاء الرحلة');await loadAll();showLoading(false);
 }
 // ===== موافقة إنهاء الرحلة (طلب من الطيار) =====
@@ -1829,6 +1903,7 @@ async function approveComplete(){
   const tripId=document.getElementById('ca-trip-id').value;
   showLoading(true);
   const now=new Date().toISOString();
+  const trip=activeTrips.find(t=>t.id===tripId);
   const oIds=tripOrdersMap[tripId]||[];
   const tO=oIds.map(id=>allOrders.find(o=>o.id===id)).filter(Boolean);
   // المتعذرة ترجع للتوزيع
@@ -1844,6 +1919,10 @@ async function approveComplete(){
   await db.from('trips').update({status:'completed',updated_at:now}).eq('id',tripId);
   await addTripLog(tripId,'trip_completed',{by:'admin_approved'});
   for(const id of deliveredIds)await addOrderLog(id,'order_completed',{trip_id:tripId});
+  // الطيار فعلاً وصّل واستحق يترتيب آخر الطابور
+  if(trip?.driver_id && deliveredIds.length){
+    await db.from('drivers').update({last_completed_at:now}).eq('id',trip.driver_id);
+  }
   closeModal('completeApprovalModal');showToast('✓ تمت الموافقة وإنهاء الرحلة');await loadAll();showLoading(false);
 }
 
@@ -1938,11 +2017,6 @@ document.querySelectorAll('.modal-overlay').forEach(m=>m.addEventListener('click
 function showLoading(show){document.getElementById('loadingOverlay').classList.toggle('show',show);}
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
 
-// ============================================================
-// استبدل قسم BRANCH SELECTOR بالكامل في dispatch.html بدي
-// (من تعليق "// ===== BRANCH SELECTOR =====" لحد "initBranchSelector();")
-// ============================================================
-
 // ===== BRANCH SELECTOR =====
 let activeBranchId = null;       // null = كل الفروع
 let allBranchesCache = [];       // كاش الفروع للتابات
@@ -1954,7 +2028,6 @@ async function initBranchSelector(){
     // موظف الفرع → فرعه بس
     activeBranchId = currentUser?.branch_id || null;
     loadAll();
-    setTimeout(initDispatchEngine, 2000);
     return;
   }
 
@@ -1972,7 +2045,6 @@ async function initBranchSelector(){
       : 'كل الفروع';
     document.getElementById('branchLabel').textContent = '· ' + name;
     loadAll();
-    setTimeout(initDispatchEngine, 1000);
   } else {
     // أول مرة بس → اعرض الـ overlay للاختيار المبدئي
     renderBranchTabs();
@@ -2007,10 +2079,7 @@ function selectBranchTab(id){
   const name = id ? (allBranchesCache.find(b=>b.id===id)?.name || '') : 'كل الفروع';
   document.getElementById('branchLabel').textContent = '· ' + name;
   renderBranchTabs();
-  // أعد تشغيل الـ engine للفرع الجديد
-  if(dispatchEngine){ dispatchEngine.stop?.(); dispatchEngine=null; }
   loadAll();
-  if(id) setTimeout(initDispatchEngine, 1000);
 }
 
 // الـ overlay لسه موجود لأول اختيار بس
@@ -2036,9 +2105,7 @@ function selectBranch(id, name){
   document.getElementById('branchOverlay').style.display='none';
   document.getElementById('branchLabel').textContent = '· ' + name;
   renderBranchTabs();
-  if(dispatchEngine){ dispatchEngine.stop?.(); dispatchEngine=null; }
   loadAll();
-  setTimeout(initDispatchEngine, 1000);
 }
 
 function selectBranchAll(){
@@ -2052,49 +2119,8 @@ function selectBranchAll(){
 
 initBranchSelector();
 
-// ===== AUTO DISPATCH ENGINE =====
-let dispatchEngine = null;
-async function initDispatchEngine() {
-  // استخدم الفرع المختار (admin) أو فرع المستخدم
-  const branchId = currentUser?.role==='admin' ? activeBranchId : currentUser?.branch_id;
-  if (!branchId) {
-    console.log('[AutoDispatch] لم يتم اختيار فرع بعد');
-    return;
-  }
-  // تحقق من إعداد auto_dispatch
-  const {data:ds} = await db.from('dispatch_settings').select('auto_dispatch').eq('branch_id', branchId);
-  const autoDispatch = ds?.[0]?.auto_dispatch;
-  if (!autoDispatch) {
-    console.log('[AutoDispatch] التوزيع التلقائي معطّل من الإعدادات');
-    return;
-  }
-  // لو فيه engine قديم على فرع مختلف → وقّفه
-  if (dispatchEngine) { dispatchEngine.stop?.(); dispatchEngine=null; }
-  dispatchEngine = new DispatchEngine(db, branchId);
-  dispatchEngine.onLog = (msg) => {
-    if (msg.includes('✅') || msg.includes('❌') || msg.includes('⚠️')) showToast(msg);
-    console.log('[AutoDispatch]', msg);
-  };
-  await dispatchEngine.start();
-}
-
-// إعادة تشغيل الـ engine لو تغير الإعداد أو الفرع (كل دقيقة)
-setInterval(async()=>{
-  const branchId = currentUser?.role==='admin' ? activeBranchId : currentUser?.branch_id;
-  if(!branchId) return;
-  const {data:ds}=await db.from('dispatch_settings').select('auto_dispatch').eq('branch_id',branchId);
-  const autoDispatch=ds?.[0]?.auto_dispatch;
-  // لو الفرع اتغير → وقّف الـ engine القديم
-  if(dispatchEngine && dispatchEngine.branchId !== branchId){
-    dispatchEngine.stop?.(); dispatchEngine=null;
-  }
-  if(autoDispatch && !dispatchEngine){
-    await initDispatchEngine();
-  } else if(!autoDispatch && dispatchEngine){
-    dispatchEngine.stop?.(); dispatchEngine=null;
-    console.log('[AutoDispatch] تم إيقاف التوزيع التلقائي');
-  }
-},60000);
+// ملحوظة: التوزيع التلقائي انتقل بالكامل إلى الخادم (n8n → auto_dispatch_tick في Supabase)
+// هذه الشاشة للعرض والإجراءات اليدوية فقط.
 </script>
 </body>
 </html>
