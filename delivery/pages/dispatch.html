@@ -432,10 +432,18 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
 <!-- Modal: Postpone -->
 <div class="modal-overlay" id="postponeModal">
   <div class="modal modal-sm">
-    <div class="modal-header"><span class="modal-title">تأجيل الطلب</span><button class="modal-close" onclick="closeModal('postponeModal')">✕</button></div>
+    <div class="modal-header"><span class="modal-title" id="pst-title">تأجيل الطلب</span><button class="modal-close" onclick="closeModal('postponeModal')">✕</button></div>
     <div class="modal-body">
       <input type="hidden" id="pst-id">
-      <div class="form-group"><label>وقت التأجيل</label><input type="datetime-local" class="form-control" id="pst-time"></div>
+      <div class="form-group"><label>يعود للتوزيع في *</label><input type="datetime-local" class="form-control" id="pst-time">
+        <div style="display:flex;gap:.3rem;margin-top:.4rem;flex-wrap:wrap">
+          <button class="ftab" onclick="setPstMins(5)">+5د</button>
+          <button class="ftab" onclick="setPstMins(15)">+15د</button>
+          <button class="ftab" onclick="setPstMins(30)">+30د</button>
+          <button class="ftab" onclick="setPstMins(60)">+ساعة</button>
+          <button class="ftab" onclick="setPstMins(180)">+3 ساعات</button>
+        </div>
+      </div>
       <div class="form-group" style="margin-bottom:0"><label>السبب</label><textarea class="form-control" id="pst-reason" placeholder="سبب التأجيل..."></textarea></div>
     </div>
     <div class="modal-footer">
@@ -974,20 +982,28 @@ const pickedMap={};allOrders.filter(o=>['picked','failed'].includes(o.status)&&o
     const onTrip=(pickedMap[d.id]||0)+(assignedMap[d.id]||0);
     const workMins=getDriverWorkMins(d.id);
 
-    // تحديد اللون والحالة (متاح = نفس شروط التوزيع التلقائي)
+    // تحديد اللون والحالة
+    // الترتيب مهم: أي طيار عليه طلبات شغّالة → يعرض عددها قبل أي حاجة تانية
     let sc,st,sl;
+    const hasActiveTrip = activeTrips.some(t=>t.driver_id===d.id&&['active','pending_complete'].includes(t.status));
     if(attStatus==='break'){
       sc='sr';st='st-r';sl='استراحة';
     } else if(attStatus==='online_request'){
-      sc='sd';st='st-r';sl='بانتظار الموافقة';
-    } else if(isDriverReturning(d.id)){
-      sc='sd';st='st-rt';sl='في العودة';
+      sc='sd';st='st-rt';sl='بانتظار الموافقة';
     } else if(onTrip>0){
+      // معاه طلبات لسه ما اتوصلتش (assigned أو picked)
       sc='sb';st='st-b';sl=`${onTrip} طلب`;
+    } else if(isDriverReturning(d.id)){
+      // وصّل كل طلباته ولسه ما أنهاش الرحلة
+      sc='sd';st='st-rt';sl='في العودة';
+    } else if(hasActiveTrip){
+      // رحلة نشطة فاضية من الطلبات
+      sc='sb';st='st-b';sl='على رحلة';
     } else if(isDriverAvailable(d.id)){
       sc='sf';st='st-f';sl='متاح';
     } else {
-      sc='sd';st='st-r';sl='غير متاح';
+      // مفيش رحلة ومش متاح → مش حاضر أو حضور بلا موافقة
+      sc='sd';st='st-r';sl='غير حاضر';
     }
 
     const ini=(d.full_name||'?').split(' ').slice(0,2).map(w=>w[0]).join('');
@@ -1193,6 +1209,7 @@ function renderOrders(){
     }
     if(o.status==='postponed'){
       actions+=`<button class="ab ab-assign" onclick="activatePostponed('${o.id}',event)" style="background:#f0fdf4;color:#15803d;border-color:#bbf7d0;font-weight:800">▶ تشغيل</button>`;
+      actions+=`<button class="ab ab-postpone" onclick="openPostpone('${o.id}',event)">⏰ تعديل التأجيل</button>`;
       actions+=`<button class="ab ab-assign" onclick="quickAssign('${o.id}',event)">تعيين</button>`;
       actions+=`<button class="ab ab-urgent" onclick="markUrgent('${o.id}',event)">عاجل</button>`;
       actions+=`<button class="ab ab-cancel" onclick="openCancel('${o.id}',event)">إلغاء</button>`;
@@ -1400,27 +1417,27 @@ async function saveNewOrder(){
               : (r.bill_type||'').includes('آجل') ? 'deferred' : 'cash';
     payload = {
       bill_no: String(r.bill_no),
-      bill_type: r.bill_type||null,
-      bill_status: r.bill_status||null,
+      bill_type: r.bill_type || null,
+      bill_status: r.bill_status || null,
       bill_date: r.bill_date ? new Date(r.bill_date).toISOString() : now,
-      cust_code: r.cust_code||null,
-      cust_name: r.cust_name||null,
-      customer_name: r.cust_name||null,
-      cust_address: r.cust_address||null,
-      customer_address: r.cust_address||null,
-      cust_region: r.cust_region||null,
-      count_of_items: r.count_of_items||0,
-      total_bill_net: Number(r.total_bill_net||0),
-      amount: Number(r.total_bill_net||0),
-      current_customer_balance: Number(r.current_customer_balance||0),
-      additional_expenses: Number(r.AddithionalExpenses||0),
-      employee_name: r.employee_name||null,
+      cust_code: r.cust_code || null,
+      customer_name: r.cust_name || null,
+      customer_address: r.cust_address || null,
+      cust_region: r.cust_region || null,
+      count_of_items: r.count_of_items || 0,
+      total_bill_net: Number(r.total_bill_net || 0),
+      amount: Number(r.total_bill_net || 0),
+      current_customer_balance: Number(r.current_customer_balance || 0),
+      additional_expenses: Number(r.AddithionalExpenses || 0),
+      money_with_deliveryman: Number(r.money_with_deliveryman || 0),
+      employee_name: r.employee_name || null,
       payment_method: pay,
-      notes: r.notes||null,
+      notes: r.notes || null,
       branch_id: branchId,
       status: 'pending',
       driver_id: null,
       deliveryman: null,
+      attempt_count: 0,
       source_data: { source:'manual_invoice', added_by: currentUser?.full_name||'—', raw: r },
       created_at: now,
       updated_at: now
@@ -1431,7 +1448,7 @@ async function saveNewOrder(){
     const amount = parseFloat(document.getElementById('ao-amount').value);
     if(isNaN(amount) || amount < 0){ showToast('القيمة غير صحيحة'); return; }
 
-    const isTransfer = aoType==='transfer';
+    const isTransfer = aoType === 'transfer';
     const prefix = isTransfer ? 'TRF' : 'DRV';
     const label  = isTransfer ? 'تحويلة' : 'طلب من طيار';
     const billNo = `${prefix}-${Date.now().toString().slice(-8)}`;
@@ -1439,13 +1456,16 @@ async function saveNewOrder(){
     const addr   = document.getElementById('ao-addr').value.trim();
     const notes  = document.getElementById('ao-notes').value.trim();
 
+    // الدالة على السيرفر بتخصم ساعتين من bill_date، فنعوّضها هنا
+    // عشان الطلب اليدوي يحترم وقت الانتظار زي أي طلب عادي
+    const billDate = new Date(Date.now() + 2*60*60*1000).toISOString();
+
     payload = {
       bill_no: billNo,
       bill_type: label,
-      bill_date: now,
-      cust_name: cust || label,
+      bill_status: 'Pending',
+      bill_date: billDate,
       customer_name: cust || label,
-      cust_address: addr || null,
       customer_address: addr || null,
       cust_region: region,
       count_of_items: 0,
@@ -1458,6 +1478,7 @@ async function saveNewOrder(){
       status: 'pending',
       driver_id: null,
       deliveryman: null,
+      attempt_count: 0,
       source_data: { source: aoType, added_by: currentUser?.full_name||'—' },
       created_at: now,
       updated_at: now
@@ -1477,8 +1498,8 @@ async function saveNewOrder(){
     showToast(`✓ تم إضافة الطلب ${payload.bill_no}`);
     await loadAll();
   }catch(e){
-    console.error(e);
-    showToast(e.code==='23505' ? '❌ رقم الفاتورة موجود بالفعل' : ('حدث خطأ: '+(e.message||'')));
+    console.error('saveNewOrder:', e);
+    showToast(e.code==='23505' ? '❌ رقم الفاتورة موجود بالفعل' : ('حدث خطأ: '+(e.message||e.hint||'')));
   }
   showLoading(false);
 }
@@ -1620,17 +1641,35 @@ async function confirmDeliver(){
 // Postpone
 function openPostpone(id,e){
   e?.stopPropagation();
+  window._removeFromTripId=null; // تأجيل عادي مش إزالة من رحلة
+  const o=allOrders.find(x=>x.id===id);
   document.getElementById('pst-id').value=id;
-  const now=new Date();now.setHours(now.getHours()+1);
-  document.getElementById('pst-time').value=now.toISOString().slice(0,16);
-  document.getElementById('pst-reason').value='';
+  // لو الطلب مؤجل بالفعل → اعرض وقته الحالي عشان تعدّله
+  let t;
+  if(o?.status==='postponed'&&o.postpone_time){
+    t=new Date(o.postpone_time);
+  }else{
+    t=new Date(); t.setHours(t.getHours()+1);
+  }
+  document.getElementById('pst-time').value=new Date(t.getTime()-t.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  document.getElementById('pst-reason').value=(o?.status==='postponed'?(o.postpone_reason||''):'');
   document.getElementById('postponeModal').classList.add('open');
 }
+function setPstMins(mins){
+  const t=new Date(Date.now()+mins*60000);
+  document.getElementById('pst-time').value=new Date(t.getTime()-t.getTimezoneOffset()*60000).toISOString().slice(0,16);
+}
+
 async function confirmPostpone(){
   const id=document.getElementById('pst-id').value;
   const reason=document.getElementById('pst-reason').value;
+  const timeVal=document.getElementById('pst-time').value;
+  if(!timeVal){ showToast('حدد وقت التأجيل'); return; }
+  const postponeAt=new Date(timeVal).toISOString();
+  const wasRemove=!!window._removeFromTripId;
   showLoading(true);
   const now=new Date().toISOString();
+
   // لو الطلب في رحلة → شيله منها
   const tripEntry=Object.entries(tripOrdersMap).find(([,ids])=>ids.includes(id));
   if(tripEntry){
@@ -1640,13 +1679,26 @@ async function confirmPostpone(){
     await db.from('trips').update({orders_count:(to||[]).length,updated_at:now}).eq('id',tripId);
     await autoCloseTripIfEmpty(tripId);
   }
+
   await db.from('orders').update({
-    status:'postponed',postpone_reason:reason,
-    driver_id:null,deliveryman:null,picked_at:null,
+    status:'postponed',
+    postpone_reason:reason||null,
+    postpone_time:postponeAt,
+    driver_id:null,deliveryman:null,
+    assigned_at:null,picked_at:null,
     updated_at:now
   }).eq('id',id);
-  await addOrderLog(id,'order_postponed',{reason:reason||'—'});
-  closeModal('postponeModal');showToast('تم التأجيل');await loadAll();showLoading(false);
+
+  await addOrderLog(id,'order_postponed',{
+    reason:reason||'—',
+    until:new Date(postponeAt).toLocaleString('ar-EG',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}),
+    ...(wasRemove?{action:'removed_from_trip'}:{})
+  });
+
+  window._removeFromTripId=null;
+  closeModal('postponeModal');
+  showToast(wasRemove?'✓ تم إزالة الطلب وتأجيله':'✓ تم التأجيل');
+  await loadAll();showLoading(false);
 }
 
 // Cancel
@@ -1802,33 +1854,20 @@ async function autoCloseTripIfEmpty(tripId){
   }
 }
 
-// إزالة أوردر من رحلة (يتأجل 5 دقائق ثم يعود للتوزيع)
+// إزالة أوردر من رحلة — تفتح مودال التأجيل عشان تحدد الوقت بنفسك
 async function removeFromTrip(orderId, tripId, e){
   e?.stopPropagation();
-  if(!confirm('إزالة الطلب من الرحلة؟ سيتأجل دقيقة ثم يعود للتوزيع تلقائياً.')) return;
-  showLoading(true);
-  const now = new Date().toISOString();
-  const reactivateAt = new Date(Date.now() + 1*60000).toISOString();
-  // شيل من trip_orders
-  await db.from('trip_orders').delete().eq('trip_id', tripId).eq('order_id', orderId);
-  // أجّل الطلب 1 دقائق بدل ما يرجع pending فوراً
-  await db.from('orders').update({
-    driver_id: null, deliveryman: null,
-    status: 'postponed',
-    postpone_time: reactivateAt,
-    postpone_reason: 'أُزيل من الرحلة — إعادة توزيع بعد 1 دقائق',
-    assigned_at: null, picked_at: null,
-    updated_at: now
-  }).eq('id', orderId);
-  // حدّث عدد الطلبات في الرحلة
-  const {data:to} = await db.from('trip_orders').select('id').eq('trip_id', tripId);
-  await db.from('trips').update({orders_count: (to||[]).length, updated_at: now}).eq('id', tripId);
-  await autoCloseTripIfEmpty(tripId);
-  await addOrderLog(orderId, 'order_postponed', {action: 'removed_from_trip', trip_id: tripId, reactivate_at: reactivateAt});
-  showToast('✓ تم تأجيل الطلب 1 دقائق');
-  await loadAll();
-  showLoading(false);
+  const o = allOrders.find(x=>x.id===orderId);
+  if(!o){ showToast('الطلب غير موجود'); return; }
+  // خزّن الرحلة عشان confirmPostpone يشيله منها
+  window._removeFromTripId = tripId;
+  document.getElementById('pst-id').value = orderId;
+  const t = new Date(); t.setMinutes(t.getMinutes()+5);
+  document.getElementById('pst-time').value = new Date(t.getTime()-t.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  document.getElementById('pst-reason').value = 'أُزيل من الرحلة';
+  document.getElementById('postponeModal').classList.add('open');
 }
+
 // Trip Order Actions Modal
 function openTripOrderActions(orderId, tripId){
   const o=allOrders.find(x=>x.id===orderId);if(!o)return;
