@@ -451,3 +451,76 @@ function logout() {
   localStorage.clear();
   window.location.replace('index.html');
 }
+const POS_CLOSE_URL = "https://agent.ebrahimhamdy.com/webhook/pos_close";
+ 
+// ---- 1) جلب وسائل الفرع + رصيد البداية + قيم النظام ----
+// بيرجّع: { methods: [...], openings: { key: رقم }, system: { key: رقم } }
+async function fetchPosCloseData(branch) {
+  try {
+    const params = new URLSearchParams({ action: 'get_close_data', branch });
+    const response = await fetch(`${POS_CLOSE_URL}?${params.toString()}`);
+    if (!response.ok) throw new Error('Network error');
+    const text = await response.text();
+    if (!text || text.trim() === '') return { methods: [], openings: {}, system: {} };
+    const raw = JSON.parse(text);
+    const data = Array.isArray(raw) ? (raw[0] || {}) : raw;
+    return {
+      methods:  data.methods  || [],
+      openings: data.openings || {},
+      system:   data.system   || {}
+    };
+  } catch (e) {
+    console.error('fetchPosCloseData error:', e);
+    throw e;
+  }
+}
+ 
+// ---- 2) حفظ إغلاق شيفت ----
+async function submitPosShift(payload) {
+  try {
+    const response = await fetch(POS_CLOSE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'close_shift', ...payload })
+    });
+    return response.ok;
+  } catch (e) {
+    console.error('submitPosShift error:', e);
+    return false;
+  }
+}
+ 
+// ---- 3) جلب الشيفتات غير المرحّلة ----
+async function fetchUnsettledShifts(branch) {
+  try {
+    const params = new URLSearchParams({ action: 'get_unsettled', branch });
+    const response = await fetch(`${POS_CLOSE_URL}?${params.toString()}`);
+    if (!response.ok) return [];
+    const text = await response.text();
+    if (!text || text.trim() === '') return [];
+    const data = JSON.parse(text);
+    return Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.error('fetchUnsettledShifts error:', e);
+    return [];
+  }
+}
+ 
+// ---- 4) ترحيل شيفت (المحاسب) ----
+async function settlePosShift(shiftId, settledBy) {
+  try {
+    const response = await fetch(POS_CLOSE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action:     'settle_shift',
+        shift_id:   shiftId,
+        settled_by: settledBy
+      })
+    });
+    return response.ok;
+  } catch (e) {
+    console.error('settlePosShift error:', e);
+    return false;
+  }
+}
