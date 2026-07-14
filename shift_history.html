@@ -11,13 +11,23 @@
   --bg:#f0f4f8;--surface:#fff;--border:#e2e8f0;
   --text:#0f172a;--muted:#64748b;--light:#f8fafc;
   --accent:#0369a1;--success:#15803d;--danger:#b91c1c;--warn:#92400e;
+  --wal-c:#7e22ce;--wal-bg:#faf5ff;
   --font:'Tajawal',system-ui,sans-serif;--radius:12px;
 }
 body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100vh;}
 .header{background:var(--surface);border-bottom:2px solid var(--accent);padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
 .header h1{font-size:1rem;font-weight:900;color:var(--accent);display:flex;align-items:center;gap:8px;}
 .filters{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-.container{max-width:1100px;margin:0 auto;padding:20px;}
+.container{max-width:1150px;margin:0 auto;padding:20px;}
+
+/* Tabs */
+.tabs{display:flex;gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:5px;margin-bottom:16px;}
+.tab{flex:1;text-align:center;padding:9px;border-radius:8px;font-weight:800;font-size:0.84rem;cursor:pointer;color:var(--muted);border:none;background:transparent;font-family:var(--font);display:flex;align-items:center;justify-content:center;gap:6px;}
+.tab.active{background:var(--accent);color:#fff;}
+.tab .cnt{background:rgba(255,255,255,.25);padding:1px 7px;border-radius:20px;font-size:0.7rem;}
+.tab:not(.active) .cnt{background:#fee2e2;color:#b91c1c;}
+.pane{display:none;} .pane.active{display:block;}
+
 .btn{border:none;border-radius:8px;padding:8px 16px;font-family:var(--font);font-weight:800;font-size:0.82rem;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}
 .btn:hover{filter:brightness(.93);} .btn:disabled{opacity:.5;cursor:not-allowed;}
 .btn-primary{background:var(--accent);color:#fff;}
@@ -31,27 +41,38 @@ select:focus,input:focus{border-color:var(--accent);}
 .badge{padding:3px 10px;border-radius:20px;font-size:0.72rem;font-weight:700;}
 .badge-pending{background:#fef9c3;color:#854d0e;}
 .badge-settled{background:#dcfce7;color:#15803d;}
+.badge-disb{background:#dcfce7;color:#15803d;}
+.badge-nodisb{background:#fef9c3;color:#854d0e;}
 .grand-num{font-size:1.2rem;font-weight:900;color:var(--success);}
 .detail-area{display:none;margin-top:14px;border-top:1px solid var(--border);padding-top:14px;}
 .detail-area.open{display:block;}
 table{width:100%;border-collapse:collapse;font-size:0.82rem;}
-th{background:var(--light);padding:7px 10px;text-align:right;font-weight:700;font-size:0.75rem;color:var(--muted);}
-td{padding:7px 10px;border-bottom:1px solid var(--light);}
+th{background:var(--light);padding:8px 10px;text-align:right;font-weight:700;font-size:0.75rem;color:var(--muted);white-space:nowrap;}
+td{padding:8px 10px;border-bottom:1px solid var(--light);}
 tr:last-child td{border-bottom:none;}
 .type-machine{color:#1d4ed8;font-weight:700;}
-.type-wallet{color:#7e22ce;font-weight:700;}
+.type-wallet{color:var(--wal-c);font-weight:700;}
 .empty{text-align:center;color:var(--muted);padding:40px;font-size:0.9rem;}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);padding:10px 22px;border-radius:10px;font-weight:700;font-size:0.85rem;color:#fff;z-index:999;display:none;box-shadow:0 4px 20px rgba(0,0,0,.2);}
 .confirm-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;}
 .summary-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px;}
+@media(max-width:700px){.summary-row{grid-template-columns:1fr 1fr;}}
 .sum-cell{background:var(--light);border-radius:8px;padding:10px;text-align:center;}
 .sum-label{font-size:0.7rem;color:var(--muted);margin-bottom:3px;}
 .sum-val{font-size:1rem;font-weight:900;}
+.stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px;}
+@media(max-width:700px){.stat-row{grid-template-columns:1fr;}}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px;text-align:center;}
+.stat.hl{background:linear-gradient(135deg,#7e22ce,#a855f7);color:#fff;border:none;}
+.stat-label{font-size:0.74rem;opacity:.85;margin-bottom:5px;}
+.stat-val{font-size:1.35rem;font-weight:900;font-variant-numeric:tabular-nums;}
+.num{text-align:center;font-variant-numeric:tabular-nums;}
+.tbl-wrap{overflow-x:auto;}
 </style>
 </head>
 <body>
 <div class="header">
-  <h1><i class="fas fa-history"></i> سجل إغلاقات الشيفت</h1>
+  <h1><i class="fas fa-file-invoice-dollar"></i> صفحة المحاسب</h1>
   <div class="filters">
     <select id="f-branch"><option value="">كل الفروع</option></select>
     <input type="date" id="f-from">
@@ -61,12 +82,27 @@ tr:last-child td{border-bottom:none;}
       <option value="false">بانتظار التأكيد</option>
       <option value="true">تم التأكيد</option>
     </select>
-    <button class="btn btn-primary" onclick="loadShifts()"><i class="fas fa-search"></i> بحث</button>
+    <button class="btn btn-primary" onclick="reloadAll()"><i class="fas fa-search"></i> بحث</button>
   </div>
 </div>
 
 <div class="container">
-  <div id="shifts-area"><div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div></div>
+  <div class="tabs">
+    <button class="tab active" id="tab-shifts" onclick="switchTab('shifts')">
+      <i class="fas fa-history"></i> سجل الإغلاقات
+    </button>
+    <button class="tab" id="tab-transfers" onclick="switchTab('transfers')">
+      <i class="fas fa-right-left"></i> تحويلات المحافظ <span class="cnt" id="pending-cnt">0</span>
+    </button>
+  </div>
+
+  <div class="pane active" id="pane-shifts">
+    <div id="shifts-area"><div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div></div>
+  </div>
+
+  <div class="pane" id="pane-transfers">
+    <div id="transfers-area"><div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div></div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -81,11 +117,14 @@ const H_WRITE={...H_BASE,'Prefer':'return=minimal'};
 async function api(path,opts={}){
   const isWrite=['PATCH','DELETE','PUT'].includes(opts.method);
   const r=await fetch(SB_URL+'/rest/v1/'+path,{headers:isWrite?H_WRITE:H,...opts});
-  if(!r.ok){const e=await r.text();throw new Error(e);}
+  if(!r.ok){throw new Error(await r.text());}
   return isWrite?null:r.json();
 }
 
 function fmt(n){return(+n||0).toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function dt(s){return s?new Date(s).toLocaleString('ar-EG',{dateStyle:'short',timeStyle:'short'}):'—';}
+
 let toastT;
 function toast(msg,type='ok'){
   const t=document.getElementById('toast');t.textContent=msg;
@@ -96,31 +135,49 @@ function toast(msg,type='ok'){
 const role=(localStorage.getItem('userRole')||'').trim();
 const canConfirm=role==='admin'||role==='manager'||role==='accountant';
 const settler=localStorage.getItem('activeUser')||'محاسب';
+const REASON_LABEL={supplier:'تحويل لمورد', customer_refund:'مرتجع لعميل'};
 
-// تهيئة
 const today=new Date().toISOString().slice(0,10);
 document.getElementById('f-from').value=today;
 document.getElementById('f-to').value=today;
 
-async function init(){
-  const branches=await api('branches?select=name&order=name');
-  const sel=document.getElementById('f-branch');
-  sel.innerHTML='<option value="">كل الفروع</option>'+
-    branches.map(b=>`<option value="${b.name}">${b.name}</option>`).join('');
-  // لو مش أدمن، سيب فرعه بس
-  if(!canConfirm){
-    const ub=localStorage.getItem('userBranch')||'';
-    if(ub){sel.value=ub;sel.disabled=true;}
-  }
-  await loadShifts();
+function switchTab(t){
+  ['shifts','transfers'].forEach(x=>{
+    document.getElementById('tab-'+x).classList.toggle('active',x===t);
+    document.getElementById('pane-'+x).classList.toggle('active',x===t);
+  });
 }
 
-async function loadShifts(){
-  const branch=document.getElementById('f-branch').value;
-  const from=document.getElementById('f-from').value;
-  const to=document.getElementById('f-to').value;
-  const status=document.getElementById('f-status').value;
+async function init(){
+  try{
+    const branches=await api('branches?select=name&order=name');
+    const sel=document.getElementById('f-branch');
+    sel.innerHTML='<option value="">كل الفروع</option>'+
+      branches.map(b=>`<option value="${esc(b.name)}">${esc(b.name)}</option>`).join('');
+    if(!canConfirm){
+      const ub=localStorage.getItem('userBranch')||'';
+      if(ub){sel.value=ub;sel.disabled=true;}
+    }
+  }catch(e){}
+  await reloadAll();
+}
 
+async function reloadAll(){
+  await Promise.all([loadShifts(), loadTransfers()]);
+}
+
+function filters(){
+  return{
+    branch:document.getElementById('f-branch').value,
+    from:document.getElementById('f-from').value,
+    to:document.getElementById('f-to').value,
+    status:document.getElementById('f-status').value
+  };
+}
+
+/* ================= سجل الإغلاقات ================= */
+async function loadShifts(){
+  const{branch,from,to,status}=filters();
   let q='pos_shifts?order=id.desc&limit=100';
   if(branch) q+=`&branch=eq.${encodeURIComponent(branch)}`;
   if(from) q+=`&shift_date=gte.${from}`;
@@ -129,45 +186,49 @@ async function loadShifts(){
 
   const area=document.getElementById('shifts-area');
   area.innerHTML='<div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>';
-  const shifts=await api(q);
-  if(!shifts.length){area.innerHTML='<div class="empty">لا توجد إغلاقات في هذه الفترة</div>';return;}
+  try{
+    const shifts=await api(q);
+    if(!shifts.length){area.innerHTML='<div class="empty">لا توجد إغلاقات في هذه الفترة</div>';return;}
 
-  area.innerHTML=shifts.map(s=>`
-    <div class="card">
-      <div class="shift-head" onclick="toggleDetail(${s.id})">
-        <div class="shift-meta">
-          <span style="font-weight:800;font-size:0.95rem;">${s.branch}</span>
-          <span style="color:var(--muted);font-size:0.82rem;"><i class="fas fa-calendar"></i> ${s.shift_date}</span>
-          <span style="color:var(--muted);font-size:0.82rem;"><i class="fas fa-user"></i> ${s.employee_name}</span>
-          <span style="color:var(--muted);font-size:0.78rem;">${new Date(s.closed_at).toLocaleString('ar-EG',{timeStyle:'short'})}</span>
-          <span class="badge ${s.is_settled?'badge-settled':'badge-pending'}">${s.is_settled?'✅ تم التأكيد':'⏳ بانتظار التأكيد'}</span>
+    area.innerHTML=shifts.map(s=>`
+      <div class="card">
+        <div class="shift-head" onclick="toggleDetail(${s.id})">
+          <div class="shift-meta">
+            <span style="font-weight:800;font-size:0.95rem;">${esc(s.branch)}</span>
+            <span style="color:var(--muted);font-size:0.82rem;"><i class="fas fa-calendar"></i> ${s.shift_date}</span>
+            <span style="color:var(--muted);font-size:0.82rem;"><i class="fas fa-user"></i> ${esc(s.employee_name)}</span>
+            <span style="color:var(--muted);font-size:0.78rem;">${s.closed_at?new Date(s.closed_at).toLocaleString('ar-EG',{timeStyle:'short'}):''}</span>
+            <span class="badge ${s.is_settled?'badge-settled':'badge-pending'}">${s.is_settled?'✅ تم التأكيد':'⏳ بانتظار التأكيد'}</span>
+            ${+s.total_transfers>0?`<span class="badge" style="background:var(--wal-bg);color:var(--wal-c);"><i class="fas fa-right-left"></i> ${fmt(s.total_transfers)} تحويلات</span>`:''}
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <span class="grand-num">${fmt(s.grand_total)} ج</span>
+            <i class="fas fa-chevron-down" style="color:var(--muted);font-size:0.8rem;transition:.2s;" id="chev-${s.id}"></i>
+          </div>
         </div>
-        <div style="display:flex;align-items:center;gap:12px;">
-          <span class="grand-num">${fmt(s.grand_total)} ج</span>
-          <i class="fas fa-chevron-down" style="color:var(--muted);font-size:0.8rem;" id="chev-${s.id}"></i>
+        <div class="detail-area" id="detail-${s.id}">
+          <div class="summary-row">
+            <div class="sum-cell"><div class="sum-label">إجمالي الماكينات</div><div class="sum-val" style="color:#1d4ed8">${fmt(s.total_machines)} ج</div></div>
+            <div class="sum-cell"><div class="sum-label">إجمالي المحافظ</div><div class="sum-val" style="color:var(--wal-c)">${fmt(s.total_wallets)} ج</div></div>
+            <div class="sum-cell"><div class="sum-label">تحويلات الفترة</div><div class="sum-val" style="color:var(--warn)">${fmt(s.total_transfers)} ج</div></div>
+            <div class="sum-cell"><div class="sum-label">الإجمالي الكلي</div><div class="sum-val" style="color:var(--success)">${fmt(s.grand_total)} ج</div></div>
+          </div>
+          ${s.notes?`<div style="margin-top:10px;background:#fef9c3;border-radius:8px;padding:8px 12px;font-size:0.82rem;color:#854d0e;"><i class="fas fa-note-sticky"></i> ${esc(s.notes)}</div>`:''}
+          <div id="lines-${s.id}" style="margin-top:12px;"><div style="text-align:center;color:var(--muted);font-size:0.8rem;"><i class="fas fa-spinner fa-spin"></i></div></div>
+          ${canConfirm&&!s.is_settled?`
+            <div class="confirm-actions">
+              <button class="btn btn-success" onclick="event.stopPropagation();confirmShift(${s.id})">
+                <i class="fas fa-check-double"></i> تأكيد المراجعة والاعتماد
+              </button>
+            </div>`:
+            s.is_settled?`<div style="margin-top:10px;font-size:0.78rem;color:var(--muted);text-align:left;">
+              اعتمد بواسطة: <b>${esc(s.settled_by)}</b> · ${dt(s.settled_at)}
+            </div>`:''}
         </div>
-      </div>
-      <div class="detail-area" id="detail-${s.id}">
-        <div class="summary-row">
-          <div class="sum-cell"><div class="sum-label">إجمالي الماكينات</div><div class="sum-val" style="color:#1d4ed8">${fmt(s.total_machines)} ج</div></div>
-          <div class="sum-cell"><div class="sum-label">إجمالي المحافظ</div><div class="sum-val" style="color:#7e22ce">${fmt(s.total_wallets)} ج</div></div>
-          <div class="sum-cell"><div class="sum-label">الإجمالي الكلي</div><div class="sum-val" style="color:var(--success)">${fmt(s.grand_total)} ج</div></div>
-          <div class="sum-cell"><div class="sum-label">${s.is_settled?'اعتمد بواسطة':'الحالة'}</div><div class="sum-val" style="font-size:0.8rem;color:var(--muted)">${s.is_settled?s.settled_by:'—'}</div></div>
-        </div>
-        ${s.notes?`<div style="margin-top:10px;background:#fef9c3;border-radius:8px;padding:8px 12px;font-size:0.82rem;color:#854d0e;"><i class="fas fa-note-sticky"></i> ${s.notes}</div>`:''}
-        <div id="lines-${s.id}" style="margin-top:12px;"><div style="text-align:center;color:var(--muted);font-size:0.8rem;"><i class="fas fa-spinner fa-spin"></i></div></div>
-        ${canConfirm&&!s.is_settled?`
-          <div class="confirm-actions">
-            <button class="btn btn-success" onclick="confirmShift(${s.id})">
-              <i class="fas fa-check-double"></i> تأكيد المراجعة والاعتماد
-            </button>
-          </div>`:
-          s.is_settled?`<div style="margin-top:10px;font-size:0.78rem;color:var(--muted);text-align:left;">
-            اعتمد بواسطة: <b>${s.settled_by}</b> · ${new Date(s.settled_at).toLocaleString('ar-EG',{dateStyle:'short',timeStyle:'short'})}
-          </div>`:''
-        }
-      </div>
-    </div>`).join('');
+      </div>`).join('');
+  }catch(e){
+    area.innerHTML='<div class="empty" style="color:var(--danger)">فشل التحميل</div>';
+  }
 }
 
 async function toggleDetail(id){
@@ -176,20 +237,51 @@ async function toggleDetail(id){
   const isOpen=d.classList.contains('open');
   d.classList.toggle('open');
   chev.style.transform=isOpen?'':'rotate(180deg)';
-  if(!isOpen){
-    const linesEl=document.getElementById('lines-'+id);
-    const lines=await api(`pos_shift_lines?shift_id=eq.${id}&order=method_type,display_name`);
-    if(!lines.length){linesEl.innerHTML='<div style="color:var(--muted);font-size:0.8rem;text-align:center;">لا توجد تفاصيل</div>';return;}
-    linesEl.innerHTML=`<table>
-      <thead><tr><th>النوع</th><th>الاسم</th><th class="num">رصيد البداية</th><th class="num">رصيد النهاية</th><th class="num">صافي الفترة</th></tr></thead>
-      <tbody>${lines.map(l=>`<tr>
-        <td><span class="type-${l.method_type}">${l.method_type==='machine'?'ماكينة POS':'محفظة'}</span></td>
-        <td>${l.display_name}</td>
-        <td style="text-align:center;color:var(--muted);">${l.opening_balance!=null?fmt(l.opening_balance):'—'}</td>
-        <td style="text-align:center;color:var(--muted);">${l.closing_balance!=null?fmt(l.closing_balance):'—'}</td>
-        <td style="text-align:center;font-weight:800;color:${l.actual_amount>=0?'var(--success)':'var(--danger)'};">${l.actual_amount>=0?'+':''}${fmt(l.actual_amount)}</td>
-      </tr>`).join('')}</tbody>
-    </table>`;
+  if(isOpen)return;
+
+  const linesEl=document.getElementById('lines-'+id);
+  try{
+    const [lines,trs]=await Promise.all([
+      api(`pos_shift_lines?shift_id=eq.${id}&order=method_type,display_name`),
+      api(`pos_wallet_transfers?shift_id=eq.${id}&order=created_at`)
+    ]);
+
+    let h='';
+    if(lines.length){
+      h+=`<div class="tbl-wrap"><table>
+        <thead><tr><th>النوع</th><th>الاسم</th><th class="num">رصيد البداية</th><th class="num">رصيد النهاية</th><th class="num">صافي الفترة</th></tr></thead>
+        <tbody>${lines.map(l=>`<tr>
+          <td><span class="type-${l.method_type}">${l.method_type==='machine'?'ماكينة POS':'محفظة'}</span></td>
+          <td>${esc(l.display_name)}</td>
+          <td class="num" style="color:var(--muted);">${l.opening_balance!=null?fmt(l.opening_balance):'—'}</td>
+          <td class="num" style="color:var(--muted);">${l.closing_balance!=null?fmt(l.closing_balance):'—'}</td>
+          <td class="num" style="font-weight:800;color:${l.actual_amount>=0?'var(--success)':'var(--danger)'};">${l.actual_amount>=0?'+':''}${fmt(l.actual_amount)}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+    }else{
+      h+='<div style="color:var(--muted);font-size:0.8rem;text-align:center;">لا توجد تفاصيل</div>';
+    }
+
+    if(trs.length){
+      h+=`<div style="margin-top:14px;font-size:0.78rem;font-weight:800;color:var(--wal-c);margin-bottom:6px;">
+        <i class="fas fa-right-left"></i> تحويلات هذه الفترة (${trs.length})
+      </div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>المحفظة</th><th>الموظف</th><th>السبب</th><th>ملاحظات</th><th>وقت الإضافة</th><th class="num">القيمة</th><th class="num">الحالة</th></tr></thead>
+        <tbody>${trs.map(t=>`<tr>
+          <td><b>${esc(t.display_name)}</b></td>
+          <td>${esc(t.employee_name||'—')}</td>
+          <td>${REASON_LABEL[t.reason]||esc(t.reason)}</td>
+          <td style="color:var(--muted);">${esc(t.note||'—')}</td>
+          <td style="color:var(--muted);font-size:0.75rem;">${dt(t.created_at)}</td>
+          <td class="num" style="font-weight:800;color:var(--wal-c);">${fmt(t.amount)}</td>
+          <td class="num"><span class="badge ${t.is_disbursed?'badge-disb':'badge-nodisb'}">${t.is_disbursed?'✅ تم التوريد':'⏳ معلّق'}</span></td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+    }
+    linesEl.innerHTML=h;
+  }catch(e){
+    linesEl.innerHTML='<div style="color:var(--danger);font-size:0.8rem;text-align:center;">فشل تحميل التفاصيل</div>';
   }
 }
 
@@ -202,6 +294,108 @@ async function confirmShift(id){
     toast('تم الاعتماد بنجاح ✓');
     await loadShifts();
   }catch(e){toast('فشل الاعتماد','err');}
+}
+
+/* ================= تحويلات المحافظ ================= */
+async function loadTransfers(){
+  const{branch,from,to}=filters();
+  const area=document.getElementById('transfers-area');
+  area.innerHTML='<div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>';
+
+  // المعلّق: كل المعلّق بغض النظر عن التاريخ (لأنه دَين قائم)
+  let qPend='pos_wallet_transfers?is_disbursed=eq.false&order=created_at.desc&limit=300';
+  if(branch) qPend+=`&branch=eq.${encodeURIComponent(branch)}`;
+
+  // التقرير: بفلترة التاريخ
+  let qAll='pos_wallet_transfers?order=created_at.desc&limit=300';
+  if(branch) qAll+=`&branch=eq.${encodeURIComponent(branch)}`;
+  if(from) qAll+=`&created_at=gte.${from}T00:00:00`;
+  if(to) qAll+=`&created_at=lte.${to}T23:59:59`;
+
+  try{
+    const [pending,all]=await Promise.all([api(qPend),api(qAll)]);
+    document.getElementById('pending-cnt').textContent=pending.length;
+
+    const totPend=pending.reduce((s,t)=>s+(+t.amount||0),0);
+    const totDisb=all.filter(t=>t.is_disbursed).reduce((s,t)=>s+(+t.amount||0),0);
+    const totAll=all.reduce((s,t)=>s+(+t.amount||0),0);
+
+    area.innerHTML=`
+      <div class="stat-row">
+        <div class="stat hl">
+          <div class="stat-label"><i class="fas fa-hourglass-half"></i> معلّق للتوريد (كل الفترات)</div>
+          <div class="stat-val">${fmt(totPend)} ج</div>
+          <div style="font-size:0.7rem;opacity:.8;margin-top:2px;">${pending.length} تحويل</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label" style="color:var(--muted)"><i class="fas fa-check"></i> تم توريده (في الفترة)</div>
+          <div class="stat-val" style="color:var(--success)">${fmt(totDisb)} ج</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label" style="color:var(--muted)"><i class="fas fa-list"></i> إجمالي التحويلات (في الفترة)</div>
+          <div class="stat-val">${fmt(totAll)} ج</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="font-weight:900;font-size:0.9rem;color:var(--warn);margin-bottom:12px;display:flex;align-items:center;gap:7px;">
+          <i class="fas fa-hourglass-half"></i> بانتظار التوريد
+        </div>
+        ${pending.length?`<div class="tbl-wrap"><table>
+          <thead><tr><th>الفرع</th><th>المحفظة</th><th>الموظف</th><th>السبب</th><th>ملاحظات</th><th>وقت الإضافة</th><th class="num">القيمة</th><th class="num">إجراء</th></tr></thead>
+          <tbody>${pending.map(t=>`<tr id="pend-${t.id}">
+            <td>${esc(t.branch||'—')}</td>
+            <td><b>${esc(t.display_name)}</b></td>
+            <td>${esc(t.employee_name||'—')}</td>
+            <td>${REASON_LABEL[t.reason]||esc(t.reason)}</td>
+            <td style="color:var(--muted);">${esc(t.note||'—')}</td>
+            <td style="color:var(--muted);font-size:0.75rem;white-space:nowrap;">${dt(t.created_at)}</td>
+            <td class="num" style="font-weight:900;color:var(--wal-c);">${fmt(t.amount)}</td>
+            <td class="num">
+              ${canConfirm?`<button class="btn btn-success" style="padding:5px 12px;font-size:0.75rem;white-space:nowrap;" onclick="disburse(${t.id},'${esc(t.display_name)}',${t.amount})">
+                <i class="fas fa-check"></i> تم التوريد
+              </button>`:'<span style="color:var(--muted);font-size:0.75rem;">لا صلاحية</span>'}
+            </td>
+          </tr>`).join('')}</tbody>
+        </table></div>`:'<div class="empty" style="padding:24px;">لا توجد تحويلات معلّقة ✓</div>'}
+      </div>
+
+      <div class="card">
+        <div style="font-weight:900;font-size:0.9rem;color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:7px;">
+          <i class="fas fa-file-lines"></i> تقرير كل التحويلات (حسب فلتر التاريخ)
+        </div>
+        ${all.length?`<div class="tbl-wrap"><table>
+          <thead><tr><th>الفرع</th><th>المحفظة</th><th>الموظف</th><th>السبب</th><th>ملاحظات</th><th>وقت الإضافة</th><th class="num">القيمة</th><th class="num">الحالة</th><th>التوريد</th></tr></thead>
+          <tbody>${all.map(t=>`<tr>
+            <td>${esc(t.branch||'—')}</td>
+            <td><b>${esc(t.display_name)}</b></td>
+            <td>${esc(t.employee_name||'—')}</td>
+            <td>${REASON_LABEL[t.reason]||esc(t.reason)}</td>
+            <td style="color:var(--muted);">${esc(t.note||'—')}</td>
+            <td style="color:var(--muted);font-size:0.75rem;white-space:nowrap;">${dt(t.created_at)}</td>
+            <td class="num" style="font-weight:800;">${fmt(t.amount)}</td>
+            <td class="num"><span class="badge ${t.is_disbursed?'badge-disb':'badge-nodisb'}">${t.is_disbursed?'✅ تم التوريد':'⏳ معلّق'}</span></td>
+            <td style="color:var(--muted);font-size:0.72rem;white-space:nowrap;">${t.is_disbursed?`${esc(t.disbursed_by||'—')}<br>${dt(t.disbursed_at)}`:'—'}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>`:'<div class="empty" style="padding:24px;">لا توجد تحويلات في هذه الفترة</div>'}
+      </div>`;
+  }catch(e){
+    area.innerHTML='<div class="empty" style="color:var(--danger)">فشل التحميل</div>';
+  }
+}
+
+async function disburse(id,name,amount){
+  if(!canConfirm){toast('لا تملك صلاحية التوريد','err');return;}
+  if(!confirm(`تأكيد توريد ${fmt(amount)} ج من ${name}؟\n\nلن يمكن التراجع.`))return;
+  try{
+    await api(`pos_wallet_transfers?id=eq.${id}`,{method:'PATCH',body:JSON.stringify({
+      is_disbursed:true,
+      disbursed_at:new Date().toISOString(),
+      disbursed_by:settler
+    })});
+    toast('تم التوريد ✓');
+    await loadTransfers();
+  }catch(e){toast('فشل التوريد','err');}
 }
 
 init();
