@@ -74,7 +74,7 @@ select:focus,input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(3,
 <div class="header">
   <h1><i class="fas fa-cash-register"></i> إغلاق الشيفت</h1>
   <div class="header-controls">
-    <select id="branch-sel" onchange="loadMethods()"><option value="">اختر الفرع...</option></select>
+    <span id="branch-display" style="font-weight:800;color:var(--accent);font-size:0.95rem;padding:6px 14px;background:var(--accent-l);border-radius:8px;"></span>
     <input id="cashier-name" placeholder="اسم الكاشير" style="width:150px;">
     <input id="shift-date" type="date" style="width:145px;">
     <input id="notes-inp" placeholder="ملاحظات..." style="width:160px;">
@@ -114,24 +114,25 @@ function toast(msg,type='ok'){
 function fmt(n){return(+n||0).toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2});}
 
 // تحميل الفروع
+const BRANCH_ALIAS={'الصيدلية':'المعمورة','ابراهيم حمدي 2':'سان ستيفانو','ابراهيم حمدي 3':'سيدى بشر'};
+const USER_BRANCH_RAW=(localStorage.getItem('userBranch')||'').trim();
+const USER_BRANCH=BRANCH_ALIAS[USER_BRANCH_RAW]||USER_BRANCH_RAW;
+
+function getBranch(){ return USER_BRANCH||'المعمورة'; }
+
 async function loadBranches(){
-  const branches=await api('branches?select=id,name&order=name');
-  const sel=document.getElementById('branch-sel');
-  sel.innerHTML='<option value="">اختر الفرع...</option>'+
-    branches.map(b=>`<option value="${b.name}">${b.name}</option>`).join('');
-  // تحديد فرع المستخدم تلقائياً
-  const ub=localStorage.getItem('userBranch')||'';
-  if(ub) sel.value=ub;
-  if(sel.value) loadMethods();
+  const branch=getBranch();
+  const el=document.getElementById('branch-display');
+  if(el) el.textContent=branch;
+  await loadMethods();
 }
 
 async function loadMethods(){
-  const branch=document.getElementById('branch-sel').value;
-  if(!branch){document.getElementById('methods-area').innerHTML='<div class="empty"><i class="fas fa-arrow-up"></i> اختر الفرع أولاً</div>';return;}
+  const branch=getBranch();
   METHODS=await api(`pos_methods?branch=eq.${encodeURIComponent(branch)}&is_active=eq.true&order=sort_order`);
   VALUES={};
   METHODS.forEach(m=>{
-    if(m.method_type==='pos') VALUES[m.id]={closing:''};
+    if(m.method_type==='machine') VALUES[m.id]={closing:''};
     else VALUES[m.id]={opening:'',closing:''};
   });
   // فحص لو فيه شيفت مفتوح
@@ -143,7 +144,7 @@ async function loadMethods(){
 
 function getNet(m){
   const v=VALUES[m.id]||{};
-  if(m.method_type==='pos') return parseFloat(v.closing)||0;
+  if(m.method_type==='machine') return parseFloat(v.closing)||0;
   return (parseFloat(v.closing)||0)-(parseFloat(v.opening)||0);
 }
 
@@ -151,7 +152,7 @@ function calcTotals(){
   let totalPos=0,totalWal=0;
   METHODS.forEach(m=>{
     const net=getNet(m);
-    if(m.method_type==='pos') totalPos+=net;
+    if(m.method_type==='machine') totalPos+=net;
     else totalWal+=net;
   });
   return{totalPos,totalWal,grand:totalPos+totalWal};
@@ -163,7 +164,7 @@ function render(){
     return;
   }
 
-  const pos=METHODS.filter(m=>m.method_type==='pos');
+  const pos=METHODS.filter(m=>m.method_type==='machine');
   const wal=METHODS.filter(m=>m.method_type==='wallet');
 
   let html='';
@@ -275,11 +276,10 @@ function recalc(){
 }
 
 async function closeShift(){
-  const branch=document.getElementById('branch-sel').value;
+  const branch=getBranch();
   const cashier=document.getElementById('cashier-name').value.trim();
   const shiftDate=document.getElementById('shift-date').value||new Date().toISOString().slice(0,10);
   if(!cashier){toast('اكتب اسم الكاشير','err');return;}
-  if(!branch){toast('اختر الفرع','err');return;}
 
   const{totalPos,totalWal,grand}=calcTotals();
 
@@ -297,7 +297,7 @@ async function closeShift(){
     const v=VALUES[m.id]||{};
     const opening=parseFloat(v.opening)||0;
     const closing=parseFloat(v.closing)||0;
-    const net=m.method_type==='pos'?closing:closing-opening;
+    const net=m.method_type==='machine'?closing:closing-opening;
     return{
       shift_id:shift.id,
       method_type:m.method_type,
