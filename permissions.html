@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>الصلاحيات</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../delivery-style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
+.perm-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:.75rem}
+.no-access{text-align:center;padding:4rem 1rem;color:var(--text-muted)}
+.matrix-wrap{overflow-x:auto;background:white;border-radius:12px;border:1px solid var(--border)}
+table.matrix{border-collapse:collapse;font-size:.78rem;min-width:900px;width:100%}
+table.matrix th,table.matrix td{padding:.5rem .6rem;border-bottom:1px solid var(--border);text-align:center;white-space:nowrap}
+table.matrix th{background:var(--gray-light);position:sticky;top:0;z-index:2}
+table.matrix td:first-child,table.matrix th:first-child{
+  position:sticky;right:0;background:white;text-align:right;font-weight:600;z-index:1;min-width:200px;box-shadow:2px 0 4px rgba(0,0,0,.03)
+}
+table.matrix th:first-child{background:var(--gray-light);z-index:3}
+.group-row td{background:var(--primary-light);color:var(--primary);font-weight:700;text-align:right !important;padding:.5rem .75rem}
+.chk{width:16px;height:16px;cursor:pointer}
+.chk:disabled{cursor:not-allowed;opacity:.5}
+.btn-edit{background:var(--primary,#1a56db);color:white;border:none;border-radius:8px;padding:.5rem 1.1rem;font-family:'Cairo',sans-serif;font-size:.8rem;font-weight:700;cursor:pointer}
+.btn-save{background:#16a34a;color:white;border:none;border-radius:8px;padding:.5rem 1.1rem;font-family:'Cairo',sans-serif;font-size:.8rem;font-weight:700;cursor:pointer}
+.btn-cancel{background:#f3f4f6;color:#374151;border:1px solid var(--border);border-radius:8px;padding:.5rem 1.1rem;font-family:'Cairo',sans-serif;font-size:.8rem;font-weight:700;cursor:pointer}
+.toast{position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);background:#1e293b;color:white;padding:.6rem 1.25rem;border-radius:10px;font-size:.8rem;font-weight:600;z-index:400;display:none}
+.toast.show{display:block}
+.role-driver-note{font-size:.72rem;color:var(--text-muted);margin-top:.75rem}
+</style>
+</head>
+<body>
+
+<div class="perm-head">
+  <div>
+    <div style="font-size:.9rem;font-weight:700;margin-bottom:.2rem">الصلاحيات — كل النظام</div>
+    <div style="font-size:.78rem;color:var(--text-muted)" id="permSubtitle">مين يشوف إيه من صفحات الصيدلية والتوصيل</div>
+  </div>
+  <div id="permActions"></div>
+</div>
+
+<div id="permBody"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const SUPABASE_URL='https://rxtjoqulmgkkcohmgzgi.supabase.co';
+const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
+const {createClient}=supabase;
+const db=createClient(SUPABASE_URL,SUPABASE_KEY);
+
+function getCurrentUser(){
+  const token=localStorage.getItem('authToken');
+  const activeUser=localStorage.getItem('activeUser');
+  if(!token||!activeUser) return null;
+  return { username:activeUser, role: localStorage.getItem('userRole')||'' };
+}
+
+const currentUser = getCurrentUser();
+const isAdmin = currentUser?.role === 'admin';
+
+const ROLES = [
+  {key:'admin', label:'Admin'},
+  {key:'manager', label:'مدير فرع'},
+  {key:'employee', label:'موظف فرع'},
+  {key:'inventory', label:'مسؤول جرد'},
+  {key:'accountant', label:'محاسب'},
+  {key:'supervisor', label:'مشرف توصيل'},
+  {key:'cashier', label:'كاشير توصيل'},
+  {key:'pharmacist', label:'صيدلي (توصيل)'},
+];
+
+const PAGE_META = {
+  'main.html':{title:'طلب جديد', group:'الصيدلية'},
+  'transfers.html':{title:'التحويلات', group:'الصيدلية'},
+  'inventory.html':{title:'الجرد', group:'الصيدلية'},
+  'notifications.html':{title:'الإشعارات', group:'الصيدلية'},
+  'offers.html':{title:'العروض', group:'الصيدلية'},
+  'missing_items.html':{title:'لم يصل من الشركات', group:'الصيدلية'},
+  'inventory_min.html':{title:'حدود المخزون', group:'الصيدلية'},
+  'customers.html':{title:'العملاء', group:'الصيدلية'},
+  'employees.html':{title:'الموظفين', group:'الصيدلية'},
+  'dashboard.html':{title:'داشبورد', group:'الصيدلية'},
+  'purchases.html':{title:'مشتريات', group:'الصيدلية'},
+  'cosmo_order.html':{title:'طلبيات الكوزمو والشركات', group:'الصيدلية'},
+  'inventory_management.html':{title:'إدارة المخزون', group:'الصيدلية'},
+  'price_check.html':{title:'مراجعة السعر لإذون الصرف', group:'الصيدلية'},
+  'customer_service.html':{title:'خدمة العملاء', group:'الصيدلية'},
+  'shortages.html':{title:'نواقص', group:'الصيدلية'},
+  'print_invoice.html':{title:'طباعة فاتورة بيع', group:'الصيدلية'},
+  'sales_contracts.html':{title:'فواتير التعاقد', group:'الصيدلية'},
+  'claims.html':{title:'مطالبات', group:'الصيدلية'},
+  'contracts.html':{title:'لنا فواتير لدى العملاء', group:'الصيدلية'},
+  'contracts_stats.html':{title:'إحصائيات التعاقدات', group:'الصيدلية'},
+  'visa_transactions.html':{title:'معاملات الفيزا', group:'الصيدلية'},
+  'bank_monitor.html':{title:'متابعة البنك', group:'الصيدلية'},
+  'paymob.html':{title:'معاملات باي موب', group:'الصيدلية'},
+  'sms.html':{title:'معاملات المحافظ', group:'الصيدلية'},
+  'pos_reconciliation.html':{title:'تسوية وإغلاق', group:'الصيدلية'},
+  'machine_import.html':{title:'استيراد جدول الماكينات', group:'الصيدلية'},
+  'shift_close.html':{title:'إغلاق الشيفت', group:'الصيدلية'},
+  'shift_history.html':{title:'سجل الإغلاقات', group:'الصيدلية'},
+  'jard_settings.html':{title:'إعدادات الجرد', group:'الصيدلية'},
+  'overview.html':{title:'نظرة عامة', group:'التوصيل'},
+  'operations.html':{title:'غرفة العمليات', group:'التوصيل'},
+  'dispatch.html':{title:'شاشة التوزيع', group:'التوصيل'},
+  'orders.html':{title:'الطلبات', group:'التوصيل'},
+  'trips.html':{title:'الرحلات', group:'التوصيل'},
+  'drivers.html':{title:'الطيارين', group:'التوصيل'},
+  'attendance.html':{title:'الحضور', group:'التوصيل'},
+  'branches.html':{title:'الفروع', group:'إعدادات التوصيل'},
+  'regions.html':{title:'المناطق', group:'إعدادات التوصيل'},
+  'routes.html':{title:'خطوط السير', group:'إعدادات التوصيل'},
+  'dispatch-settings.html':{title:'إعدادات التوزيع', group:'إعدادات التوصيل'},
+  'reports.html':{title:'التقارير', group:'تقارير'},
+  'users.html':{title:'المستخدمون', group:'إدارة'},
+  'permissions.html':{title:'الصلاحيات', group:'إدارة'},
+  'pos_methods.html':{title:'إدارة ماكينات الفروع', group:'إدارة'},
+};
+const GROUP_ORDER = ['الصيدلية','التوصيل','إعدادات التوصيل','تقارير','إدارة'];
+
+let permData = {};   // permData[role][page] = {can_view, can_edit}
+let editMode = false;
+
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
+
+async function loadPermissions(){
+  if(!currentUser){ document.getElementById('permBody').innerHTML='<div class="no-access">من فضلك سجّل الدخول</div>'; return; }
+  if(!isAdmin){
+    document.getElementById('permBody').innerHTML='<div class="no-access">🔒 الصفحة دي متاحة بس للأدمن</div>';
+    return;
+  }
+  const {data,error}=await db.from('page_permissions').select('role,page,can_view,can_edit');
+  permData={};
+  (data||[]).forEach(r=>{
+    if(!permData[r.role]) permData[r.role]={};
+    permData[r.role][r.page]={can_view:r.can_view, can_edit:r.can_edit};
+  });
+  render();
+}
+
+function renderActions(){
+  const el=document.getElementById('permActions');
+  if(editMode){
+    el.innerHTML=`
+      <button class="btn-save" onclick="savePermissions()">💾 حفظ التغييرات</button>
+      <button class="btn-cancel" onclick="cancelEdit()">إلغاء</button>`;
+  } else {
+    el.innerHTML=`<button class="btn-edit" onclick="enterEdit()">✏️ تعديل الصلاحيات</button>`;
+  }
+}
+
+function render(){
+  renderActions();
+  let html = `<div class="matrix-wrap"><table class="matrix"><thead><tr><th>الصفحة</th>`;
+  ROLES.forEach(r => html += `<th>${r.label}</th>`);
+  html += `</tr></thead><tbody>`;
+
+  GROUP_ORDER.forEach(group => {
+    const pages = Object.entries(PAGE_META).filter(([,m]) => m.group === group);
+    if(!pages.length) return;
+    html += `<tr class="group-row"><td colspan="${ROLES.length+1}">${group}</td></tr>`;
+    pages.forEach(([page, meta]) => {
+      html += `<tr><td>${meta.title}</td>`;
+      ROLES.forEach(role => {
+        const has = permData[role.key]?.[page]?.can_view === true;
+        if(editMode){
+          html += `<td><input type="checkbox" class="chk" data-role="${role.key}" data-page="${page}" ${has?'checked':''}></td>`;
+        } else {
+          html += `<td>${has?'✅':'—'}</td>`;
+        }
+      });
+      html += `</tr>`;
+    });
+  });
+
+  html += `</tbody></table></div>
+    <div class="role-driver-note">ملاحظة: دور "طيار" (driver) مش موجود في الجدول ده — بيدخل مباشرة على صفحته الخاصة (driver.html) من غير أي شاشة تانية.</div>`;
+
+  document.getElementById('permBody').innerHTML = html;
+}
+
+function enterEdit(){ editMode=true; render(); }
+function cancelEdit(){ editMode=false; loadPermissions(); }
+
+async function savePermissions(){
+  const checkboxes = document.querySelectorAll('#permBody input[type=checkbox]');
+  const updates = [];
+  checkboxes.forEach(cb=>{
+    updates.push({ role: cb.dataset.role, page: cb.dataset.page, can_view: cb.checked });
+  });
+  try{
+    const { error } = await db.rpc('save_page_permissions_bulk', { p_updates: updates });
+    if(error) throw error;
+    showToast('✓ تم حفظ الصلاحيات');
+    editMode=false;
+    await loadPermissions();
+  }catch(e){
+    console.error(e);
+    showToast('حدث خطأ في الحفظ');
+  }
+}
+
+loadPermissions();
+</script>
+</body>
+</html>
