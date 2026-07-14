@@ -1144,6 +1144,7 @@ function renderTrips(){
         <span class="tc-tot">${tot.toLocaleString()} ج.م</span>
         <div style="display:flex;gap:.3rem">
           ${waitingPickup>0?`<button class="tc-btn" style="background:var(--yellow-light);color:#a16207;border-color:#fde68a" onclick="pickupAllTrip('${trip.id}',event)">▶ استلام (${waitingPickup})</button>`:''}
+          <button class="tc-btn" style="background:#fef3c7;color:#92400e;border-color:#fde68a" onclick="openTransfer('${trip.id}',event)">🔄 تسليم</button>
           <button class="tc-btn" onclick="completeTrip('${trip.id}')">إنهاء الرحلة</button>
         </div>
       </div>
@@ -1504,6 +1505,86 @@ async function saveNewOrder(){
   showLoading(false);
 }
 
+// ═══════════════ تسليم الطلبات لطيار آخر ═══════════════
+let _trOrderIds = [];
+
+function openTransfer(tripId, e){
+  e?.stopPropagation();
+  const trip = activeTrips.find(t=>t.id===tripId);
+  if(!trip){ showToast('الرحلة غير موجودة'); return; }
+
+  // الطلبات اللي لسه في الشارع — المتوصّلة مش محتاجة تسليم
+  const oIds = tripOrdersMap[tripId] || [];
+  const orders = oIds.map(id=>allOrders.find(o=>o.id===id)).filter(Boolean)
+                     .filter(o=>['assigned','picked'].includes(o.status));
+
+  if(!orders.length){ showToast('لا توجد طلبات قابلة للتسليم في هذه الرحلة'); return; }
+
+  _trOrderIds = orders.map(o=>o.id);
+
+  document.getElementById('tr-summary').innerHTML = `
+    <div style="font-weight:800;margin-bottom:.4rem">من: ${trip.driver_name}</div>
+    ${orders.map(o=>`<div style="display:flex;justify-content:space-between;padding:.2rem 0;border-top:1px solid var(--border)">
+      <span><strong>${o.bill_no||o.id.slice(0,6)}</strong> · ${o.customer_name||'—'}</span>
+      <span style="color:${o.status==='picked'?'#2563eb':'#b45309'};font-weight:700">${SL[o.status]||o.status}</span>
+    </div>`).join('')}
+    <div style="margin-top:.5rem;font-weight:800;color:var(--primary)">${orders.length} طلب</div>`;
+
+  const others = allDrivers.filter(d=>d.id!==trip.driver_id && d.is_active);
+  document.getElementById('tr-driver').innerHTML =
+    '<option value="">— اختر الطيار —</option>' +
+    others.map(d=>{
+      const att = getDriverAttStatus(d.id);
+      const onTrip = allOrders.filter(o=>o.driver_id===d.id&&['assigned','picked'].includes(o.status)).length;
+      const tag = att==='online' ? (onTrip>0?`(${onTrip} طلب)`:'(متاح)') : '(غير حاضر)';
+      return `<option value="${d.id}">${d.full_name} ${tag}</option>`;
+    }).join('');
+
+  document.getElementById('tr-reason').value='عطل في المركبة';
+  document.getElementById('tr-other').value='';
+  document.getElementById('tr-other-wrap').style.display='none';
+  document.getElementById('transferModal').classList.add('open');
+}
+
+function toggleTrOther(){
+  const isOther = document.getElementById('tr-reason').value==='__other';
+  document.getElementById('tr-other-wrap').style.display = isOther?'block':'none';
+}
+
+async function confirmTransfer(){
+  const toDriver = document.getElementById('tr-driver').value;
+  if(!toDriver){ showToast('اختر الطيار المستلم'); return; }
+
+  let reason = document.getElementById('tr-reason').value;
+  if(reason==='__other'){
+    reason = document.getElementById('tr-other').value.trim();
+    if(!reason){ showToast('اكتب سبب التسليم'); return; }
+  }
+  if(!_trOrderIds.length){ showToast('لا توجد طلبات'); return; }
+
+  const drv = allDrivers.find(d=>d.id===toDriver);
+  showLoading(true);
+  try{
+    const {data,error} = await db.rpc('transfer_orders_to_driver',{
+      p_order_ids: _trOrderIds,
+      p_to_driver_id: toDriver,
+      p_reason: reason,
+      p_user_name: currentUser?.full_name||'—'
+    });
+    if(error) throw error;
+    if(data?.success===false) throw new Error(data.error);
+
+    closeModal('transferModal');
+    showToast(`✓ تم تسليم ${data.moved} طلب إلى ${drv?.full_name}`);
+    _trOrderIds=[];
+    await loadAll();
+  }catch(e){
+    console.error('confirmTransfer:',e);
+    alert('❌ فشل التسليم: '+(e.message||''));
+  }
+  showLoading(false);
+}
+
 // ===== ACTIONS =====
 function quickAssign(id,e){e?.stopPropagation();selectedOrders.clear();selectedOrders.add(id);updSel();openAssignModal();}
 
@@ -1526,86 +1607,59 @@ async function confirmAssign(){
   if(!driverId){showToast('اختر الطيار');return;}
   const driver=allDrivers.find(d=>d.id===driverId);
   const orderIds=[...selectedOrders];
+  if(!orderIds.length){showToast('اختر طلب على الأقل');return;}
+
   showLoading(true);
+  const now=new Date().toISOString();
+  const failed=[];
+  let done=0;
+
   try{
-    const now=new Date().toISOString();
-    // لو إعادة تعيين → شيل من الرحلة القديمة
+    // لو إعادة تعيين → شيل من الرحلة القديمة الأول
     if(window._reassignTripId){
+      const oldTrip=window._reassignTripId;
       for(const id of orderIds){
-        await db.from('trip_orders').delete().eq('trip_id',window._reassignTripId).eq('order_id',id);
+        await db.from('trip_orders').delete().eq('trip_id',oldTrip).eq('order_id',id);
       }
-      const {data:to}=await db.from('trip_orders').select('id').eq('trip_id',window._reassignTripId);
-      await db.from('trips').update({orders_count:(to||[]).length,updated_at:now}).eq('id',window._reassignTripId);
-      await autoCloseTripIfEmpty(window._reassignTripId);
+      const {data:to}=await db.from('trip_orders').select('id').eq('trip_id',oldTrip);
+      await db.from('trips').update({orders_count:(to||[]).length,updated_at:now}).eq('id',oldTrip);
+      await autoCloseTripIfEmpty(oldTrip);
       window._reassignTripId=null;
     }
-    await db.from('orders').update({
-      driver_id:driverId,
-      deliveryman:driver?.full_name,
-      status:'assigned',
-      assigned_at:now,
-      updated_at:now
-    }).in('id',orderIds);
-    const tOrds=orderIds.map(id=>allOrders.find(o=>o.id===id)).filter(Boolean);
-    const newTotal=tOrds.reduce((s,o)=>s+Number(o.total_bill_net||0),0);
 
-// الفرع الصحيح: للأدمن = الفرع المختار، للموظف = فرعه
-    const branchId = currentUser?.role==='admin' ? activeBranchId : (currentUser?.branch_id||null);
-    // شوف لو الطيار عنده رحلة active (الأقدم لو فيه أكتر من واحدة)
-    const {data:existingTrips}=await db.from('trips').select('*').eq('driver_id',driverId).eq('status','active').order('created_at',{ascending:true});
-    const existingTrip=existingTrips&&existingTrips.length>0?existingTrips[0]:null;
-
-    let tripId=null;
-    if(existingTrip){
-      // أضف على الرحلة الموجودة
-      tripId=existingTrip.id;
-      const {data:curTO}=await db.from('trip_orders').select('id').eq('trip_id',tripId);
-      const curCount=(curTO||[]).length;
-      await db.from('trips').update({
-        orders_count:curCount+orderIds.length,
-        total_amount:Number(existingTrip.total_amount||0)+newTotal,
-        updated_at:now
-      }).eq('id',tripId);
-      await db.from('trip_orders').insert(orderIds.map(id=>({trip_id:tripId,order_id:id})));
-      await addTripLog(tripId,'order_added',{driver:driver?.full_name,orders:orderIds.length});
-    }else{
-      // أنشئ رحلة جديدة
-      const {data:trip,error:tripErr}=await db.from('trips').insert({
-        driver_id:driverId,
-        driver_name:driver?.full_name,
-        branch_id:branchId,
-        status:'active',
-        orders_count:orderIds.length,
-        total_amount:newTotal,
-        created_at:now
-      }).select().single();
-
-      if(tripErr&&tripErr.code==='23505'){
-        // رحلة اتعملت للطيار في نفس اللحظة (التوزيع التلقائي من الخادم) → ضيف عليها بدل ما تفشل
-        const {data:races}=await db.from('trips').select('*').eq('driver_id',driverId).eq('status','active').limit(1);
-        const raceTrip=races?.[0];
-        if(raceTrip){
-          tripId=raceTrip.id;
-          await db.from('trip_orders').insert(orderIds.map(id=>({trip_id:tripId,order_id:id})));
-          const {data:curTO}=await db.from('trip_orders').select('id').eq('trip_id',tripId);
-          await db.from('trips').update({
-            orders_count:(curTO||[]).length,
-            total_amount:Number(raceTrip.total_amount||0)+newTotal,
-            updated_at:now
-          }).eq('id',tripId);
-          await addTripLog(tripId,'order_added',{driver:driver?.full_name,orders:orderIds.length,race_recovered:true});
-        }
-      }else if(trip){
-        tripId=trip.id;
-        await db.from('trip_orders').insert(orderIds.map(id=>({trip_id:tripId,order_id:id})));
-        await addTripLog(tripId,'trip_created',{driver:driver?.full_name,orders:orderIds.length});
+    // التعيين عن طريق RPC — كل طلب في transaction واحدة (الكل ينجح أو الكل يفشل)
+    for(const id of orderIds){
+      const o=allOrders.find(x=>x.id===id);
+      const {data,error}=await db.rpc('manual_assign_order',{
+        p_order_id:id,
+        p_driver_id:driverId,
+        p_user_name:currentUser?.full_name||'—'
+      });
+      if(error){
+        failed.push(`${o?.bill_no||id.slice(0,6)}: ${error.message}`);
+      }else if(data?.success===false){
+        failed.push(`${o?.bill_no||id.slice(0,6)}: ${data.error}`);
+      }else{
+        done++;
       }
     }
-    for(const id of orderIds) await addOrderLog(id,'driver_assigned',{driver:driver?.full_name,trip_id:tripId});
+
     selectedOrders.clear();updSel();closeModal('assignModal');
-    showToast(`✓ تم تعيين ${orderIds.length} طلب للطيار ${driver?.full_name}`);
+
+    if(failed.length===0){
+      showToast(`✓ تم تعيين ${done} طلب للطيار ${driver?.full_name}`);
+    }else if(done>0){
+      showToast(`⚠️ نجح ${done} · فشل ${failed.length}`);
+      alert('بعض الطلبات لم تُعيَّن:\n\n'+failed.join('\n'));
+    }else{
+      alert('❌ فشل التعيين:\n\n'+failed.join('\n'));
+    }
+
     await loadAll();
-  }catch(e){console.error(e);showToast('حدث خطأ');}
+  }catch(e){
+    console.error('confirmAssign:',e);
+    alert('❌ حدث خطأ: '+(e.message||''));
+  }
   showLoading(false);
 }
 
