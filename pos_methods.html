@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>إدارة ماكينات الفروع — Phalix</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --bg:#f8fafc;--surface:#fff;--border:#e2e8f0;
+  --text:#0f172a;--muted:#64748b;--light:#f1f5f9;
+  --accent:#3b82f6;--accent-d:#1d4ed8;
+  --success:#16a34a;--danger:#dc2626;--warn:#d97706;
+  --font:'Tajawal',system-ui,sans-serif;
+  --radius:10px;
+}
+body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100vh;}
+.header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 20px;display:flex;align-items:center;justify-content:space-between;}
+.header h1{font-size:1rem;font-weight:800;display:flex;align-items:center;gap:8px;}
+.header h1 i{color:var(--accent);}
+.container{max-width:1100px;margin:0 auto;padding:20px;}
+.btn{border:none;border-radius:8px;padding:8px 16px;font-family:var(--font);font-weight:700;font-size:0.82rem;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:opacity .15s;}
+.btn:hover{opacity:.88;} .btn:disabled{opacity:.5;cursor:not-allowed;}
+.btn-primary{background:var(--accent);color:#fff;}
+.btn-success{background:var(--success);color:#fff;}
+.btn-danger{background:#fee2e2;color:var(--danger);}
+.btn-ghost{background:var(--light);color:var(--muted);}
+.btn-sm{padding:5px 10px;font-size:0.75rem;}
+input,select,textarea{font-family:var(--font);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:0.85rem;width:100%;outline:none;background:#fff;color:var(--text);}
+input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(59,130,246,.12);}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:16px;}
+.card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+.card-head h2{font-size:0.95rem;font-weight:800;display:flex;align-items:center;gap:8px;}
+.branch-badge{display:inline-block;background:var(--accent);color:#fff;padding:2px 10px;border-radius:20px;font-size:0.72rem;font-weight:700;}
+table{width:100%;border-collapse:collapse;font-size:0.83rem;}
+th{background:var(--light);padding:8px 10px;text-align:right;font-weight:700;font-size:0.76rem;color:var(--muted);white-space:nowrap;}
+td{padding:8px 10px;border-bottom:1px solid var(--light);vertical-align:middle;}
+tr:last-child td{border-bottom:none;}
+.badge-pos{background:#dbeafe;color:#1d4ed8;padding:2px 9px;border-radius:20px;font-size:0.7rem;font-weight:700;}
+.badge-wallet{background:#fae8ff;color:#7e22ce;padding:2px 9px;border-radius:20px;font-size:0.7rem;font-weight:700;}
+.active-dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
+.dot-on{background:#16a34a;} .dot-off{background:#94a3b8;}
+.drag-handle{cursor:grab;color:var(--muted);font-size:0.9rem;padding:0 4px;}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:100;align-items:center;justify-content:center;}
+.modal-overlay.open{display:flex;}
+.modal{background:#fff;border-radius:14px;padding:24px;width:90%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.18);}
+.modal h3{font-size:1rem;font-weight:800;margin-bottom:16px;}
+.form-row{margin-bottom:12px;}
+.form-row label{display:block;font-size:0.78rem;font-weight:700;color:var(--muted);margin-bottom:5px;}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:10px;font-weight:700;font-size:0.85rem;color:#fff;z-index:999;display:none;}
+.empty{text-align:center;color:var(--muted);padding:30px;font-size:0.85rem;}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1><i class="fas fa-cash-register"></i> إدارة ماكينات وطرق الدفع</h1>
+  <button class="btn btn-primary" onclick="openModal()"><i class="fas fa-plus"></i> إضافة طريقة دفع</button>
+</div>
+
+<div class="container">
+  <div id="branches-area"><div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div></div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h3 id="modal-title">إضافة طريقة دفع</h3>
+    <input type="hidden" id="edit-id">
+    <div class="form-row">
+      <label>الفرع</label>
+      <select id="f-branch"></select>
+    </div>
+    <div class="form-row">
+      <label>النوع</label>
+      <select id="f-type">
+        <option value="pos">ماكينة POS (فيزا)</option>
+        <option value="wallet">محفظة إلكترونية</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>الاسم المختصر (مفتاح)</label>
+      <input id="f-key" placeholder="مثال: paymob_1 أو vodafone">
+    </div>
+    <div class="form-row">
+      <label>الاسم المعروض</label>
+      <input id="f-name" placeholder="مثال: Paymob أو فودافون كاش">
+    </div>
+    <div class="form-row">
+      <label>الترتيب</label>
+      <input id="f-order" type="number" value="0" min="0">
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+      <button class="btn btn-primary" id="save-btn" onclick="saveMethod()"><i class="fas fa-check"></i> حفظ</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SB_URL='https://rxtjoqulmgkkcohmgzgi.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
+const H={'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Prefer':'return=representation'};
+
+let BRANCHES=[], METHODS=[];
+
+async function api(path,opts={}){
+  const r=await fetch(SB_URL+'/rest/v1/'+path,{headers:H,...opts});
+  if(!r.ok){const e=await r.text();throw new Error(e);}
+  return r.status===204?null:r.json();
+}
+
+let toastT;
+function toast(msg,type='ok'){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.style.background=type==='ok'?'#16a34a':'#dc2626';
+  t.style.display='block'; clearTimeout(toastT); toastT=setTimeout(()=>t.style.display='none',2600);
+}
+
+async function load(){
+  try{
+    [BRANCHES,METHODS]=await Promise.all([
+      api('branches?select=id,name&order=name'),
+      api('pos_methods?select=*&order=branch,sort_order')
+    ]);
+    render();
+    const sel=document.getElementById('f-branch');
+    sel.innerHTML=BRANCHES.map(b=>`<option value="${b.name}">${b.name}</option>`).join('');
+  }catch(e){toast('فشل التحميل: '+e.message,'err');}
+}
+
+function render(){
+  const area=document.getElementById('branches-area');
+  if(!BRANCHES.length){area.innerHTML='<div class="empty">لا توجد فروع</div>';return;}
+  area.innerHTML=BRANCHES.map(b=>{
+    const methods=METHODS.filter(m=>m.branch===b.name);
+    return `<div class="card">
+      <div class="card-head">
+        <h2><i class="fas fa-store" style="color:var(--accent)"></i> ${b.name} <span class="branch-badge">${methods.length} طريقة</span></h2>
+        <button class="btn btn-primary btn-sm" onclick="openModal('${b.name}')"><i class="fas fa-plus"></i> إضافة</button>
+      </div>
+      ${methods.length?`<table>
+        <thead><tr><th>النوع</th><th>المفتاح</th><th>الاسم</th><th>الترتيب</th><th>الحالة</th><th></th></tr></thead>
+        <tbody>${methods.map(m=>`<tr>
+          <td><span class="badge-${m.method_type}">${m.method_type==='pos'?'ماكينة POS':'محفظة'}</span></td>
+          <td><code style="font-size:0.75rem;background:var(--light);padding:2px 6px;border-radius:4px;">${m.method_key}</code></td>
+          <td style="font-weight:700;">${m.display_name}</td>
+          <td style="color:var(--muted)">${m.sort_order}</td>
+          <td><span class="active-dot ${m.is_active?'dot-on':'dot-off'}"></span> ${m.is_active?'نشط':'متوقف'}</td>
+          <td>
+            <button class="btn btn-ghost btn-sm" onclick='editMethod(${JSON.stringify(m)})'><i class="fas fa-pen"></i></button>
+            <button class="btn btn-danger btn-sm" onclick="deleteMethod(${m.id})"><i class="fas fa-trash"></i></button>
+            <button class="btn btn-sm" style="background:${m.is_active?'#fee2e2':'#dcfce7'};color:${m.is_active?'#dc2626':'#16a34a'};" onclick="toggleActive(${m.id},${!m.is_active})">${m.is_active?'إيقاف':'تفعيل'}</button>
+          </td>
+        </tr>`).join('')}</tbody>
+      </table>`:'<div class="empty">لا توجد طرق دفع — اضغط «إضافة»</div>'}
+    </div>`;
+  }).join('');
+}
+
+function openModal(branch=''){
+  document.getElementById('edit-id').value='';
+  document.getElementById('modal-title').textContent='إضافة طريقة دفع';
+  document.getElementById('f-key').value='';
+  document.getElementById('f-name').value='';
+  document.getElementById('f-order').value='0';
+  document.getElementById('f-type').value='pos';
+  if(branch)document.getElementById('f-branch').value=branch;
+  document.getElementById('modal').classList.add('open');
+}
+function editMethod(m){
+  document.getElementById('edit-id').value=m.id;
+  document.getElementById('modal-title').textContent='تعديل طريقة دفع';
+  document.getElementById('f-branch').value=m.branch;
+  document.getElementById('f-type').value=m.method_type;
+  document.getElementById('f-key').value=m.method_key;
+  document.getElementById('f-name').value=m.display_name;
+  document.getElementById('f-order').value=m.sort_order;
+  document.getElementById('modal').classList.add('open');
+}
+function closeModal(){document.getElementById('modal').classList.remove('open');}
+
+async function saveMethod(){
+  const id=document.getElementById('edit-id').value;
+  const data={
+    branch:document.getElementById('f-branch').value,
+    method_type:document.getElementById('f-type').value,
+    method_key:document.getElementById('f-key').value.trim(),
+    display_name:document.getElementById('f-name').value.trim(),
+    sort_order:parseInt(document.getElementById('f-order').value)||0,
+    is_active:true
+  };
+  if(!data.method_key||!data.display_name){toast('اكتب الاسم والمفتاح','err');return;}
+  const btn=document.getElementById('save-btn'); btn.disabled=true;
+  try{
+    if(id) await api(`pos_methods?id=eq.${id}`,{method:'PATCH',body:JSON.stringify(data)});
+    else await api('pos_methods',{method:'POST',body:JSON.stringify(data)});
+    toast(id?'تم التحديث':'تمت الإضافة');
+    closeModal(); await load();
+  }catch(e){toast('فشل الحفظ: '+e.message,'err');}
+  finally{btn.disabled=false;}
+}
+async function deleteMethod(id){
+  if(!confirm('حذف طريقة الدفع نهائياً؟'))return;
+  try{await api(`pos_methods?id=eq.${id}`,{method:'DELETE'});toast('تم الحذف');await load();}
+  catch(e){toast('فشل الحذف','err');}
+}
+async function toggleActive(id,val){
+  try{await api(`pos_methods?id=eq.${id}`,{method:'PATCH',body:JSON.stringify({is_active:val})});await load();}
+  catch(e){toast('فشل','err');}
+}
+
+load();
+</script>
+</body>
+</html>

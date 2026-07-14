@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>إغلاق الشيفت — Phalix</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --bg:#f0f4f8;--surface:#fff;--border:#e2e8f0;
+  --text:#0f172a;--muted:#64748b;--light:#f8fafc;
+  --accent:#0369a1;--accent-l:#dbeafe;
+  --success:#15803d;--danger:#b91c1c;--warn:#92400e;
+  --pos-c:#1d4ed8;--pos-bg:#eff6ff;
+  --wal-c:#7e22ce;--wal-bg:#faf5ff;
+  --font:'Tajawal',system-ui,sans-serif;
+  --radius:12px;
+}
+body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100vh;}
+.header{background:var(--surface);border-bottom:2px solid #0369a1;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.header h1{font-size:1rem;font-weight:900;display:flex;align-items:center;gap:8px;color:var(--accent);}
+.header-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.container{max-width:1000px;margin:0 auto;padding:20px;}
+.btn{border:none;border-radius:8px;padding:9px 18px;font-family:var(--font);font-weight:800;font-size:0.83rem;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .15s;}
+.btn:hover{filter:brightness(.93);} .btn:disabled{opacity:.5;cursor:not-allowed;}
+.btn-primary{background:var(--accent);color:#fff;}
+.btn-success{background:#15803d;color:#fff;}
+.btn-confirm{background:#7e22ce;color:#fff;}
+.btn-ghost{background:var(--light);color:var(--muted);border:1px solid var(--border);}
+select,input,textarea{font-family:var(--font);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:0.85rem;outline:none;background:#fff;color:var(--text);}
+select:focus,input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(3,105,161,.1);}
+.section-title{font-size:0.8rem;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:20px 0 10px;display:flex;align-items:center;gap:6px;}
+.section-title::after{content:'';flex:1;height:1px;background:var(--border);}
+
+/* Method cards */
+.methods-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+@media(max-width:640px){.methods-grid{grid-template-columns:1fr;}}
+.method-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:14px;transition:border-color .15s;}
+.method-card.pos-card{border-top:3px solid var(--pos-c);}
+.method-card.wallet-card{border-top:3px solid var(--wal-c);}
+.method-head{display:flex;align-items:center;gap:8px;margin-bottom:12px;}
+.method-icon{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:0.85rem;}
+.icon-pos{background:var(--pos-bg);color:var(--pos-c);}
+.icon-wal{background:var(--wal-bg);color:var(--wal-c);}
+.method-name{font-weight:800;font-size:0.9rem;}
+.method-type-label{font-size:0.7rem;color:var(--muted);}
+.input-group{display:flex;flex-direction:column;gap:6px;margin-bottom:8px;}
+.input-group label{font-size:0.75rem;font-weight:700;color:var(--muted);}
+.net-display{background:var(--light);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:1rem;font-weight:900;color:var(--success);text-align:center;}
+.net-display.negative{color:var(--danger);}
+
+/* Grand total */
+.grand-card{background:linear-gradient(135deg,#0369a1,#1d4ed8);color:#fff;border-radius:var(--radius);padding:20px;margin-top:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px;}
+.grand-cell{text-align:center;}
+.grand-label{font-size:0.75rem;opacity:.8;margin-bottom:4px;}
+.grand-value{font-size:1.4rem;font-weight:900;font-variant-numeric:tabular-nums;}
+
+/* Status bar */
+.status-bar{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;}
+.status-item{display:flex;align-items:center;gap:6px;font-size:0.82rem;}
+.status-dot{width:10px;height:10px;border-radius:50%;}
+
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);padding:10px 22px;border-radius:10px;font-weight:700;font-size:0.85rem;color:#fff;z-index:999;display:none;box-shadow:0 4px 20px rgba(0,0,0,.2);}
+.empty{text-align:center;color:var(--muted);padding:40px;font-size:0.9rem;}
+
+/* Confirm banner */
+.confirm-banner{background:#fdf4ff;border:2px solid #a855f7;border-radius:var(--radius);padding:16px 20px;margin-top:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+.confirm-banner.settled{background:#f0fdf4;border-color:#22c55e;}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><i class="fas fa-cash-register"></i> إغلاق الشيفت</h1>
+  <div class="header-controls">
+    <select id="branch-sel" onchange="loadMethods()"><option value="">اختر الفرع...</option></select>
+    <input id="cashier-name" placeholder="اسم الكاشير" style="width:150px;">
+    <input id="shift-date" type="date" style="width:145px;">
+    <input id="notes-inp" placeholder="ملاحظات..." style="width:160px;">
+  </div>
+</div>
+
+<div class="container">
+  <div id="status-area"></div>
+  <div id="methods-area"><div class="empty"><i class="fas fa-arrow-up"></i> اختر الفرع أولاً</div></div>
+  <div id="totals-area"></div>
+  <div id="actions-area"></div>
+  <div id="confirm-area"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SB_URL='https://rxtjoqulmgkkcohmgzgi.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
+const H={'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Prefer':'return=representation'};
+
+let METHODS=[], VALUES={}, CURRENT_SHIFT=null;
+
+async function api(path,opts={}){
+  const r=await fetch(SB_URL+'/rest/v1/'+path,{headers:H,...opts});
+  if(!r.ok){const e=await r.text();throw new Error(e);}
+  return r.status===204?null:r.json();
+}
+
+let toastT;
+function toast(msg,type='ok'){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.style.background=type==='ok'?'#15803d':'#dc2626';
+  t.style.display='block'; clearTimeout(toastT); toastT=setTimeout(()=>t.style.display='none',2800);
+}
+
+function fmt(n){return(+n||0).toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2});}
+
+// تحميل الفروع
+async function loadBranches(){
+  const branches=await api('branches?select=id,name&order=name');
+  const sel=document.getElementById('branch-sel');
+  sel.innerHTML='<option value="">اختر الفرع...</option>'+
+    branches.map(b=>`<option value="${b.name}">${b.name}</option>`).join('');
+  // تحديد فرع المستخدم تلقائياً
+  const ub=localStorage.getItem('userBranch')||'';
+  if(ub) sel.value=ub;
+  if(sel.value) loadMethods();
+}
+
+async function loadMethods(){
+  const branch=document.getElementById('branch-sel').value;
+  if(!branch){document.getElementById('methods-area').innerHTML='<div class="empty"><i class="fas fa-arrow-up"></i> اختر الفرع أولاً</div>';return;}
+  METHODS=await api(`pos_methods?branch=eq.${encodeURIComponent(branch)}&is_active=eq.true&order=sort_order`);
+  VALUES={};
+  METHODS.forEach(m=>{
+    if(m.method_type==='pos') VALUES[m.id]={closing:''};
+    else VALUES[m.id]={opening:'',closing:''};
+  });
+  // فحص لو فيه شيفت مفتوح
+  const today=document.getElementById('shift-date').value||new Date().toISOString().slice(0,10);
+  const shifts=await api(`pos_shifts?branch=eq.${encodeURIComponent(branch)}&shift_date=eq.${today}&order=id.desc&limit=1`);
+  CURRENT_SHIFT=shifts.length?shifts[0]:null;
+  render();
+}
+
+function getNet(m){
+  const v=VALUES[m.id]||{};
+  if(m.method_type==='pos') return parseFloat(v.closing)||0;
+  return (parseFloat(v.closing)||0)-(parseFloat(v.opening)||0);
+}
+
+function calcTotals(){
+  let totalPos=0,totalWal=0;
+  METHODS.forEach(m=>{
+    const net=getNet(m);
+    if(m.method_type==='pos') totalPos+=net;
+    else totalWal+=net;
+  });
+  return{totalPos,totalWal,grand:totalPos+totalWal};
+}
+
+function render(){
+  if(!METHODS.length){
+    document.getElementById('methods-area').innerHTML='<div class="empty">لا توجد طرق دفع نشطة لهذا الفرع</div>';
+    return;
+  }
+
+  const pos=METHODS.filter(m=>m.method_type==='pos');
+  const wal=METHODS.filter(m=>m.method_type==='wallet');
+
+  let html='';
+
+  if(pos.length){
+    html+=`<div class="section-title"><i class="fas fa-credit-card" style="color:#1d4ed8"></i> ماكينات POS</div>
+    <div class="methods-grid">`;
+    pos.forEach(m=>{
+      const v=VALUES[m.id]||{closing:''};
+      const net=getNet(m);
+      html+=`<div class="method-card pos-card">
+        <div class="method-head">
+          <div class="method-icon icon-pos"><i class="fas fa-cash-register"></i></div>
+          <div><div class="method-name">${m.display_name}</div><div class="method-type-label">قيمة إغلاق الشيفت من الورقة</div></div>
+        </div>
+        <div class="input-group">
+          <label>قيمة إغلاق الشيفت (ج)</label>
+          <input type="number" step="0.01" min="0" placeholder="0.00" value="${v.closing}"
+            oninput="VALUES[${m.id}].closing=this.value;recalc()">
+        </div>
+        <div class="net-display ${net<0?'negative':''}">${net>=0?'+':''}${fmt(net)} ج</div>
+      </div>`;
+    });
+    html+='</div>';
+  }
+
+  if(wal.length){
+    html+=`<div class="section-title"><i class="fas fa-wallet" style="color:#7e22ce"></i> المحافظ الإلكترونية</div>
+    <div class="methods-grid">`;
+    wal.forEach(m=>{
+      const v=VALUES[m.id]||{opening:'',closing:''};
+      const net=getNet(m);
+      html+=`<div class="method-card wallet-card">
+        <div class="method-head">
+          <div class="method-icon icon-wal"><i class="fas fa-mobile-alt"></i></div>
+          <div><div class="method-name">${m.display_name}</div><div class="method-type-label">رصيد البداية والنهاية من الموبايل</div></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <div class="input-group">
+            <label>رصيد البداية (ج)</label>
+            <input type="number" step="0.01" min="0" placeholder="0.00" value="${v.opening}"
+              oninput="VALUES[${m.id}].opening=this.value;recalc()">
+          </div>
+          <div class="input-group">
+            <label>رصيد النهاية (ج)</label>
+            <input type="number" step="0.01" min="0" placeholder="0.00" value="${v.closing}"
+              oninput="VALUES[${m.id}].closing=this.value;recalc()">
+          </div>
+        </div>
+        <div class="net-display ${net<0?'negative':''}">${net>=0?'+':''}${fmt(net)} ج <span style="font-size:0.7rem;opacity:.7;">(صافي الفترة)</span></div>
+      </div>`;
+    });
+    html+='</div>';
+  }
+
+  document.getElementById('methods-area').innerHTML=html;
+  recalc();
+}
+
+function recalc(){
+  const{totalPos,totalWal,grand}=calcTotals();
+  document.getElementById('totals-area').innerHTML=`
+    <div class="grand-card">
+      <div class="grand-cell">
+        <div class="grand-label"><i class="fas fa-credit-card"></i> إجمالي الماكينات</div>
+        <div class="grand-value">${fmt(totalPos)}</div>
+        <div style="font-size:0.72rem;opacity:.7;">جنيه</div>
+      </div>
+      <div class="grand-cell">
+        <div class="grand-label"><i class="fas fa-wallet"></i> إجمالي المحافظ</div>
+        <div class="grand-value">${fmt(totalWal)}</div>
+        <div style="font-size:0.72rem;opacity:.7;">جنيه</div>
+      </div>
+      <div class="grand-cell" style="border-right:1px solid rgba(255,255,255,.2);padding-right:16px;">
+        <div class="grand-label"><i class="fas fa-calculator"></i> الإجمالي الكلي</div>
+        <div class="grand-value" style="font-size:1.7rem;">${fmt(grand)}</div>
+        <div style="font-size:0.72rem;opacity:.7;">جنيه</div>
+      </div>
+    </div>`;
+
+  // أزرار الإجراءات
+  const settled=CURRENT_SHIFT?.is_settled;
+  const role=(localStorage.getItem('userRole')||'').trim();
+  const canConfirm=role==='admin'||role==='manager'||role==='accountant';
+
+  document.getElementById('actions-area').innerHTML=`
+    <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;justify-content:flex-end;">
+      ${!CURRENT_SHIFT?`<button class="btn btn-success" onclick="closeShift()"><i class="fas fa-lock"></i> إغلاق الشيفت</button>`:''}
+      ${CURRENT_SHIFT&&!settled&&canConfirm?`<button class="btn btn-confirm" onclick="confirmShift()"><i class="fas fa-check-double"></i> تأكيد المراجعة والترحيل</button>`:''}
+    </div>`;
+
+  // بانر الحالة
+  if(CURRENT_SHIFT){
+    const s=CURRENT_SHIFT;
+    document.getElementById('confirm-area').innerHTML=`
+      <div class="confirm-banner ${s.is_settled?'settled':''}">
+        <div>
+          <div style="font-weight:800;font-size:0.9rem;">${s.is_settled?'✅ تم التأكيد والترحيل':'⏳ بانتظار تأكيد المحاسب'}</div>
+          <div style="font-size:0.78rem;color:var(--muted);margin-top:3px;">
+            أُغلق بواسطة: <b>${s.employee_name}</b> · ${new Date(s.closed_at).toLocaleString('ar-EG',{dateStyle:'short',timeStyle:'short'})}
+            ${s.is_settled?` · تأكيد: <b>${s.settled_by}</b>  ${new Date(s.settled_at).toLocaleString('ar-EG',{dateStyle:'short',timeStyle:'short'})}`:''}
+          </div>
+        </div>
+        <div style="font-size:1.1rem;font-weight:900;color:${s.is_settled?'#15803d':'#7e22ce'};">${fmt(s.grand_total)} ج</div>
+      </div>`;
+  }else{
+    document.getElementById('confirm-area').innerHTML='';
+  }
+}
+
+async function closeShift(){
+  const branch=document.getElementById('branch-sel').value;
+  const cashier=document.getElementById('cashier-name').value.trim();
+  const shiftDate=document.getElementById('shift-date').value||new Date().toISOString().slice(0,10);
+  if(!cashier){toast('اكتب اسم الكاشير','err');return;}
+  if(!branch){toast('اختر الفرع','err');return;}
+
+  const{totalPos,totalWal,grand}=calcTotals();
+
+  // إنشاء الشيفت
+  const shifts=await api('pos_shifts',{method:'POST',body:JSON.stringify({
+    branch,employee_name:cashier,shift_date:shiftDate,
+    total_wallets:totalWal,total_machines:totalPos,grand_total:grand,
+    notes:document.getElementById('notes-inp').value||null,
+    is_settled:false
+  })});
+  const shift=shifts[0];
+
+  // إنشاء سطور التفاصيل
+  const lines=METHODS.map(m=>{
+    const v=VALUES[m.id]||{};
+    const opening=parseFloat(v.opening)||0;
+    const closing=parseFloat(v.closing)||0;
+    const net=m.method_type==='pos'?closing:closing-opening;
+    return{
+      shift_id:shift.id,
+      method_type:m.method_type,
+      method_key:m.method_key,
+      display_name:m.display_name,
+      opening_balance:m.method_type==='wallet'?opening:null,
+      closing_balance:closing,
+      actual_amount:net
+    };
+  });
+  await api('pos_shift_lines',{method:'POST',body:JSON.stringify(lines)});
+
+  CURRENT_SHIFT=shift;
+  toast('تم إغلاق الشيفت بنجاح ✓');
+  recalc();
+}
+
+async function confirmShift(){
+  if(!CURRENT_SHIFT)return;
+  const settler=localStorage.getItem('activeUser')||'محاسب';
+  if(!confirm(`تأكيد مراجعة وترحيل شيفت ${CURRENT_SHIFT.branch}؟`))return;
+  await api(`pos_shifts?id=eq.${CURRENT_SHIFT.id}`,{method:'PATCH',body:JSON.stringify({
+    is_settled:true,
+    settled_at:new Date().toISOString(),
+    settled_by:settler
+  })});
+  CURRENT_SHIFT={...CURRENT_SHIFT,is_settled:true,settled_by:settler,settled_at:new Date().toISOString()};
+  toast('تم التأكيد والترحيل ✓');
+  recalc();
+}
+
+// تهيئة
+document.getElementById('shift-date').value=new Date().toISOString().slice(0,10);
+loadBranches();
+</script>
+</body>
+</html>
