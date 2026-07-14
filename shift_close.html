@@ -29,7 +29,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
 .btn-confirm{background:#7e22ce;color:#fff;}
 .btn-ghost{background:var(--light);color:var(--muted);border:1px solid var(--border);}
 select,input,textarea{font-family:var(--font);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:0.85rem;outline:none;background:#fff;color:var(--text);}
-select:focus,input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(3,105,161,.1);}
+select:focus,input:focus{border-color:#16a34a;box-shadow:0 0 0 3px rgba(22,163,74,.1);}
 .section-title{font-size:0.8rem;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:20px 0 10px;display:flex;align-items:center;gap:6px;}
 .section-title::after{content:'';flex:1;height:1px;background:var(--border);}
 
@@ -135,10 +135,22 @@ async function loadMethods(){
     if(m.method_type==='machine') VALUES[m.id]={closing:''};
     else VALUES[m.id]={opening:'',closing:''};
   });
-  // فحص لو فيه شيفت مفتوح
-  const today=document.getElementById('shift-date').value||new Date().toISOString().slice(0,10);
-  const shifts=await api(`pos_shifts?branch=eq.${encodeURIComponent(branch)}&shift_date=eq.${today}&order=id.desc&limit=1`);
-  CURRENT_SHIFT=shifts.length?shifts[0]:null;
+
+  // جلب آخر closing_balance لكل محفظة من آخر شيفت
+  try{
+    const lastLines=await api(`pos_shift_lines?method_type=eq.wallet&order=id.desc&limit=100`);
+    const seen=new Set();
+    lastLines.forEach(l=>{
+      const m=METHODS.find(x=>x.method_key===l.method_key);
+      if(m&&!seen.has(l.method_key)&&l.closing_balance!=null){
+        VALUES[m.id]={opening:String(l.closing_balance),closing:''};
+        seen.add(l.method_key);
+      }
+    });
+  }catch(e){}
+
+  // لا نحجب زر الإغلاق — كل ضغطة تنشئ شيفت جديد
+  CURRENT_SHIFT=null;
   render();
 }
 
