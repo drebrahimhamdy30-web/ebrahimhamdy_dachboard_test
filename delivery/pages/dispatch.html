@@ -1659,15 +1659,30 @@ function openTransfer(tripId, e){
 
   if(!orders.length){ showToast('لا توجد طلبات قابلة للنقل في هذه الرحلة'); return; }
 
+  // كل الطلبات مختارة افتراضياً — والموظف يشيل اللي مش عايزه
   _trOrderIds = orders.map(o=>o.id);
 
   document.getElementById('tr-summary').innerHTML = `
-    <div style="font-weight:800;margin-bottom:.4rem">من: ${trip.driver_name}</div>
-    ${orders.map(o=>`<div style="display:flex;justify-content:space-between;padding:.2rem 0;border-top:1px solid var(--border)">
-      <span><strong>${o.bill_no||o.id.slice(0,6)}</strong> · ${o.customer_name||'—'}</span>
-      <span style="color:${o.status==='picked'?'#2563eb':'#b45309'};font-weight:700">${SL[o.status]||o.status}</span>
-    </div>`).join('')}
-    <div style="margin-top:.5rem;font-weight:800;color:var(--primary)">${orders.length} طلب</div>`;
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+      <span style="font-weight:800">من: ${trip.driver_name}</span>
+      <label style="display:flex;align-items:center;gap:.3rem;font-size:.7rem;cursor:pointer;color:var(--primary)">
+        <input type="checkbox" id="tr-all" checked onchange="trToggleAll()" style="accent-color:var(--primary);width:14px;height:14px">
+        <span>تحديد الكل</span>
+      </label>
+    </div>
+    ${orders.map(o=>`
+      <label style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-top:1px solid var(--border);cursor:pointer">
+        <input type="checkbox" class="tr-ck" value="${o.id}" checked onchange="trUpdSel()"
+               style="accent-color:var(--primary);width:15px;height:15px;flex-shrink:0">
+        <span style="flex:1;min-width:0">
+          <strong style="color:var(--primary)">${o.bill_no||o.id.slice(0,6)}</strong>
+          <span style="color:var(--text-muted);margin-right:.3rem">${o.customer_name||'—'}</span>
+        </span>
+        <span style="font-size:.68rem;font-weight:800;flex-shrink:0;color:${o.status==='picked'?'#2563eb':'#b45309'}">
+          ${SL[o.status]||o.status}
+        </span>
+      </label>`).join('')}
+    <div id="tr-count" style="margin-top:.5rem;font-weight:800;color:var(--primary)">${orders.length} طلب محدد</div>`;
 
   document.getElementById('tr-driver').innerHTML = driverOptions(trip.driver_id);
 
@@ -1675,6 +1690,26 @@ function openTransfer(tripId, e){
   document.getElementById('tr-other').value='';
   document.getElementById('tr-other-wrap').style.display='none';
   document.getElementById('transferModal').classList.add('open');
+}
+
+// تحديث الطلبات المختارة للنقل
+function trUpdSel(){
+  const cks=[...document.querySelectorAll('.tr-ck')];
+  _trOrderIds=cks.filter(c=>c.checked).map(c=>c.value);
+  const n=_trOrderIds.length;
+  const cnt=document.getElementById('tr-count');
+  if(cnt){
+    cnt.textContent=n?`${n} طلب محدد`:'لم يتم تحديد أي طلب';
+    cnt.style.color=n?'var(--primary)':'var(--red)';
+  }
+  const all=document.getElementById('tr-all');
+  if(all) all.checked = n===cks.length && n>0;
+}
+
+function trToggleAll(){
+  const on=document.getElementById('tr-all').checked;
+  document.querySelectorAll('.tr-ck').forEach(c=>c.checked=on);
+  trUpdSel();
 }
 
 function toggleTrOther(){
@@ -1695,7 +1730,7 @@ async function confirmTransfer(){
     reason = document.getElementById('tr-other').value.trim();
     if(!reason){ showToast('اكتب سبب النقل'); return; }
   }
-  if(!_trOrderIds.length){ showToast('لا توجد طلبات'); return; }
+  if(!_trOrderIds.length){ showToast('⚠️ حدد طلب واحد على الأقل للنقل'); return; }
 
   const drv = allDrivers.find(d=>d.id===toDriver);
   showLoading(true);
