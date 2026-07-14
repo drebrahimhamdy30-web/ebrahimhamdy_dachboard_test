@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>سجل إغلاقات الشيفت — Phalix</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --bg:#f0f4f8;--surface:#fff;--border:#e2e8f0;
+  --text:#0f172a;--muted:#64748b;--light:#f8fafc;
+  --accent:#0369a1;--success:#15803d;--danger:#b91c1c;--warn:#92400e;
+  --font:'Tajawal',system-ui,sans-serif;--radius:12px;
+}
+body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100vh;}
+.header{background:var(--surface);border-bottom:2px solid var(--accent);padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+.header h1{font-size:1rem;font-weight:900;color:var(--accent);display:flex;align-items:center;gap:8px;}
+.filters{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.container{max-width:1100px;margin:0 auto;padding:20px;}
+.btn{border:none;border-radius:8px;padding:8px 16px;font-family:var(--font);font-weight:800;font-size:0.82rem;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}
+.btn:hover{filter:brightness(.93);} .btn:disabled{opacity:.5;cursor:not-allowed;}
+.btn-primary{background:var(--accent);color:#fff;}
+.btn-success{background:var(--success);color:#fff;}
+.btn-ghost{background:var(--light);color:var(--muted);border:1px solid var(--border);}
+select,input{font-family:var(--font);border:1px solid var(--border);border-radius:8px;padding:7px 12px;font-size:0.83rem;outline:none;background:#fff;}
+select:focus,input:focus{border-color:var(--accent);}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:12px;}
+.shift-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;cursor:pointer;}
+.shift-meta{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.badge{padding:3px 10px;border-radius:20px;font-size:0.72rem;font-weight:700;}
+.badge-pending{background:#fef9c3;color:#854d0e;}
+.badge-settled{background:#dcfce7;color:#15803d;}
+.grand-num{font-size:1.2rem;font-weight:900;color:var(--success);}
+.detail-area{display:none;margin-top:14px;border-top:1px solid var(--border);padding-top:14px;}
+.detail-area.open{display:block;}
+table{width:100%;border-collapse:collapse;font-size:0.82rem;}
+th{background:var(--light);padding:7px 10px;text-align:right;font-weight:700;font-size:0.75rem;color:var(--muted);}
+td{padding:7px 10px;border-bottom:1px solid var(--light);}
+tr:last-child td{border-bottom:none;}
+.type-machine{color:#1d4ed8;font-weight:700;}
+.type-wallet{color:#7e22ce;font-weight:700;}
+.empty{text-align:center;color:var(--muted);padding:40px;font-size:0.9rem;}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);padding:10px 22px;border-radius:10px;font-weight:700;font-size:0.85rem;color:#fff;z-index:999;display:none;box-shadow:0 4px 20px rgba(0,0,0,.2);}
+.confirm-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;}
+.summary-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px;}
+.sum-cell{background:var(--light);border-radius:8px;padding:10px;text-align:center;}
+.sum-label{font-size:0.7rem;color:var(--muted);margin-bottom:3px;}
+.sum-val{font-size:1rem;font-weight:900;}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1><i class="fas fa-history"></i> سجل إغلاقات الشيفت</h1>
+  <div class="filters">
+    <select id="f-branch"><option value="">كل الفروع</option></select>
+    <input type="date" id="f-from">
+    <input type="date" id="f-to">
+    <select id="f-status">
+      <option value="">كل الحالات</option>
+      <option value="false">بانتظار التأكيد</option>
+      <option value="true">تم التأكيد</option>
+    </select>
+    <button class="btn btn-primary" onclick="loadShifts()"><i class="fas fa-search"></i> بحث</button>
+  </div>
+</div>
+
+<div class="container">
+  <div id="shifts-area"><div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SB_URL='https://rxtjoqulmgkkcohmgzgi.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
+const H_BASE={'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY};
+const H={...H_BASE,'Prefer':'return=representation'};
+const H_WRITE={...H_BASE,'Prefer':'return=minimal'};
+
+async function api(path,opts={}){
+  const isWrite=['PATCH','DELETE','PUT'].includes(opts.method);
+  const r=await fetch(SB_URL+'/rest/v1/'+path,{headers:isWrite?H_WRITE:H,...opts});
+  if(!r.ok){const e=await r.text();throw new Error(e);}
+  return isWrite?null:r.json();
+}
+
+function fmt(n){return(+n||0).toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2});}
+let toastT;
+function toast(msg,type='ok'){
+  const t=document.getElementById('toast');t.textContent=msg;
+  t.style.background=type==='ok'?'#15803d':'#dc2626';
+  t.style.display='block';clearTimeout(toastT);toastT=setTimeout(()=>t.style.display='none',2800);
+}
+
+const role=(localStorage.getItem('userRole')||'').trim();
+const canConfirm=role==='admin'||role==='manager'||role==='accountant';
+const settler=localStorage.getItem('activeUser')||'محاسب';
+
+// تهيئة
+const today=new Date().toISOString().slice(0,10);
+document.getElementById('f-from').value=today;
+document.getElementById('f-to').value=today;
+
+async function init(){
+  const branches=await api('branches?select=name&order=name');
+  const sel=document.getElementById('f-branch');
+  sel.innerHTML='<option value="">كل الفروع</option>'+
+    branches.map(b=>`<option value="${b.name}">${b.name}</option>`).join('');
+  // لو مش أدمن، سيب فرعه بس
+  if(!canConfirm){
+    const ub=localStorage.getItem('userBranch')||'';
+    if(ub){sel.value=ub;sel.disabled=true;}
+  }
+  await loadShifts();
+}
+
+async function loadShifts(){
+  const branch=document.getElementById('f-branch').value;
+  const from=document.getElementById('f-from').value;
+  const to=document.getElementById('f-to').value;
+  const status=document.getElementById('f-status').value;
+
+  let q='pos_shifts?order=id.desc&limit=100';
+  if(branch) q+=`&branch=eq.${encodeURIComponent(branch)}`;
+  if(from) q+=`&shift_date=gte.${from}`;
+  if(to) q+=`&shift_date=lte.${to}`;
+  if(status!=='') q+=`&is_settled=eq.${status}`;
+
+  const area=document.getElementById('shifts-area');
+  area.innerHTML='<div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>';
+  const shifts=await api(q);
+  if(!shifts.length){area.innerHTML='<div class="empty">لا توجد إغلاقات في هذه الفترة</div>';return;}
+
+  area.innerHTML=shifts.map(s=>`
+    <div class="card">
+      <div class="shift-head" onclick="toggleDetail(${s.id})">
+        <div class="shift-meta">
+          <span style="font-weight:800;font-size:0.95rem;">${s.branch}</span>
+          <span style="color:var(--muted);font-size:0.82rem;"><i class="fas fa-calendar"></i> ${s.shift_date}</span>
+          <span style="color:var(--muted);font-size:0.82rem;"><i class="fas fa-user"></i> ${s.employee_name}</span>
+          <span style="color:var(--muted);font-size:0.78rem;">${new Date(s.closed_at).toLocaleString('ar-EG',{timeStyle:'short'})}</span>
+          <span class="badge ${s.is_settled?'badge-settled':'badge-pending'}">${s.is_settled?'✅ تم التأكيد':'⏳ بانتظار التأكيد'}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <span class="grand-num">${fmt(s.grand_total)} ج</span>
+          <i class="fas fa-chevron-down" style="color:var(--muted);font-size:0.8rem;" id="chev-${s.id}"></i>
+        </div>
+      </div>
+      <div class="detail-area" id="detail-${s.id}">
+        <div class="summary-row">
+          <div class="sum-cell"><div class="sum-label">إجمالي الماكينات</div><div class="sum-val" style="color:#1d4ed8">${fmt(s.total_machines)} ج</div></div>
+          <div class="sum-cell"><div class="sum-label">إجمالي المحافظ</div><div class="sum-val" style="color:#7e22ce">${fmt(s.total_wallets)} ج</div></div>
+          <div class="sum-cell"><div class="sum-label">الإجمالي الكلي</div><div class="sum-val" style="color:var(--success)">${fmt(s.grand_total)} ج</div></div>
+          <div class="sum-cell"><div class="sum-label">${s.is_settled?'اعتمد بواسطة':'الحالة'}</div><div class="sum-val" style="font-size:0.8rem;color:var(--muted)">${s.is_settled?s.settled_by:'—'}</div></div>
+        </div>
+        ${s.notes?`<div style="margin-top:10px;background:#fef9c3;border-radius:8px;padding:8px 12px;font-size:0.82rem;color:#854d0e;"><i class="fas fa-note-sticky"></i> ${s.notes}</div>`:''}
+        <div id="lines-${s.id}" style="margin-top:12px;"><div style="text-align:center;color:var(--muted);font-size:0.8rem;"><i class="fas fa-spinner fa-spin"></i></div></div>
+        ${canConfirm&&!s.is_settled?`
+          <div class="confirm-actions">
+            <button class="btn btn-success" onclick="confirmShift(${s.id})">
+              <i class="fas fa-check-double"></i> تأكيد المراجعة والاعتماد
+            </button>
+          </div>`:
+          s.is_settled?`<div style="margin-top:10px;font-size:0.78rem;color:var(--muted);text-align:left;">
+            اعتمد بواسطة: <b>${s.settled_by}</b> · ${new Date(s.settled_at).toLocaleString('ar-EG',{dateStyle:'short',timeStyle:'short'})}
+          </div>`:''
+        }
+      </div>
+    </div>`).join('');
+}
+
+async function toggleDetail(id){
+  const d=document.getElementById('detail-'+id);
+  const chev=document.getElementById('chev-'+id);
+  const isOpen=d.classList.contains('open');
+  d.classList.toggle('open');
+  chev.style.transform=isOpen?'':'rotate(180deg)';
+  if(!isOpen){
+    const linesEl=document.getElementById('lines-'+id);
+    const lines=await api(`pos_shift_lines?shift_id=eq.${id}&order=method_type,display_name`);
+    if(!lines.length){linesEl.innerHTML='<div style="color:var(--muted);font-size:0.8rem;text-align:center;">لا توجد تفاصيل</div>';return;}
+    linesEl.innerHTML=`<table>
+      <thead><tr><th>النوع</th><th>الاسم</th><th class="num">رصيد البداية</th><th class="num">رصيد النهاية</th><th class="num">صافي الفترة</th></tr></thead>
+      <tbody>${lines.map(l=>`<tr>
+        <td><span class="type-${l.method_type}">${l.method_type==='machine'?'ماكينة POS':'محفظة'}</span></td>
+        <td>${l.display_name}</td>
+        <td style="text-align:center;color:var(--muted);">${l.opening_balance!=null?fmt(l.opening_balance):'—'}</td>
+        <td style="text-align:center;color:var(--muted);">${l.closing_balance!=null?fmt(l.closing_balance):'—'}</td>
+        <td style="text-align:center;font-weight:800;color:${l.actual_amount>=0?'var(--success)':'var(--danger)'};">${l.actual_amount>=0?'+':''}${fmt(l.actual_amount)}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+  }
+}
+
+async function confirmShift(id){
+  if(!confirm('تأكيد اعتماد هذا الإغلاق؟'))return;
+  try{
+    await api(`pos_shifts?id=eq.${id}`,{method:'PATCH',body:JSON.stringify({
+      is_settled:true,settled_at:new Date().toISOString(),settled_by:settler
+    })});
+    toast('تم الاعتماد بنجاح ✓');
+    await loadShifts();
+  }catch(e){toast('فشل الاعتماد','err');}
+}
+
+init();
+</script>
+</body>
+</html>
