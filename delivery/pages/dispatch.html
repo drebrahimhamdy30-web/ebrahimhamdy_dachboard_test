@@ -1647,33 +1647,38 @@ async function saveNewOrder(){
 // ═══════════════ تسليم الطلبات لطيار آخر ═══════════════
 let _trOrderIds = [];
 
-function openTransfer(tripId, e){
+// النقل — من كارت الرحلة (كل الطلبات) أو من طلب واحد (onlyOrderId)
+function openTransfer(tripId, e, onlyOrderId){
   e?.stopPropagation();
   const trip = activeTrips.find(t=>t.id===tripId);
   if(!trip){ showToast('الرحلة غير موجودة'); return; }
 
-  // الطلبات اللي لسه في الشارع — المتوصّلة مش محتاجة تسليم
+  // الطلبات اللي لسه في الشارع — المتوصّلة مش محتاجة نقل
   const oIds = tripOrdersMap[tripId] || [];
-  const orders = oIds.map(id=>allOrders.find(o=>o.id===id)).filter(Boolean)
-                     .filter(o=>['assigned','picked'].includes(o.status));
+  let orders = oIds.map(id=>allOrders.find(o=>o.id===id)).filter(Boolean)
+                   .filter(o=>['assigned','picked'].includes(o.status));
 
-  if(!orders.length){ showToast('لا توجد طلبات قابلة للنقل في هذه الرحلة'); return; }
+  // نقل فردي؟ → الطلب ده بس
+  if(onlyOrderId) orders = orders.filter(o=>o.id===onlyOrderId);
+
+  if(!orders.length){ showToast('لا توجد طلبات قابلة للنقل'); return; }
 
   // كل الطلبات مختارة افتراضياً — والموظف يشيل اللي مش عايزه
   _trOrderIds = orders.map(o=>o.id);
 
+  const single = !!onlyOrderId || orders.length===1;
+
   document.getElementById('tr-summary').innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
       <span style="font-weight:800">من: ${trip.driver_name}</span>
-      <label style="display:flex;align-items:center;gap:.3rem;font-size:.7rem;cursor:pointer;color:var(--primary)">
+      ${single?'':`<label style="display:flex;align-items:center;gap:.3rem;font-size:.7rem;cursor:pointer;color:var(--primary)">
         <input type="checkbox" id="tr-all" checked onchange="trToggleAll()" style="accent-color:var(--primary);width:14px;height:14px">
         <span>تحديد الكل</span>
-      </label>
+      </label>`}
     </div>
     ${orders.map(o=>`
-      <label style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-top:1px solid var(--border);cursor:pointer">
-        <input type="checkbox" class="tr-ck" value="${o.id}" checked onchange="trUpdSel()"
-               style="accent-color:var(--primary);width:15px;height:15px;flex-shrink:0">
+      <label style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-top:1px solid var(--border);cursor:${single?'default':'pointer'}">
+        <input type="checkbox" class="tr-ck" value="${o.id}" checked ${single?'style="display:none"':'onchange="trUpdSel()" style="accent-color:var(--primary);width:15px;height:15px;flex-shrink:0"'}>
         <span style="flex:1;min-width:0">
           <strong style="color:var(--primary)">${o.bill_no||o.id.slice(0,6)}</strong>
           <span style="color:var(--text-muted);margin-right:.3rem">${o.customer_name||'—'}</span>
@@ -1682,9 +1687,15 @@ function openTransfer(tripId, e){
           ${SL[o.status]||o.status}
         </span>
       </label>`).join('')}
-    <div id="tr-count" style="margin-top:.5rem;font-weight:800;color:var(--primary)">${orders.length} طلب محدد</div>`;
+    ${single?'':`<div id="tr-count" style="margin-top:.5rem;font-weight:800;color:var(--primary)">${orders.length} طلب محدد</div>`}`;
 
   document.getElementById('tr-driver').innerHTML = driverOptions(trip.driver_id);
+
+  // العنوان حسب النوع
+  const ttl=document.querySelector('#transferModal .modal-title');
+  if(ttl) ttl.textContent = onlyOrderId
+    ? `🔄 نقل الطلب ${orders[0].bill_no||''} لطيار آخر`
+    : '🔄 نقل الطلبات لطيار آخر';
 
   document.getElementById('tr-reason').value='عطل في المركبة';
   document.getElementById('tr-other').value='';
@@ -2155,7 +2166,7 @@ function openTripOrderActions(orderId, tripId){
     document.getElementById('toa-btn-reassign').parentNode
       .insertBefore(_tr, document.getElementById('toa-btn-postpone'));
   }
-  _tr.onclick=()=>{ closeModal('tripOrderActionsModal'); openTransfer(tripId,{stopPropagation:()=>{}}); };
+  _tr.onclick=()=>{ closeModal('tripOrderActionsModal'); openTransfer(tripId,{stopPropagation:()=>{}}, o.id); };
   _tr.style.display=(_out && ['assigned','picked'].includes(o.status))?'flex':'none';
 
   document.getElementById('tripOrderActionsModal').classList.add('open');
@@ -2373,14 +2384,14 @@ if(o.delivered_at){
       footerBtns+=`<button class="btn btn-primary" onclick="closeModal('detailModal');openReassign('${orderId}','${tripId}')">🔄 إعادة تعيين</button>`;
       footerBtns+=`<button class="btn btn-outline" onclick="closeModal('detailModal');removeFromTrip('${orderId}','${tripId}',{stopPropagation:()=>{}})">↩ إزالة من الرحلة</button>`;
     }else{
-      footerBtns+=`<button class="btn btn-outline" onclick="closeModal('detailModal');openTransfer('${tripId}',{stopPropagation:()=>{}})">🔄 نقل لطيار آخر</button>`;
+      footerBtns+=`<button class="btn btn-outline" onclick="closeModal('detailModal');openTransfer('${tripId}',{stopPropagation:()=>{}},'${orderId}')">🔄 نقل لطيار آخر</button>`;
     }
     footerBtns+=`<button class="btn btn-red" onclick="closeModal('detailModal');openCancel('${orderId}',null)">إلغاء</button>`;
   }
   if(o.status==='picked'){
     footerBtns+=`<button class="btn btn-yellow" onclick="closeModal('detailModal');openDeliver('${orderId}',null)">✅ وصّل</button>`;
     // الطلب في الشارع → النقل بس (إعادة التعيين هتخلي الأدوية ضايعة)
-    footerBtns+=`<button class="btn btn-primary" onclick="closeModal('detailModal');openTransfer('${tripId}',{stopPropagation:()=>{}})">🔄 نقل لطيار آخر</button>`;
+    footerBtns+=`<button class="btn btn-primary" onclick="closeModal('detailModal');openTransfer('${tripId}',{stopPropagation:()=>{}},'${orderId}')">🔄 نقل لطيار آخر</button>`;
     footerBtns+=`<button class="btn btn-outline" onclick="closeModal('detailModal');openPostpone('${orderId}',null)">⏰ تأجيل</button>`;
     footerBtns+=`<button class="btn btn-red" onclick="closeModal('detailModal');openCancelByCustomer('${orderId}')">العميل ألغى</button>`;
   }
