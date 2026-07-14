@@ -664,6 +664,35 @@ function getBillDate(o){if(!o.bill_date)return new Date(o.created_at);return new
 // كده الطلب اللي اتأجل ساعة ورجع، عداده يبدأ من الصفر
 // هل الطيار خرج بالرحلة فعلاً؟ (أي طلب اتستلم = الأدوية معاه في الشارع)
 // لو خرج → النقل بس (الأدوية معاه)، ولو لسه في الصيدلية → إعادة التعيين بس
+// خيارات قائمة الطيارين — الحاضرين المعتمدين بس، مع حالة كل واحد
+// الطيار غير الحاضر مش هيقدر يستلم، فمفيش فايدة من عرضه
+function driverOptions(excludeId){
+  const avail = allDrivers.filter(d=>{
+    if(!d.is_active) return false;
+    if(excludeId && d.id===excludeId) return false;
+    return getDriverAttStatus(d.id)==='online' && isDriverApproved(d.id);
+  });
+
+  if(!avail.length) return '<option value="">— لا يوجد طيارين حاضرين —</option>';
+
+  return '<option value="">— اختر الطيار —</option>' + avail.map(d=>{
+    const onTrip = allOrders.filter(o=>o.driver_id===d.id&&['assigned','picked'].includes(o.status)).length;
+    const isOut  = allOrders.some(o=>o.driver_id===d.id&&o.status==='picked');
+    let tag;
+    if(isOut)          tag = `🚗 خرج · ${onTrip} طلب`;
+    else if(onTrip>0)  tag = `📦 ${onTrip} طلب`;
+    else               tag = '✅ متاح';
+    return `<option value="${d.id}">${d.full_name} — ${tag}</option>`;
+  }).join('');
+}
+
+// الطيار حضوره معتمد؟
+function isDriverApproved(driverId){
+  const recs = attendanceToday.filter(r=>r.driver_id===driverId)
+    .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  return !!(recs[0] && recs[0].approved_at);
+}
+
 function tripHasPicked(tripId){
   const ids = tripOrdersMap[tripId] || [];
   return ids.some(id=>{
@@ -1640,15 +1669,7 @@ function openTransfer(tripId, e){
     </div>`).join('')}
     <div style="margin-top:.5rem;font-weight:800;color:var(--primary)">${orders.length} طلب</div>`;
 
-  const others = allDrivers.filter(d=>d.id!==trip.driver_id && d.is_active);
-  document.getElementById('tr-driver').innerHTML =
-    '<option value="">— اختر الطيار —</option>' +
-    others.map(d=>{
-      const att = getDriverAttStatus(d.id);
-      const onTrip = allOrders.filter(o=>o.driver_id===d.id&&['assigned','picked'].includes(o.status)).length;
-      const tag = att==='online' ? (onTrip>0?`(${onTrip} طلب)`:'(متاح)') : '(غير حاضر)';
-      return `<option value="${d.id}">${d.full_name} ${tag}</option>`;
-    }).join('');
+  document.getElementById('tr-driver').innerHTML = driverOptions(trip.driver_id);
 
   document.getElementById('tr-reason').value='عطل في المركبة';
   document.getElementById('tr-other').value='';
@@ -1663,7 +1684,11 @@ function toggleTrOther(){
 
 async function confirmTransfer(){
   const toDriver = document.getElementById('tr-driver').value;
-  if(!toDriver){ showToast('اختر الطيار المستلم'); return; }
+  if(!toDriver){
+    const hasAny=allDrivers.some(d=>d.is_active&&getDriverAttStatus(d.id)==='online'&&isDriverApproved(d.id));
+    showToast(hasAny?'اختر الطيار المستلم':'⚠️ لا يوجد طيارين حاضرين لاستلام الطلبات');
+    return;
+  }
 
   let reason = document.getElementById('tr-reason').value;
   if(reason==='__other'){
@@ -1700,7 +1725,7 @@ function quickAssign(id,e){e?.stopPropagation();selectedOrders.clear();selectedO
 
 function openAssignModal(){
   if(!selectedOrders.size){showToast('اختر طلباً أولاً');return;}
-  document.getElementById('assignDrv').innerHTML=allDrivers.map(d=>`<option value="${d.id}">${d.full_name}</option>`).join('');
+  document.getElementById('assignDrv').innerHTML=driverOptions();
   const ids=[...selectedOrders];
   const orders=ids.map(id=>allOrders.find(o=>o.id===id)).filter(Boolean);
   document.getElementById('assignList').innerHTML=orders.map(o=>`
@@ -1714,7 +1739,11 @@ function openAssignModal(){
 
 async function confirmAssign(){
   const driverId=document.getElementById('assignDrv').value;
-  if(!driverId){showToast('اختر الطيار');return;}
+  if(!driverId){
+    const hasAny=allDrivers.some(d=>d.is_active&&getDriverAttStatus(d.id)==='online'&&isDriverApproved(d.id));
+    showToast(hasAny?'اختر الطيار':'⚠️ لا يوجد طيارين حاضرين — اعتمد حضور طيار أولاً');
+    return;
+  }
   const driver=allDrivers.find(d=>d.id===driverId);
   const orderIds=[...selectedOrders];
   if(!orderIds.length){showToast('اختر طلب على الأقل');return;}
@@ -2331,7 +2360,7 @@ function openReassign(orderId, tripId){
   selectedOrders.add(orderId);
   updSel();
   // Remove from current trip first, then assign
-  document.getElementById('assignDrv').innerHTML=allDrivers.map(d=>`<option value="${d.id}">${d.full_name}</option>`).join('');
+  document.getElementById('assignDrv').innerHTML=driverOptions();
   const o=allOrders.find(x=>x.id===orderId);
   document.getElementById('assignList').innerHTML=`<div class="sel-item">
     <span style="font-weight:700;color:var(--primary)">${o?.bill_no||orderId.slice(0,8)}</span>
