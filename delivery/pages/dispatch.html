@@ -324,6 +324,7 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
     <button class="ftab" onclick="setFilter('picked',this)">في الطريق <span id="f-picked">0</span></button>
     <button class="ftab" onclick="setFilter('late',this)">⚠️ متأخر <span id="f-late">0</span></button>
     <button class="ftab" onclick="openAddOrder()" style="background:var(--green-light);color:#15803d;border-color:#bbf7d0;font-weight:700">➕ إضافة طلب</button>
+    <button class="ftab" id="errBadge" onclick="showErrors()" title="سجل الأخطاء" style="display:none;background:#fee2e2;color:#b91c1c;border-color:#fecaca;font-weight:800"></button>
     <span class="sel-info" id="selInfo"></span>
     <button class="batch-btn" id="batchBtn" onclick="openAssignModal()">🚗 تعيين طيار</button>
   </div>
@@ -617,10 +618,19 @@ setInterval(()=>{document.getElementById('clockTime').textContent=new Date().toL
 }
 function fm(mins){if(mins<0)mins=0;return mins<60?`${mins}د`:`${Math.floor(mins/60)}:${String(mins%60).padStart(2,'0')}`}
 function dm(from,to=new Date()){return Math.floor((new Date(to)-new Date(from))/60000)}
+// وقت الفاتورة الأصلي (للعرض والتقارير)
 function getBillDate(o){if(!o.bill_date)return new Date(o.created_at);return new Date(o.bill_date);}
+
+// الأساس اللي العدادات بتتحسب منه:
+// لو الطلب اتأجل ورجع → من وقت التفعيل (مش من وقت الفاتورة)
+// كده الطلب اللي اتأجل ساعة ورجع، عداده يبدأ من الصفر
+function getTimerBase(o){
+  if(o.last_activated_at) return new Date(o.last_activated_at);
+  return getBillDate(o);
+}
 function isLate(o){
   if(['completed','cancelled','delivered'].includes(o.status))return false;
-  const base=getBillDate(o);
+  const base=getTimerBase(o);
   if(o.status==='pending')   return dm(base)>(dispatchSettings?.late_threshold_minutes||30);
   if(o.status==='assigned')  return dm(o.assigned_at||base)>(dispatchSettings?.max_assigned_minutes||10);
   if(o.status==='picked')    return dm(o.picked_at||base)>(dispatchSettings?.max_picked_minutes||30);
@@ -628,7 +638,7 @@ function isLate(o){
 }
 function isStageAlert(o){
   // تحذير مرحلة محددة
-  const base=getBillDate(o);
+  const base=getTimerBase(o);
   if(o.status==='pending')   return dm(base)>(dispatchSettings?.max_pending_minutes||10);
   if(o.status==='assigned')  return dm(o.assigned_at||base)>(dispatchSettings?.max_assigned_minutes||10);
   if(o.status==='picked')    return dm(o.picked_at||base)>(dispatchSettings?.max_picked_minutes||30);
@@ -636,7 +646,7 @@ function isStageAlert(o){
 }
 
 function buildTimers(o){
-  const base=getBillDate(o);
+  const base=getTimerBase(o);
   const late=isLate(o);
   const alert=isStageAlert(o);
   let html='';
@@ -1102,7 +1112,7 @@ function renderTrips(){
       </div>
       <div class="tc-orders">
         ${tO.length?tO.map(o=>{
-          const base=getBillDate(o);
+          const base=getTimerBase(o);
           // التسمية + العداد + فحص تجاوز الحد (كل حالة وحدها الخاص بيها)
           let timerLabel='', timerVal=0, rowCls='', over=false;
           if(o.status==='assigned'){
@@ -1265,11 +1275,62 @@ function updSel(){
 }
 
 // ===== LOG =====
+// ملحوظة: Supabase مبيرميش exception — بيرجّع {data,error}
+// فلازم نفحص error صراحةً، وإلا الفشل يعدي بصمت
 async function addOrderLog(orderId,event,details={}){
-  try{await db.from('order_logs').insert({order_id:orderId,event,details,user_id:currentUser?.id,user_name:currentUser?.full_name||'—'});}catch(e){console.error('log',e);}
+  const payload={order_id:orderId,event,details,user_name:currentUser?.full_name||'—'};
+  // user_id لازم يكون UUID صالح — لو مش كده، نسيبه فاضي بدل ما الـ insert كله يترفض
+  const uid=currentUser?.userDbId||currentUser?.id;
+  if(uid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(uid))){
+    payload.user_id=uid;
+  }
+  const {error}=await db.from('order_logs').insert(payload);
+  if(error){
+    console.error('❌ فشل تسجيل لوج الطلب:',error.message,payload);
+    logError('addOrderLog',error,{orderId,event});
+  }
 }
+
 async function addTripLog(tripId,event,details={}){
-  try{await db.from('trip_logs').insert({trip_id:tripId,event,details,user_id:currentUser?.id,user_name:currentUser?.full_name||'—'});}catch(e){console.error('trip log',e);}
+  const payload={trip_id:tripId,event,details,user_name:currentUser?.full_name||'—'};
+  const uid=currentUser?.userDbId||currentUser?.id;
+  if(uid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(uid))){
+    payload.user_id=uid;
+  }
+  const {error}=await db.from('trip_logs').insert(payload);
+  if(error){
+    console.error('❌ فشل تسجيل لوج الرحلة:',error.message,payload);
+    logError('addTripLog',error,{tripId,event});
+  }
+}
+
+// ═══════════════ تتبع الأخطاء ═══════════════
+// بيجمع أي فشل في الخلفية، ويعرض تنبيه بدل ما يعدي بصمت
+window._errLog=[];
+function logError(where,error,ctx={}){
+  const entry={
+    at:new Date().toISOString(),
+    where,
+    msg:error?.message||String(error),
+    code:error?.code||null,
+    hint:error?.hint||null,
+    ctx
+  };
+  window._errLog.push(entry);
+  if(window._errLog.length>50) window._errLog.shift();
+  // مؤشر بصري في الهيدر
+  const badge=document.getElementById('errBadge');
+  if(badge){
+    badge.style.display='inline-flex';
+    badge.textContent=`⚠️ ${window._errLog.length}`;
+  }
+}
+function showErrors(){
+  if(!window._errLog.length){ showToast('✓ لا توجد أخطاء مسجّلة'); return; }
+  const txt=window._errLog.slice().reverse().map(e=>
+    `[${new Date(e.at).toLocaleTimeString('ar-EG')}] ${e.where}\n  ${e.msg}${e.code?' (كود: '+e.code+')':''}${e.hint?'\n  تلميح: '+e.hint:''}`
+  ).join('\n\n');
+  alert('سجل الأخطاء ('+window._errLog.length+'):\n\n'+txt);
 }
 
 async function openLog(orderId,e){
@@ -1929,10 +1990,10 @@ function openTripOrderActions(orderId, tripId){
   document.getElementById('toa-id').value=orderId;
   document.getElementById('toa-trip-id').value=tripId;
 
-  const base=getBillDate(o);
+  const base=getTimerBase(o);
   let timerHtml='';
   const t1=dm(base);
-  timerHtml+=`<span class="oc-t t1"><span class="ti">إنشاء منذ</span> ${fm(t1)}</span>`;
+  timerHtml+=`<span class="oc-t t1"><span class="ti">${o.last_activated_at?'تفعيل منذ':'إنشاء منذ'}</span> ${fm(t1)}</span>`;
   if(o.assigned_at&&!o.picked_at){
     const p=dm(o.assigned_at);
     const late=p>(dispatchSettings?.max_assigned_minutes||10);
@@ -2019,6 +2080,8 @@ function openDetail(id){
   const base2=getBillDate(o);
   const stg2=[];
   stg2.push({label:'إنشاء',time:base2,color:'#60a5fa',icon:'📦'});
+  if(o.last_activated_at && Math.abs(new Date(o.last_activated_at)-base2)>60000)
+    stg2.push({label:'إعادة تفعيل',time:new Date(o.last_activated_at),color:'#a855f7',icon:'🔄'});
   if(o.assigned_at) stg2.push({label:'تعيين',time:new Date(o.assigned_at),color:'#f97316',icon:'🚗'});
   if(o.picked_at) stg2.push({label:'استلام',time:new Date(o.picked_at),color:'#a78bfa',icon:'▶️'});
   if(o.delivered_at) stg2.push({label:'توصيل',time:new Date(o.delivered_at),color:'#4ade80',icon:'✅'});
@@ -2099,7 +2162,7 @@ function buildHorizTimeline(stages){
 // Trip Order Detail Modal
 async function openTripOrderDetail(orderId, tripId){
   const o=allOrders.find(x=>x.id===orderId);if(!o)return;
-  const base=getBillDate(o);
+  const base=getTimerBase(o);
   const pm=o.payment_method;
   const pmL=pm?PL[pm]:(o.bill_type||'—');
 
