@@ -47,8 +47,8 @@ select:focus,input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(3,
 .method-type-label{font-size:0.7rem;color:var(--muted);}
 .input-group{display:flex;flex-direction:column;gap:6px;margin-bottom:8px;}
 .input-group label{font-size:0.75rem;font-weight:700;color:var(--muted);}
-.net-display{background:var(--light);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:1rem;font-weight:900;color:var(--success);text-align:center;}
-.net-display.negative{color:var(--danger);}
+.net-display{background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:8px 12px;font-size:1.05rem;font-weight:900;color:#15803d;text-align:center;}
+.net-display.negative{background:#fef2f2;border-color:#fca5a5;color:#b91c1c;}
 
 /* Grand total */
 .grand-card{background:linear-gradient(135deg,#0369a1,#1d4ed8);color:#fff;border-radius:var(--radius);padding:20px;margin-top:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px;}
@@ -183,9 +183,9 @@ function render(){
         <div class="input-group">
           <label>قيمة إغلاق الشيفت (ج)</label>
           <input type="number" step="0.01" min="0" placeholder="0.00" value="${v.closing}"
-            oninput="VALUES[${m.id}].closing=this.value;recalc()">
+            oninput="VALUES[${m.id}].closing=this.value;updateNetDisplay(${m.id});recalc()">
         </div>
-        <div class="net-display ${net<0?'negative':''}">${net>=0?'+':''}${fmt(net)} ج</div>
+        <div class="net-display" id="net-${m.id}">${net>=0?'+':''}${fmt(net)} ج</div>
       </div>`;
     });
     html+='</div>';
@@ -206,15 +206,15 @@ function render(){
           <div class="input-group">
             <label>رصيد البداية (ج)</label>
             <input type="number" step="0.01" min="0" placeholder="0.00" value="${v.opening}"
-              oninput="VALUES[${m.id}].opening=this.value;recalc()">
+              oninput="VALUES[${m.id}].opening=this.value;updateNetDisplay(${m.id});recalc()">
           </div>
           <div class="input-group">
             <label>رصيد النهاية (ج)</label>
             <input type="number" step="0.01" min="0" placeholder="0.00" value="${v.closing}"
-              oninput="VALUES[${m.id}].closing=this.value;recalc()">
+              oninput="VALUES[${m.id}].closing=this.value;updateNetDisplay(${m.id});recalc()">
           </div>
         </div>
-        <div class="net-display ${net<0?'negative':''}">${net>=0?'+':''}${fmt(net)} ج <span style="font-size:0.7rem;opacity:.7;">(صافي الفترة)</span></div>
+        <div class="net-display" id="net-${m.id}">${net>=0?'+':''}${fmt(net)} ج <span style="font-size:0.7rem;opacity:.7;">(صافي الفترة)</span></div>
       </div>`;
     });
     html+='</div>';
@@ -222,6 +222,14 @@ function render(){
 
   document.getElementById('methods-area').innerHTML=html;
   recalc();
+}
+
+function updateNetDisplay(mId){
+  const m=METHODS.find(x=>x.id===mId); if(!m)return;
+  const net=getNet(m);
+  const el=document.getElementById('net-'+mId); if(!el)return;
+  el.className='net-display'+(net<0?' negative':'');
+  el.innerHTML=(net>=0?'+':'')+fmt(net)+' ج'+(m.method_type==='wallet'?' <span style="font-size:0.7rem;opacity:.7;">(صافي الفترة)</span>':'');
 }
 
 function recalc(){
@@ -310,7 +318,7 @@ async function closeShift(){
   });
   await api('pos_shift_lines',{method:'POST',body:JSON.stringify(lines)});
 
-  CURRENT_SHIFT=shift;
+  CURRENT_SHIFT=null; // يسمح بإغلاق شيفت جديد
   toast('تم إغلاق الشيفت بنجاح ✓');
 
   // نقل رصيد النهاية للمحافظ → رصيد بداية الشيفت الجديد، وتصفير الباقي
