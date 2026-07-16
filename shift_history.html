@@ -68,6 +68,16 @@ tr:last-child td{border-bottom:none;}
 .stat-val{font-size:1.35rem;font-weight:900;font-variant-numeric:tabular-nums;}
 .num{text-align:center;font-variant-numeric:tabular-nums;}
 .tbl-wrap{overflow-x:auto;}
+/* Unreviewed total card */
+.unrev-card{background:linear-gradient(135deg,#b45309,#d97706);color:#fff;border-radius:var(--radius);padding:16px 20px;margin-bottom:16px;}
+.unrev-top{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;}
+.unrev-title{font-size:0.9rem;font-weight:900;display:flex;align-items:center;gap:8px;}
+.unrev-big{font-size:1.7rem;font-weight:900;font-variant-numeric:tabular-nums;}
+.unrev-sub{font-size:0.74rem;opacity:.9;margin-top:2px;}
+.unrev-branch-sel{border:none;border-radius:8px;padding:7px 12px;font-family:var(--font);font-weight:800;font-size:0.82rem;background:rgba(255,255,255,.95);color:#92400e;cursor:pointer;}
+.unrev-list{margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.25);display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;}
+.unrev-item{background:rgba(255,255,255,.15);border-radius:8px;padding:8px 12px;display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:0.82rem;}
+.unrev-item b{font-variant-numeric:tabular-nums;font-weight:900;}
 </style>
 </head>
 <body>
@@ -97,6 +107,7 @@ tr:last-child td{border-bottom:none;}
   </div>
 
   <div class="pane active" id="pane-shifts">
+    <div id="unreviewed-area"></div>
     <div id="shifts-area"><div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div></div>
   </div>
 
@@ -163,7 +174,78 @@ async function init(){
 }
 
 async function reloadAll(){
-  await Promise.all([loadShifts(), loadTransfers()]);
+  await Promise.all([loadShifts(), loadTransfers(), loadUnreviewed()]);
+}
+
+/* ===== إجمالي غير المراجَع (مستقل تماماً عن فلتر التاريخ) ===== */
+let UNREV_BRANCH='';  // فلتر داخلي خاص بالكارت (للمدير/المحاسب)
+
+async function loadUnreviewed(){
+  const area=document.getElementById('unreviewed-area');
+  // الموظف العادي: فرعه فقط. المدير/المحاسب: كل الفروع مع فلتر داخلي.
+  const forcedBranch = canConfirm ? '' : (localStorage.getItem('userBranch')||'');
+
+  let q='pos_shifts?select=branch,grand_total&is_settled=eq.false&limit=2000';
+  if(forcedBranch) q+=`&branch=eq.${encodeURIComponent(forcedBranch)}`;
+
+  try{
+    const rows=await api(q);
+    // تجميع حسب الفرع
+    const byBranch={};
+    rows.forEach(r=>{ byBranch[r.branch]=(byBranch[r.branch]||0)+(+r.grand_total||0); });
+    const branches=Object.keys(byBranch).sort();
+    const grandAll=rows.reduce((s,r)=>s+(+r.grand_total||0),0);
+
+    if(!canConfirm){
+      // موظف عادي: رقم واحد لفرعه
+      area.innerHTML=`
+        <div class="unrev-card">
+          <div class="unrev-top">
+            <div>
+              <div class="unrev-title"><i class="fas fa-triangle-exclamation"></i> إجمالي المعاملات غير المراجَعة — ${esc(forcedBranch||getMyBranchLabel())}</div>
+              <div class="unrev-sub">مجموع الشيفتات التي لم يتم تأكيدها بعد (لا يرتبط بالتاريخ)</div>
+            </div>
+            <div class="unrev-big">${fmt(grandAll)} ج</div>
+          </div>
+        </div>`;
+      return;
+    }
+
+    // مدير/محاسب: فلتر داخلي + تفصيل لكل فرع
+    const selBranch = UNREV_BRANCH && byBranch[UNREV_BRANCH]!=null ? UNREV_BRANCH : '';
+    const shown = selBranch ? (byBranch[selBranch]||0) : grandAll;
+
+    const opts = ['<option value="">كل الفروع</option>']
+      .concat(branches.map(b=>`<option value="${esc(b)}"${b===UNREV_BRANCH?' selected':''}>${esc(b)}</option>`))
+      .join('');
+
+    area.innerHTML=`
+      <div class="unrev-card">
+        <div class="unrev-top">
+          <div>
+            <div class="unrev-title"><i class="fas fa-triangle-exclamation"></i> إجمالي المعاملات غير المراجَعة</div>
+            <div class="unrev-sub">مجموع الشيفتات التي لم يتم تأكيدها بعد — مستقل تماماً عن فلتر التاريخ</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <select class="unrev-branch-sel" onchange="UNREV_BRANCH=this.value;loadUnreviewed()">${opts}</select>
+            <div class="unrev-big">${fmt(shown)} ج</div>
+          </div>
+        </div>
+        ${!selBranch && branches.length ? `
+        <div class="unrev-list">
+          ${branches.map(b=>`<div class="unrev-item"><span>${esc(b)}</span><b>${fmt(byBranch[b])} ج</b></div>`).join('')}
+        </div>` : ''}
+        ${!branches.length ? '<div style="margin-top:10px;font-size:0.82rem;opacity:.9;"><i class="fas fa-check-circle"></i> لا توجد شيفتات غير مراجَعة ✓</div>' : ''}
+      </div>`;
+  }catch(e){
+    area.innerHTML='';
+  }
+}
+
+function getMyBranchLabel(){
+  const raw=(localStorage.getItem('userBranch')||'').trim();
+  const alias={'الصيدلية':'المعمورة','ابراهيم حمدي 2':'سان ستيفانو','ابراهيم حمدي 3':'سيدى بشر'};
+  return alias[raw]||raw||'فرعك';
 }
 
 function filters(){
@@ -292,7 +374,7 @@ async function confirmShift(id){
       is_settled:true,settled_at:new Date().toISOString(),settled_by:settler
     })});
     toast('تم الاعتماد بنجاح ✓');
-    await loadShifts();
+    await Promise.all([loadShifts(), loadUnreviewed()]);
   }catch(e){toast('فشل الاعتماد','err');}
 }
 
