@@ -1014,6 +1014,27 @@ const {data:trips}=await db.from('trips').select('*')
 
 function fm(mins){if(mins<0)mins=0;return mins<60?`${mins}د`:`${Math.floor(mins/60)}س${String(mins%60).padStart(2,'0')}د`}
 function dm(from,to=new Date()){if(!from)return 0;return Math.floor((new Date(to)-new Date(from))/60000)}
+// معرّف المستخدم الصحيح للوجات: id (integer) مش legacyId (UUID)
+function logUserId(){
+  const uid = currentUser?.id;
+  return (uid!=null && uid!=='') ? parseInt(uid) : null;
+}
+// تسجيل لوج — بيفحص error بدل ما يعدي بصمت (Supabase مبيرميش exception)
+async function addOrderLog(orderId, event, details={}){
+  const {error} = await db.from('order_logs').insert({
+    order_id: orderId, event, details,
+    user_id: logUserId(), user_name: currentUser?.full_name || '—'
+  });
+  if(error) console.error('❌ فشل لوج الطلب:', error.message, {orderId, event});
+}
+async function addTripLog(tripId, event, details={}){
+  const {error} = await db.from('trip_logs').insert({
+    trip_id: tripId, event, details,
+    user_id: logUserId(), user_name: currentUser?.full_name || '—'
+  });
+  if(error) console.error('❌ فشل لوج الرحلة:', error.message, {tripId, event});
+}
+
 function getBillDate(o){if(!o.bill_date)return new Date(o.created_at);return new Date(o.bill_date);}
 
 function isLate(o){
@@ -1211,7 +1232,7 @@ async function pickupAll(tripId){
     const ids=(ordRes.data||[]).map(o=>o.id);
     if(ids.length){
       await db.from('orders').update({status:'picked',picked_at:now,updated_at:now}).in('id',ids);
-      for(const id of ids){try{await db.from('order_logs').insert({order_id:id,event:'order_picked',details:{bulk:true},user_id:currentUser.legacyId,user_name:currentUser.full_name});}catch(e){}}
+      for(const id of ids){await addOrderLog(id,'order_picked',{bulk:true});}
     }
   }
   await loadAll();load(false);
@@ -1220,7 +1241,7 @@ async function pickupOne(orderId){
   load(true);
   const now=new Date().toISOString();
   await db.from('orders').update({status:'picked',picked_at:now,updated_at:now}).eq('id',orderId);
-  try{await db.from('order_logs').insert({order_id:orderId,event:'order_picked',details:{},user_id:currentUser.legacyId,user_name:currentUser.full_name});}catch(e){}
+  await addOrderLog(orderId,'order_picked',{});
   await loadAll();load(false);
 }
 
@@ -1250,7 +1271,7 @@ async function confirmDeliver(){
   load(true);
   const now=new Date().toISOString();
   await db.from('orders').update({status:'delivered',payment_method:pay,collected_amount:amt,driver_notes:note||null,delivered_at:now,updated_at:now}).eq('id',id);
-  try{await db.from('order_logs').insert({order_id:id,event:'order_delivered',details:{payment:pay,amount:amt},user_id:currentUser.legacyId,user_name:currentUser.full_name});}catch(e){}
+  await addOrderLog(id,'order_delivered',{payment:pay,amount:amt});
   closeModal('deliverModal');await loadAll();load(false);
 }
 
@@ -1283,7 +1304,7 @@ async function confirmFail(){
     attempt_count:(o?.attempt_count||0)+1,
     updated_at:now
   }).eq('id',id);
-  try{await db.from('order_logs').insert({order_id:id,event:'order_postponed',details:{reason,kept_in_trip:true},user_id:currentUser.legacyId,user_name:currentUser.full_name});}catch(e){}
+  await addOrderLog(id,'order_postponed',{reason,kept_in_trip:true});
   closeModal('failModal');await loadAll();load(false);
 }
 async function retryFailed(orderId){
@@ -1295,7 +1316,7 @@ async function retryFailed(orderId){
     picked_at:now,
     updated_at:now
   }).eq('id',orderId);
-  try{await db.from('order_logs').insert({order_id:orderId,event:'order_picked',details:{retry:true},user_id:currentUser.legacyId,user_name:currentUser.full_name});}catch(e){}
+  await addOrderLog(orderId,'order_picked',{retry:true});
   await loadAll();load(false);
 }
 async function completeTrip(tripId){
@@ -1308,7 +1329,7 @@ async function completeTrip(tripId){
     load(true);
     const now=new Date().toISOString();
     await db.from('trips').update({status:'pending_complete',updated_at:now}).eq('id',tripId);
-    try{await db.from('trip_logs').insert({trip_id:tripId,event:'complete_requested',details:{by:'driver'},user_id:currentUser.legacyId,user_name:currentUser.full_name});}catch(e){}
+    await addTripLog(tripId,'complete_requested',{by:'driver'});
     await loadAll();load(false);
     return;
   }
@@ -1336,7 +1357,7 @@ async function completeTrip(tripId){
         await db.from('trip_orders').delete().eq('trip_id',tripId).eq('order_id',id);
       }
     }
-    for(const id of failedIds){try{await db.from('order_logs').insert({order_id:id,event:'order_postponed',details:{released_on_trip_complete:true},user_id:currentUser.legacyId,user_name:currentUser.full_name});}catch(e){}}
+    for(const id of failedIds){await addOrderLog(id,'order_postponed',{released_on_trip_complete:true});}
   }
 
   // المُوصّلة → completed
@@ -1346,7 +1367,7 @@ async function completeTrip(tripId){
 
   if(tripId!=='direct')
     await db.from('trips').update({status:'completed',updated_at:now}).eq('id',tripId);
-  try{await db.from('trip_logs').insert({trip_id:tripId,event:'trip_completed',details:{by:'driver',failed_released:failedOrders.length},user_id:currentUser.legacyId,user_name:currentUser.full_name});}catch(e){}
+  await addTripLog(tripId,'trip_completed',{by:'driver',failed_released:failedOrders.length});
 await loadAll();load(false);
 }
 
@@ -1355,7 +1376,7 @@ async function cancelCompleteRequest(tripId){
   load(true);
   const now=new Date().toISOString();
   await db.from('trips').update({status:'active',updated_at:now}).eq('id',tripId);
-  try{await db.from('trip_logs').insert({trip_id:tripId,event:'complete_cancelled',details:{by:'driver'},user_id:currentUser.legacyId,user_name:currentUser.full_name});}catch(e){}
+  await addTripLog(tripId,'complete_cancelled',{by:'driver'});
   await loadAll();load(false);
 }
 
@@ -1375,11 +1396,12 @@ async function submitChangePassword(){
   const confirmP=document.getElementById('pwd-confirm').value.trim();
   if(!oldP||!newP||!confirmP){alert('املأ كل الخانات');return;}
   if(newP!==confirmP){alert('كلمة المرور الجديدة وتأكيدها غير متطابقين');return;}
-  if(newP.length<4){alert('كلمة المرور الجديدة قصيرة جداً (4 أحرف على الأقل)');return;}
+  if(newP.length<6){alert('كلمة المرور الجديدة قصيرة جداً (6 أحرف على الأقل)');return;}
+  if(newP===oldP){alert('كلمة المرور الجديدة مطابقة للحالية');return;}
   load(true);
   try{
-    const {data,error}=await db.rpc('change_user_password',{
-      p_user_id:currentUser.legacyId,
+    const {data,error}=await db.rpc('change_branch_user_password',{
+      p_username:currentUser.username,
       p_old_password:oldP,
       p_new_password:newP
     });
@@ -1388,11 +1410,11 @@ async function submitChangePassword(){
       closeModal('pwdModal');
       alert('✓ تم تغيير كلمة المرور بنجاح');
     } else {
-      alert(data?.error||'حدث خطأ');
+      alert('❌ '+(data?.error||'حدث خطأ'));
     }
   }catch(e){
-    console.error(e);
-    alert('حدث خطأ في تغيير كلمة المرور');
+    console.error('changePassword:',e);
+    alert('❌ حدث خطأ: '+(e.message||'فشل تغيير كلمة المرور'));
   }
   load(false);
 }
