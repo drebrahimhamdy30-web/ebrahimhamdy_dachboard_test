@@ -356,6 +356,7 @@ let attRecord=null, attTimerInterval=null;
 // ===== SOUND SYSTEM =====
 let soundEnabled = true;
 let lastOrderIds = new Set();
+let firstOrderCheck = true;  // أول فحص بعد تحميل الصفحة — مايعملش إشعار
 let callChannel = null;
 let audioCtx = null;
 
@@ -486,11 +487,22 @@ function stopContinuousSound(){
 function checkNewOrders(){
   if(!driverRecord) return;
   const allOrds = Object.values(tripOrders).flat();
-  const currentIds = new Set(allOrds.filter(o=>['assigned','picked'].includes(o.status)).map(o=>o.id));
 
-  // طلبات جديدة
+  // الطلب "الجديد" = assigned فقط (لسه محتاج استلام)
+  // الطلب المستلَم (picked) مش جديد — الطيار خارج بيه بالفعل
+  const currentIds = new Set(
+    allOrds.filter(o => o.status === 'assigned').map(o => o.id)
+  );
+
+  // أول فحص بعد تحميل الصفحة → سجّل الموجود بدون إشعار
+  // (عشان الـ refresh مايعملش إشعار وهمي للطلبات القديمة)
+  if(firstOrderCheck){
+    lastOrderIds = currentIds;
+    firstOrderCheck = false;
+    return;
+  }
+
   const newOrders = [...currentIds].filter(id => !lastOrderIds.has(id));
-  // طلبات اتشالت
   const removedOrders = [...lastOrderIds].filter(id => !currentIds.has(id));
 
   if(newOrders.length > 0){
@@ -498,7 +510,7 @@ function checkNewOrders(){
     showBanner(`📦 طلب جديد عليك! (${newOrders.length}) — اضغط للإيقاف`, 'var(--green)', true);
   }
   if(removedOrders.length > 0 && lastOrderIds.size > 0){
-    playSound('order_removed');
+    // طلب اتشال أو اتستلم → وقّف الصوت (مفيش تنبيه)
     stopContinuousSound();
   }
 
