@@ -45,6 +45,29 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
 .att-tab{padding:.35rem .875rem;border-radius:20px;font-size:.75rem;font-weight:600;cursor:pointer;border:1.5px solid var(--border);background:white;color:var(--text-muted);font-family:'Cairo',sans-serif}
 .att-tab.active{background:var(--primary);color:white;border-color:var(--primary)}
 
+/* PERIOD REPORT */
+.rep-filters{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem;background:white;padding:.875rem;border-radius:12px;border:1.5px solid var(--border)}
+.rep-filters label{font-size:.72rem;font-weight:700;color:var(--text-muted)}
+.rep-input{font-family:'Cairo',sans-serif;font-size:.78rem;padding:.4rem .6rem;border:1.5px solid var(--border);border-radius:8px;background:white;color:var(--text)}
+.rep-btn{font-family:'Cairo',sans-serif;font-size:.78rem;font-weight:700;padding:.45rem .875rem;border-radius:8px;border:none;cursor:pointer}
+.rep-btn-primary{background:var(--primary);color:white}
+.rep-btn-outline{background:white;color:var(--text-muted);border:1.5px solid var(--border)}
+.rep-summary{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.75rem;margin-bottom:1.25rem}
+.rep-stat{background:white;border-radius:12px;border:1.5px solid var(--border);padding:.875rem;text-align:center}
+.rep-stat-val{font-size:1.4rem;font-weight:800;color:var(--text)}
+.rep-stat-lbl{font-size:.7rem;color:var(--text-muted);margin-top:.2rem}
+.rep-driver{background:white;border-radius:12px;border:1.5px solid var(--border);margin-bottom:.75rem;overflow:hidden}
+.rep-driver-head{display:flex;align-items:center;justify-content:space-between;padding:.875rem 1rem;cursor:pointer;background:var(--bg)}
+.rep-driver-name{font-weight:800;font-size:.9rem}
+.rep-driver-totals{font-size:.72rem;color:var(--text-muted);margin-top:.15rem}
+.rep-driver-hours{font-size:.95rem;font-weight:800;color:var(--primary)}
+.rep-days{padding:.5rem 1rem 1rem}
+.rep-day-row{display:flex;align-items:center;justify-content:space-between;padding:.5rem .25rem;border-bottom:1px solid var(--gray-light);font-size:.76rem}
+.rep-day-row:last-child{border-bottom:none}
+.rep-day-date{font-weight:700;color:var(--text)}
+.rep-day-times{color:var(--text-muted);font-size:.7rem}
+.rep-day-hours{font-weight:800;color:var(--green)}
+.rep-badge{font-size:.62rem;font-weight:700;padding:.1rem .4rem;border-radius:5px;background:var(--yellow-light);color:#92400e;margin-right:.3rem}
 .empty-state{text-align:center;padding:2.5rem;color:var(--text-muted);font-size:.82rem}
 .loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,.7);z-index:300;display:none;align-items:center;justify-content:center}
 .loading-overlay.show{display:flex}
@@ -69,11 +92,13 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
   <button class="att-tab active" onclick="setView('live',this)">🟢 الحالة الحالية</button>
   <button class="att-tab" onclick="setView('requests',this)">⏳ طلبات الموافقة <span id="req-count" style="background:var(--red);color:white;border-radius:10px;padding:.05rem .35rem;font-size:.65rem;margin-right:.2rem">0</span></button>
   <button class="att-tab" onclick="setView('history',this)">📋 السجل اليومي</button>
+  <button class="att-tab" onclick="setView('report',this)">📊 تقرير الفترة</button>
 </div>
 
 <div id="liveView"></div>
 <div id="requestsView" style="display:none"></div>
 <div id="historyView" style="display:none"></div>
+<div id="reportView" style="display:none"></div>
 
 <div class="loading-overlay" id="lo"><div class="spinner"></div></div>
 
@@ -127,13 +152,15 @@ function setView(view,el){
   document.getElementById('liveView').style.display=view==='live'?'block':'none';
   document.getElementById('requestsView').style.display=view==='requests'?'block':'none';
   document.getElementById('historyView').style.display=view==='history'?'block':'none';
+  document.getElementById('reportView').style.display=view==='report'?'block':'none';
   renderCurrentView();
 }
 
 function renderCurrentView(){
   if(currentView==='live')renderLive();
   else if(currentView==='requests')renderRequests();
-  else renderHistory();
+  else if(currentView==='history')renderHistory();
+  else renderReport();
 }
 
 function getDriverStatus(driverId){
@@ -278,6 +305,153 @@ function renderHistory(){
     </div>`;
   }).join('')}
   </div>`;
+}
+
+// ============ تقرير الفترة ============
+let reportInitialized=false, reportRecords=[];
+
+function renderReport(){
+  const el=document.getElementById('reportView');
+  // نبني الفلاتر مرة واحدة فقط عشان ما نمسحش اختيار المستخدم
+  if(!reportInitialized){
+    const today=new Date().toISOString().split('T')[0];
+    const weekAgo=new Date(Date.now()-6*86400000).toISOString().split('T')[0];
+    el.innerHTML=`
+      <div class="rep-filters">
+        <label>من:</label>
+        <input type="date" class="rep-input" id="repFrom" value="${weekAgo}">
+        <label>إلى:</label>
+        <input type="date" class="rep-input" id="repTo" value="${today}">
+        <label>الطيار:</label>
+        <select class="rep-input" id="repDriver">
+          <option value="">كل الطيارين</option>
+          ${allDrivers.map(d=>`<option value="${d.id}">${d.full_name}</option>`).join('')}
+        </select>
+        <button class="rep-btn rep-btn-primary" onclick="runReport()">عرض</button>
+        <button class="rep-btn rep-btn-outline" onclick="repQuick(0)">اليوم</button>
+        <button class="rep-btn rep-btn-outline" onclick="repQuick(6)">آخر ٧ أيام</button>
+        <button class="rep-btn rep-btn-outline" onclick="repQuick(29)">آخر ٣٠ يوم</button>
+      </div>
+      <div id="repResults"><div class="empty-state">اختر الفترة واضغط «عرض»</div></div>`;
+    reportInitialized=true;
+    runReport();
+  } else {
+    // حدّث قائمة الطيارين لو حُمّلت بعد أول بناء، مع الحفاظ على الاختيار الحالي
+    const sel=document.getElementById('repDriver');
+    if(sel && allDrivers.length && sel.options.length<=1){
+      const cur=sel.value;
+      sel.innerHTML=`<option value="">كل الطيارين</option>`+
+        allDrivers.map(d=>`<option value="${d.id}">${d.full_name}</option>`).join('');
+      sel.value=cur;
+    }
+  }
+}
+
+function repQuick(daysBack){
+  const today=new Date().toISOString().split('T')[0];
+  const from=new Date(Date.now()-daysBack*86400000).toISOString().split('T')[0];
+  document.getElementById('repFrom').value=from;
+  document.getElementById('repTo').value=today;
+  runReport();
+}
+
+async function runReport(){
+  showLoading(true);
+  const from=document.getElementById('repFrom').value;
+  const to=document.getElementById('repTo').value;
+  const driverId=document.getElementById('repDriver').value;
+
+  // استعلام على نطاق التاريخ — الأدمن كل الفروع، غيره فرعه
+  let q=db.from('driver_attendance').select('*')
+    .gte('date',from).lte('date',to)
+    .order('date',{ascending:true}).order('created_at',{ascending:true});
+  if(driverId) q=q.eq('driver_id',driverId);
+
+  const {data,error}=await q;
+  if(error){console.error(error);showToast('خطأ في جلب البيانات');showLoading(false);return;}
+  reportRecords=data||[];
+  buildReportResults();
+  showLoading(false);
+}
+
+// حساب فترات العمل: كل سجل online معتمد له بداية (approved_at) ونهاية (ended_at)
+function computeSessions(records){
+  // جمّع حسب الطيار ثم اليوم
+  const byDriver={};
+  records.filter(r=>r.status==='online'&&r.approved_at).forEach(r=>{
+    const start=new Date(r.approved_at);
+    const end=r.ended_at?new Date(r.ended_at):null; // null = لسه شغال / مش مختوم
+    const mins=end?Math.max(0,Math.floor((end-start)/60000)):null;
+    const day=r.date;
+    if(!byDriver[r.driver_id]) byDriver[r.driver_id]={days:{},total:0,openSessions:0};
+    if(!byDriver[r.driver_id].days[day]) byDriver[r.driver_id].days[day]={mins:0,sessions:[],hasOpen:false};
+    const dd=byDriver[r.driver_id].days[day];
+    if(mins===null){ dd.hasOpen=true; byDriver[r.driver_id].openSessions++; }
+    else { dd.mins+=mins; byDriver[r.driver_id].total+=mins; }
+    dd.sessions.push({start,end,mins});
+  });
+  return byDriver;
+}
+
+function driverName(id){
+  const d=allDrivers.find(x=>x.id===id);
+  return d?d.full_name:'طيار #'+String(id).slice(0,6);
+}
+
+function fmClock(dt){return dt.toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'});}
+function fmDate(s){return new Date(s).toLocaleDateString('ar-EG',{weekday:'short',day:'numeric',month:'short'});}
+
+function buildReportResults(){
+  const el=document.getElementById('repResults');
+  if(!reportRecords.length){el.innerHTML='<div class="empty-state">لا يوجد سجل حضور في هذه الفترة</div>';return;}
+
+  const byDriver=computeSessions(reportRecords);
+  const driverIds=Object.keys(byDriver);
+  if(!driverIds.length){el.innerHTML='<div class="empty-state">لا توجد جلسات حضور معتمدة في هذه الفترة</div>';return;}
+
+  // ملخص عام
+  const totalMins=driverIds.reduce((s,id)=>s+byDriver[id].total,0);
+  const totalDays=driverIds.reduce((s,id)=>s+Object.keys(byDriver[id].days).length,0);
+  const avgPerDriver=driverIds.length?Math.round(totalMins/driverIds.length):0;
+
+  let html=`<div class="rep-summary">
+    <div class="rep-stat"><div class="rep-stat-val">${driverIds.length}</div><div class="rep-stat-lbl">طيار حاضر</div></div>
+    <div class="rep-stat"><div class="rep-stat-val">${fmTime(totalMins)}</div><div class="rep-stat-lbl">إجمالي ساعات العمل</div></div>
+    <div class="rep-stat"><div class="rep-stat-val">${totalDays}</div><div class="rep-stat-lbl">أيام عمل (طيار×يوم)</div></div>
+    <div class="rep-stat"><div class="rep-stat-val">${fmTime(avgPerDriver)}</div><div class="rep-stat-lbl">متوسط الطيار</div></div>
+  </div>`;
+
+  // رتّب الطيارين حسب إجمالي الساعات تنازلياً
+  driverIds.sort((a,b)=>byDriver[b].total-byDriver[a].total);
+
+  html+=driverIds.map(id=>{
+    const info=byDriver[id];
+    const days=Object.entries(info.days).sort((a,b)=>a[0].localeCompare(b[0]));
+    const openNote=info.openSessions?`<span class="rep-badge">${info.openSessions} جلسة غير مختومة</span>`:'';
+    return `<div class="rep-driver">
+      <div class="rep-driver-head" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+        <div>
+          <div class="rep-driver-name">${driverName(id)}</div>
+          <div class="rep-driver-totals">${days.length} يوم حضور ${openNote}</div>
+        </div>
+        <div class="rep-driver-hours">${fmTime(info.total)}</div>
+      </div>
+      <div class="rep-days" style="display:none">
+        ${days.map(([day,dd])=>{
+          const first=dd.sessions[0]?.start;
+          const lastClosed=[...dd.sessions].reverse().find(s=>s.end);
+          const span=first?`${fmClock(first)}${lastClosed?' – '+fmClock(lastClosed.end):''}`:'';
+          const openTag=dd.hasOpen?'<span class="rep-badge">جلسة مفتوحة</span>':'';
+          return `<div class="rep-day-row">
+            <div><span class="rep-day-date">${fmDate(day)}</span> <span class="rep-day-times">${span}</span> ${openTag}</div>
+            <span class="rep-day-hours">${fmTime(dd.mins)}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
+  el.innerHTML=html;
 }
 
 function showLoading(s){document.getElementById('lo').classList.toggle('show',s);}
