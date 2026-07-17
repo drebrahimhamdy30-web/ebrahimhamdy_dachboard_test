@@ -84,10 +84,10 @@ tr:last-child td{border-bottom:none;}
 <div class="header">
   <h1><i class="fas fa-file-invoice-dollar"></i> صفحة المحاسب</h1>
   <div class="filters">
-    <select id="f-branch"><option value="">كل الفروع</option></select>
+    <select id="f-branch" onchange="reloadAll()"><option value="">كل الفروع</option></select>
     <input type="date" id="f-from">
     <input type="date" id="f-to">
-    <select id="f-status">
+    <select id="f-status" onchange="reloadAll()">
       <option value="">كل الحالات</option>
       <option value="false">بانتظار التأكيد</option>
       <option value="true">تم التأكيد</option>
@@ -183,43 +183,35 @@ async function reloadAll(){
   await Promise.all([loadShifts(), loadTransfers(), loadUnreviewed()]);
 }
 
-/* ===== إجمالي غير المراجَع (مستقل تماماً عن فلتر التاريخ) ===== */
-let UNREV_BRANCH='';  // فلتر داخلي خاص بالكارت (للأدمن/المحاسب)
-
+/* ===== إجمالي غير المراجَع (يتبع فلتر الفرع فوق، لكن مستقل عن التاريخ) ===== */
 async function loadUnreviewed(){
   const area=document.getElementById('unreviewed-area');
-  // الأدمن/المحاسب: كل الفروع (مع فلتر داخلي). غيرهم: فرعه فقط.
-  const forcedBranch = isAdminView ? '' : MY_BRANCH;
+  const topBranch=document.getElementById('f-branch').value;
+  // الأدمن/المحاسب: يتبع فلتر الفرع فوق. غيرهم: فرعه فقط.
+  const effBranch = isAdminView ? topBranch : MY_BRANCH;
 
-  // 1) الشيفتات غير المراجَعة
+  // 1) الشيفتات غير المراجَعة (بدون تاريخ)
   let q='pos_shifts?select=id,branch,grand_total,total_machines,total_wallets&is_settled=eq.false&limit=3000';
-  if(forcedBranch) q+=`&branch=eq.${encodeURIComponent(forcedBranch)}`;
+  if(effBranch) q+=`&branch=eq.${encodeURIComponent(effBranch)}`;
 
   try{
     const shifts=await api(q);
     if(!shifts.length){
       area.innerHTML=`<div class="unrev-card" style="background:linear-gradient(135deg,#15803d,#16a34a);">
-        <div class="unrev-title"><i class="fas fa-circle-check"></i> لا توجد معاملات في انتظار التأكيد ✓</div>
+        <div class="unrev-title"><i class="fas fa-circle-check"></i> لا توجد معاملات في انتظار التأكيد${effBranch?` — ${esc(effBranch)}`:''} ✓</div>
       </div>`;
       return;
     }
 
-    // تجميع الإجمالي حسب الفرع
     const byBranch={};
     shifts.forEach(s=>{ byBranch[s.branch]=(byBranch[s.branch]||0)+(+s.grand_total||0); });
     const branches=Object.keys(byBranch).sort();
     const grandAll=shifts.reduce((s,r)=>s+(+r.grand_total||0),0);
 
-    // الفلتر الداخلي (أدمن/محاسب فقط)
-    const selBranch = (isAdminView && UNREV_BRANCH && byBranch[UNREV_BRANCH]!=null) ? UNREV_BRANCH : '';
-    const shownShifts = selBranch ? shifts.filter(s=>s.branch===selBranch) : shifts;
-    const shownTotal  = shownShifts.reduce((s,r)=>s+(+r.grand_total||0),0);
-
     // 2) تفصيل كل ماكينة/محفظة من سطور هذه الشيفتات
-    const ids = shownShifts.map(s=>s.id);
-    let byMethod={};   // key -> {name, type, total}
+    const ids = shifts.map(s=>s.id);
+    let byMethod={};
     try{
-      // PostgREST in.() — نقسّم على دفعات لو كثيرة
       const chunks=[];
       for(let i=0;i<ids.length;i+=100) chunks.push(ids.slice(i,i+100));
       for(const c of chunks){
@@ -236,12 +228,7 @@ async function loadUnreviewed(){
     const machines=methods.filter(m=>m.type==='machine').sort((a,b)=>b.total-a.total);
     const wallets =methods.filter(m=>m.type==='wallet').sort((a,b)=>b.total-a.total);
 
-    // dropdown الفلتر الداخلي
-    const opts = ['<option value="">كل الفروع</option>']
-      .concat(branches.map(b=>`<option value="${esc(b)}"${b===UNREV_BRANCH?' selected':''}>${esc(b)}</option>`))
-      .join('');
-
-    const methodBlock = (title,icon,color,arr)=> arr.length ? `
+    const methodBlock = (title,icon,arr)=> arr.length ? `
       <div style="margin-top:4px;">
         <div style="font-size:0.74rem;font-weight:800;opacity:.9;margin-bottom:6px;"><i class="fas ${icon}"></i> ${title}</div>
         <div class="unrev-list">
@@ -253,16 +240,13 @@ async function loadUnreviewed(){
       <div class="unrev-card">
         <div class="unrev-top">
           <div>
-            <div class="unrev-title"><i class="fas fa-hourglass-half"></i> إجمالي المعاملات في انتظار التأكيد${selBranch?` — ${esc(selBranch)}`:(forcedBranch?` — ${esc(forcedBranch)}`:'')}</div>
-            <div class="unrev-sub">${shownShifts.length} شيفت غير مراجَع · لا يرتبط بفلتر التاريخ</div>
+            <div class="unrev-title"><i class="fas fa-hourglass-half"></i> إجمالي المعاملات في انتظار التأكيد${effBranch?` — ${esc(effBranch)}`:' — كل الفروع'}</div>
+            <div class="unrev-sub">${shifts.length} شيفت غير مراجَع · لا يرتبط بفلتر التاريخ</div>
           </div>
-          <div style="display:flex;align-items:center;gap:12px;">
-            ${isAdminView?`<select class="unrev-branch-sel" onchange="UNREV_BRANCH=this.value;loadUnreviewed()">${opts}</select>`:''}
-            <div class="unrev-big">${fmt(shownTotal)} ج</div>
-          </div>
+          <div class="unrev-big">${fmt(grandAll)} ج</div>
         </div>
 
-        ${(isAdminView && !selBranch && branches.length>1) ? `
+        ${(isAdminView && !effBranch && branches.length>1) ? `
         <div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.25);">
           <div style="font-size:0.74rem;font-weight:800;opacity:.9;margin-bottom:6px;"><i class="fas fa-store"></i> حسب الفرع</div>
           <div class="unrev-list">
@@ -271,9 +255,9 @@ async function loadUnreviewed(){
         </div>`:''}
 
         <div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.25);">
-          ${methodBlock('ماكينات POS','fa-credit-card','',machines)}
+          ${methodBlock('ماكينات POS','fa-credit-card',machines)}
           ${machines.length&&wallets.length?'<div style="height:10px;"></div>':''}
-          ${methodBlock('المحافظ الإلكترونية','fa-wallet','',wallets)}
+          ${methodBlock('المحافظ الإلكترونية','fa-wallet',wallets)}
           ${(!machines.length&&!wallets.length)?'<div style="font-size:0.78rem;opacity:.85;">لا توجد تفاصيل سطور لهذه الشيفتات.</div>':''}
         </div>
       </div>`;
