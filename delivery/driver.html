@@ -185,7 +185,7 @@ textarea.form-ctrl{height:80px;padding:.75rem;resize:none}
 <body>
 
 <!-- Sound Permission Overlay -->
-<div id="soundPermOverlay" style="position:fixed;inset:0;background:#0f172a;z-index:1000;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1.5rem;padding:2rem">
+<div id="soundPermOverlay" style="position:fixed;inset:0;background:#0f172a;z-index:1000;display:none;align-items:center;justify-content:center;flex-direction:column;gap:1.5rem;padding:2rem">
   <div style="font-size:3rem">🔔</div>
   <div style="color:white;font-size:1.1rem;font-weight:800;text-align:center">بورتال الطيار</div>
   <div style="color:#94a3b8;font-size:.85rem;text-align:center;max-width:280px;line-height:1.6">
@@ -360,11 +360,43 @@ let callChannel = null;
 let audioCtx = null;
 
 // ===== SOUND PERMISSION =====
+// قرار عرض شاشة تفعيل الصوت — مرة واحدة بس، وبعدها تُحفظ
+function initSoundGate(){
+  let enabledBefore = false;
+  try{ enabledBefore = localStorage.getItem('phalix_sound_ok') === '1'; }catch(e){}
+
+  if(enabledBefore){
+    // الطيار فعّل الصوت قبل كده → ادخل مباشرة
+    soundEnabled = true;
+    document.getElementById('soundPermOverlay').style.display = 'none';
+    // الـ AudioContext محتاج تفاعل — نجهّزه على أول لمسة/ضغطة
+    armAudioOnFirstGesture();
+    setTimeout(registerPush, 1000);
+  }else{
+    // أول مرة → أظهر الشاشة
+    document.getElementById('soundPermOverlay').style.display = 'flex';
+  }
+}
+
+// يفعّل الـ AudioContext على أول تفاعل (سياسة المتصفح تتطلب ذلك)
+function armAudioOnFirstGesture(){
+  const arm = ()=>{
+    initAudio();
+    if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    document.removeEventListener('click', arm);
+    document.removeEventListener('touchstart', arm);
+  };
+  document.addEventListener('click', arm, {once:false});
+  document.addEventListener('touchstart', arm, {once:false});
+}
+
 function enableSoundAndEnter(){
   soundEnabled = true;
   initAudio();
+  if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
   document.getElementById('soundPermOverlay').style.display = 'none';
-  // سجّل Push Notifications
+  // احفظ التفضيل — مايظهرش تاني بعد كده
+  try{ localStorage.setItem('phalix_sound_ok', '1'); }catch(e){}
   setTimeout(registerPush, 1000);
 }
 
@@ -548,7 +580,8 @@ window.addEventListener('DOMContentLoaded', async()=>{
   if(currentUser.role!=='driver'){window.location.href='app.html';return;}
   document.getElementById('driverName').textContent=currentUser.full_name||'طيار';
 
-  // دايماً بيطلب تفعيل الصوت عند الدخول
+  // شاشة تفعيل الصوت — مرة واحدة بس (تُحفظ بعد أول تفعيل)
+  initSoundGate();
 
   load(true);
   await loadDriver();
