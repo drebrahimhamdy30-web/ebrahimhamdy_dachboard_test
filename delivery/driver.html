@@ -1026,15 +1026,28 @@ function distanceMeters(lat1, lng1, lat2, lng2){
   return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
 }
 
-// يجيب موقع الطيار — يرجّع {lat,lng} أو null لو رفض/فشل
+// يجيب موقع الطيار — يرجّع {lat,lng} أو null
+// بيجرّب دقة عالية الأول، ولو فشل يجرّب دقة عادية (أسرع وأضمن)
 function getMyLocation(){
   return new Promise(resolve=>{
     if(!navigator.geolocation){ resolve(null); return; }
-    navigator.geolocation.getCurrentPosition(
-      pos => resolve({lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy}),
-      ()  => resolve(null),
-      { enableHighAccuracy:true, timeout:8000, maximumAge:30000 }
-    );
+
+    const tryGet = (highAcc, timeout, onDone)=>{
+      navigator.geolocation.getCurrentPosition(
+        pos => onDone({lat:pos.coords.latitude, lng:pos.coords.longitude, acc:pos.coords.accuracy}),
+        err => onDone(null, err),
+        { enableHighAccuracy:highAcc, timeout, maximumAge:60000 }
+      );
+    };
+
+    // محاولة 1: دقة عالية، وقت أطول (15ث)
+    tryGet(true, 15000, (loc, err)=>{
+      if(loc){ resolve(loc); return; }
+      // رفض الإذن صراحةً؟ → مفيش فايدة نعيد
+      if(err && err.code === 1){ resolve(null); return; } // PERMISSION_DENIED
+      // فشل تاني (timeout/unavailable) → محاولة 2: دقة عادية أسرع
+      tryGet(false, 10000, (loc2)=> resolve(loc2||null));
+    });
   });
 }
 
@@ -1066,7 +1079,7 @@ async function checkPickupLocation(){
 // يعرض تنبيه المخالفة (الاستلام بيتم برضه)
 function showPickupViolation(res){
   if(res.noLoc){
-    alert('⚠️ تعذّر تحديد موقعك\n\nتم استلام الطلب وتسجيل ملاحظة للمراجعة من الإدارة.\nيُفضّل تفعيل خدمة الموقع (GPS).');
+    alert('⚠️ تعذّر تحديد موقعك\n\nتم استلام الطلب وتسجيل ملاحظة للمراجعة.\n\nللحل: تأكد من تفعيل GPS في الموبايل، والسماح للموقع من إعدادات المتصفح، وأن الصفحة تفتح عبر https.');
   }else{
     alert(`⚠️ تم تسجيل مخالفة: استلام خارج حدود الفرع\n\nأنت على بُعد ${res.distance} متر من الصيدلية.\nتم استلام الطلب وتحويله للمراجعة من الإدارة.`);
   }
