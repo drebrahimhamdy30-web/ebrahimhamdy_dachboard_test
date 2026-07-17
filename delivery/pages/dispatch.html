@@ -575,7 +575,10 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
       <span class="modal-title">🏁 طلب إنهاء رحلة</span>
       <button class="modal-close" onclick="closeModal('completeApprovalModal')">✕</button>
     </div>
-    <div class="modal-body" id="completeApprovalBody"></div>
+    <div class="modal-body">
+      <div id="ca-review-flags"></div>
+      <div id="completeApprovalBody"></div>
+    </div>
     <div class="modal-footer">
       <input type="hidden" id="ca-trip-id">
       <button class="btn btn-red" onclick="rejectComplete()">✕ رفض</button>
@@ -2525,7 +2528,34 @@ async function openCompleteApproval(tripId){
       <span style="font-weight:600;color:#15803d">المطلوب من الطيار (كاش)</span>
       <strong style="color:#15803d">${cashDue.toLocaleString()} ج.م</strong>
     </div>`;
-  document.getElementById('completeApprovalModal').classList.add('open');
+    document.getElementById('completeApprovalModal').classList.add('open');
+
+  // فحص طلبات الرحلة السابقة غير المغلقة على الصيدلية (B Connect)
+  loadReviewFlagsIntoApproval(tripId);
+}
+
+// تجيب الطلبات غير المغلقة على الصيدلية وتعرضها في مودال الموافقة
+async function loadReviewFlagsIntoApproval(tripId){
+  const box = document.getElementById('ca-review-flags');
+  if(box) box.innerHTML = '';
+  const {data, error} = await db.rpc('get_trip_review_flags', {p_trip_id: tripId});
+  if(error || !data || !data.length) return;
+
+  const rows = data.map(f =>
+    `<div style="display:flex;justify-content:space-between;padding:.35rem 0;border-top:1px solid #fecaca;font-size:.74rem">
+      <span><strong>${f.bill_no}</strong> · ${f.customer_name||'—'} ${f.cust_code?`<span style="color:#9ca3af">(${f.cust_code})</span>`:''}</span>
+      <span style="white-space:nowrap"><strong>${Number(f.amount||0).toLocaleString()} ج</strong> · <span style="color:#b45309">${f.erp_status}</span></span>
+    </div>`).join('');
+
+  const warn = `<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:10px;padding:.7rem;margin-bottom:1rem">
+    <div style="font-weight:800;margin-bottom:.3rem">⚠️ طلبات من الرحلة السابقة لم تُغلق على نظام الصيدلية</div>
+    ${rows}
+    <div style="font-size:.68rem;margin-top:.4rem;opacity:.85">راجع إغلاقها على B Connect قبل الموافقة</div>
+  </div>`;
+
+  // نحطها فوق جسم المودال
+  const target = document.getElementById('ca-review-flags');
+  if(target) target.innerHTML = warn;
 }
 
 async function approveComplete(){
