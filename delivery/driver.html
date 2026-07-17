@@ -1071,9 +1071,9 @@ async function checkPickupLocation(){
 
   const dist = distanceMeters(loc.lat, loc.lng, plat, plng);
   if(dist > radius){
-    return {ok:false, distance:dist, noLoc:false, acc:loc.acc};
+    return {ok:false, distance:dist, noLoc:false, acc:loc.acc, lat:loc.lat, lng:loc.lng};
   }
-  return {ok:true, distance:dist};
+  return {ok:true, distance:dist, lat:loc.lat, lng:loc.lng, acc:loc.acc};
 }
 
 // يعرض تنبيه المخالفة (الاستلام بيتم برضه)
@@ -1296,6 +1296,8 @@ async function pickupAll(tripId){
   // فحص الموقع مرة واحدة للكل
   const loc = await checkPickupLocation();
   if(!loc.ok) showPickupViolation(loc);
+  else if(loc.distance != null && DEBUG_LOCATION)
+    alert(`📍 اختبار: المسافة من الصيدلية ${loc.distance} متر (داخل النطاق)`);
 
   load(true);
   const now=new Date().toISOString();
@@ -1306,10 +1308,7 @@ async function pickupAll(tripId){
     const ids=(ordRes.data||[]).map(o=>o.id);
     if(ids.length){
       await db.from('orders').update({status:'picked',picked_at:now,updated_at:now}).in('id',ids);
-      const logDetails = loc.ok ? {bulk:true} : {
-        bulk:true, pickup_violation:true,
-        distance_m: loc.distance, no_location: !!loc.noLoc
-      };
+      const logDetails = buildPickupLog(loc, {bulk:true});
       for(const id of ids){await addOrderLog(id,'order_picked',logDetails);}
     }
   }
@@ -1319,17 +1318,31 @@ async function pickupOne(orderId){
   // فحص الموقع قبل الاستلام
   const loc = await checkPickupLocation();
   if(!loc.ok) showPickupViolation(loc);
+  else if(loc.distance != null && DEBUG_LOCATION)
+    alert(`📍 اختبار: المسافة من الصيدلية ${loc.distance} متر (داخل النطاق)`);
 
   load(true);
   const now=new Date().toISOString();
   await db.from('orders').update({status:'picked',picked_at:now,updated_at:now}).eq('id',orderId);
-  await addOrderLog(orderId,'order_picked', loc.ok ? {} : {
-    pickup_violation:true,
-    distance_m: loc.distance,
-    no_location: !!loc.noLoc
-  });
+  await addOrderLog(orderId,'order_picked', buildPickupLog(loc));
   await loadAll();load(false);
 }
+
+// تفاصيل لوج الاستلام — الموقع والمسافة دايماً (للمراجعة)
+function buildPickupLog(loc, extra={}){
+  const base = {...extra};
+  if(loc.distance != null) base.distance_m = loc.distance;
+  if(loc.lat != null){ base.pickup_lat = loc.lat; base.pickup_lng = loc.lng; }
+  if(loc.acc != null) base.gps_accuracy_m = Math.round(loc.acc);
+  if(!loc.ok){
+    base.pickup_violation = true;
+    if(loc.noLoc) base.no_location = true;
+  }
+  return base;
+}
+
+// شغّل ده مؤقتاً للاختبار — يعرض المسافة حتى لو الاستلام سليم
+const DEBUG_LOCATION = true;
 
 function openDeliver(id){
   const o=Object.values(tripOrders).flat().find(x=>x.id===id);if(!o)return;
