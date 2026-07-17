@@ -208,6 +208,9 @@ textarea.form-ctrl{height:80px;padding:.75rem;resize:none}
   </div>
 </div>
 
+<!-- REVIEW FLAG BANNER -->
+<div id="reviewFlagBanner" style="display:none;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;margin:.6rem;padding:.7rem .9rem;border-radius:12px;font-size:.78rem;line-height:1.5"></div>
+
 <!-- ATTENDANCE BAR -->
 <div class="att-bar offline" id="attBar" onclick="initAudio()">
   <div class="att-status">
@@ -1053,8 +1056,33 @@ const {data:trips}=await db.from('trips').select('*')
     if(!currentTripId&&allTrips.length)currentTripId=allTrips[0].id;
     renderContent();
     checkNewOrders();
+    checkReviewFlags();   // تنبيهات الطلبات غير المغلقة على الصيدلية
     document.getElementById('lastRefresh')||null;
   }catch(e){console.error(e);}
+}
+
+// يفحص لو فيه طلبات من رحلة سابقة لسه مش مقفولة على نظام الصيدلية
+async function checkReviewFlags(){
+  const activeTrip = allTrips.find(t=>['active','pending_complete'].includes(t.status));
+  const banner = document.getElementById('reviewFlagBanner');
+  if(!banner) return;
+
+  if(!activeTrip){ banner.style.display='none'; return; }
+
+  const {data, error} = await db.rpc('get_trip_review_flags', {p_trip_id: activeTrip.id});
+  if(error || !data || !data.length){ banner.style.display='none'; return; }
+
+  const items = data.map(f =>
+    `<div style="padding:.4rem 0;border-top:1px solid rgba(180,60,60,.2)">
+      <strong>${f.bill_no}</strong> · ${f.customer_name||'—'} · ${Number(f.amount||0).toLocaleString()} ج
+      <span style="color:#b45309">(${f.erp_status})</span>
+    </div>`).join('');
+
+  banner.innerHTML = `
+    <div style="font-weight:800;margin-bottom:.3rem">⚠️ طلبات من رحلتك السابقة لم تُغلق على نظام الصيدلية</div>
+    ${items}
+    <div style="font-size:.68rem;margin-top:.4rem;opacity:.85">راجع الصيدلية لإغلاق هذه الطلبات</div>`;
+  banner.style.display='block';
 }
 
 function fm(mins){if(mins<0)mins=0;return mins<60?`${mins}د`:`${Math.floor(mins/60)}س${String(mins%60).padStart(2,'0')}د`}
@@ -1463,6 +1491,21 @@ async function retryFailed(orderId){
   await addOrderLog(orderId,'order_picked',{retry:true});
   await loadAll();load(false);
 }
+// يبعت للـ n8n يفحص طلبات الرحلة السابقة على نظام الصيدلية (B Connect)
+// بيشتغل في الخلفية — مايعطّلش الطيار
+function triggerPrevTripCheck(currentTripId){
+  if(!driverRecord?.id || !currentTripId || currentTripId==='direct') return;
+  // fire-and-forget — منستناش الرد
+  fetch('https://agent.ebrahimhamdy.com/webhook/check_prev_trip', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      driver_id: driverRecord.id,
+      current_trip_id: currentTripId
+    })
+  }).catch(e => console.warn('prev-trip check webhook failed:', e));
+}
+
 async function completeTrip(tripId){
   const orders=tripOrders[tripId]||[];
   // بس assigned و picked بيمنعوا الإنهاء — المتعذر (failed) مسموح
@@ -1474,6 +1517,7 @@ async function completeTrip(tripId){
     const now=new Date().toISOString();
     await db.from('trips').update({status:'pending_complete',updated_at:now}).eq('id',tripId);
     await addTripLog(tripId,'complete_requested',{by:'driver'});
+    triggerPrevTripCheck(tripId);   // فحص الرحلة السابقة في الخلفية
     await loadAll();load(false);
     return;
   }
@@ -1512,6 +1556,7 @@ async function completeTrip(tripId){
   if(tripId!=='direct')
     await db.from('trips').update({status:'completed',updated_at:now}).eq('id',tripId);
   await addTripLog(tripId,'trip_completed',{by:'driver',failed_released:failedOrders.length});
+  triggerPrevTripCheck(tripId);   // فحص الرحلة السابقة في الخلفية
 await loadAll();load(false);
 }
 
