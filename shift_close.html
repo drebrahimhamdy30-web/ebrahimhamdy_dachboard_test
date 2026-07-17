@@ -95,6 +95,12 @@ select:focus,input:focus{border-color:#16a34a;box-shadow:0 0 0 3px rgba(22,163,7
 
 .sidebar-title{font-size:0.85rem;font-weight:900;color:var(--wal-c);display:flex;align-items:center;gap:6px;margin-bottom:8px;}
 .sidebar-note{font-size:0.68rem;color:var(--warn);background:#fef9c3;border:1px solid #fde68a;border-radius:7px;padding:7px 9px;line-height:1.6;margin-bottom:12px;display:flex;gap:6px;}
+.insta-box{margin-top:10px;padding-top:10px;border-top:1px dashed #bfdbfe;}
+.insta-prev{font-size:0.72rem;font-weight:700;color:#0369a1;background:#eff6ff;border:1px solid #bfdbfe;border-radius:7px;padding:7px 9px;line-height:1.6;}
+.insta-prev.muted{color:var(--muted);background:var(--light);border-color:var(--border);font-weight:600;}
+.calc-line{display:flex;justify-content:space-between;align-items:center;padding:8px 2px;font-size:0.82rem;border-bottom:1px solid var(--light);}
+.calc-line b{font-variant-numeric:tabular-nums;font-weight:900;}
+.calc-line.total{border-bottom:none;border-top:1.5px solid var(--border);margin-top:2px;padding-top:10px;font-weight:800;font-size:0.9rem;}
 .tr-form{display:grid;grid-template-columns:1.1fr 0.9fr 1.1fr 1.1fr 1.3fr auto;gap:8px;align-items:end;}
 @media(max-width:900px){.tr-form{grid-template-columns:1fr 1fr;}}
 @media(max-width:560px){.tr-form{grid-template-columns:1fr;}}
@@ -243,6 +249,7 @@ const H={...H_BASE,'Prefer':'return=representation'};
 
 let METHODS=[], VALUES={}, TRANSFERS=[], SAVING=false;
 let SHIFT_START=null;
+let LAST_INSTAPAY_NOTE=null;
 const REASON_LABEL={supplier:'تحويل لمورد', customer_refund:'مرتجع لعميل'};
 
 async function api(path,opts={}){
@@ -334,8 +341,10 @@ async function loadMethods(){
   METHODS=await api(`pos_methods?branch=eq.${encodeURIComponent(branch)}&is_active=eq.true&order=sort_order`);
   VALUES={};
   METHODS.forEach(m=>{
-    VALUES[m.id]= m.method_type==='machine' ? {closing:''} : {opening:'',closing:''};
+    if(m.method_type==='machine') VALUES[m.id]={closing:'', txn:''};
+    else VALUES[m.id]={opening:'',closing:''};
   });
+  LAST_INSTAPAY_NOTE=null;
   try{
     const lastLines=await api(`pos_shift_lines?method_type=eq.wallet&order=id.desc&limit=200`);
     const seen=new Set();
@@ -346,6 +355,11 @@ async function loadMethods(){
         seen.add(l.method_key);
       }
     });
+  }catch(e){}
+  // آخر عملية انستاباي مسجّلة (دليل لبداية الشيفت الحالي)
+  try{
+    const li=await api(`pos_shift_lines?method_key=eq.instapay&last_txn_note=not.is.null&order=id.desc&limit=1`);
+    if(li&&li[0]&&li[0].last_txn_note) LAST_INSTAPAY_NOTE=li[0].last_txn_note;
   }catch(e){}
   await Promise.all([loadTransfers(), loadShiftStart()]);
   renderShiftBar();
@@ -438,7 +452,8 @@ function render(){
   if(pos.length){
     html+=`<div class="section-title"><i class="fas fa-credit-card" style="color:#1d4ed8"></i> ماكينات POS</div><div class="methods-grid">`;
     pos.forEach(m=>{
-      const v=VALUES[m.id]||{closing:''};
+      const v=VALUES[m.id]||{closing:'',txn:''};
+      const isInsta = m.method_key==='instapay';
       html+=`<div class="method-card pos-card">
         <div class="method-head">
           <div class="method-icon icon-pos"><i class="fas fa-cash-register"></i></div>
@@ -450,6 +465,15 @@ function render(){
             oninput="VALUES[${m.id}].closing=this.value;refreshNet(${m.id})">
         </div>
         ${netHtml(m)}
+        ${isInsta?`
+        <div class="insta-box">
+          ${LAST_INSTAPAY_NOTE?`<div class="insta-prev"><i class="fas fa-flag-checkered"></i> الشيفت السابق انتهى عند: <b>${esc(LAST_INSTAPAY_NOTE)}</b></div>`:'<div class="insta-prev muted"><i class="fas fa-circle-info"></i> لا توجد عملية سابقة مسجّلة</div>'}
+          <div class="input-group" style="margin:8px 0 0;">
+            <label><i class="fas fa-bookmark"></i> آخر عملية في هذا الشيفت (دليل للشيفت القادم)</label>
+            <input type="text" placeholder="رقم / وقت آخر عملية إنستاباي" value="${esc(v.txn||'')}"
+              oninput="VALUES[${m.id}].txn=this.value">
+          </div>
+        </div>`:''}
       </div>`;
     });
     html+='</div>';
@@ -485,6 +509,7 @@ function render(){
 
   document.getElementById('methods-area').innerHTML=html;
   renderTransfers(wal);
+  recalcHelper();
   renderActions();
 }
 
@@ -492,6 +517,7 @@ function refreshNet(mId){
   const m=METHODS.find(x=>x.id===mId); if(!m)return;
   const el=document.getElementById('net-'+mId); if(!el)return;
   el.outerHTML=netHtml(m);
+  recalcHelper();
 }
 
 function trRow(t,isOld){
@@ -568,7 +594,52 @@ function renderTransfers(wal){
           <i class="fas fa-lock"></i> لا يمكن حذف التحويل — التوريد من صفحة المحاسب.
         </div>
       </div>
+    </div>
+
+    <div class="method-card" style="border-top:3px solid #0f766e;margin-top:14px;">
+      <div class="sidebar-title" style="color:#0f766e;"><i class="fas fa-calculator"></i> مساعدة تقفيل الدرج</div>
+      <div style="font-size:0.7rem;color:var(--muted);margin-bottom:10px;line-height:1.6;">
+        أداة حسابية فقط — لا تُحفظ ولا تؤثر على الإغلاق.
+      </div>
+
+      <div class="input-group" style="margin:0 0 8px;">
+        <label>النقدية بالدرج (ج)</label>
+        <input type="number" step="0.01" min="0" id="calc-cash" placeholder="0.00" oninput="recalcHelper()">
+      </div>
+
+      <div class="calc-line">
+        <span><i class="fas fa-credit-card"></i> إجمالي الفيزا (الماكينات)</span>
+        <b id="calc-visa">0.00</b>
+      </div>
+      <div class="calc-line total">
+        <span>إجمالي (نقدي + فيزا)</span>
+        <b id="calc-sum1">0.00</b>
+      </div>
+
+      <div class="input-group" style="margin:12px 0 8px;">
+        <label>نقدية التحويل للخزنة (ج)</label>
+        <input type="number" step="0.01" min="0" id="calc-transfer-cash" placeholder="0.00" oninput="recalcHelper()">
+      </div>
+      <div class="calc-line total" style="border-color:#0f766e;">
+        <span><i class="fas fa-vault"></i> إجمالي التحويل للخزنة</span>
+        <b id="calc-sum2" style="color:#0f766e;">0.00</b>
+      </div>
+      <div style="font-size:0.66rem;color:var(--muted);margin-top:6px;line-height:1.6;">
+        = نقدية التحويل + الفيزا (لأن الفيزا تُحوّل للخزنة أيضاً).
+      </div>
     </div>`;
+}
+
+function recalcHelper(){
+  const{totalPos}=calcTotals();
+  const cash=parseFloat(document.getElementById('calc-cash')?.value)||0;
+  const tcash=parseFloat(document.getElementById('calc-transfer-cash')?.value)||0;
+  const visaEl=document.getElementById('calc-visa');
+  const s1=document.getElementById('calc-sum1');
+  const s2=document.getElementById('calc-sum2');
+  if(visaEl) visaEl.textContent=fmt(totalPos);
+  if(s1) s1.textContent=fmt(cash+totalPos);
+  if(s2) s2.textContent=fmt(tcash+totalPos);
 }
 
 function renderActions(){
@@ -665,7 +736,8 @@ async function doCloseShift(){
         display_name:m.display_name,
         opening_balance:m.method_type==='wallet'?opening:null,
         closing_balance:closing,
-        actual_amount:getNet(m)
+        actual_amount:getNet(m),
+        last_txn_note:(m.method_key==='instapay' && v.txn) ? v.txn.trim() : null
       };
     });
     await api('pos_shift_lines',{method:'POST',body:JSON.stringify(lines)});
@@ -676,10 +748,14 @@ async function doCloseShift(){
     });
     closeModal();
     toast('تم إغلاق الشيفت بنجاح ✓');
+    // الشيفت الجاي: آخر عملية إنستاباي الحالية تصبح دليل البداية
+    let newInstaNote=LAST_INSTAPAY_NOTE;
     METHODS.forEach(m=>{
       const v=VALUES[m.id]||{};
-      VALUES[m.id]= m.method_type==='wallet' ? {opening:v.closing||'', closing:''} : {closing:''};
+      if(m.method_key==='instapay' && v.txn) newInstaNote=v.txn.trim();
+      VALUES[m.id]= m.method_type==='wallet' ? {opening:v.closing||'', closing:''} : {closing:'', txn:''};
     });
+    LAST_INSTAPAY_NOTE=newInstaNote;
     document.getElementById('cashier-name').value='';
     document.getElementById('notes-inp').value='';
     await Promise.all([loadTransfers(), loadShiftStart()]);
