@@ -6,6 +6,58 @@
 const FS_MIN_ORDERS = 5; // حد أدنى لعرض الطيار في الترتيب
 
 /**
+ * يبني فترات الحضور الفعلية من تسلسل أحداث driver_attendance.
+ * لا يعتمد على ended_at لأنه غالباً فاضي في البيانات.
+ * لكل طيار في كل يوم: online تفتح فترة، وأول offline/break بعدها تقفلها.
+ * offline بدون online قبله => يعني كان شغّال من بداية اليوم (شيفت ليلي).
+ */
+function buildAttendanceSessions(records) {
+  // جمّع حسب (الطيار + اليوم) عشان الشيفتات ما تتداخلش بين الأيام
+  const groups = {};
+  records.forEach(r => {
+    if (!r.approved_at || !r.date) return;
+    const key = r.driver_id + '|' + r.date;
+    (groups[key] = groups[key] || []).push(r);
+  });
+
+  const sessions = [];
+  Object.entries(groups).forEach(([key, recs]) => {
+    const [driver_id, date] = key.split('|');
+    // مهم: نثبّت الإزاحة على توقيت مصر (+03) عشان بداية/نهاية اليوم
+    // ما تتفسّرش بتوقيت جهاز المستخدم فتزحزح الشيفت الليلي.
+    const dayStart = new Date(date + 'T00:00:00+03:00').getTime();
+    const dayEndRaw = new Date(date + 'T23:59:59+03:00').getTime();
+    // لو اليوم هو النهاردة، الفترة المفتوحة تنتهي دلوقتي مش آخر اليوم
+    const dayEnd = Math.min(dayEndRaw, Date.now());
+
+    recs.sort((a, b) => new Date(a.approved_at) - new Date(b.approved_at));
+    let openStart = null;
+
+    recs.forEach(r => {
+      const t = new Date(r.approved_at).getTime();
+      if (r.status === 'online') {
+        if (openStart === null) openStart = t;   // تجاهل online مكرر
+      } else { // offline أو break => تقفل الفترة
+        if (openStart !== null) {
+          if (t > openStart) sessions.push({ driver_id, start: openStart, end: t });
+          openStart = null;
+        } else if (t > dayStart) {
+          // انصراف من غير حضور مسجّل => شيفت بدأ قبل بداية اليوم
+          sessions.push({ driver_id, start: dayStart, end: t, inferred: true });
+        }
+      }
+    });
+
+    // فترة فضلت مفتوحة لآخر اليوم (أو لحد دلوقتي)
+    if (openStart !== null && dayEnd > openStart) {
+      sessions.push({ driver_id, start: openStart, end: dayEnd, open: true });
+    }
+  });
+
+  return sessions;
+}
+
+/**
  * يجيب الطلبات المسلّمة + جلسات الحضور لفترة، ويحسب التقييم.
  * @param {string} from  تاريخ البداية YYYY-MM-DD
  * @param {string} to    تاريخ النهاية YYYY-MM-DD
@@ -21,10 +73,10 @@ async function computeFairScores(from, to, branchId) {
     .lte('delivered_at', to + 'T23:59:59');
   if (branchId) oq = oq.eq('branch_id', branchId);
 
-  // 2) جلسات الحضور المعتمدة في نفس الفترة
+  // 2) أحداث الحضور المعتمدة في نفس الفترة (كل الأنواع، مش online بس)
   const aq = db.from('driver_attendance')
     .select('driver_id,status,approved_at,ended_at,date')
-    .eq('status', 'online')
+    .in('status', ['online', 'offline', 'break'])
     .not('approved_at', 'is', null)
     .gte('date', from).lte('date', to);
 
@@ -35,13 +87,12 @@ async function computeFairScores(from, to, branchId) {
   }
 
   const orders = oRes.data || [];
-  // حوّل الجلسات لفترات زمنية [start, end] — الجلسة المفتوحة تُختم بـ "الآن"
-  const sessions = (aRes.data || []).map(r => ({
-    driver_id: r.driver_id,
-    start: new Date(r.approved_at).getTime(),
-    end: r.ended_at ? new Date(r.ended_at).getTime() : Date.now(),
-    open: !r.ended_at
-  })).filter(s => s.end > s.start);
+
+  // ابنِ فترات الحضور من تسلسل الأحداث لكل يوم على حدة.
+  // السبب: ended_at غالباً فاضي، والاعتماد عليه بيضيّع الشيفتات.
+  // القاعدة: online تفتح فترة، وأول offline/break بعدها تقفلها.
+  //          offline من غير online قبله => الطيار كان شغّال من بداية اليوم (شيفت ليلي).
+  const sessions = buildAttendanceSessions(aRes.data || []);
 
   // 3) لكل طلب: مين كان أونلاين لحظة التسليم؟
   const stats = {};   // driver_id -> { expected, actual, revenue }
