@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="stylesheet" href="../delivery-style.css">
+<link rel="stylesheet" href="../fair-score.css">
 <style>
 body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg); }
 
@@ -119,11 +120,21 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
   </div>
 </div>
 
+<!-- Fair driver scoring -->
+<div class="card" style="margin-bottom:1.25rem">
+  <div class="card-header">
+    <span class="card-title">تقييم الطيارين العادل</span>
+    <span style="font-size:.68rem;color:var(--text-muted)">نصيبه المفترض مقابل اللي وصّله فعلاً</span>
+  </div>
+  <div class="card-body" id="fairScores"></div>
+</div>
+
 <div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../supabase-config.js"></script>
 <script src="../permissions.js"></script>
+<script src="../fair-score.js"></script>
 <script>
 const STATUS_COLORS = { pending:'#16a34a', picked:'#0891b2', delivered:'#ca8a04', completed:'#6b7280', cancelled:'#dc2626', postponed:'#7c3aed' };
 const STATUS_LABELS = { pending:'جاهز', picked:'في الطريق', delivered:'تم التسليم', completed:'مكتمل', cancelled:'ملغي', postponed:'مؤجل' };
@@ -167,7 +178,28 @@ async function loadReport() {
   renderStatusPie();
   renderRegions();
   renderDriverRankings();
+  await loadFairScores(from, to);
   showLoading(false);
+}
+
+// كاش لأسماء الطيارين عشان ما نجيبهاش كل مرة
+let driversCache = null;
+
+async function loadFairScores(from, to) {
+  const el = document.getElementById('fairScores');
+  if (!from || !to) { el.innerHTML = '<div class="empty-state"><p>اختر الفترة</p></div>'; return; }
+  try {
+    if (!driversCache) {
+      const { data } = await db.from('drivers').select('id,full_name');
+      driversCache = data || [];
+    }
+    // null = كل الفروع. حط branch_id لو عايز فرع بعينه
+    const result = await computeFairScores(from, to, null);
+    renderFairScores(result, driversCache, 'fairScores');
+  } catch (e) {
+    console.error(e);
+    el.innerHTML = '<div class="empty-state"><p>تعذّر حساب التقييم</p></div>';
+  }
 }
 
 function renderKPIs() {
