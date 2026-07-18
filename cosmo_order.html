@@ -44,7 +44,7 @@
     .cb-ordered { width:15px;height:15px;cursor:pointer;accent-color:var(--success); }
     .cb-ignore  { width:15px;height:15px;cursor:pointer;accent-color:var(--danger); }
     .qty-input {
-      width:62px;text-align:center;padding:5px 6px;
+      width:82px;text-align:center;padding:5px 6px;
       border:1.5px solid var(--border);border-radius:var(--radius-sm);
       font-family:var(--font);font-size:0.85rem;font-weight:700;
       color:var(--danger);outline:none;background:var(--surface);
@@ -53,6 +53,7 @@
     .qty-input:focus { border-color:var(--accent); }
     .qty-input:disabled { background:var(--surface-3);color:var(--text-muted);cursor:not-allowed; }
     .qty-edited { border-color:var(--accent)!important;background:#eff6ff!important; }
+    .branch-stock { color:#7f1d1d;font-weight:800;font-size:0.78rem; }
     /* صف البحث + الشركات في سطر واحد */
     .search-company-row { display:grid;grid-template-columns:1fr 1.4fr;gap:8px;margin-bottom:10px;align-items:stretch; }
     @media(max-width:600px){ .search-company-row{grid-template-columns:1fr;} }
@@ -218,15 +219,32 @@
       return (customQty.hasOwnProperty(c)) ? customQty[c] : item.orderQty;
     }
 
+    // القيمة الرقمية فقط (للمجاميع) — النص زي "كرتونة" بيرجع 0
+    function qtyNum(item){
+      var v = qtyOf(item);
+      var n = parseFloat(v);
+      return isNaN(n) ? 0 : n;
+    }
+
+    // هل القيمة نص وليست رقم؟
+    function qtyIsText(v){
+      return String(v).trim() !== '' && isNaN(parseFloat(v));
+    }
+
     function updateQty(code, val){
-      var n = parseInt(val);
-      if(isNaN(n) || n < 0) n = 0;
-      customQty[code] = n;
+      var v = String(val).trim();
+      // لو رقم: نظّفه. لو نص: سيبه زي ما هو
+      if(!isNaN(parseFloat(v)) && isFinite(v)){
+        var n = parseFloat(v);
+        if(n < 0) n = 0;
+        v = n;
+      }
+      customQty[code] = v;
       saveQty();
       // لون مختلف لو اتعدلت
       var input = document.getElementById('qty-'+code);
       if(input){
-        if(n !== origQty[code]) input.classList.add('qty-edited');
+        if(String(v) !== String(origQty[code])) input.classList.add('qty-edited');
         else input.classList.remove('qty-edited');
       }
     }
@@ -561,7 +579,8 @@
           mamora:{stock:s.mamora,avg:r1(m.avg),active:m.activeMonths,mul:mulM,need:nM},
           san:   {stock:s.san,   avg:r1(n.avg),active:n.activeMonths,mul:mulN,need:nN},
           bishr: {stock:s.bishr, avg:r1(b.avg),active:b.activeMonths,mul:mulB,need:nB},
-          totalStock,totalTarget,orderQty
+          totalStock,totalTarget,orderQty,
+          totalAvg:r1(m.avg+n.avg+b.avg)
         });
       });
 
@@ -613,7 +632,7 @@
       // عدّ المتجاهَل من كل النتائج (حتى لو مخفي من القائمة)
       var ignored=allResults.filter(function(i){return (itemStates[i.code]||{}).ignored;}).length;
       var totalQty=list.filter(function(i){return !(itemStates[i.code]||{}).ignored;})
-                       .reduce(function(s,i){return s+qtyOf(i);},0);
+                       .reduce(function(s,i){return s+qtyNum(i);},0);
 
       document.getElementById('result-count').textContent=
         list.length+' صنف — تم: '+ordered+' · متجاهل: '+ignored;
@@ -635,6 +654,7 @@
                 <th style="width:30px;">🚫</th>
                 <th style="text-align:right;">الصنف</th>
                 <th>الكمية المطلوبة</th>
+                <th>إجمالي المعدل الشهري</th>
                 <th>إجمالي الهدف</th>
                 <th>إجمالي الرصيد</th>
                 <th>المعمورة<br><small style="font-weight:400;opacity:0.8;">احتياج·رصيد·معدل·×</small></th>
@@ -649,13 +669,14 @@
         var state=itemStates[item.code]||{};
         var rowClass=state.ignored?'ignored-row':state.ordered?'ordered-row':'';
         var qty=qtyOf(item);
-        var isEdited = customQty.hasOwnProperty(item.code) && customQty[item.code] !== item.orderQty;
+        var qtyAttr=String(qty).replace(/"/g,'&quot;').replace(/</g,'&lt;');
+        var isEdited = customQty.hasOwnProperty(item.code) && String(customQty[item.code]) !== String(item.orderQty);
 
         function bc(b){
           var nc=b.need>0?'need-pos':'need-neg';
           return '<td><span class="'+nc+'">'+(b.need>0?'+'+b.need:'—')+'</span>'+
             '<div style="font-size:0.67rem;color:var(--text-muted);margin-top:2px;">'+
-            b.stock+' / '+b.avg+(b.active>0?' ('+b.active+'ش)':'')+
+            '<span class="branch-stock">'+b.stock+'</span> / '+b.avg+(b.active>0?' ('+b.active+'ش)':'')+
             ' <span class="multiply-badge">×'+b.mul+'</span></div></td>';
         }
 
@@ -672,12 +693,13 @@
             '<div style="font-size:0.67rem;color:var(--text-muted);">'+item.code+' · '+item.unit+' · '+item.company+'</div>'+
           '</td>'+
           '<td>'+
-            '<input type="number" id="qty-'+item.code+'" class="qty-input'+(isEdited?' qty-edited':'')+'"'+
-              ' value="'+qty+'" min="0"'+
+            '<input type="text" id="qty-'+item.code+'" class="qty-input'+(isEdited?' qty-edited':'')+'"'+
+              ' value="'+qtyAttr+'"'+
               (state.ignored?' disabled':'')+
               ' onchange="updateQty(\''+item.code+'\',this.value)"'+
               ' onkeydown="qtyKeyNav(event, this)">'+
           '</td>'+
+          '<td style="font-weight:700;color:var(--primary);">'+item.totalAvg+'</td>'+
           '<td style="color:var(--accent-dark);font-weight:700;">'+Math.round(item.totalTarget)+'</td>'+
           '<td style="font-weight:600;">'+Math.round(item.totalStock)+'</td>'+
           bc(item.mamora)+bc(item.san)+bc(item.bishr)+
@@ -724,7 +746,9 @@
       // استبعاد المتجاهل + استبعاد أي صنف كميته صفر (بعد التعديل)
       var list = filteredResults.filter(function(i){
         if((itemStates[i.code]||{}).ignored) return false;
-        return qtyOf(i) > 0;
+        var v = qtyOf(i);
+        if(qtyIsText(v)) return true;   // نص زي "كرتونة" يتصدّر عادي
+        return qtyNum(i) > 0;
       });
       if(!list.length){ alert('لا توجد أصناف بكمية أكبر من صفر'); return; }
 
