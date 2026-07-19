@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>مبيعات الماكينات - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    .wl-header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px; }
+    .wl-header-right { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .search-wrap { position:relative; min-width:200px; flex:1; max-width:280px; }
+    .search-wrap i { position:absolute; right:11px; top:50%; transform:translateY(-50%); color:var(--text-muted); font-size:0.85rem; pointer-events:none; }
+    .search-wrap input { padding-right:34px; }
+
+    /* فلتر المدى الزمني */
+    .wl-range { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; background:var(--surface-3); border:1px solid var(--border); border-radius:14px; padding:12px 14px; margin-bottom:12px; }
+    .wl-range-field { display:flex; flex-direction:column; gap:4px; }
+    .wl-range-field label { font-size:0.72rem; font-weight:700; color:var(--text-secondary); }
+    .wl-range-field input { width:210px; }
+    .wl-quick { display:flex; gap:6px; flex-wrap:wrap; margin-right:auto; align-items:center; }
+    .quick-btn { padding:6px 13px; border-radius:20px; border:1px solid var(--border); background:var(--surface); color:var(--text-secondary); font-size:0.76rem; cursor:pointer; font-family:var(--font); font-weight:700; transition:all 0.15s; }
+    .quick-btn:hover { border-color:var(--accent); color:var(--text-primary); }
+    .quick-btn.active { background:var(--accent); color:var(--primary); border-color:var(--accent); }
+
+    /* كروت الملخص */
+    .wl-summary { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+    .wl-card { border-radius:14px; padding:12px 18px; border:1.5px solid var(--border); background:var(--surface); min-width:150px; }
+    .wl-card .lbl { font-size:0.72rem; font-weight:700; color:var(--text-secondary); display:block; margin-bottom:3px; }
+    .wl-card .val { font-size:1.15rem; font-weight:800; color:var(--accent-dark); }
+    .wl-card .sub { font-size:0.65rem; color:var(--text-muted); }
+    .wl-card-total  { border-color:var(--accent); }
+    .wl-card-count  { border-color:#93c5fd; }
+    .wl-card-tax    { border-color:#fdba74; }
+    .wl-card-net    { border-color:#86efac; }
+    .wl-card-refund { border-color:#c4b5fd; }
+
+    /* مجاميع الماكينات والفروع */
+    .wl-group-title { font-size:0.85rem; font-weight:800; color:var(--text-primary); margin:14px 0 8px; display:flex; align-items:center; gap:7px; }
+    .wl-boxes { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+    .wl-box { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:9px 14px; min-width:185px; }
+    .wl-box-head { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:3px; }
+    .wl-box-name { font-size:0.8rem; font-weight:800; color:var(--text-primary); }
+    .wl-box-cnt { font-size:0.64rem; background:var(--surface-3); border:1px solid var(--border); border-radius:20px; padding:1px 8px; color:var(--text-secondary); font-weight:700; white-space:nowrap; }
+    .wl-box-total { font-size:0.95rem; font-weight:800; color:var(--warning); }
+    .wl-box-sub { font-size:0.63rem; color:var(--text-muted); margin-top:2px; }
+    .wl-box-machines { margin-top:5px; }
+    .wl-box-mline { display:flex; justify-content:space-between; gap:8px; padding:2px 0; border-top:1px dashed var(--border); font-size:0.68rem; }
+
+    .badge-sale   { background:#dcfce7; color:#15803d; }
+    .badge-refund { background:#ede9fe; color:#7c3aed; }
+    .mono { font-family:monospace; font-size:0.72rem; color:var(--text-secondary); }
+    .empty-note { text-align:center; padding:40px; color:var(--text-muted); }
+  </style>
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+
+      <div class="wl-header">
+        <div class="page-title" style="margin:0;">
+          <i class="fas fa-cash-register"></i> مبيعات الماكينات
+          <span class="highlight" id="display-branch">...</span>
+        </div>
+        <div class="wl-header-right">
+          <div class="search-wrap">
+            <i class="fas fa-search"></i>
+            <input type="text" id="searchInput" class="form-input" placeholder="بحث بالقيمة أو رقم الطلب..." oninput="applyFilter()">
+          </div>
+          <button class="btn btn-primary" onclick="loadWallet()"><i class="fas fa-sync-alt"></i> تحديث</button>
+        </div>
+      </div>
+
+      <!-- فلتر المدى الزمني -->
+      <div class="wl-range">
+        <div class="wl-range-field">
+          <label><i class="fas fa-calendar-day"></i> من</label>
+          <input type="datetime-local" id="fromInput" class="form-input" onchange="onManualRange()">
+        </div>
+        <div class="wl-range-field">
+          <label><i class="fas fa-calendar-check"></i> إلى</label>
+          <input type="datetime-local" id="toInput" class="form-input" onchange="onManualRange()">
+        </div>
+        <div class="wl-quick">
+          <button class="quick-btn" data-q="today"  onclick="quickRange('today', this)">النهارده</button>
+          <button class="quick-btn" data-q="yest"   onclick="quickRange('yest', this)">إمبارح</button>
+          <button class="quick-btn" data-q="7d"     onclick="quickRange('7d', this)">آخر ٧ أيام</button>
+          <button class="quick-btn" data-q="30d"    onclick="quickRange('30d', this)">آخر ٣٠ يوم</button>
+          <button class="quick-btn active" data-q="all" onclick="quickRange('all', this)">الكل</button>
+        </div>
+      </div>
+
+      <!-- ملخص المدى -->
+      <div class="wl-summary" id="wl-summary"></div>
+
+      <!-- مجاميع الفروع والماكينات -->
+      <div id="wl-groups"></div>
+
+      <div class="wl-group-title"><i class="fas fa-list" style="color:var(--accent);"></i> المعاملات</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>التاريخ والوقت</th>
+              <th>القيمة</th>
+              <th>الرسوم</th>
+              <th>الصافي</th>
+              <th>الماكينة</th>
+              <th id="th-branch">الفرع</th>
+              <th>رقم الطلب</th>
+              <th>النوع</th>
+            </tr>
+          </thead>
+          <tbody id="table-body">
+            <tr class="loading-row"><td colspan="8">⏳ جاري التحميل...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="nav.js" defer></script>
+  <script>
+    const WALLET_ENDPOINT = 'https://agent.ebrahimhamdy.com/webhook/paymobdaily';
+
+    // ربط فرع الماكينة (زي ما هو في جدول wallet) باسم الفرع في السيستم
+    const BRANCH_NORMALIZE = {
+      'المعمورة':    'الصيدلية',
+      'سان ستيفانو': 'ابراهيم حمدي 2',
+      'سيدي بشر':   'ابراهيم حمدي 3',
+      'سيدى بشر':   'ابراهيم حمدي 3',
+    };
+
+    // ترتيب ثابت للفروع
+    const STORE_ORDER = ['الصيدلية', 'ابراهيم حمدي 2', 'ابراهيم حمدي 3'];
+
+    // ربط فرع المستخدم (اللي في localStorage) بالاسم الموحّد
+    const USER_BRANCH_MAP = {
+      'المعمورة':    'الصيدلية',
+      'سان ستيفانو': 'ابراهيم حمدي 2',
+      'سيدى بشر':   'ابراهيم حمدي 3',
+      'سيدي بشر':   'ابراهيم حمدي 3',
+    };
+
+    let userBranch   = '';
+    let userRole     = '';
+    let isAdmin      = false;
+    let myStore      = '';
+    let allRows      = [];
+    let activeQuick  = 'all';
+
+    checkAuth().then(async user => {
+      if (!user) return;
+      userBranch = (localStorage.getItem('userBranch') || '').trim();
+      userRole   = (localStorage.getItem('userRole')   || '').trim();
+      isAdmin    = (userRole === 'admin');
+      myStore    = USER_BRANCH_MAP[userBranch] || userBranch;
+      document.getElementById('display-branch').textContent = isAdmin ? 'كل الفروع' : myStore;
+      document.getElementById('th-branch').style.display = isAdmin ? '' : 'none';
+      await loadWallet();
+    });
+
+    /* ===================== تحميل البيانات ===================== */
+    async function loadWallet() {
+      const tbody = document.getElementById('table-body');
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="8">⏳ جاري جلب البيانات...</td></tr>';
+      try {
+        const resp = await fetch(WALLET_ENDPOINT);
+        const data = await resp.json();
+        let rows = Array.isArray(data) ? data : (data.data || []);
+        // لو المستخدم مش أدمن، نعرض فرعه بس
+        if (!isAdmin) {
+          rows = rows.filter(r => storeOf(r) === myStore);
+        }
+        allRows = rows;
+        applyFilter();
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال بالسيرفر</td></tr>';
+      }
+    }
+
+    /* ===================== دوال مساعدة ===================== */
+    function storeOf(r) {
+      const b = String(r.branch || '').trim();
+      return BRANCH_NORMALIZE[b] || b || '---';
+    }
+    function machineOf(r) {
+      return String(r.machine_name || r.to || r.terminal_id || '---').trim();
+    }
+    function amountOf(r)  { return parseFloat(r.ammount)    || 0; }
+    function feesOf(r)    { return parseFloat(r.fees)       || 0; }
+    function vatOf(r)     { return parseFloat(r.vat)        || 0; }
+    function netOf(r) {
+      const n = parseFloat(r.netammount);
+      return isNaN(n) ? (amountOf(r) - feesOf(r)) : n;
+    }
+    function isRefund(r) { return String(r.type || '').trim().toUpperCase() === 'REFUND'; }
+
+    // تحويل createdAt لتوقيت مصر (+3)
+    function toEgypt(t) {
+      if (!t) return null;
+      const ms = new Date(t).getTime();
+      if (isNaN(ms)) return null;
+      return new Date(ms + 3 * 60 * 60 * 1000);
+    }
+    // رقم قابل للمقارنة بتوقيت مصر (بيرجّع ملي ثانية بعد الإزاحة)
+    function egyptMs(t) {
+      const d = toEgypt(t);
+      return d ? d.getTime() : NaN;
+    }
+    function fmtDate(t) {
+      const d = toEgypt(t);
+      if (!d) return '---';
+      return `${String(d.getUTCDate()).padStart(2,'0')}/${String(d.getUTCMonth()+1).padStart(2,'0')}/${d.getUTCFullYear()}`;
+    }
+    function fmtTime(t) {
+      const d = toEgypt(t);
+      if (!d) return '';
+      const h = d.getUTCHours(), m = d.getUTCMinutes();
+      const ampm = h >= 12 ? 'م' : 'ص';
+      const h12 = h % 12 || 12;
+      return `${String(h12).padStart(2,'0')}:${String(m).padStart(2,'0')} ${ampm}`;
+    }
+    function pad(n) { return String(n).padStart(2,'0'); }
+    // تحويل قيمة الـ datetime-local لملي ثانية بنفس مرجع توقيت مصر
+    function inputToEgyptMs(v) {
+      if (!v) return NaN;
+      // بنعاملها كأنها UTC عشان تتقارن مع egyptMs مباشرة
+      return Date.parse(v + ':00Z');
+    }
+    // نهارده بتوقيت مصر كـ Date (بمكوّنات UTC)
+    function egyptNow() { return toEgypt(new Date().toISOString()); }
+    function egyptDateStr(d) {
+      return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}`;
+    }
+
+    /* ===================== الفلاتر السريعة ===================== */
+    function quickRange(kind, btn) {
+      activeQuick = kind;
+      document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+
+      const fromEl = document.getElementById('fromInput');
+      const toEl   = document.getElementById('toInput');
+      const now    = egyptNow();
+
+      if (kind === 'all') {
+        fromEl.value = '';
+        toEl.value   = '';
+        applyFilter();
+        return;
+      }
+
+      let start = new Date(now.getTime());
+      if (kind === 'today') {
+        start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0));
+        fromEl.value = `${egyptDateStr(start)}T00:00`;
+        toEl.value   = `${egyptDateStr(now)}T23:59`;
+      } else if (kind === 'yest') {
+        const y = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+        fromEl.value = `${egyptDateStr(y)}T00:00`;
+        toEl.value   = `${egyptDateStr(y)}T23:59`;
+      } else if (kind === '7d') {
+        const s = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6));
+        fromEl.value = `${egyptDateStr(s)}T00:00`;
+        toEl.value   = `${egyptDateStr(now)}T23:59`;
+      } else if (kind === '30d') {
+        const s = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 29));
+        fromEl.value = `${egyptDateStr(s)}T00:00`;
+        toEl.value   = `${egyptDateStr(now)}T23:59`;
+      }
+      applyFilter();
+    }
+
+    function onManualRange() {
+      activeQuick = '';
+      document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+      applyFilter();
+    }
+
+    /* ===================== الفلترة ===================== */
+    function getFiltered() {
+      const search  = document.getElementById('searchInput').value.trim().toLowerCase();
+      const fromMs  = inputToEgyptMs(document.getElementById('fromInput').value);
+      const toMs    = inputToEgyptMs(document.getElementById('toInput').value);
+
+      return allRows.filter(r => {
+        const ms = egyptMs(r.createdAt);
+        if (!isNaN(fromMs) && (isNaN(ms) || ms < fromMs)) return false;
+        if (!isNaN(toMs)   && (isNaN(ms) || ms > toMs + 59999)) return false;
+        if (search) {
+          const hit = String(amountOf(r).toFixed(2)).includes(search) ||
+                      String(r.order_id     || '').toLowerCase().includes(search) ||
+                      String(r.terminal_id  || '').toLowerCase().includes(search) ||
+                      machineOf(r).toLowerCase().includes(search);
+          if (!hit) return false;
+        }
+        return true;
+      });
+    }
+
+    function applyFilter() { render(getFiltered()); }
+
+    /* ===================== الرسم ===================== */
+    function render(items) {
+      const tbody = document.getElementById('table-body');
+      const colCount = isAdmin ? 8 : 7;
+
+      // الأحدث بالأعلى
+      items.sort((a,b) => new Date(b.createdAt||0) - new Date(a.createdAt||0));
+
+      /* ---------- المجاميع ---------- */
+      let totSale = 0, totRefund = 0, totFees = 0, totVat = 0, totNet = 0;
+      let cntSale = 0, cntRefund = 0;
+      const byMachine = {};
+      const byStore   = {};
+
+      items.forEach(r => {
+        const amt = amountOf(r), f = feesOf(r), v = vatOf(r), n = netOf(r);
+        const mch = machineOf(r), st = storeOf(r);
+        const ref = isRefund(r);
+
+        if (ref) { totRefund += amt; cntRefund++; }
+        else     { totSale   += amt; cntSale++;   }
+        totFees += f; totVat += v; totNet += n;
+
+        if (!byMachine[mch]) byMachine[mch] = { store:st, total:0, fees:0, net:0, count:0, refund:0 };
+        byMachine[mch].total  += ref ? 0 : amt;
+        byMachine[mch].refund += ref ? amt : 0;
+        byMachine[mch].fees   += f;
+        byMachine[mch].net    += n;
+        byMachine[mch].count++;
+
+        if (!byStore[st]) byStore[st] = { total:0, fees:0, net:0, count:0, refund:0, machines:{} };
+        byStore[st].total  += ref ? 0 : amt;
+        byStore[st].refund += ref ? amt : 0;
+        byStore[st].fees   += f;
+        byStore[st].net    += n;
+        byStore[st].count++;
+        if (!byStore[st].machines[mch]) byStore[st].machines[mch] = { total:0, count:0, net:0 };
+        byStore[st].machines[mch].total += ref ? 0 : amt;
+        byStore[st].machines[mch].net   += n;
+        byStore[st].machines[mch].count++;
+      });
+
+      const feesPct = totSale > 0 ? ((totFees / totSale) * 100).toFixed(2) : '0.00';
+
+      /* ---------- كروت الملخص ---------- */
+      document.getElementById('wl-summary').innerHTML = `
+        <div class="wl-card wl-card-total">
+          <span class="lbl">إجمالي المبيعات</span>
+          <span class="val">${totSale.toFixed(2)}</span>
+          <span class="sub">جنيه</span>
+        </div>
+        <div class="wl-card wl-card-count">
+          <span class="lbl">عدد المعاملات</span>
+          <span class="val">${cntSale}</span>
+          <span class="sub">${cntRefund ? `+ ${cntRefund} مرتجع` : 'معاملة'}</span>
+        </div>
+        <div class="wl-card wl-card-tax">
+          <span class="lbl">الرسوم</span>
+          <span class="val" style="color:#c2410c;">${totFees.toFixed(2)}</span>
+          <span class="sub">${feesPct}% من الإجمالي${totVat ? ` | ضريبة: ${totVat.toFixed(2)}` : ''}</span>
+        </div>
+        <div class="wl-card wl-card-net">
+          <span class="lbl">الصافي</span>
+          <span class="val" style="color:#15803d;">${totNet.toFixed(2)}</span>
+          <span class="sub">بعد خصم الرسوم</span>
+        </div>
+        ${totRefund ? `<div class="wl-card wl-card-refund">
+          <span class="lbl">المرتجعات</span>
+          <span class="val" style="color:#7c3aed;">${totRefund.toFixed(2)}</span>
+          <span class="sub">${cntRefund} معاملة</span>
+        </div>` : ''}`;
+
+      /* ---------- مجاميع الفروع والماكينات ---------- */
+      const orderedStores = Object.keys(byStore).sort((a,b) => {
+        let ia = STORE_ORDER.indexOf(a); if (ia === -1) ia = 999;
+        let ib = STORE_ORDER.indexOf(b); if (ib === -1) ib = 999;
+        return ia - ib;
+      });
+
+      let groupsHtml = '';
+
+      if (isAdmin && orderedStores.length) {
+        groupsHtml += `<div class="wl-group-title"><i class="fas fa-store" style="color:var(--accent);"></i> إجمالي كل فرع</div><div class="wl-boxes">`;
+        groupsHtml += orderedStores.map(st => {
+          const v = byStore[st];
+          const mLines = Object.entries(v.machines)
+            .sort((a,b) => a[0].localeCompare(b[0]))
+            .map(([m, mv]) => `<div class="wl-box-mline">
+              <span style="color:var(--text-secondary);"><i class="fas fa-mobile-screen-button" style="font-size:0.6rem;color:var(--accent);margin-left:3px;"></i> ${m} <span style="color:var(--text-muted);">(${mv.count})</span></span>
+              <b style="color:var(--warning);">${mv.total.toFixed(2)}</b>
+            </div>`).join('');
+          return `<div class="wl-box">
+            <div class="wl-box-head">
+              <span class="wl-box-name">${st}</span>
+              <span class="wl-box-cnt">${v.count} معاملة</span>
+            </div>
+            <div class="wl-box-total">${v.total.toFixed(2)}</div>
+            <div class="wl-box-sub">رسوم: ${v.fees.toFixed(2)} | صافي: ${v.net.toFixed(2)}${v.refund ? ` | مرتجع: ${v.refund.toFixed(2)}` : ''}</div>
+            <div class="wl-box-machines">${mLines}</div>
+          </div>`;
+        }).join('');
+        groupsHtml += `</div>`;
+      }
+
+      const machineKeys = Object.keys(byMachine).sort((a,b) => a.localeCompare(b));
+      if (machineKeys.length) {
+        groupsHtml += `<div class="wl-group-title"><i class="fas fa-mobile-screen-button" style="color:var(--accent);"></i> إجمالي كل ماكينة</div><div class="wl-boxes">`;
+        groupsHtml += machineKeys.map(m => {
+          const v = byMachine[m];
+          return `<div class="wl-box">
+            <div class="wl-box-head">
+              <span class="wl-box-name">${m}</span>
+              <span class="wl-box-cnt">${v.count} معاملة</span>
+            </div>
+            <div class="wl-box-total">${v.total.toFixed(2)}</div>
+            <div class="wl-box-sub">${isAdmin ? v.store + ' | ' : ''}رسوم: ${v.fees.toFixed(2)} | صافي: ${v.net.toFixed(2)}${v.refund ? ` | مرتجع: ${v.refund.toFixed(2)}` : ''}</div>
+          </div>`;
+        }).join('');
+        groupsHtml += `</div>`;
+      }
+
+      document.getElementById('wl-groups').innerHTML = groupsHtml;
+
+      /* ---------- الجدول ---------- */
+      if (!items.length) {
+        tbody.innerHTML = `<tr><td colspan="${colCount}" class="empty-note">لا توجد معاملات في المدى المحدد</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = items.map(r => {
+        const ref = isRefund(r);
+        const branchCell = isAdmin ? `<td style="font-size:0.78rem;">${storeOf(r)}</td>` : '';
+        return `<tr>
+          <td style="font-size:0.78rem;white-space:nowrap;">
+            ${fmtDate(r.createdAt)}<br>
+            <span style="color:var(--text-muted);font-size:0.7rem;">${fmtTime(r.createdAt)}</span>
+          </td>
+          <td><b style="color:${ref ? '#7c3aed' : 'var(--warning)'};">${amountOf(r).toFixed(2)}</b></td>
+          <td style="font-size:0.75rem;color:#c2410c;">${feesOf(r).toFixed(2)}</td>
+          <td style="font-size:0.75rem;color:#15803d;">${netOf(r).toFixed(2)}</td>
+          <td><span class="badge badge-blue" style="font-size:0.72rem;">${machineOf(r)}</span></td>
+          ${branchCell}
+          <td class="mono">${r.order_id || '---'}</td>
+          <td>${ref ? '<span class="badge badge-refund">🔄 مرتجع</span>' : '<span class="badge badge-sale">✅ بيع</span>'}</td>
+        </tr>`;
+      }).join('');
+    }
+  </script>
+</body>
+</html>
