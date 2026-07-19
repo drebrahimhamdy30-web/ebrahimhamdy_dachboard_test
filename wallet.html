@@ -137,29 +137,22 @@
     // ترتيب ثابت للفروع
     const STORE_ORDER = ['الصيدلية', 'ابراهيم حمدي 2', 'ابراهيم حمدي 3'];
 
-    // ربط فرع المستخدم (اللي في localStorage) بالاسم الموحّد
-    const USER_BRANCH_MAP = {
-      'المعمورة':    'الصيدلية',
-      'سان ستيفانو': 'ابراهيم حمدي 2',
-      'سيدى بشر':   'ابراهيم حمدي 3',
-      'سيدي بشر':   'ابراهيم حمدي 3',
-    };
 
-    let userBranch   = '';
-    let userRole     = '';
-    let isAdmin      = false;
-    let myStore      = '';
+
+    // الصفحة دي للأدمن فقط (متحكوم فيها من جدول الصلاحيات)
+    const isAdmin    = true;
     let allRows      = [];
     let activeQuick  = 'all';
 
     checkAuth().then(async user => {
       if (!user) return;
-      userBranch = (localStorage.getItem('userBranch') || '').trim();
-      userRole   = (localStorage.getItem('userRole')   || '').trim();
-      isAdmin    = (userRole === 'admin');
-      myStore    = USER_BRANCH_MAP[userBranch] || userBranch;
-      document.getElementById('display-branch').textContent = isAdmin ? 'كل الفروع' : myStore;
-      document.getElementById('th-branch').style.display = isAdmin ? '' : 'none';
+      const role = (localStorage.getItem('userRole') || '').trim();
+      if (role !== 'admin') {
+        document.querySelector('.card').innerHTML =
+          '<div class="empty-note">🔒 الصفحة دي متاحة للأدمن بس</div>';
+        return;
+      }
+      document.getElementById('display-branch').textContent = 'كل الفروع';
       await loadWallet();
     });
 
@@ -171,10 +164,6 @@
         const resp = await fetch(WALLET_ENDPOINT);
         const data = await resp.json();
         let rows = Array.isArray(data) ? data : (data.data || []);
-        // لو المستخدم مش أدمن، نعرض فرعه بس
-        if (!isAdmin) {
-          rows = rows.filter(r => storeOf(r) === myStore);
-        }
         allRows = rows;
         applyFilter();
       } catch (e) {
