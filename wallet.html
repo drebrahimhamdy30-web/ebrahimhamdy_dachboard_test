@@ -162,12 +162,22 @@
       tbody.innerHTML = '<tr class="loading-row"><td colspan="8">⏳ جاري جلب البيانات...</td></tr>';
       try {
         const resp = await fetch(WALLET_ENDPOINT);
+        if (!resp.ok) {
+          tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ السيرفر رجّع كود ${resp.status}</td></tr>`;
+          return;
+        }
         const data = await resp.json();
         let rows = Array.isArray(data) ? data : (data.data || []);
+        console.log('wallet rows:', rows.length, rows[0]);
         allRows = rows;
+        if (!rows.length) {
+          tbody.innerHTML = '<tr><td colspan="8" class="empty-note">السيرفر رجّع صفر صفوف</td></tr>';
+          return;
+        }
         applyFilter();
       } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال بالسيرفر</td></tr>';
+        console.error('wallet load error:', e);
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال بالسيرفر<br><span style="font-size:0.72rem;color:var(--text-muted);">${e.message}</span></td></tr>`;
       }
     }
 
@@ -215,10 +225,17 @@
     }
     function pad(n) { return String(n).padStart(2,'0'); }
     // تحويل قيمة الـ datetime-local لملي ثانية بنفس مرجع توقيت مصر
+    // ملاحظة: المتصفح ساعات بيرجّع "2026-07-20T23:59" وساعات "2026-07-20T23:59:00"
     function inputToEgyptMs(v) {
       if (!v) return NaN;
+      let s = String(v).trim();
+      // لو فيه ثواني نسيبها، لو مفيش نضيفها
+      const parts = s.split('T');
+      if (parts.length !== 2) return NaN;
+      const timeParts = parts[1].split(':');
+      if (timeParts.length === 2) s = s + ':00';
       // بنعاملها كأنها UTC عشان تتقارن مع egyptMs مباشرة
-      return Date.parse(v + ':00Z');
+      return Date.parse(s + 'Z');
     }
     // نهارده بتوقيت مصر كـ Date (بمكوّنات UTC)
     function egyptNow() { return toEgypt(new Date().toISOString()); }
