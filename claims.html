@@ -578,9 +578,17 @@
       const r = selected.filter(i => String(i.bill_type || '').trim() === 'معاشات').length;
       if (!confirm(`هل تريد إنشاء مطالبة بـ ${selected.length} فاتورة؟\nعاملين: ${w} — معاشات: ${r}`)) return;
 
+      // نفتح نافذة الطباعة فورًا قبل أي await عشان المتصفح ميمنعهاش
+      const printWin = window.open('', '_blank');
+      if (printWin) {
+        printWin.document.write('<html dir="rtl"><body style="font-family:Arial;text-align:center;padding:40px;font-size:16px;">⏳ جاري تجهيز المطالبة...</body></html>');
+      }
+
       const btn = document.getElementById('create-claim-btn');
       btn.disabled  = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الإنشاء...';
+
+      let claimSaved = false;
 
       try {
         const claimResp = await fetch("https://agent.ebrahimhamdy.com/webhook/taskmanagement", {
@@ -598,7 +606,7 @@
         const claimArr  = Array.isArray(claimData) ? claimData : [claimData];
         const claimId   = claimArr[0]?.id;
 
-        if (!claimId) { alert('❌ فشل إنشاء المطالبة'); return; }
+        if (!claimId) { if (printWin) printWin.close(); alert('❌ فشل إنشاء المطالبة'); return; }
 
         const claimDate = new Date().toISOString();
         await Promise.all(selected.map(item =>
@@ -621,21 +629,33 @@
           })
         ));
 
-        generatePDF(selected, claimDate);
+        claimSaved = true;
+
+        // الطباعة في try منفصل: لو فشلت، البيانات تفضل محفوظة والتحديث يتم برضه
+        try {
+          generatePDF(selected, claimDate, printWin);
+        } catch (pdfErr) {
+          console.error('PDF error:', pdfErr);
+          if (printWin) { try { printWin.close(); } catch(_) {} }
+          alert('⚠️ تم إنشاء المطالبة بنجاح، لكن حدث خطأ أثناء الطباعة.\nيمكنك طباعتها من تبويب "المطالبات المرسلة".');
+        }
+
         excludedIds.clear();
-        await loadAll();
 
       } catch(e) {
+        if (!claimSaved && printWin) { try { printWin.close(); } catch(_) {} }
         alert('❌ خطأ في الاتصال');
         console.error(e);
       } finally {
         btn.disabled  = false;
         btn.innerHTML = '<i class="fas fa-paper-plane"></i> إنشاء مطالبة';
+        // التحديث دايمًا يتنفذ حتى لو حصل خطأ في الطباعة
+        try { await loadAll(); } catch(_) {}
       }
     }
 
     // ===== PDF =====
-    function generatePDF(items, claimDate) {
+    function generatePDF(items, claimDate, winRef) {
       const dateStr = new Date(claimDate).toLocaleDateString('ar-EG', {
         year:'numeric', month:'long', day:'numeric'
       });
@@ -751,9 +771,15 @@
         </body>
         </html>`;
 
-      const win = window.open('', '_blank');
+      const win = winRef || window.open('', '_blank');
+      if (!win) {
+        alert('⚠️ المتصفح منع فتح نافذة الطباعة.\nبرجاء السماح بالنوافذ المنبثقة (Popups) لهذا الموقع، ثم اطبع المطالبة من تبويب "المطالبات المرسلة".');
+        return;
+      }
+      win.document.open();
       win.document.write(html);
       win.document.close();
+      win.focus();
       win.print();
     }
 
