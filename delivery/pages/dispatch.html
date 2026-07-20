@@ -787,13 +787,19 @@ async function loadAll(){
       tripsQ=tripsQ.eq('branch_id',branchId);
     }
 
-    const [oR,dR,tR,rrR]=await Promise.all([
+    const [oR,dR,tR]=await Promise.all([
       ordersQ,
       driversQ,
-      tripsQ,
-      db.from('trip_orders').select('*')
+      tripsQ
     ]);
     allOrders=oR.data||[];allDrivers=dR.data||[];activeTrips=tR.data||[];
+    // روابط trip_orders للرحلات النشطة فقط — بدل تحميل الجدول كله (يتجاوز حد 1000 صف ويخفي أوردرات بعض الطيارين)
+    let rrData=[];
+    const activeTripIds=activeTrips.map(t=>t.id);
+    if(activeTripIds.length){
+      const rrR=await db.from('trip_orders').select('*').in('trip_id',activeTripIds);
+      rrData=rrR.data||[];
+    }
     // Load dispatch settings
     if(branchId){
       const dsRes=await db.from('dispatch_settings').select('*').eq('branch_id',branchId);
@@ -803,7 +809,7 @@ async function loadAll(){
     const bl=document.getElementById('branchLabel');
     if(bl&&!bl.textContent) bl.textContent=branchId?'':'· كل الفروع';
     tripOrdersMap={};
-    (rrR.data||[]).forEach(r=>{if(!tripOrdersMap[r.trip_id])tripOrdersMap[r.trip_id]=[];tripOrdersMap[r.trip_id].push(r.order_id);});
+    rrData.forEach(r=>{if(!tripOrdersMap[r.trip_id])tripOrdersMap[r.trip_id]=[];tripOrdersMap[r.trip_id].push(r.order_id);});
     // جيب المناطق المسجلة
     const regRes=await db.from('regions').select('name').eq('is_active',true);
     knownRegions=new Set((regRes.data||[]).map(r=>r.name));
