@@ -69,7 +69,17 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
   <button class="btn btn-outline btn-sm" onclick="setToday()">اليوم</button>
   <button class="btn btn-outline btn-sm" onclick="setThisWeek()">هذا الأسبوع</button>
   <button class="btn btn-outline btn-sm" onclick="setThisMonth()">هذا الشهر</button>
+  <button class="btn btn-outline btn-sm" onclick="setPrevMonth()">الشهر السابق</button>
 </div>
+
+<!-- Tabs -->
+<div style="display:flex;gap:.5rem;margin-bottom:1rem;border-bottom:1px solid var(--border)">
+  <button id="tabBtn-drivers" onclick="switchTab('drivers')" style="background:none;border:none;border-bottom:3px solid var(--primary);color:var(--primary);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تقارير الطيارين</button>
+  <button id="tabBtn-orders" onclick="switchTab('orders')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تقارير الطلبات</button>
+</div>
+
+<!-- ========== TAB: تقارير الطيارين ========== -->
+<div id="tab-drivers">
 
 <!-- KPIs -->
 <div class="kpi-grid" id="kpiGrid"></div>
@@ -129,6 +139,44 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
   <div class="card-body" id="fairScores"></div>
 </div>
 
+</div><!-- /tab-drivers -->
+
+<!-- ========== TAB: تقارير الطلبات ========== -->
+<div id="tab-orders" style="display:none">
+
+  <div class="kpi-grid" id="ordKpiGrid"></div>
+
+  <div class="charts-2">
+    <div class="card">
+      <div class="card-header"><span class="card-title">أكثر العملاء إلغاءً للطلبات</span></div>
+      <div class="card-body" id="topCancelCustomers"></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">أكثر العملاء تأخيرًا في التوصيل</span></div>
+      <div class="card-body" id="topLateCustomers"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:1.25rem">
+    <div class="card-header"><span class="card-title">أكثر الطيارين تعذّرًا في التوصيل</span>
+      <span style="font-size:.68rem;color:var(--text-muted)">عدد مرات تسجيل تعذّر التوصيل</span></div>
+    <div class="card-body" id="topFailDrivers"></div>
+  </div>
+
+  <div class="card" style="margin-bottom:1.25rem">
+    <div class="card-header"><span class="card-title">كل الطلبات الملغية</span>
+      <span style="font-size:.68rem;color:var(--text-muted)" id="cancelledCount"></span></div>
+    <div class="card-body" id="cancelledList" style="max-height:340px;overflow-y:auto"></div>
+  </div>
+
+  <div class="card" style="margin-bottom:1.25rem">
+    <div class="card-header"><span class="card-title">كل الطلبات المتأخرة</span>
+      <span style="font-size:.68rem;color:var(--text-muted)" id="lateCount"></span></div>
+    <div class="card-body" id="lateList" style="max-height:340px;overflow-y:auto"></div>
+  </div>
+
+</div><!-- /tab-orders -->
+
 <div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -160,6 +208,27 @@ function setThisMonth() {
   document.getElementById('dateTo').value = now.toISOString().split('T')[0];
   loadReport();
 }
+function setPrevMonth() {
+  const now = new Date();
+  const first = new Date(now.getFullYear(), now.getMonth()-1, 1);
+  const last  = new Date(now.getFullYear(), now.getMonth(), 0);
+  document.getElementById('dateFrom').value = first.toISOString().split('T')[0];
+  document.getElementById('dateTo').value = last.toISOString().split('T')[0];
+  loadReport();
+}
+
+let currentTab = 'drivers';
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('tab-drivers').style.display = tab==='drivers' ? '' : 'none';
+  document.getElementById('tab-orders').style.display  = tab==='orders'  ? '' : 'none';
+  for (const t of ['drivers','orders']) {
+    const b = document.getElementById('tabBtn-'+t);
+    const on = t===tab;
+    b.style.borderBottomColor = on ? 'var(--primary)' : 'transparent';
+    b.style.color = on ? 'var(--primary)' : 'var(--text-muted)';
+  }
+}
 
 async function loadReport() {
   showLoading(true);
@@ -179,7 +248,96 @@ async function loadReport() {
   renderRegions();
   renderDriverRankings();
   await loadFairScores(from, to);
+  await loadOrdersTab(from, to);
   showLoading(false);
+}
+
+// ===== تاب تقارير الطلبات =====
+let breakSettingsMap = null; // branch_id -> max_picked_minutes
+function custName(o){ return o.customer_name || o.cust_name || '—'; }
+
+async function loadOrdersTab(from, to) {
+  // حد التأخير لكل فرع (من الاستلام للتسليم)
+  if (!breakSettingsMap) {
+    const { data } = await db.from('dispatch_settings').select('branch_id,max_picked_minutes');
+    breakSettingsMap = {};
+    (data||[]).forEach(s => { breakSettingsMap[s.branch_id] = Number(s.max_picked_minutes)||30; });
+  }
+  const thr = o => breakSettingsMap[o.branch_id] || 30;
+
+  // الملغية
+  const cancelled = reportOrders.filter(o => o.status === 'cancelled');
+  // المتأخرة: عندها picked_at، والوقت من الاستلام للتسليم (أو للآن لو مفتوح) عدّى الحد
+  const now = Date.now();
+  const late = reportOrders.filter(o => {
+    if (o.status === 'cancelled' || !o.picked_at) return false;
+    const start = new Date(o.picked_at).getTime();
+    const end = o.delivered_at ? new Date(o.delivered_at).getTime() : now;
+    return (end - start) / 60000 > thr(o);
+  }).map(o => {
+    const start = new Date(o.picked_at).getTime();
+    const end = o.delivered_at ? new Date(o.delivered_at).getTime() : now;
+    return { ...o, _lateMin: Math.round((end - start)/60000) };
+  });
+
+  // أكثر الطيارين تعذّرًا: من order_logs (order_postponed) لأن الطلب المتعذّر بيرجع للتوزيع ويفقد الطيار
+  let failByDriver = [];
+  try {
+    let q = db.from('order_logs').select('user_name,created_at').eq('event','order_postponed');
+    if (from) q = q.gte('created_at', from + 'T00:00:00');
+    if (to) q = q.lte('created_at', to + 'T23:59:59');
+    const { data } = await q;
+    const m = {};
+    (data||[]).forEach(l => { const n = l.user_name || '—'; m[n] = (m[n]||0)+1; });
+    failByDriver = Object.entries(m).sort((a,b)=>b[1]-a[1]);
+  } catch(e){ console.error(e); }
+
+  renderOrdKPIs(cancelled, late, failByDriver);
+  renderRankList('topCancelCustomers', groupCount(cancelled, custName), 'طلب');
+  renderRankList('topLateCustomers', groupCount(late, custName), 'طلب');
+  renderRankList('topFailDrivers', failByDriver, 'مرة');
+  renderOrderList('cancelledList', cancelled, 'cancelledCount', false);
+  renderOrderList('lateList', late, 'lateCount', true);
+}
+
+function groupCount(arr, keyFn) {
+  const m = {};
+  arr.forEach(x => { const k = keyFn(x); m[k] = (m[k]||0)+1; });
+  return Object.entries(m).sort((a,b)=>b[1]-a[1]);
+}
+
+function renderOrdKPIs(cancelled, late, failByDriver) {
+  const totalFails = failByDriver.reduce((s,[,c])=>s+c,0);
+  document.getElementById('ordKpiGrid').innerHTML = `
+    <div class="stat-card"><div class="stat-label">طلبات ملغية</div><div class="stat-value" style="color:#dc2626">${cancelled.length}</div></div>
+    <div class="stat-card"><div class="stat-label">طلبات متأخرة</div><div class="stat-value" style="color:#b45309">${late.length}</div></div>
+    <div class="stat-card"><div class="stat-label">مرات تعذّر التوصيل</div><div class="stat-value" style="color:#7c3aed">${totalFails}</div></div>`;
+}
+
+function renderRankList(elId, entries, unit) {
+  const el = document.getElementById(elId);
+  if (!entries.length) { el.innerHTML = '<div class="empty-state"><p>لا يوجد</p></div>'; return; }
+  el.innerHTML = entries.slice(0,10).map(([name,count],i)=>`
+    <div class="rank-item" style="display:flex;align-items:center;gap:.6rem;padding:.4rem 0;border-bottom:1px solid var(--border)">
+      <span class="rank-num ${i<3?'top3':''}" style="width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.7rem;font-weight:700;background:${i<3?'#92400e':'#f3f4f6'};color:${i<3?'#fff':'#6b7280'}">${i+1}</span>
+      <span class="rank-name" style="flex:1;font-size:.78rem;font-weight:600">${name}</span>
+      <span class="rank-val" style="font-size:.78rem;font-weight:700">${count} ${unit}</span>
+    </div>`).join('');
+}
+
+function renderOrderList(elId, orders, countId, showLate) {
+  const el = document.getElementById(elId);
+  document.getElementById(countId).textContent = `(${orders.length})`;
+  if (!orders.length) { el.innerHTML = '<div class="empty-state"><p>لا يوجد</p></div>'; return; }
+  el.innerHTML = orders.map(o=>`
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.45rem 0;border-bottom:1px solid var(--border);font-size:.76rem">
+      <div style="flex:1;min-width:0">
+        <span style="font-weight:700;color:var(--primary)">#${o.bill_no||(o.id||'').slice(0,6)}</span>
+        <span style="color:var(--text-muted)"> · ${custName(o)}</span>
+      </div>
+      ${showLate ? `<span style="color:#b45309;font-weight:700;white-space:nowrap">${o._lateMin} د</span>` : `<span style="white-space:nowrap">${Number(o.total_bill_net||0).toLocaleString()} ج</span>`}
+      <span style="color:var(--text-muted);white-space:nowrap">${new Date(o.created_at).toLocaleDateString('ar-EG',{day:'numeric',month:'numeric'})}</span>
+    </div>`).join('');
 }
 
 // كاش لأسماء الطيارين عشان ما نجيبهاش كل مرة
