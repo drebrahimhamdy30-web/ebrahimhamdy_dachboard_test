@@ -55,6 +55,24 @@
       padding:3px 4px;
       outline:none;
     }
+    /* ===== فلتر التاريخ ===== */
+    .filter-bar {
+      display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap;
+      background:var(--surface-2); border:1.5px solid var(--border);
+      border-radius:var(--radius-md); padding:12px; margin-bottom:12px;
+    }
+    .filter-group { display:flex; flex-direction:column; gap:4px; }
+    .filter-group label {
+      font-size:0.75rem; color:var(--text-secondary); font-weight:700;
+    }
+    .date-input {
+      background:var(--surface-3); border:1.5px solid var(--border);
+      border-radius:6px; color:var(--text-primary);
+      font-family:var(--font); font-size:0.82rem; padding:6px 8px; outline:none;
+    }
+    .date-input:focus { border-color:var(--accent); }
+    .row-check { width:16px; height:16px; cursor:pointer; accent-color:var(--accent); }
+    tr.unchecked-row { opacity:0.45; }
   </style>
 </head>
 <body>
@@ -77,6 +95,24 @@
 
 <!-- تبويب ١: جاهزة للمطالبة -->
       <div id="tab-pending">
+        <div class="filter-bar">
+          <div class="filter-group">
+            <label>من تاريخ</label>
+            <input type="date" id="date-from" class="date-input" onchange="onDateFilterChange()">
+          </div>
+          <div class="filter-group">
+            <label>إلى تاريخ</label>
+            <input type="date" id="date-to" class="date-input" onchange="onDateFilterChange()">
+          </div>
+          <button class="btn btn-sm" onclick="clearDateFilter()"
+            style="background:var(--surface-3);color:var(--text-secondary);border:1.5px solid var(--border);">
+            <i class="fas fa-times"></i> مسح الفلتر
+          </button>
+          <div style="margin-right:auto;font-size:0.82rem;font-weight:700;color:var(--text-secondary);">
+            <span id="selection-info"></span>
+          </div>
+        </div>
+
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px;">
           <button class="btn btn-primary" onclick="previewPDF()" id="preview-pdf-btn">
             <i class="fas fa-file-pdf"></i> معاينة PDF
@@ -91,6 +127,7 @@
           <table>
             <thead>
               <tr>
+                <th style="width:34px;"><input type="checkbox" class="row-check" id="check-all-workers" onclick="toggleAll('عاملين', this)"></th>
                 <th>م</th>
                 <th>رقم القيد</th>
                 <th>اسم العميل</th>
@@ -100,7 +137,7 @@
               </tr>
             </thead>
             <tbody id="workers-body">
-              <tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted);">⏳ جاري التحميل...</td></tr>
+              <tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-muted);">⏳ جاري التحميل...</td></tr>
             </tbody>
           </table>
         </div>
@@ -111,6 +148,7 @@
           <table>
             <thead>
               <tr>
+                <th style="width:34px;"><input type="checkbox" class="row-check" id="check-all-retirees" onclick="toggleAll('معاشات', this)"></th>
                 <th>م</th>
                 <th>رقم القيد</th>
                 <th>اسم العميل</th>
@@ -120,7 +158,7 @@
               </tr>
             </thead>
             <tbody id="retirees-body">
-              <tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted);">⏳ جاري التحميل...</td></tr>
+              <tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-muted);">⏳ جاري التحميل...</td></tr>
             </tbody>
           </table>
         </div>
@@ -144,17 +182,7 @@
     let allContracts = [];
     let allClaims    = [];
     let currentTab   = 'pending';
-    function previewPDF() {
-  const ready = allContracts.filter(item => {
-    const state      = String(item.bill_state || '').trim();
-    const claimId    = item.claim_id;
-    const hasNoClaim = !claimId || claimId === 'null' || claimId === '' || claimId === '0';
-    return state === 'فاتورة' && hasNoClaim;
-  });
-
-  if (ready.length === 0) { alert('لا توجد فواتير جاهزة'); return; }
-  generatePDF(ready, 'مسودة', new Date().toISOString());
-}
+    let excludedIds  = new Set();   // الفواتير اللي شيلت علامة الاختيار عنها
 
     checkAuth().then(user => {
       activeUser = user;
@@ -211,25 +239,109 @@
       return t * 0.75;
     }
 
-    function renderPending() {
-      const ready = allContracts.filter(item => {
+    // ===== الفلترة =====
+
+    // كل الفواتير اللي حالتها فاتورة ومش متضافة لمطالبة
+    function getUnclaimed() {
+      return allContracts.filter(item => {
         const state      = String(item.bill_state || '').trim();
         const claimId    = item.claim_id;
         const hasNoClaim = !claimId || claimId === 'null' || claimId === '' || claimId === '0';
         return state === 'فاتورة' && hasNoClaim;
       });
+    }
 
-      ready.sort((a, b) => {
+    // تطبيق فلتر التاريخ على bill_date
+    function applyDateFilter(list) {
+      const fromVal = document.getElementById('date-from')?.value;
+      const toVal   = document.getElementById('date-to')?.value;
+      if (!fromVal && !toVal) return list;
+
+      const from = fromVal ? new Date(fromVal + 'T00:00:00') : null;
+      const to   = toVal   ? new Date(toVal   + 'T23:59:59') : null;
+
+      return list.filter(item => {
+        if (!item.bill_date) return false;
+        const d = new Date(item.bill_date);
+        if (isNaN(d)) return false;
+        if (from && d < from) return false;
+        if (to   && d > to)   return false;
+        return true;
+      });
+    }
+
+    // الفواتير الظاهرة حاليًا (بعد فلتر التاريخ)
+    function getVisible() {
+      const list = applyDateFilter(getUnclaimed());
+      list.sort((a, b) => {
         const aSerial = parseInt(a.serial_no) || 9999;
         const bSerial = parseInt(b.serial_no) || 9999;
         return aSerial - bSerial;
       });
+      return list;
+    }
 
-      const workers  = ready.filter(i => String(i.bill_type || '').trim() === 'عاملين');
-      const retirees = ready.filter(i => String(i.bill_type || '').trim() === 'معاشات');
+    // الفواتير المختارة فعليًا = الظاهرة ناقص المستبعدة
+    function getSelected() {
+      return getVisible().filter(i => !excludedIds.has(String(i.id)));
+    }
+
+    function onDateFilterChange() {
+      excludedIds.clear();   // الفلتر اتغير، نرجّع كل الاختيارات
+      renderPending();
+    }
+
+    function clearDateFilter() {
+      document.getElementById('date-from').value = '';
+      document.getElementById('date-to').value   = '';
+      excludedIds.clear();
+      renderPending();
+    }
+
+    function toggleRow(id, cb) {
+      const key = String(id);
+      if (cb.checked) excludedIds.delete(key);
+      else            excludedIds.add(key);
+      const row = document.getElementById(`claim-row-${id}`);
+      if (row) row.classList.toggle('unchecked-row', !cb.checked);
+      renderPending();
+    }
+
+    function toggleAll(billType, cb) {
+      const group = getVisible().filter(i => String(i.bill_type || '').trim() === billType);
+      group.forEach(i => {
+        if (cb.checked) excludedIds.delete(String(i.id));
+        else            excludedIds.add(String(i.id));
+      });
+      renderPending();
+    }
+
+    function renderPending() {
+      const visible  = getVisible();
+      const workers  = visible.filter(i => String(i.bill_type || '').trim() === 'عاملين');
+      const retirees = visible.filter(i => String(i.bill_type || '').trim() === 'معاشات');
 
       renderGroup('workers-body',  workers,  'workers-total');
       renderGroup('retirees-body', retirees, 'retirees-total');
+
+      // ضبط حالة checkbox الرئيسي لكل مجموعة
+      syncHeaderCheck('check-all-workers',  workers);
+      syncHeaderCheck('check-all-retirees', retirees);
+
+      // ملخص الاختيار
+      const selected = getSelected();
+      const info     = document.getElementById('selection-info');
+      if (info) {
+        info.textContent = `المختار: ${selected.length} من ${visible.length} فاتورة`;
+      }
+    }
+
+    function syncHeaderCheck(elId, group) {
+      const el = document.getElementById(elId);
+      if (!el) return;
+      const selectedCount = group.filter(i => !excludedIds.has(String(i.id))).length;
+      el.checked       = group.length > 0 && selectedCount === group.length;
+      el.indeterminate = selectedCount > 0 && selectedCount < group.length;
     }
 
     function renderGroup(tbodyId, items, totalId) {
@@ -237,24 +349,35 @@
       const totalEl = document.getElementById(totalId);
 
       if (items.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--text-muted);">لا توجد فواتير</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-muted);">لا توجد فواتير</td></tr>`;
         totalEl.textContent = '';
         return;
       }
 
+      // الترقيم بيتم على المختار فقط، ويبدأ من 1 لكل مجموعة
       let grandTotal = 0;
-      tbody.innerHTML = items.map((item, idx) => {
+      let serialNum  = 0;
+
+      tbody.innerHTML = items.map(item => {
         const { name, qaid } = extractQaid(item.cust_name_ar || '');
-        const amount          = calcAmount(item.total_bill, item.payment_type);
-        grandTotal           += amount;
-        const payType         = (item.payment_type && item.payment_type !== 'null') ? item.payment_type : '3/4';
-        const serialNum       = idx + 1;
+        const amount   = calcAmount(item.total_bill, item.payment_type);
+        const payType  = (item.payment_type && item.payment_type !== 'null') ? item.payment_type : '3/4';
+        const isChecked = !excludedIds.has(String(item.id));
+
+        let serialCell = '—';
+        if (isChecked) {
+          serialNum  += 1;
+          grandTotal += amount;
+          serialCell  = serialNum;
+        }
 
         return `
-          <tr id="claim-row-${item.id}">
-            <td style="text-align:center;font-weight:700;">
-              <span class="editable-cell" onclick="editSerial('${item.id}', this, ${serialNum})">${serialNum}</span>
+          <tr id="claim-row-${item.id}" class="${isChecked ? '' : 'unchecked-row'}">
+            <td style="text-align:center;">
+              <input type="checkbox" class="row-check" ${isChecked ? 'checked' : ''}
+                onclick="toggleRow('${item.id}', this)">
             </td>
+            <td style="text-align:center;font-weight:700;">${serialCell}</td>
             <td style="text-align:center;font-weight:700;color:var(--accent-dark);">
               <span class="editable-cell" onclick="editQaid('${item.id}', this, '${qaid}')">${qaid || '---'}</span>
             </td>
@@ -276,42 +399,6 @@
     }
 
     // ===== Inline Edit Functions =====
-
-    function editSerial(id, el, current) {
-      const input = document.createElement('input');
-      input.type      = 'number';
-      input.value     = current;
-      input.className = 'cell-input';
-      input.style.width = '60px';
-      el.replaceWith(input);
-      input.focus();
-      input.select();
-
-      const save = async () => {
-        const newVal = input.value.trim();
-        const item   = allContracts.find(x => String(x.id) === String(id));
-        if (!item) return;
-        const span = document.createElement('span');
-        span.className = 'editable-cell';
-        span.textContent = newVal || current;
-        span.onclick = () => editSerial(id, span, parseInt(newVal) || current);
-        input.replaceWith(span);
-        if (newVal && newVal != current) {
-          await updateData({
-            type: "contract_update", id,
-            bill_no: item.bill_no || null, bill_date: item.bill_date || null,
-            cust_code: item.cust_code || null, cust_name_ar: item.cust_name_ar || null,
-            total_bill: item.total_bill || null, employee_name: item.employee_name || null,
-            bill_state: item.bill_state || null, bill_type: item.bill_type || null,
-            payment_type: item.payment_type || null, branch: item.branch || null,
-            serial_no: newVal
-          });
-          item.serial_no = newVal;
-        }
-      };
-      input.addEventListener('blur', save);
-      input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { input.value = current; input.blur(); } });
-    }
 
     function editQaid(id, el, current) {
       const item = allContracts.find(x => String(x.id) === String(id));
@@ -467,27 +554,29 @@
             serial_no: item.serial_no || null
           });
           item.payment_type = newVal;
-          // تحديث المبلغ في نفس الصف
-          const row    = document.getElementById(`claim-row-${id}`);
-          const amtEl  = row?.querySelector('td:last-child b');
-          if (amtEl) amtEl.textContent = calcAmount(item.total_bill, newVal).toFixed(2);
+          renderPending();
         }
       };
       select.addEventListener('blur', save);
       select.addEventListener('change', save);
     }
 
+    // ===== معاينة PDF =====
+    function previewPDF() {
+      const selected = getSelected();
+      if (selected.length === 0) { alert('لا توجد فواتير مختارة'); return; }
+      generatePDF(selected, new Date().toISOString());
+    }
+
     // ===== إنشاء مطالبة =====
     async function createClaim() {
-      const ready = allContracts.filter(item => {
-        const state      = String(item.bill_state || '').trim();
-        const claimId    = item.claim_id;
-        const hasNoClaim = !claimId || claimId === 'null' || claimId === '' || claimId === '0';
-        return state === 'فاتورة' && hasNoClaim;
-      });
+      const selected = getSelected();
 
-      if (ready.length === 0) { alert('لا توجد فواتير جاهزة للمطالبة'); return; }
-      if (!confirm(`هل تريد إنشاء مطالبة بـ ${ready.length} فاتورة؟`)) return;
+      if (selected.length === 0) { alert('لا توجد فواتير مختارة للمطالبة'); return; }
+
+      const w = selected.filter(i => String(i.bill_type || '').trim() === 'عاملين').length;
+      const r = selected.filter(i => String(i.bill_type || '').trim() === 'معاشات').length;
+      if (!confirm(`هل تريد إنشاء مطالبة بـ ${selected.length} فاتورة؟\nعاملين: ${w} — معاشات: ${r}`)) return;
 
       const btn = document.getElementById('create-claim-btn');
       btn.disabled  = true;
@@ -512,7 +601,7 @@
         if (!claimId) { alert('❌ فشل إنشاء المطالبة'); return; }
 
         const claimDate = new Date().toISOString();
-        await Promise.all(ready.map(item =>
+        await Promise.all(selected.map(item =>
           updateData({
             type:          "contract_update",
             id:            item.id,
@@ -532,7 +621,8 @@
           })
         ));
 
-        generatePDF(ready, claimId, claimDate);
+        generatePDF(selected, claimDate);
+        excludedIds.clear();
         await loadAll();
 
       } catch(e) {
@@ -545,12 +635,12 @@
     }
 
     // ===== PDF =====
-    function generatePDF(items, claimId, claimDate) {
+    function generatePDF(items, claimDate) {
       const dateStr = new Date(claimDate).toLocaleDateString('ar-EG', {
         year:'numeric', month:'long', day:'numeric'
       });
 
-      items.sort((a, b) => {
+      items = items.slice().sort((a, b) => {
         const aSerial = parseInt(a.serial_no) || 9999;
         const bSerial = parseInt(b.serial_no) || 9999;
         return aSerial - bSerial;
@@ -688,6 +778,7 @@
             String(cid).trim() === String(claim.id).trim();
         });
         const totalAmount  = relatedBills.reduce((s, i) => s + calcAmount(i.total_bill, i.payment_type), 0);
+        const netAmount    = totalAmount * 0.85;
 
         return `
           <div class="claim-card ${collected ? 'collected' : ''}">
@@ -701,7 +792,8 @@
                 </div>
                 <div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px;">
                   ${dateStr} — ${claim.created_by || ''}
-                  — <b style="color:var(--warning);">${totalAmount.toFixed(2)} جنيه</b>
+                  — إجمالي <b style="color:var(--warning);">${totalAmount.toFixed(2)}</b>
+                  — صافي <b style="color:var(--success);">${netAmount.toFixed(2)}</b>
                   — <span style="color:var(--text-secondary);">${relatedBills.length} فاتورة</span>
                 </div>
               </div>
@@ -747,7 +839,7 @@
       });
       const claim     = allClaims.find(c => String(c.id) === String(claimId));
       const claimDate = claim?.claim_date || new Date().toISOString();
-      generatePDF(relatedBills, claimId, claimDate);
+      generatePDF(relatedBills, claimDate);
     }
   </script>
 </body>
