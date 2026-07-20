@@ -2500,17 +2500,31 @@ async function openCompleteApproval(tripId){
   const oIds=tripOrdersMap[tripId]||[];
   const tO=oIds.map(id=>allOrders.find(o=>o.id===id)).filter(Boolean);
   const total=tO.reduce((s,o)=>s+Number(o.total_bill_net||0),0);
-  const cashDue=tO.filter(o=>o.payment_method==='cash').reduce((s,o)=>s+Number(o.collected_amount||o.total_bill_net||0),0);
+  // المطلوب من الطيار: لو الكاشير أقرّ مبلغ الطيار = المحصّل، وإلا = قيمة الفاتورة
+  const settle=o=>(o.collected_approved && o.collected_amount!=null)?Number(o.collected_amount):Number(o.total_bill_net||0);
+  const cashDue=tO.filter(o=>o.payment_method==='cash').reduce((s,o)=>s+settle(o),0);
 
   const rows=tO.map(o=>{
     const pm=o.payment_method||'cash';
-    return `<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.5rem;border-bottom:1px solid var(--border);font-size:.78rem">
+    const bill=Number(o.total_bill_net||0);
+    const coll=o.collected_amount;
+    const differs=pm==='cash'&&coll!=null&&Number(coll)!==bill;
+    let approveHtml='';
+    if(differs){
+      const appr=!!o.collected_approved;
+      approveHtml=`<div style="width:100%;margin-top:.35rem;display:flex;align-items:center;justify-content:space-between;gap:.4rem;background:${appr?'#dcfce7':'#fef3c7'};border-radius:6px;padding:.3rem .5rem">
+        <span style="font-size:.72rem;color:${appr?'#15803d':'#92400e'}">الطيار محصّل <strong>${Number(coll).toLocaleString()} ج</strong> (الفاتورة ${bill.toLocaleString()})${appr?' — مُقرّ':' — يُحسب على الفاتورة'}</span>
+        <button onclick="approveCollected('${o.id}','${tripId}',${appr?'false':'true'})" style="border:none;border-radius:6px;padding:.25rem .6rem;font-size:.7rem;font-weight:700;cursor:pointer;color:#fff;background:${appr?'#dc2626':'#16a34a'}">${appr?'إلغاء الإقرار':'أقرّ المبلغ'}</button>
+      </div>`;
+    }
+    return `<div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem;padding:.5rem;border-bottom:1px solid var(--border);font-size:.78rem">
       <div style="flex:1;min-width:0">
         <div style="font-weight:700;color:var(--primary)">${o.bill_no||o.id?.slice(0,6)}</div>
         <div style="color:var(--text-muted);font-size:.7rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${o.customer_name||o.cust_name||'—'}</div>
       </div>
       <span class="oc-pay p-${pm}">${PL[pm]||pm}</span>
-      <strong style="white-space:nowrap">${Number(o.total_bill_net||0).toLocaleString()} ج</strong>
+      <strong style="white-space:nowrap">${bill.toLocaleString()} ج</strong>
+      ${approveHtml}
     </div>`;
   }).join('');
 
@@ -2532,6 +2546,15 @@ async function openCompleteApproval(tripId){
 
   // فحص طلبات الرحلة السابقة غير المغلقة على الصيدلية (B Connect)
   loadReviewFlagsIntoApproval(tripId);
+}
+
+// إقرار/إلغاء إقرار المبلغ اللي الطيار محصّله (يختلف عن الفاتورة)
+async function approveCollected(orderId, tripId, approve){
+  showLoading(true);
+  await db.from('orders').update({collected_approved:approve, updated_at:new Date().toISOString()}).eq('id',orderId);
+  const o=allOrders.find(x=>x.id===orderId); if(o) o.collected_approved=approve;
+  showLoading(false);
+  openCompleteApproval(tripId); // إعادة رسم المودال بالمبلغ الجديد
 }
 
 // تجيب الطلبات غير المغلقة على الصيدلية وتعرضها في مودال الموافقة
