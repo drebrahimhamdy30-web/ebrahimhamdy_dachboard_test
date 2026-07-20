@@ -61,6 +61,7 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
 
 <!-- Filters -->
 <div class="report-filters">
+  <select class="filter-input" id="branchFilter" style="display:none" title="الفرع"></select>
   <span class="date-range-label">الفترة:</span>
   <input type="date" class="filter-input" id="dateFrom">
   <span style="font-size:.75rem;color:var(--text-muted)">إلى</span>
@@ -189,6 +190,23 @@ const STATUS_LABELS = { pending:'جاهز', picked:'في الطريق', delivere
 
 let reportOrders = [];
 
+// المستخدم والفرع (الأدمن يقدر يفلتر كل الفروع/فرع؛ غيره يتقيّد بفرعه)
+const RUSER = (typeof getCurrentUser==='function') ? getCurrentUser() : {role:'',branch_id:null};
+const RIS_ADMIN = RUSER.role === 'admin';
+async function initBranchFilter() {
+  const sel = document.getElementById('branchFilter');
+  if (!RIS_ADMIN) { sel.style.display = 'none'; return; }
+  sel.style.display = '';
+  const { data } = await db.from('branches').select('id,name').order('name');
+  sel.innerHTML = '<option value="">كل الفروع</option>' +
+    (data||[]).map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
+  sel.onchange = loadReport;
+}
+function effectiveBranch() {
+  if (RIS_ADMIN) return document.getElementById('branchFilter').value || '';
+  return RUSER.branch_id || '';
+}
+
 function setToday() {
   const d = new Date().toISOString().split('T')[0];
   document.getElementById('dateFrom').value = d;
@@ -235,7 +253,9 @@ async function loadReport() {
   const from = document.getElementById('dateFrom').value;
   const to = document.getElementById('dateTo').value;
 
+  const branchId = effectiveBranch();
   let query = db.from('orders').select('*').order('created_at', { ascending: false });
+  if (branchId) query = query.eq('branch_id', branchId);
   if (from) query = query.gte('created_at', from + 'T00:00:00');
   if (to) query = query.lte('created_at', to + 'T23:59:59');
 
@@ -281,9 +301,13 @@ async function loadOrdersTab(from, to) {
   });
 
   // أكثر الطيارين تعذّرًا: من order_logs (order_postponed) لأن الطلب المتعذّر بيرجع للتوزيع ويفقد الطيار
+  const branchId = effectiveBranch();
   let failByDriver = [];
   try {
-    let q = db.from('order_logs').select('user_name,details,created_at').eq('event','order_postponed');
+    let q = db.from('order_logs')
+      .select('user_name,details,created_at,orders!inner(branch_id)')
+      .eq('event','order_postponed');
+    if (branchId) q = q.eq('orders.branch_id', branchId);
     if (from) q = q.gte('created_at', from + 'T00:00:00');
     if (to) q = q.lte('created_at', to + 'T23:59:59');
     const { data } = await q;
@@ -355,8 +379,8 @@ async function loadFairScores(from, to) {
       const { data } = await db.from('drivers').select('id,full_name');
       driversCache = data || [];
     }
-    // null = كل الفروع. حط branch_id لو عايز فرع بعينه
-    const result = await computeFairScores(from, to, null);
+    // فلتر الفرع (الأدمن يختار؛ غيره فرعه بس)
+    const result = await computeFairScores(from, to, effectiveBranch() || null);
     renderFairScores(result, driversCache, 'fairScores');
   } catch (e) {
     console.error(e);
@@ -506,8 +530,8 @@ function exportCSV() {
 
 function showLoading(show) { document.getElementById('loadingOverlay').classList.toggle('show', show); }
 
-// Init with today
-setToday();
+// Init: جهّز فلتر الفروع ثم حمّل تقرير اليوم
+initBranchFilter().then(setToday);
 </script>
 </body>
 </html>
