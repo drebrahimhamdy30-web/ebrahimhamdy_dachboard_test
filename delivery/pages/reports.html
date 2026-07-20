@@ -207,6 +207,19 @@ function effectiveBranch() {
   return RUSER.branch_id || '';
 }
 
+// يجيب كل الصفوف مهما كان عددها (يتجاوز حد 1000 صف الافتراضي) عبر التقسيم
+async function fetchAllPaged(buildQuery) {
+  const all = []; const size = 1000;
+  for (let off = 0; ; off += size) {
+    const { data, error } = await buildQuery().range(off, off + size - 1);
+    if (error) { console.error(error); break; }
+    if (!data || !data.length) break;
+    all.push(...data);
+    if (data.length < size) break;
+  }
+  return all;
+}
+
 function setToday() {
   const d = new Date().toISOString().split('T')[0];
   document.getElementById('dateFrom').value = d;
@@ -254,13 +267,13 @@ async function loadReport() {
   const to = document.getElementById('dateTo').value;
 
   const branchId = effectiveBranch();
-  let query = db.from('orders').select('*').order('created_at', { ascending: false });
-  if (branchId) query = query.eq('branch_id', branchId);
-  if (from) query = query.gte('created_at', from + 'T00:00:00');
-  if (to) query = query.lte('created_at', to + 'T23:59:59');
-
-  const { data } = await query;
-  reportOrders = data || [];
+  reportOrders = await fetchAllPaged(() => {
+    let q = db.from('orders').select('*').order('created_at', { ascending: false });
+    if (branchId) q = q.eq('branch_id', branchId);
+    if (from) q = q.gte('created_at', from + 'T00:00:00');
+    if (to) q = q.lte('created_at', to + 'T23:59:59');
+    return q;
+  });
 
   renderKPIs();
   renderDailyChart();
@@ -304,15 +317,17 @@ async function loadOrdersTab(from, to) {
   const branchId = effectiveBranch();
   let failByDriver = [];
   try {
-    let q = db.from('order_logs')
-      .select('user_name,details,created_at,orders!inner(branch_id)')
-      .eq('event','order_postponed');
-    if (branchId) q = q.eq('orders.branch_id', branchId);
-    if (from) q = q.gte('created_at', from + 'T00:00:00');
-    if (to) q = q.lte('created_at', to + 'T23:59:59');
-    const { data } = await q;
+    const logs = await fetchAllPaged(() => {
+      let q = db.from('order_logs')
+        .select('user_name,details,created_at,orders!inner(branch_id)')
+        .eq('event','order_postponed').order('created_at',{ascending:false});
+      if (branchId) q = q.eq('orders.branch_id', branchId);
+      if (from) q = q.gte('created_at', from + 'T00:00:00');
+      if (to) q = q.lte('created_at', to + 'T23:59:59');
+      return q;
+    });
     const m = {};
-    (data||[]).forEach(l => {
+    logs.forEach(l => {
       // نتجاهل سجل الإرجاع عند إنهاء الرحلة (مش تعذّر جديد) عشان ما نعدّش المرة مرتين
       if (l.details && l.details.released_on_trip_complete) return;
       const n = l.user_name || '—'; m[n] = (m[n]||0)+1;

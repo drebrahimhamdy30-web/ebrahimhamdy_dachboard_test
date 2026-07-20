@@ -5,6 +5,19 @@
 
 const FS_MIN_ORDERS = 5; // حد أدنى لعرض الطيار في الترتيب
 
+// يجيب كل الصفوف مهما كان عددها (يتجاوز حد 1000 صف الافتراضي)
+async function _fsFetchAll(buildQuery) {
+  const all = []; const size = 1000;
+  for (let off = 0; ; off += size) {
+    const { data, error } = await buildQuery().range(off, off + size - 1);
+    if (error) { console.error(error); break; }
+    if (!data || !data.length) break;
+    all.push(...data);
+    if (data.length < size) break;
+  }
+  return all;
+}
+
 /**
  * يبني فترات الحضور الفعلية من تسلسل أحداث driver_attendance.
  * لا يعتمد على ended_at لأنه غالباً فاضي في البيانات.
@@ -65,34 +78,32 @@ function buildAttendanceSessions(records) {
  */
 async function computeFairScores(from, to, branchId) {
   // 1) الطلبات المسلّمة فعلاً في الفترة (نفلتر على delivered_at مش created_at)
-  let oq = db.from('orders')
-    .select('id,driver_id,deliveryman,delivered_at,total_bill_net,status')
-    .in('status', ['delivered', 'completed'])
-    .not('delivered_at', 'is', null)
-    .gte('delivered_at', from + 'T00:00:00')
-    .lte('delivered_at', to + 'T23:59:59');
-  if (branchId) oq = oq.eq('branch_id', branchId);
-
-  // 2) أحداث الحضور المعتمدة في نفس الفترة (كل الأنواع، مش online بس)
-  const aq = db.from('driver_attendance')
-    .select('driver_id,status,approved_at,ended_at,date')
-    .in('status', ['online', 'offline', 'break'])
-    .not('approved_at', 'is', null)
-    .gte('date', from).lte('date', to);
-
-  const [oRes, aRes] = await Promise.all([oq, aq]);
-  if (oRes.error || aRes.error) {
-    console.error(oRes.error || aRes.error);
-    return null;
-  }
-
-  const orders = oRes.data || [];
+  // كل الطلبات وأحداث الحضور مع pagination (يتجاوز حد 1000 صف)
+  const [orders, attendanceRows] = await Promise.all([
+    _fsFetchAll(() => {
+      let oq = db.from('orders')
+        .select('id,driver_id,deliveryman,delivered_at,total_bill_net,status,branch_id')
+        .in('status', ['delivered', 'completed'])
+        .not('delivered_at', 'is', null)
+        .gte('delivered_at', from + 'T00:00:00')
+        .lte('delivered_at', to + 'T23:59:59')
+        .order('delivered_at', { ascending: true });
+      if (branchId) oq = oq.eq('branch_id', branchId);
+      return oq;
+    }),
+    _fsFetchAll(() => db.from('driver_attendance')
+      .select('driver_id,status,approved_at,ended_at,date')
+      .in('status', ['online', 'offline', 'break'])
+      .not('approved_at', 'is', null)
+      .gte('date', from).lte('date', to)
+      .order('date', { ascending: true })),
+  ]);
 
   // ابنِ فترات الحضور من تسلسل الأحداث لكل يوم على حدة.
   // السبب: ended_at غالباً فاضي، والاعتماد عليه بيضيّع الشيفتات.
   // القاعدة: online تفتح فترة، وأول offline/break بعدها تقفلها.
   //          offline من غير online قبله => الطيار كان شغّال من بداية اليوم (شيفت ليلي).
-  const sessions = buildAttendanceSessions(aRes.data || []);
+  const sessions = buildAttendanceSessions(attendanceRows || []);
 
   // 3) لكل طلب: مين كان أونلاين لحظة التسليم؟
   const stats = {};   // driver_id -> { expected, actual, revenue }
