@@ -283,12 +283,16 @@ async function loadOrdersTab(from, to) {
   // أكثر الطيارين تعذّرًا: من order_logs (order_postponed) لأن الطلب المتعذّر بيرجع للتوزيع ويفقد الطيار
   let failByDriver = [];
   try {
-    let q = db.from('order_logs').select('user_name,created_at').eq('event','order_postponed');
+    let q = db.from('order_logs').select('user_name,details,created_at').eq('event','order_postponed');
     if (from) q = q.gte('created_at', from + 'T00:00:00');
     if (to) q = q.lte('created_at', to + 'T23:59:59');
     const { data } = await q;
     const m = {};
-    (data||[]).forEach(l => { const n = l.user_name || '—'; m[n] = (m[n]||0)+1; });
+    (data||[]).forEach(l => {
+      // نتجاهل سجل الإرجاع عند إنهاء الرحلة (مش تعذّر جديد) عشان ما نعدّش المرة مرتين
+      if (l.details && l.details.released_on_trip_complete) return;
+      const n = l.user_name || '—'; m[n] = (m[n]||0)+1;
+    });
     failByDriver = Object.entries(m).sort((a,b)=>b[1]-a[1]);
   } catch(e){ console.error(e); }
 
