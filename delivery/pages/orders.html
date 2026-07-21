@@ -105,16 +105,18 @@ body{padding:0;overflow:hidden;height:100vh;background:var(--bg);display:flex;fl
     <input type="text" class="search-box" id="searchInput" placeholder="بحث باسم أو رقم أو منطقة..." oninput="applyFilters()" style="padding-right:2rem">
   </div>
 
-  <!-- Status filters -->
-  <button class="filter-chip active" onclick="setStatus('',this)">الكل <span class="cnt-badge" id="cnt-all">0</span></button>
-  <button class="filter-chip fc-green" onclick="setStatus('completed',this)">✅ مكتمل <span class="cnt-badge" id="cnt-completed">0</span></button>
-  <button class="filter-chip fc-yellow" onclick="setStatus('delivered',this)">🚚 وصّل <span class="cnt-badge" id="cnt-delivered">0</span></button>
-  <button class="filter-chip fc-blue" onclick="setStatus('picked',this)">▶️ استلم <span class="cnt-badge" id="cnt-picked">0</span></button>
-  <button class="filter-chip" onclick="setStatus('assigned',this)">🚗 على رحلة <span class="cnt-badge" id="cnt-assigned">0</span></button>
-  <button class="filter-chip" onclick="setStatus('pending',this)">📦 جاهز <span class="cnt-badge" id="cnt-pending">0</span></button>
-  <button class="filter-chip fc-purple" onclick="setStatus('postponed',this)">⏰ مؤجل <span class="cnt-badge" id="cnt-postponed">0</span></button>
-  <button class="filter-chip fc-red" onclick="setStatus('cancelled',this)">❌ ملغي <span class="cnt-badge" id="cnt-cancelled">0</span></button>
-  <button class="filter-chip fc-red" onclick="setStatus('late',this)">⚠️ متأخر <span class="cnt-badge" id="cnt-late">0</span></button>
+  <!-- Status filter (dropdown) -->
+  <select class="date-input" id="statusSelect" onchange="setStatus(this.value)" style="width:160px" title="الحالة">
+    <option value="" id="opt-all">كل الحالات</option>
+    <option value="completed" id="opt-completed">مكتمل</option>
+    <option value="delivered" id="opt-delivered">وصّل</option>
+    <option value="picked" id="opt-picked">استلم</option>
+    <option value="assigned" id="opt-assigned">على رحلة</option>
+    <option value="pending" id="opt-pending">جاهز</option>
+    <option value="postponed" id="opt-postponed">مؤجل</option>
+    <option value="cancelled" id="opt-cancelled">ملغي</option>
+    <option value="late" id="opt-late">متأخر</option>
+  </select>
 
   <!-- Date filter -->
   <input type="date" class="date-input" id="dateFrom" onchange="applyFilters()" title="من تاريخ">
@@ -162,11 +164,12 @@ body{padding:0;overflow:hidden;height:100vh;background:var(--bg);display:flex;fl
         <th onclick="sortBy('deliveryman')">الطيار</th>
         <th>مدة التوصيل</th>
         <th onclick="sortBy('delivered_at')">وقت التوصيل</th>
+        <th>الأداء</th>
         <th>تفاصيل</th>
       </tr>
     </thead>
     <tbody id="ordersBody">
-      <tr><td colspan="11" style="text-align:center;padding:2rem;color:var(--text-muted)">جاري التحميل...</td></tr>
+      <tr><td colspan="12" style="text-align:center;padding:2rem;color:var(--text-muted)">جاري التحميل...</td></tr>
     </tbody>
   </table>
 </div>
@@ -264,11 +267,11 @@ function fmDate(dt){
 }
 
 function updateCounts(){
-  document.getElementById('cnt-all').textContent=allOrders.length;
-  ['pending','assigned','picked','delivered','completed','postponed','cancelled'].forEach(s=>
-    document.getElementById(`cnt-${s}`).textContent=allOrders.filter(o=>o.status===s).length
-  );
-  document.getElementById('cnt-late').textContent=allOrders.filter(o=>isLate(o)).length;
+  const setOpt=(id,label,n)=>{const e=document.getElementById(id);if(e)e.textContent=`${label} (${n})`;};
+  setOpt('opt-all','كل الحالات',allOrders.length);
+  const labels={completed:'مكتمل',delivered:'وصّل',picked:'استلم',assigned:'على رحلة',pending:'جاهز',postponed:'مؤجل',cancelled:'ملغي'};
+  Object.entries(labels).forEach(([s,l])=>setOpt('opt-'+s,l,allOrders.filter(o=>o.status===s).length));
+  setOpt('opt-late','متأخر',allOrders.filter(o=>isLate(o)).length);
 
   // Stats row
   const today=new Date();today.setHours(0,0,0,0);
@@ -290,10 +293,8 @@ function updateCounts(){
     <div class="stat-item" style="margin-right:auto"><span style="font-size:.7rem;color:var(--text-muted)">إجمالي الطلبات: <strong>${allOrders.length}</strong></span></div>`;
 }
 
-function setStatus(s,el){
+function setStatus(s){
   statusFilter=s;
-  document.querySelectorAll('.filter-chip').forEach(c=>c.classList.remove('active'));
-  el.classList.add('active');
   currentPage=1;
   applyFilters();
 }
@@ -351,7 +352,7 @@ function renderTable(){
   const body=document.getElementById('ordersBody');
 
   if(!page.length){
-    body.innerHTML='<tr><td colspan="11" style="text-align:center;padding:2.5rem;color:var(--text-muted)">📭 لا توجد طلبات</td></tr>';
+    body.innerHTML='<tr><td colspan="12" style="text-align:center;padding:2.5rem;color:var(--text-muted)">📭 لا توجد طلبات</td></tr>';
     return;
   }
 
@@ -376,6 +377,7 @@ function renderTable(){
       <td style="font-size:.7rem;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.deliveryman||'—'}</td>
       <td class="duration-cell">${delivDuration!=='—'?delivDuration:duration}</td>
       <td style="white-space:nowrap;font-size:.7rem">${fmDate(o.delivered_at)}</td>
+      <td style="font-size:.68rem;white-space:nowrap">${o.perf_rating?`<span style="color:${o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':'#ca8a04'};font-weight:700">${o.perf_rating}</span>`:'—'}</td>
       <td><button class="btn btn-outline btn-sm" onclick="openDetail('${o.id}')" style="font-size:.62rem;padding:.18rem .45rem">تفاصيل</button></td>
     </tr>`;
   }).join('');
