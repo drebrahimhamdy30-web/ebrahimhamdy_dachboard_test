@@ -101,6 +101,13 @@ body{padding:0;overflow:hidden;height:100vh;background:var(--bg);display:flex;fl
     <option value="">كل الفروع</option>
   </select>
 
+  <select class="date-input" id="perfFilter" onchange="applyFilters()" style="width:110px" title="تقييم الرحلة">
+    <option value="">كل الأداء</option>
+    <option value="ممتاز">ممتاز</option>
+    <option value="جيد">جيد</option>
+    <option value="متأخر">متأخر</option>
+  </select>
+
   <button class="btn btn-outline btn-sm" onclick="loadAll()" style="margin-right:auto">↻ تحديث</button>
   <span id="resultCount" style="font-size:.72rem;color:var(--text-muted);white-space:nowrap"></span>
 </div>
@@ -123,6 +130,7 @@ body{padding:0;overflow:hidden;height:100vh;background:var(--bg);display:flex;fl
         <th onclick="sortBy('status')">الحالة</th>
         <th>مدة الرحلة</th>
         <th onclick="sortBy('updated_at')">وقت الانتهاء</th>
+        <th>الأداء / المسافة</th>
       </tr>
     </thead>
     <tbody id="tripsBody">
@@ -147,7 +155,7 @@ const STATUS_LABELS={pending:'جاهز',assigned:'على رحلة',picked:'اس�
 const PAY_LABELS={cash:'كاش',visa:'فيزا',transfer:'تحويل',deferred:'آجل'};
 const COLORS=['#1a56db','#7c3aed','#16a34a','#ea580c','#0891b2','#ca8a04','#dc2626'];
 
-let allTrips=[], tripOrdersCache={}, filtered=[];
+let allTrips=[], tripOrdersCache={}, filtered=[], tripPerf={};
 let currentPage=1, pageSize=40, sortCol='created_at', sortDir=-1, statusFilter='';
 let currentUser=null, expandedRows=new Set();
 
@@ -176,6 +184,13 @@ async function loadAll(){
     else if(currentUser?.role!=='admin'&&currentUser?.branch_id) q=q.eq('branch_id',currentUser.branch_id);
     const {data}=await q;
     allTrips=data||[];
+    // تقييم ومسافة كل رحلة من الـ view
+    tripPerf={};
+    const ids=allTrips.map(t=>t.id);
+    if(ids.length){
+      const {data:pf}=await db.from('v_trip_perf').select('*').in('trip_id',ids);
+      (pf||[]).forEach(p=>{tripPerf[p.trip_id]=p;});
+    }
     updateCounts();
     applyFilters();
   }catch(e){console.error(e);}
@@ -231,8 +246,11 @@ function applyFilters(){
   const dateFrom=document.getElementById('dateFrom').value;
   const dateTo=document.getElementById('dateTo').value;
 
+  const perfF=document.getElementById('perfFilter').value;
+
   filtered=allTrips.filter(t=>{
     if(statusFilter&&t.status!==statusFilter)return false;
+    if(perfF&&(tripPerf[t.id]?.rating||'')!==perfF)return false;
     if(search&&!(t.driver_name||'').toLowerCase().includes(search)&&
        !(t.id||'').toLowerCase().includes(search))return false;
     const dt=new Date(t.created_at);
@@ -283,6 +301,7 @@ function renderTable(){
       <td><span class="status-badge sb-${t.status}">${t.status==='active'?'جارية':'مكتملة'}</span></td>
       <td style="font-size:.7rem;font-variant-numeric:tabular-nums">${dur}</td>
       <td style="font-size:.7rem;white-space:nowrap">${t.status==='completed'?fmDate(t.updated_at):'—'}</td>
+      <td style="font-size:.68rem;white-space:nowrap">${(()=>{const p=tripPerf[t.id];if(!p)return '—';const rc=p.rating==='ممتاز'?'#16a34a':p.rating==='متأخر'?'#dc2626':'#ca8a04';const km=p.total_distance?(Number(p.total_distance)/1000).toFixed(1)+' كم':'';return `${p.rating?`<span style="color:${rc};font-weight:700">${p.rating}</span>`:''}${km?` · ${km}`:''}`;})()}</td>
     </tr>`;
 
     // Expanded orders row
