@@ -337,10 +337,22 @@ async function renderTripOrders(tripId){
 
 
 
+  // تقييم الرحلة ككل: مجموع الفعلي مقابل مجموع المتوقع
+  const perfOrders=orders.filter(o=>o.perf_rating&&o.expected_minutes!=null&&o.actual_minutes!=null);
+  let tripRatingHtml='';
+  if(perfOrders.length){
+    const sa=perfOrders.reduce((s,o)=>s+Number(o.actual_minutes),0);
+    const se=perfOrders.reduce((s,o)=>s+Number(o.expected_minutes),0);
+    const ratio=se>0?sa/se:1;
+    const trate=ratio<=0.90?'ممتاز':ratio>=1.10?'متأخر':'جيد';
+    const tc=trate==='ممتاز'?'#16a34a':trate==='متأخر'?'#dc2626':'#ca8a04';
+    tripRatingHtml=`<span style="font-size:.7rem;font-weight:700;color:${tc};background:${tc}14;border-radius:6px;padding:.15rem .5rem">تقييم الرحلة: ${trate} · فعلي ${sa.toFixed(0)} / متوقع ${se.toFixed(0)} د</span>`;
+  }
+
   container.innerHTML=`
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem;padding-bottom:.4rem;border-bottom:1px solid var(--border)">
       <span style="font-size:.72rem;font-weight:700;color:var(--text-muted)">${orders.length} طلب في الرحلة</span>
-
+      ${tripRatingHtml}
     </div>
     <table class="orders-inner-table">
       <thead style="background:#f1f5f9">
@@ -353,6 +365,7 @@ async function renderTripOrders(tripId){
           <td style="font-weight:700;color:var(--text-muted)">الحالة</td>
           <td style="font-weight:700;color:var(--text-muted)">وقت التوصيل</td>
           <td style="font-weight:700;color:var(--text-muted)">المدة</td>
+          <td style="font-weight:700;color:var(--text-muted)">الأداء</td>
         </tr>
       </thead>
       <tbody>
@@ -360,6 +373,10 @@ async function renderTripOrders(tripId){
           const pm=o.payment_method;
           const pmL=pm?PAY_LABELS[pm]:(o.bill_type||'—');
           const dur=fmDur(o.picked_at,o.delivered_at);
+          const pc=o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':'#ca8a04';
+          const perfCell=o.perf_rating
+            ? `<span style="color:${pc};font-weight:700">${o.perf_rating}</span> <span style="font-size:.62rem;color:var(--text-muted)">${o.actual_minutes}/${o.expected_minutes}د</span>`
+            : '—';
           return `<tr>
             <td style="font-weight:700;color:var(--primary)">${o.bill_no||o.id?.slice(0,8)}</td>
             <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.customer_name||o.cust_name||'—'}</td>
@@ -369,6 +386,7 @@ async function renderTripOrders(tripId){
             <td><span class="status-badge sb-${o.status}">${STATUS_LABELS[o.status]||o.status}</span></td>
             <td style="font-size:.68rem;white-space:nowrap">${fmDate(o.delivered_at)}</td>
             <td style="font-size:.68rem">${dur}</td>
+            <td style="font-size:.68rem;white-space:nowrap">${perfCell}</td>
           </tr>`;
         }).join('')}
       </tbody>
