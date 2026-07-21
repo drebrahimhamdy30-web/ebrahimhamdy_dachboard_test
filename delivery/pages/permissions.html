@@ -124,6 +124,7 @@ const GROUP_ORDER = ['الصيدلية','التوصيل','إعدادات الت�
 
 let permData = {};   // permData[role][page] = {can_view, can_edit}
 let editMode = false;
+let loadOk = false;  // اتحمّلت الصلاحيات صح؟ (حماية ضد الحفظ فوق بيانات فاضية ومسحها)
 
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
 
@@ -133,12 +134,20 @@ async function loadPermissions(){
     document.getElementById('permBody').innerHTML='<div class="no-access">🔒 الصفحة دي متاحة بس للأدمن</div>';
     return;
   }
+  loadOk=false;
   const {data,error}=await db.from('page_permissions').select('role,page,can_view,can_edit');
+  if(error || !data || data.length===0){
+    console.error('permissions load failed', error);
+    document.getElementById('permActions').innerHTML='';
+    document.getElementById('permBody').innerHTML='<div class="no-access">⚠️ تعذّر تحميل الصلاحيات من الخادم.<br>من فضلك حدّث الصفحة وحاول تاني — الحفظ متوقّف مؤقتاً لحماية الصلاحيات من المسح.</div>';
+    return;
+  }
   permData={};
-  (data||[]).forEach(r=>{
+  data.forEach(r=>{
     if(!permData[r.role]) permData[r.role]={};
     permData[r.role][r.page]={can_view:r.can_view, can_edit:r.can_edit};
   });
+  loadOk=true;
   render();
 }
 
@@ -187,7 +196,9 @@ function enterEdit(){ editMode=true; render(); }
 function cancelEdit(){ editMode=false; loadPermissions(); }
 
 async function savePermissions(){
+  if(!loadOk){ showToast('⚠️ مش هينفع تحفظ: الصلاحيات لم تُحمّل بشكل صحيح'); return; }
   const checkboxes = document.querySelectorAll('#permBody input[type=checkbox]');
+  if(!checkboxes.length){ showToast('لا توجد بيانات للحفظ'); return; }
   const updates = [];
   checkboxes.forEach(cb=>{
     updates.push({ role: cb.dataset.role, page: cb.dataset.page, can_view: cb.checked });
