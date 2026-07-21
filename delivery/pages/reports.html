@@ -176,6 +176,16 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
     <div class="card-body" id="lateList" style="max-height:340px;overflow-y:auto"></div>
   </div>
 
+  <!-- أداء التوصيل: الوقت الفعلي مقابل المتوقع (Google Routes) -->
+  <div class="card" style="margin-bottom:1.25rem">
+    <div class="card-header"><span class="card-title">أداء التوصيل — الوقت الفعلي مقابل المتوقع</span>
+      <span style="font-size:.68rem;color:var(--text-muted)" id="perfCount"></span></div>
+    <div class="card-body">
+      <div id="perfSummary" style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:.75rem"></div>
+      <div id="perfList" style="max-height:360px;overflow-y:auto"></div>
+    </div>
+  </div>
+
 </div><!-- /tab-orders -->
 
 <div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div></div>
@@ -341,6 +351,36 @@ async function loadOrdersTab(from, to) {
   renderRankList('topFailDrivers', failByDriver, 'مرة');
   renderOrderList('cancelledList', cancelled, 'cancelledCount', false);
   renderOrderList('lateList', late, 'lateCount', true);
+  renderPerf();
+}
+
+// أداء التوصيل لكل طلب (بعد ما الـ trigger + Google يحسبوه)
+function renderPerf() {
+  const perf = reportOrders.filter(o => o.perf_rating && o.expected_minutes != null && o.actual_minutes != null);
+  const counts = { 'ممتاز':0, 'جيد':0, 'متأخر':0 };
+  perf.forEach(o => { counts[o.perf_rating] = (counts[o.perf_rating]||0)+1; });
+  const colors = { 'ممتاز':'#16a34a', 'جيد':'#ca8a04', 'متأخر':'#dc2626' };
+  document.getElementById('perfCount').textContent = `(${perf.length} طلب)`;
+  document.getElementById('perfSummary').innerHTML = ['ممتاز','جيد','متأخر'].map(k=>`
+    <div style="flex:1;min-width:90px;background:${colors[k]}14;border:1px solid ${colors[k]}44;border-radius:10px;padding:.6rem;text-align:center">
+      <div style="font-size:1.3rem;font-weight:800;color:${colors[k]}">${counts[k]||0}</div>
+      <div style="font-size:.72rem;color:${colors[k]}">${k}</div>
+    </div>`).join('');
+  const el = document.getElementById('perfList');
+  if (!perf.length) { el.innerHTML = '<div class="empty-state"><p>لا يوجد بيانات أداء بعد (تظهر للطلبات الجديدة اللي اتوصّلت بموقع)</p></div>'; return; }
+  // الأبطأ أولاً
+  perf.sort((a,b)=> (b.actual_minutes/b.expected_minutes) - (a.actual_minutes/a.expected_minutes));
+  el.innerHTML = perf.map(o=>{
+    const c = colors[o.perf_rating] || '#6b7280';
+    return `<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.45rem 0;border-bottom:1px solid var(--border);font-size:.76rem">
+      <div style="flex:1;min-width:0">
+        <span style="font-weight:700;color:var(--primary)">#${o.bill_no||(o.id||'').slice(0,6)}</span>
+        <span style="color:var(--text-muted)"> · ${custName(o)} · ${o.deliveryman||'—'}</span>
+      </div>
+      <span style="white-space:nowrap">فعلي <strong>${o.actual_minutes}</strong> / متوقع <strong>${o.expected_minutes}</strong> د</span>
+      <span style="white-space:nowrap;color:${c};font-weight:700;background:${c}14;border-radius:6px;padding:.1rem .5rem">${o.perf_rating}</span>
+    </div>`;
+  }).join('');
 }
 
 function groupCount(arr, keyFn) {

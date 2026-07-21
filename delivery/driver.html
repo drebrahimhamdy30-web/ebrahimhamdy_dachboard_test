@@ -1447,8 +1447,12 @@ async function confirmDeliver(){
   const note=document.getElementById('dlv-note').value.trim();
   load(true);
   const now=new Date().toISOString();
-  await db.from('orders').update({status:'delivered',payment_method:pay,collected_amount:amt,driver_notes:note||null,delivered_at:now,updated_at:now}).eq('id',id);
-  await addOrderLog(id,'order_delivered',{payment:pay,amount:amt});
+  // موقع التسليم (لحساب زمن الطريق والأداء) — لا يمنع التسليم لو تعذّر
+  const dloc = await getMyLocation();
+  const upd = {status:'delivered',payment_method:pay,collected_amount:amt,driver_notes:note||null,delivered_at:now,updated_at:now};
+  if(dloc){ upd.delivery_lat=dloc.lat; upd.delivery_lng=dloc.lng; }
+  await db.from('orders').update(upd).eq('id',id);
+  await addOrderLog(id,'order_delivered',{payment:pay,amount:amt,...(dloc?{delivery_lat:dloc.lat,delivery_lng:dloc.lng,gps_accuracy_m:Math.round(dloc.acc||0)}:{no_location:true})});
   closeModal('deliverModal');await loadAll();load(false);
 }
 
