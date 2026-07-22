@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>المصروفات - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    .exp-header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px; }
+    .exp-header-right { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+
+    /* تابات */
+    .exp-tabs { display:flex; gap:6px; margin-bottom:16px; border-bottom:2px solid var(--border); }
+    .exp-tab-btn {
+      padding:10px 18px; border:none; background:transparent; cursor:pointer;
+      font-family:var(--font); font-size:0.88rem; font-weight:700; color:var(--text-muted);
+      border-bottom:3px solid transparent; margin-bottom:-2px; transition:all 0.15s;
+      display:flex; align-items:center; gap:6px;
+    }
+    .exp-tab-btn:hover { color:var(--text-primary); }
+    .exp-tab-btn.active { color:var(--accent-dark); border-bottom-color:var(--accent); }
+    .exp-tab-content { display:none; }
+    .exp-tab-content.active { display:block; }
+
+    .search-wrap { position:relative; min-width:200px; flex:1; max-width:280px; }
+    .search-wrap i { position:absolute; right:11px; top:50%; transform:translateY(-50%); color:var(--text-muted); font-size:0.85rem; pointer-events:none; }
+    .search-wrap input { padding-right:34px; }
+
+    .exp-quick { display:flex; gap:6px; flex-wrap:wrap; }
+    .quick-btn { padding:6px 13px; border-radius:20px; border:1px solid var(--border); background:var(--surface); color:var(--text-secondary); font-size:0.76rem; cursor:pointer; font-family:var(--font); font-weight:700; transition:all 0.15s; }
+    .quick-btn:hover { border-color:var(--accent); color:var(--text-primary); }
+    .quick-btn.active { background:var(--accent); color:var(--primary); border-color:var(--accent); }
+
+    .exp-notes-cell { max-width:180px; white-space:normal; font-size:0.75rem; color:var(--text-secondary); }
+    .exp-amount { font-weight:800; color:var(--accent-dark); }
+    .row-hidden-preview td { opacity:0.55; }
+
+    /* قواعد الإخفاء */
+    .rule-form {
+      display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end;
+      background:var(--surface-3); border:1px solid var(--border); border-radius:14px;
+      padding:14px; margin-bottom:16px;
+    }
+    .rule-field { display:flex; flex-direction:column; gap:4px; }
+    .rule-field label { font-size:0.72rem; font-weight:700; color:var(--text-secondary); }
+    .rule-field select, .rule-field input { min-width:150px; }
+    .rule-field.grow { flex:1; min-width:180px; }
+    .rule-field.grow input { width:100%; }
+
+    .rule-card {
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+      background:var(--surface); border:1px solid var(--border); border-right:4px solid var(--accent);
+      border-radius:var(--radius-md); padding:12px 14px; margin-bottom:8px;
+    }
+    .rule-text { font-size:0.85rem; color:var(--text-primary); }
+    .rule-text b { color:var(--accent-dark); }
+    .rule-label { font-size:0.72rem; color:var(--text-muted); margin-top:2px; }
+  </style>
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+
+      <div class="exp-header">
+        <div class="page-title" style="margin:0;"><i class="fas fa-receipt"></i> المصروفات</div>
+        <div class="exp-header-right">
+          <label class="check-label">
+            <input type="checkbox" id="showHiddenToggle" onchange="renderExpenses()">
+            إظهار المخفي / تم مراجعته
+          </label>
+          <button class="btn btn-primary" onclick="loadAll()"><i class="fas fa-sync-alt"></i> تحديث</button>
+        </div>
+      </div>
+
+      <div class="exp-tabs">
+        <button class="exp-tab-btn active" data-tab="list" onclick="switchTab('list')">
+          <i class="fas fa-list"></i> المصروفات
+        </button>
+        <button class="exp-tab-btn" data-tab="rules" onclick="switchTab('rules')">
+          <i class="fas fa-filter"></i> قواعد الإخفاء التلقائي
+        </button>
+      </div>
+
+      <!-- ===== تاب المصروفات ===== -->
+      <div class="exp-tab-content active" id="tab-list">
+        <div class="filter-bar">
+          <div class="search-wrap">
+            <i class="fas fa-search"></i>
+            <input type="text" id="searchInput" class="form-input" placeholder="بحث بالاسم أو الملاحظات أو رقم المستند..." oninput="renderExpenses()">
+          </div>
+          <div class="exp-quick">
+            <button class="quick-btn active" data-q="all" onclick="quickRange('all', this)">الكل</button>
+            <button class="quick-btn" data-q="today" onclick="quickRange('today', this)">النهارده</button>
+            <button class="quick-btn" data-q="yest" onclick="quickRange('yest', this)">إمبارح</button>
+            <button class="quick-btn" data-q="7d" onclick="quickRange('7d', this)">آخر ٧ أيام</button>
+          </div>
+        </div>
+
+        <div class="stats-row" id="exp-stats"></div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>التاريخ</th>
+                <th>القيمة</th>
+                <th>من</th>
+                <th>إلى</th>
+                <th>الموظف</th>
+                <th>ملاحظات</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="exp-table-body">
+              <tr class="loading-row"><td colspan="7">⏳ جاري التحميل...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ===== تاب قواعد الإخفاء ===== -->
+      <div class="exp-tab-content" id="tab-rules">
+        <div class="rule-form">
+          <div class="rule-field">
+            <label>العمود</label>
+            <select id="ruleField" class="form-select">
+              <option value="emp_name">اسم الموظف</option>
+              <option value="from_name">من (اسم)</option>
+              <option value="to_name">إلى (اسم)</option>
+              <option value="from">من (نوع)</option>
+              <option value="to">إلى (نوع)</option>
+              <option value="doc_notes">الملاحظات</option>
+              <option value="branch">الفرع</option>
+              <option value="doc_code">رقم المستند</option>
+            </select>
+          </div>
+          <div class="rule-field">
+            <label>الشرط</label>
+            <select id="ruleOperator" class="form-select">
+              <option value="equals">يساوي بالظبط</option>
+              <option value="contains">يحتوي على</option>
+              <option value="not_equals">لا يساوي</option>
+              <option value="not_contains">لا يحتوي على</option>
+            </select>
+          </div>
+          <div class="rule-field grow">
+            <label>القيمة</label>
+            <input type="text" id="ruleValue" class="form-input" placeholder="مثلاً: د إبراهيم حمدى">
+          </div>
+          <div class="rule-field grow">
+            <label>وصف (اختياري)</label>
+            <input type="text" id="ruleLabel" class="form-input" placeholder="مصروفاتي الشخصية">
+          </div>
+          <button class="btn btn-primary" onclick="submitAddRule()">
+            <i class="fas fa-plus"></i> إضافة قاعدة
+          </button>
+        </div>
+
+        <div id="rules-container">
+          <p style="text-align:center;padding:20px;color:var(--text-muted);">⏳ جاري التحميل...</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script src="nav.js" defer></script>
+  <script>
+    // ===== اتصال مباشر بـ Supabase (نفس مفتاح anon المستخدم في permissions.html) =====
+    const SUPABASE_URL      = 'https://rxtjoqulmgkkcohmgzgi.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
+    const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    let allExpenses = [];
+    let allRules    = [];
+    let activeQuick = 'all';
+
+    const OPERATOR_LABELS = {
+      equals: 'يساوي', not_equals: 'لا يساوي',
+      contains: 'يحتوي على', not_contains: 'لا يحتوي على'
+    };
+    const FIELD_LABELS = {
+      emp_name: 'اسم الموظف', from_name: 'من (اسم)', to_name: 'إلى (اسم)',
+      from: 'من (نوع)', to: 'إلى (نوع)', doc_notes: 'الملاحظات',
+      branch: 'الفرع', doc_code: 'رقم المستند'
+    };
+
+    checkAuth().then(async user => {
+      if (!user) return;
+      const role = (localStorage.getItem('userRole') || '').trim();
+      if (role !== 'admin') {
+        document.querySelector('.card').innerHTML =
+          '<div class="empty-note"><i class="fas fa-lock"></i>الصفحة دي متاحة للأدمن بس</div>';
+        return;
+      }
+      await loadAll();
+    });
+
+    async function loadAll() {
+      const tbody = document.getElementById('exp-table-body');
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="7">⏳ جاري التحميل...</td></tr>';
+
+      const [expRes, rulesRes] = await Promise.all([
+        db.from('erp_expenses').select('*').order('doc_date', { ascending: false }),
+        db.from('erp_expense_hide_rules').select('*').order('created_at', { ascending: false })
+      ]);
+      if (expRes.error)   console.error('expenses load error:', expRes.error);
+      if (rulesRes.error) console.error('rules load error:', rulesRes.error);
+
+      allExpenses = expRes.data || [];
+      allRules    = rulesRes.data || [];
+      renderExpenses();
+      renderRules();
+    }
+
+    /* ===================== تابات ===================== */
+    function switchTab(name) {
+      document.querySelectorAll('.exp-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+      document.getElementById('tab-list').classList.toggle('active', name === 'list');
+      document.getElementById('tab-rules').classList.toggle('active', name === 'rules');
+    }
+
+    /* ===================== مدى التاريخ السريع ===================== */
+    function quickRange(kind, btn) {
+      activeQuick = kind;
+      document.querySelectorAll('.exp-quick .quick-btn').forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+      renderExpenses();
+    }
+
+    function inQuickRange(dateStr) {
+      if (activeQuick === 'all') return true;
+      const d = new Date((dateStr || '').replace(' ', 'T'));
+      if (isNaN(d.getTime())) return true;
+      const now = new Date();
+      const startOfDay = (dt) => new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+      if (activeQuick === 'today') return startOfDay(d).getTime() === startOfDay(now).getTime();
+      if (activeQuick === 'yest') {
+        const y = new Date(now); y.setDate(y.getDate() - 1);
+        return startOfDay(d).getTime() === startOfDay(y).getTime();
+      }
+      if (activeQuick === '7d') {
+        const s = new Date(now); s.setDate(s.getDate() - 6);
+        return d.getTime() >= startOfDay(s).getTime();
+      }
+      return true;
+    }
+
+    /* ===================== تطبيق قواعد الإخفاء ===================== */
+    function matchesRule(exp, rule) {
+      const raw = exp[rule.field];
+      const val = String(raw == null ? '' : raw).trim().toLowerCase();
+      const target = String(rule.value || '').trim().toLowerCase();
+      switch (rule.operator) {
+        case 'equals':       return val === target;
+        case 'not_equals':   return val !== target;
+        case 'contains':     return val.includes(target);
+        case 'not_contains': return !val.includes(target);
+        default: return false;
+      }
+    }
+
+    function isAutoHidden(exp) {
+      return allRules.some(r => matchesRule(exp, r));
+    }
+
+    /* ===================== عرض جدول المصروفات ===================== */
+    function renderExpenses() {
+      const search      = document.getElementById('searchInput').value.trim().toLowerCase();
+      const showHidden  = document.getElementById('showHiddenToggle').checked;
+      const tbody       = document.getElementById('exp-table-body');
+
+      let visible = allExpenses.filter(exp => {
+        if (!inQuickRange(exp.doc_date)) return false;
+        const seen   = !!exp.is_seen;
+        const hidden = isAutoHidden(exp);
+        if (!showHidden && (seen || hidden)) return false;
+        if (search) {
+          const haystack = [exp.emp_name, exp.from_name, exp.to_name, exp.doc_notes, exp.doc_code]
+            .map(v => String(v || '').toLowerCase()).join(' ');
+          if (!haystack.includes(search)) return false;
+        }
+        return true;
+      });
+
+      visible.sort((a, b) => new Date(b.doc_date || 0) - new Date(a.doc_date || 0));
+
+      const total = visible.reduce((s, e) => s + (parseFloat(e.value) || 0), 0);
+      document.getElementById('exp-stats').innerHTML = `
+        <div class="stat-card"><div class="stat-num">${visible.length}</div><div class="stat-lbl">عدد الحركات الظاهرة</div></div>
+        <div class="stat-card"><div class="stat-num">${total.toLocaleString('ar-EG', {maximumFractionDigits:2})}</div><div class="stat-lbl">إجمالي القيمة</div></div>
+      `;
+
+      if (!visible.length) {
+        tbody.innerHTML = `<tr><td colspan="7" class="empty-note"><i class="fas fa-inbox"></i><br>لا توجد مصروفات تطابق الفلتر الحالي</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = visible.map(exp => {
+        const seen   = !!exp.is_seen;
+        const hidden = !seen && isAutoHidden(exp);
+        const dateStr = exp.doc_date ? String(exp.doc_date).replace('T', ' ').slice(0, 16) : '---';
+        const rowClass = (seen || hidden) ? 'row-hidden-preview' : '';
+        const statusBtn = seen
+          ? `<button class="btn btn-sm" style="background:var(--surface-3);color:var(--text-secondary);" onclick="undoSeen('${exp.doc_code}','${exp.branch}')">
+               <i class="fas fa-undo"></i> تراجع
+             </button>`
+          : `<button class="btn btn-success btn-sm" onclick="markSeen('${exp.doc_code}','${exp.branch}')">
+               <i class="fas fa-check"></i> شوفتها
+             </button>`;
+        return `<tr class="${rowClass}">
+          <td style="font-size:0.78rem;white-space:nowrap;">${dateStr}</td>
+          <td class="exp-amount">${(parseFloat(exp.value) || 0).toLocaleString('ar-EG', {maximumFractionDigits:2})}</td>
+          <td><span class="badge badge-blue">${exp.from_name || '---'}</span></td>
+          <td><span class="badge badge-gray">${exp.to_name || '---'}</span></td>
+          <td style="font-size:0.8rem;">${exp.emp_name || '---'}</td>
+          <td class="exp-notes-cell">${(exp.doc_notes && exp.doc_notes !== 'null') ? exp.doc_notes : '—'}${hidden ? '<br><span class="badge badge-yellow" style="margin-top:4px;">مخفي بقاعدة</span>' : ''}</td>
+          <td>${statusBtn}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    async function markSeen(docCode, branch) {
+      const { error } = await db.from('erp_expenses')
+        .update({ is_seen: true, seen_at: new Date().toISOString() })
+        .eq('doc_code', docCode).eq('branch', branch);
+      if (error) { alert('⚠️ فشل تحديث الحالة: ' + error.message); return; }
+      const item = allExpenses.find(e => e.doc_code === docCode && e.branch === branch);
+      if (item) { item.is_seen = true; item.seen_at = new Date().toISOString(); }
+      renderExpenses();
+    }
+
+    async function undoSeen(docCode, branch) {
+      const { error } = await db.from('erp_expenses')
+        .update({ is_seen: false, seen_at: null })
+        .eq('doc_code', docCode).eq('branch', branch);
+      if (error) { alert('⚠️ فشل التراجع: ' + error.message); return; }
+      const item = allExpenses.find(e => e.doc_code === docCode && e.branch === branch);
+      if (item) { item.is_seen = false; item.seen_at = null; }
+      renderExpenses();
+    }
+
+    /* ===================== قواعد الإخفاء ===================== */
+    function renderRules() {
+      const container = document.getElementById('rules-container');
+      if (!allRules.length) {
+        container.innerHTML = `<div class="empty-note"><i class="fas fa-filter"></i><br>مفيش قواعد إخفاء حالياً</div>`;
+        return;
+      }
+      container.innerHTML = allRules.map(r => `
+        <div class="rule-card">
+          <div>
+            <div class="rule-text">
+              العمود <b>${FIELD_LABELS[r.field] || r.field}</b>
+              ${OPERATOR_LABELS[r.operator] || r.operator}
+              <b>"${r.value}"</b>
+            </div>
+            ${r.label ? `<div class="rule-label">${r.label}</div>` : ''}
+          </div>
+          <button class="btn btn-danger btn-sm" onclick="removeRule(${r.id})">
+            <i class="fas fa-trash"></i> حذف
+          </button>
+        </div>
+      `).join('');
+    }
+
+    async function submitAddRule() {
+      const field    = document.getElementById('ruleField').value;
+      const operator = document.getElementById('ruleOperator').value;
+      const value    = document.getElementById('ruleValue').value.trim();
+      const label    = document.getElementById('ruleLabel').value.trim();
+      if (!value) { alert('اكتب القيمة المطلوبة للقاعدة'); return; }
+
+      const { error } = await db.from('erp_expense_hide_rules')
+        .insert({ field, operator, value, label: label || null });
+      if (error) { alert('⚠️ فشل إضافة القاعدة: ' + error.message); return; }
+      document.getElementById('ruleValue').value = '';
+      document.getElementById('ruleLabel').value = '';
+      await loadAll();
+    }
+
+    async function removeRule(id) {
+      if (!confirm('متأكد من حذف القاعدة دي؟')) return;
+      const { error } = await db.from('erp_expense_hide_rules').delete().eq('id', id);
+      if (error) { alert('⚠️ فشل حذف القاعدة: ' + error.message); return; }
+      await loadAll();
+    }
+  </script>
+</body>
+</html>
