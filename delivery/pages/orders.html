@@ -201,6 +201,30 @@ const STATUS_LABELS={pending:'جاهز',assigned:'على رحلة',picked:'اس�
 const PAY_LABELS={cash:'كاش',visa:'فيزا',transfer:'تحويل',deferred:'آجل'};
 const LATE_MINS=30;
 
+// عرض تفاصيل السجل بشكل مقروء للموظف (يترجم المفاتيح ويخفي الحقول التقنية)
+const DET_LABELS={amount:'المبلغ',region:'المنطقة',source:'المصدر',bill_no:'رقم الفاتورة',driver:'الطيار',distance_m:'المسافة من الصيدلية',payment:'طريقة الدفع',collected:'المبلغ المحصّل',collected_amount:'المبلغ المحصّل',reason:'السبب',note:'ملاحظة',orders:'عدد الطلبات',attempt:'المحاولة'};
+const DET_HIDE=new Set(['trip_id','order_id','driver_id','pickup_lat','pickup_lng','delivery_lat','delivery_lng','gps_accuracy_m','bulk','by']);
+function fmtDetVal(k,v){
+  if(k==='payment')return PAY_LABELS[v]||v;
+  if(k==='amount'||k==='collected'||k==='collected_amount')return Number(v).toLocaleString()+' ج';
+  if(k==='distance_m')return v+' م';
+  return v;
+}
+function fmtLogDetails(d){
+  if(!d)return '';
+  const parts=[];
+  if(d.pickup_violation)parts.push('<span style="color:#dc2626;font-weight:700">⚠️ استلام خارج نطاق الفرع</span>');
+  if(d.no_location)parts.push('<span style="color:#dc2626;font-weight:700">⚠️ استلام بدون تحديد الموقع</span>');
+  for(const [k,v] of Object.entries(d)){
+    if(v===null||v===undefined||v===''||v===true||v===false)continue;
+    if(DET_HIDE.has(k)||k==='pickup_violation'||k==='no_location')continue;
+    const lbl=DET_LABELS[k];
+    if(!lbl)continue;
+    parts.push(`<span style="color:var(--text-muted)">${lbl}:</span> ${fmtDetVal(k,v)}`);
+  }
+  return parts.join('<span style="color:var(--border)"> · </span>');
+}
+
 let allOrders=[], filtered=[], currentPage=1, pageSize=50;
 let sortCol='bill_date', sortDir=-1, statusFilter='', currentUser=null;
 
@@ -477,7 +501,7 @@ async function openDetail(id){
       ${logs.map((l,i)=>{
         const color=LOG_COLORS[l.event]||'#6b7280';
         const label=LOG_LABELS[l.event]||l.event;
-        const dets=l.details?Object.entries(l.details).filter(([,v])=>v&&v!==true).map(([k,v])=>`${k}: ${v}`).join(' · '):'';
+        const dets=fmtLogDetails(l.details);
         return `<div class="tl-item">
           <div class="tl-dot-col">
             <div class="tl-dot" style="color:${color};background:${color}22"></div>
