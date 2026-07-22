@@ -413,7 +413,7 @@
       'سان ستيفانو':  'customer_san_search',
       'سيدى بشر':     'customer_bishr_search'
     };
-    // بيانات كل عميل (بالكود لو موجود، وإلا بالاسم + الفرع) بتتحمل مرة واحدة وتتخزن هنا،
+    // بيانات كل عميل (بالكود+الاسم مع بعض + الفرع) بتتحمل مرة واحدة وتتخزن هنا،
     // فلو نفس العميل ظاهر في أكتر من صف مصروف مش هيتبعت طلب لـ n8n كل مرة تاني.
     const customerBalanceCache = {}; // key -> {status, balance}
 
@@ -423,16 +423,14 @@
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
-    // بيرجع كائن يوصف "مين نبحث عنه" لصف المصروف: بالكود لو موجود (الأدق والأضمن، من غير مشاكل
-    // اختلاف رسم الألف في العربي)، وإلا بالاسم كـ fallback بس.
+    // بيرجع كائن فيه الكود والاسم مع بعض لصف المصروف (لو الصف فعلاً "عميل")
     function customerLookupFor(exp) {
       // عميل حقيقي بس (عمود "إلى" نوعه "عميل") — مش مورد ولا حساب ولا مخزن
       if (String(exp.to || '').trim() !== 'عميل') return null;
       const code = String(exp.to_code || '').trim();
       const name = String(exp.to_name || '').trim();
-      if (code) return { isCode: true,  value: code, key: 'code:' + code };
-      if (name) return { isCode: false, value: name, key: 'name:' + name.toLowerCase() };
-      return null;
+      if (!code && !name) return null;
+      return { code, name };
     }
 
     function renderBalanceCell(exp) {
@@ -442,11 +440,11 @@
       const path = BRANCH_WEBHOOKS[exp.branch];
       if (!path) return `<span class="bal-note">فرع غير معروف</span>`;
 
-      const key   = String(exp.branch || '').trim() + '||' + lookup.key;
+      const key   = String(exp.branch || '').trim() + '||' + lookup.code + '||' + lookup.name.toLowerCase();
       const entry = customerBalanceCache[key];
 
       if (!entry) {
-        return `<button class="bal-btn" onclick="loadCustomerBalance('${escapeHtml(exp.branch)}','${escapeHtml(lookup.value)}',${lookup.isCode})">
+        return `<button class="bal-btn" onclick="loadCustomerBalance('${escapeHtml(exp.branch)}','${escapeHtml(lookup.code)}','${escapeHtml(lookup.name)}')">
                   <i class="fas fa-wallet"></i> عرض الرصيد
                 </button>`;
       }
@@ -458,7 +456,7 @@
       }
       if (entry.status === 'error') {
         return `<span class="bal-note">تعذر الجلب
-                  <button class="bal-retry" onclick="loadCustomerBalance('${escapeHtml(exp.branch)}','${escapeHtml(lookup.value)}',${lookup.isCode})">إعادة المحاولة</button>
+                  <button class="bal-retry" onclick="loadCustomerBalance('${escapeHtml(exp.branch)}','${escapeHtml(lookup.code)}','${escapeHtml(lookup.name)}')">إعادة المحاولة</button>
                 </span>`;
       }
       // status === 'done'
@@ -466,14 +464,14 @@
       return `<span class="bal-value ${cls}">${entry.balance.toLocaleString('ar-EG', {maximumFractionDigits:2})}</span>`;
     }
 
-    async function loadCustomerBalance(branch, value, isCode) {
-      const lookupKey = (isCode ? 'code:' : 'name:') + (isCode ? value : value.toLowerCase());
-      const key = String(branch || '').trim() + '||' + lookupKey;
+    async function loadCustomerBalance(branch, code, name) {
+      const key = String(branch || '').trim() + '||' + code + '||' + name.toLowerCase();
       customerBalanceCache[key] = { status: 'loading' };
       renderExpenses();
 
       const path = BRANCH_WEBHOOKS[branch];
-      const body = isCode ? { code: value, name: '' } : { name: value, code: '' };
+      // بيبعت الكود والاسم مع بعض في نفس الطلب زي ما اتطلب
+      const body = { code: code, name: name };
 
       try {
         const resp = await fetch(CUSTOMER_WEBHOOK_BASE + path, {
