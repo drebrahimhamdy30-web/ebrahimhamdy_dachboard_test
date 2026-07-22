@@ -413,9 +413,9 @@
       'سان ستيفانو':  'customer_san_search',
       'سيدى بشر':     'customer_bishr_search'
     };
-    // بيانات كل عميل (بالاسم + الفرع) بتتحمل مرة واحدة وتتخزن هنا، فلو نفس العميل ظاهر في أكتر
-    // من صف مصروف مش هيتبعت طلب لـ n8n كل مرة تاني.
-    const customerBalanceCache = {}; // key: branch + '||' + name (lowercase) -> {status, balance}
+    // بيانات كل عميل (بالكود لو موجود، وإلا بالاسم + الفرع) بتتحمل مرة واحدة وتتخزن هنا،
+    // فلو نفس العميل ظاهر في أكتر من صف مصروف مش هيتبعت طلب لـ n8n كل مرة تاني.
+    const customerBalanceCache = {}; // key -> {status, balance}
 
     function escapeHtml(str) {
       return String(str == null ? '' : str)
@@ -423,22 +423,30 @@
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
-    function balCacheKey(branch, name) {
-      return String(branch || '').trim() + '||' + String(name || '').trim().toLowerCase();
+    // بيرجع كائن يوصف "مين نبحث عنه" لصف المصروف: بالكود لو موجود (الأدق والأضمن، من غير مشاكل
+    // اختلاف رسم الألف في العربي)، وإلا بالاسم كـ fallback بس.
+    function customerLookupFor(exp) {
+      // عميل حقيقي بس (عمود "إلى" نوعه "عميل") — مش مورد ولا حساب ولا مخزن
+      if (String(exp.to || '').trim() !== 'عميل') return null;
+      const code = String(exp.to_code || '').trim();
+      const name = String(exp.to_name || '').trim();
+      if (code) return { isCode: true,  value: code, key: 'code:' + code };
+      if (name) return { isCode: false, value: name, key: 'name:' + name.toLowerCase() };
+      return null;
     }
 
     function renderBalanceCell(exp) {
-      const name = (exp.to_name || '').trim();
-      if (!name) return `<span class="bal-note">—</span>`;
+      const lookup = customerLookupFor(exp);
+      if (!lookup) return `<span class="bal-note">—</span>`;
 
       const path = BRANCH_WEBHOOKS[exp.branch];
       if (!path) return `<span class="bal-note">فرع غير معروف</span>`;
 
-      const key   = balCacheKey(exp.branch, name);
+      const key   = String(exp.branch || '').trim() + '||' + lookup.key;
       const entry = customerBalanceCache[key];
 
       if (!entry) {
-        return `<button class="bal-btn" onclick="loadCustomerBalance('${escapeHtml(exp.branch)}','${escapeHtml(name)}')">
+        return `<button class="bal-btn" onclick="loadCustomerBalance('${escapeHtml(exp.branch)}','${escapeHtml(lookup.value)}',${lookup.isCode})">
                   <i class="fas fa-wallet"></i> عرض الرصيد
                 </button>`;
       }
@@ -446,11 +454,11 @@
         return `<span class="bal-loading"><i class="fas fa-spinner fa-spin"></i> جارِ التحميل...</span>`;
       }
       if (entry.status === 'notfound') {
-        return `<span class="bal-note">مفيش عميل بالاسم ده</span>`;
+        return `<span class="bal-note">مفيش عميل بالبيانات دي</span>`;
       }
       if (entry.status === 'error') {
         return `<span class="bal-note">تعذر الجلب
-                  <button class="bal-retry" onclick="loadCustomerBalance('${escapeHtml(exp.branch)}','${escapeHtml(name)}')">إعادة المحاولة</button>
+                  <button class="bal-retry" onclick="loadCustomerBalance('${escapeHtml(exp.branch)}','${escapeHtml(lookup.value)}',${lookup.isCode})">إعادة المحاولة</button>
                 </span>`;
       }
       // status === 'done'
@@ -458,14 +466,14 @@
       return `<span class="bal-value ${cls}">${entry.balance.toLocaleString('ar-EG', {maximumFractionDigits:2})}</span>`;
     }
 
-    async function loadCustomerBalance(branch, name) {
-      const key = balCacheKey(branch, name);
+    async function loadCustomerBalance(branch, value, isCode) {
+      const lookupKey = (isCode ? 'code:' : 'name:') + (isCode ? value : value.toLowerCase());
+      const key = String(branch || '').trim() + '||' + lookupKey;
       customerBalanceCache[key] = { status: 'loading' };
       renderExpenses();
 
-      const path   = BRANCH_WEBHOOKS[branch];
-      const isCode = /^\d+$/.test(name);
-      const body   = isCode ? { code: name, name: '' } : { name: name, code: '' };
+      const path = BRANCH_WEBHOOKS[branch];
+      const body = isCode ? { code: value, name: '' } : { name: value, code: '' };
 
       try {
         const resp = await fetch(CUSTOMER_WEBHOOK_BASE + path, {
