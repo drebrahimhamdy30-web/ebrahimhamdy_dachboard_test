@@ -165,6 +165,7 @@ body{padding:0;overflow:hidden;height:100vh;background:var(--bg);display:flex;fl
         <th>مدة التوصيل</th>
         <th onclick="sortBy('delivered_at')">وقت التوصيل</th>
         <th>الأداء</th>
+        <th>الرحلة</th>
         <th>تفاصيل</th>
       </tr>
     </thead>
@@ -188,6 +189,16 @@ body{padding:0;overflow:hidden;height:100vh;background:var(--bg);display:flex;fl
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
     <div class="modal-body" id="detailBody"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="tripOrdersModal">
+  <div class="modal detail-modal">
+    <div class="modal-header">
+      <span class="modal-title" id="tripOrdersTitle">طلبات الرحلة</span>
+      <button class="modal-close" onclick="document.getElementById('tripOrdersModal').classList.remove('open')">✕</button>
+    </div>
+    <div class="modal-body" id="tripOrdersBody"></div>
   </div>
 </div>
 
@@ -225,7 +236,7 @@ function fmtLogDetails(d){
   return parts.join('<span style="color:var(--border)"> · </span>');
 }
 
-let allOrders=[], filtered=[], currentPage=1, pageSize=50;
+let allOrders=[], filtered=[], currentPage=1, pageSize=50, orderTrip={};
 let sortCol='bill_date', sortDir=-1, statusFilter='', currentUser=null;
 
 async function init(){
@@ -261,6 +272,13 @@ async function loadAll(){
     }
     const {data}=await q;
     allOrders=data||[];
+    // ربط كل طلب برحلته (order → trip) على دفعات
+    orderTrip={};
+    const oids=allOrders.map(o=>o.id);
+    for(let i=0;i<oids.length;i+=150){
+      const {data:to}=await db.from('trip_orders').select('order_id,trip_id').in('order_id',oids.slice(i,i+150));
+      (to||[]).forEach(r=>{orderTrip[r.order_id]=r.trip_id;});
+    }
     updateCounts();
     applyFilters();
   }catch(e){console.error(e);}
@@ -376,7 +394,7 @@ function renderTable(){
   const body=document.getElementById('ordersBody');
 
   if(!page.length){
-    body.innerHTML='<tr><td colspan="12" style="text-align:center;padding:2.5rem;color:var(--text-muted)">📭 لا توجد طلبات</td></tr>';
+    body.innerHTML='<tr><td colspan="13" style="text-align:center;padding:2.5rem;color:var(--text-muted)">📭 لا توجد طلبات</td></tr>';
     return;
   }
 
@@ -402,6 +420,7 @@ function renderTable(){
       <td class="duration-cell">${delivDuration!=='—'?delivDuration:duration}</td>
       <td style="white-space:nowrap;font-size:.7rem">${fmDate(o.delivered_at)}</td>
       <td style="font-size:.68rem;white-space:nowrap">${o.perf_rating?`<span style="color:${o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':'#ca8a04'};font-weight:700">${o.perf_rating}</span>`:'—'}</td>
+      <td>${orderTrip[o.id]?`<button class="btn btn-outline btn-sm" onclick="openTripOrders('${orderTrip[o.id]}')" style="font-size:.62rem;padding:.18rem .45rem">🗺️ الرحلة</button>`:'—'}</td>
       <td><button class="btn btn-outline btn-sm" onclick="openDetail('${o.id}')" style="font-size:.62rem;padding:.18rem .45rem">تفاصيل</button></td>
     </tr>`;
   }).join('');
@@ -517,6 +536,36 @@ async function openDetail(id){
     </div>`:'<div style="font-size:.78rem;color:var(--text-muted);padding:.5rem 0">لا يوجد سجل لهذا الطلب</div>'}
   `;
 }
+
+async function openTripOrders(tripId){
+  const modal=document.getElementById('tripOrdersModal');
+  const body=document.getElementById('tripOrdersBody');
+  document.getElementById('tripOrdersTitle').textContent='طلبات الرحلة #'+tripId.slice(0,8);
+  body.innerHTML='<div style="text-align:center;padding:1.5rem;color:var(--text-muted)">جاري التحميل...</div>';
+  modal.classList.add('open');
+  try{
+    const [{data:to},{data:trip}]=await Promise.all([
+      db.from('trip_orders').select('order_id').eq('trip_id',tripId),
+      db.from('trips').select('driver_name,status,created_at').eq('id',tripId).maybeSingle()
+    ]);
+    const ids=(to||[]).map(x=>x.order_id);
+    let ords=[];
+    if(ids.length){const {data:od}=await db.from('orders').select('id,bill_no,customer_name,cust_region,total_bill_net,status').in('id',ids);ords=od||[];}
+    body.innerHTML=`
+      <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.6rem">الطيار: <strong>${trip?.driver_name||'—'}</strong> · ${ords.length} طلب · ${trip?.status==='completed'?'مكتملة':'جارية'}</div>
+      <table style="width:100%;border-collapse:collapse;font-size:.72rem">
+        <thead><tr style="background:#f1f5f9"><td style="padding:.4rem;font-weight:700">فاتورة</td><td style="font-weight:700">العميل</td><td style="font-weight:700">المنطقة</td><td style="font-weight:700">المبلغ</td><td style="font-weight:700">الحالة</td></tr></thead>
+        <tbody>${ords.map(o=>`<tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:.4rem"><span class="bill-no" style="cursor:pointer" onclick="document.getElementById('tripOrdersModal').classList.remove('open');openDetail('${o.id}')">${o.bill_no||o.id.slice(0,8)}</span></td>
+          <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.customer_name||'—'}</td>
+          <td>${o.cust_region||'—'}</td>
+          <td class="amount-cell">${Number(o.total_bill_net||0).toLocaleString()}</td>
+          <td><span class="status-badge sb-${o.status}">${STATUS_LABELS[o.status]||o.status}</span></td>
+        </tr>`).join('')}</tbody>
+      </table>`;
+  }catch(e){body.innerHTML='<div style="padding:1rem;color:var(--red)">تعذّر تحميل الرحلة</div>';console.error(e);}
+}
+document.getElementById('tripOrdersModal').addEventListener('click',e=>{if(e.target===document.getElementById('tripOrdersModal'))document.getElementById('tripOrdersModal').classList.remove('open');});
 
 function closeModal(){document.getElementById('detailModal').classList.remove('open');}
 document.getElementById('detailModal').addEventListener('click',e=>{if(e.target===document.getElementById('detailModal'))closeModal();});
