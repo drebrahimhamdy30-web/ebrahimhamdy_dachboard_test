@@ -99,7 +99,7 @@ body{padding:0;overflow:hidden;height:100vh;background:var(--bg);display:flex;fl
   <input type="date" class="date-input" id="dateFrom" onchange="applyFilters()" title="من تاريخ">
   <input type="date" class="date-input" id="dateTo" onchange="applyFilters()" title="إلى تاريخ">
 
-  <select class="date-input" id="branchFilter" onchange="loadAll()" style="width:120px;display:none">
+  <select class="date-input" id="branchFilter" onchange="applyFilters()" style="width:120px;display:none">
     <option value="">كل الفروع</option>
   </select>
 
@@ -157,7 +157,7 @@ const STATUS_LABELS={pending:'جاهز',assigned:'على رحلة',picked:'اس�
 const PAY_LABELS={cash:'كاش',visa:'فيزا',transfer:'تحويل',deferred:'آجل'};
 const COLORS=['#1a56db','#7c3aed','#16a34a','#ea580c','#0891b2','#ca8a04','#dc2626'];
 
-let allTrips=[], tripOrdersCache={}, filtered=[], tripPerf={};
+let pageRows=[], tripOrdersCache={}, tripPerf={}, totalCount=0, _perfIds=null;
 let currentPage=1, pageSize=40, sortCol='created_at', sortDir=-1, statusFilter='';
 let currentUser=null, expandedRows=new Set();
 
@@ -177,25 +177,63 @@ async function init(){
   setInterval(loadAll,120000);
 }
 
+// يبني استعلام الرحلات مع كل الفلاتر على السيرفر (فرع/حالة/تاريخ/بحث/أداء)
+function buildTripsQuery(sel,opts){
+  let q=db.from('trips').select(sel,opts||{});
+  const branchVal=document.getElementById('branchFilter')?.value;
+  if(branchVal) q=q.eq('branch_id',branchVal);
+  else if(currentUser?.role!=='admin'&&currentUser?.branch_id) q=q.eq('branch_id',currentUser.branch_id);
+  if(statusFilter) q=q.eq('status',statusFilter);
+  const dFrom=document.getElementById('dateFrom').value;
+  const dTo=document.getElementById('dateTo').value;
+  if(dFrom) q=q.gte('created_at',dFrom);
+  if(dTo) q=q.lte('created_at',dTo+'T23:59:59');
+  const search=(document.getElementById('searchInput').value||'').trim().replace(/[,()%]/g,' ').trim();
+  if(search) q=q.or(`driver_name.ilike.%${search}%,trip_number.ilike.%${search}%`);
+  if(_perfIds) q=q.in('id',_perfIds);
+  return q;
+}
+
+// يحمّل صفحة واحدة فقط (40 رحلة) من السيرفر + التقييمات الخاصة بها فقط
 async function loadAll(){
   showLoad(true);
   try{
-    let q=db.from('trips').select('*').order('created_at',{ascending:false});
-    const branchVal=document.getElementById('branchFilter')?.value;
-    if(branchVal) q=q.eq('branch_id',branchVal);
-    else if(currentUser?.role!=='admin'&&currentUser?.branch_id) q=q.eq('branch_id',currentUser.branch_id);
-    const {data}=await q;
-    allTrips=data||[];
-    // تقييم ومسافة كل رحلة من الـ view — على دفعات (عشان الرابط ما يطولش مع مئات الرحلات)
+    // فلتر الأداء: هات معرّفات الرحلات بالتقييم المطلوب من الـ view (مقيّدة بنفس الفترة/الفرع)
+    const perfF=document.getElementById('perfFilter').value;
+    _perfIds=null;
+    if(perfF){
+      const branchVal=document.getElementById('branchFilter')?.value;
+      const dFrom=document.getElementById('dateFrom').value, dTo=document.getElementById('dateTo').value;
+      let pq=db.from('v_trip_perf').select('trip_id').eq('rating',perfF);
+      if(branchVal) pq=pq.eq('branch_id',branchVal);
+      else if(currentUser?.role!=='admin'&&currentUser?.branch_id) pq=pq.eq('branch_id',currentUser.branch_id);
+      if(dFrom) pq=pq.gte('created_at',dFrom);
+      if(dTo) pq=pq.lte('created_at',dTo+'T23:59:59');
+      const {data:pv}=await pq;
+      _perfIds=(pv||[]).map(x=>x.trip_id);
+      if(!_perfIds.length){pageRows=[];totalCount=0;tripPerf={};document.getElementById('resultCount').textContent='0 رحلة';renderTable();renderPagination();await updateStats();showLoad(false);return;}
+    }
+    // العدد الكلي للفلتر الحالي (بدون تحميل الصفوف)
+    const {count}=await buildTripsQuery('id',{count:'exact',head:true});
+    totalCount=count||0;
+    const maxPage=Math.max(1,Math.ceil(totalCount/pageSize));
+    if(currentPage>maxPage) currentPage=maxPage;
+    // الصفحة الحالية فقط (40 صف)
+    const from=(currentPage-1)*pageSize;
+    const {data}=await buildTripsQuery('*').order(sortCol,{ascending:sortDir>0}).range(from,from+pageSize-1);
+    pageRows=data||[];
+    // تقييمات الـ40 المعروضين فقط
     tripPerf={};
-    const ids=allTrips.map(t=>t.id);
-    for(let i=0;i<ids.length;i+=150){
-      const chunk=ids.slice(i,i+150);
-      const {data:pf}=await db.from('v_trip_perf').select('*').in('trip_id',chunk);
+    const ids=pageRows.map(t=>t.id);
+    if(ids.length){
+      const {data:pf}=await db.from('v_trip_perf').select('*').in('trip_id',ids);
       (pf||[]).forEach(p=>{tripPerf[p.trip_id]=p;});
     }
-    updateCounts();
-    applyFilters();
+    document.getElementById('resultCount').textContent=`${totalCount} رحلة`;
+    await updateStats();
+    renderTable();
+    renderPagination();
+    const tw=document.querySelector('.table-wrap'); if(tw) tw.scrollTop=0;
   }catch(e){console.error(e);}
   showLoad(false);
 }
@@ -209,73 +247,66 @@ function fmDur(from,to){
   return Math.floor(m/60)+'س'+(m%60?m%60+'د':'');
 }
 
-function updateCounts(){
+function _branchScoped(q){
+  const bv=document.getElementById('branchFilter')?.value;
+  if(bv) return q.eq('branch_id',bv);
+  if(currentUser?.role!=='admin'&&currentUser?.branch_id) return q.eq('branch_id',currentUser.branch_id);
+  return q;
+}
+function _periodCount(){
+  let q=_branchScoped(db.from('trips').select('id',{count:'exact',head:true}));
+  const dFrom=document.getElementById('dateFrom').value, dTo=document.getElementById('dateTo').value;
+  if(dFrom) q=q.gte('created_at',dFrom);
+  if(dTo) q=q.lte('created_at',dTo+'T23:59:59');
+  return q;
+}
+// إحصائيات عبر count سريع (بدون تحميل الصفوف)
+async function updateStats(){
   const setOpt=(id,label,n)=>{const e=document.getElementById(id);if(e)e.textContent=`${label} (${n})`;};
-  setOpt('opt-all','كل الرحلات',allTrips.length);
-  setOpt('opt-active','جارية',allTrips.filter(t=>t.status==='active').length);
-  setOpt('opt-completed','مكتملة',allTrips.filter(t=>t.status==='completed').length);
-
-  const today=new Date();today.setHours(0,0,0,0);
-  const todayTrips=allTrips.filter(t=>new Date(t.created_at)>=today);
-
-  const avgDur=()=>{
-    const done=todayTrips.filter(t=>t.status==='completed'&&t.updated_at&&t.created_at);
-    if(!done.length)return '—';
-    const avg=done.reduce((s,t)=>s+(new Date(t.updated_at)-new Date(t.created_at))/60000,0)/done.length;
-    return Math.round(avg)+'د';
-  };
-  document.getElementById('statsRow').innerHTML=`
-    <div class="stat-item"><div class="stat-dot" style="background:#0891b2"></div><span class="stat-val" style="color:#0891b2">${allTrips.filter(t=>t.status==='active').length}</span><span>رحلة جارية</span></div>
-    <div class="stat-item"><div class="stat-dot" style="background:#16a34a"></div><span class="stat-val" style="color:#16a34a">${todayTrips.filter(t=>t.status==='completed').length}</span><span>مكتملة اليوم</span></div>
-
-    <div class="stat-item"><div class="stat-dot" style="background:#7c3aed"></div><span class="stat-val" style="color:#7c3aed">${avgDur()}</span><span>متوسط مدة الرحلة</span></div>
-    <div class="stat-item" style="margin-right:auto"><span style="font-size:.7rem;color:var(--text-muted)">إجمالي الرحلات: <strong>${allTrips.length}</strong></span></div>`;
+  const todayStr=new Date().toISOString().split('T')[0];
+  try{
+    const [allR,actR,compR,todayR]=await Promise.all([
+      _periodCount(),
+      _periodCount().eq('status','active'),
+      _periodCount().eq('status','completed'),
+      _branchScoped(db.from('trips').select('id',{count:'exact',head:true})).eq('status','completed').gte('created_at',todayStr)
+    ]);
+    setOpt('opt-all','كل الرحلات',allR.count||0);
+    setOpt('opt-active','جارية',actR.count||0);
+    setOpt('opt-completed','مكتملة',compR.count||0);
+    // متوسط مدة الرحلات المكتملة في الصفحة المعروضة
+    const done=pageRows.filter(t=>t.status==='completed'&&t.updated_at&&t.created_at);
+    const avg=done.length?Math.round(done.reduce((s,t)=>s+(new Date(t.updated_at)-new Date(t.created_at))/60000,0)/done.length)+'د':'—';
+    document.getElementById('statsRow').innerHTML=`
+      <div class="stat-item"><div class="stat-dot" style="background:#0891b2"></div><span class="stat-val" style="color:#0891b2">${actR.count||0}</span><span>رحلة جارية</span></div>
+      <div class="stat-item"><div class="stat-dot" style="background:#16a34a"></div><span class="stat-val" style="color:#16a34a">${todayR.count||0}</span><span>مكتملة اليوم</span></div>
+      <div class="stat-item"><div class="stat-dot" style="background:#7c3aed"></div><span class="stat-val" style="color:#7c3aed">${avg}</span><span>متوسط مدة (الصفحة)</span></div>
+      <div class="stat-item" style="margin-right:auto"><span style="font-size:.7rem;color:var(--text-muted)">إجمالي الرحلات: <strong>${totalCount}</strong></span></div>`;
+  }catch(e){console.error(e);}
 }
 
 function setStatus(s){
   statusFilter=s;
   currentPage=1;
-  applyFilters();
+  loadAll();
 }
 
 function sortBy(col){
   if(sortCol===col)sortDir*=-1;else{sortCol=col;sortDir=-1;}
-  applyFilters();
+  currentPage=1;
+  loadAll();
 }
 
+// أي تغيير في الفلاتر (بحث/تاريخ/أداء) → رجوع للصفحة 1 وإعادة تحميل من السيرفر (مع تهدئة للبحث)
+let _searchTimer=null;
 function applyFilters(){
-  const search=document.getElementById('searchInput').value.toLowerCase();
-  const dateFrom=document.getElementById('dateFrom').value;
-  const dateTo=document.getElementById('dateTo').value;
-
-  const perfF=document.getElementById('perfFilter').value;
-
-  filtered=allTrips.filter(t=>{
-    if(statusFilter&&t.status!==statusFilter)return false;
-    if(perfF&&(tripPerf[t.id]?.rating||'')!==perfF)return false;
-    if(search&&!(t.driver_name||'').toLowerCase().includes(search)&&
-       !(t.id||'').toLowerCase().includes(search))return false;
-    const dt=new Date(t.created_at);
-    if(dateFrom&&dt<new Date(dateFrom))return false;
-    if(dateTo&&dt>new Date(dateTo+'T23:59:59'))return false;
-    return true;
-  });
-
-  filtered.sort((a,b)=>{
-    let av=a[sortCol],bv=b[sortCol];
-    if(sortCol==='total_amount'||sortCol==='orders_count'){av=Number(av||0);bv=Number(bv||0);}
-    if(!av&&!bv)return 0;if(!av)return 1;if(!bv)return -1;
-    return sortDir*(av>bv?1:-1);
-  });
-
-  document.getElementById('resultCount').textContent=`${filtered.length} رحلة`;
-  renderTable();
-  renderPagination();
+  currentPage=1;
+  clearTimeout(_searchTimer);
+  _searchTimer=setTimeout(loadAll,300);
 }
 
 function renderTable(){
-  const start=(currentPage-1)*pageSize;
-  const page=filtered.slice(start,start+pageSize);
+  const page=pageRows;  // الصفحة محمّلة من السيرفر بالفعل (40 صف)
   const body=document.getElementById('tripsBody');
   if(!page.length){body.innerHTML='<tr><td colspan="10" style="text-align:center;padding:2.5rem;color:var(--text-muted)">📭 لا توجد رحلات</td></tr>';return;}
 
@@ -359,7 +390,7 @@ async function renderTripOrders(tripId){
 
 
   // تقييم الرحلة ككل: مجموع الفعلي مقابل مجموع المتوقع + العودة + إجمالي المسافة
-  const trip=allTrips.find(t=>t.id===tripId)||{};
+  const trip=pageRows.find(t=>t.id===tripId)||{};
   const rExp=Number(trip.return_expected_minutes)||0;
   const rAct=Number(trip.return_actual_minutes)||0;
   const perfOrders=orders.filter(o=>o.perf_rating&&o.expected_minutes!=null&&o.actual_minutes!=null);
@@ -426,8 +457,8 @@ async function renderTripOrders(tripId){
 }
 
 function renderPagination(){
-  const total=Math.ceil(filtered.length/pageSize);
-  document.getElementById('pageInfo').textContent=`صفحة ${currentPage} من ${total} · ${filtered.length} رحلة`;
+  const total=Math.max(1,Math.ceil(totalCount/pageSize));
+  document.getElementById('pageInfo').textContent=`صفحة ${currentPage} من ${total} · ${totalCount} رحلة`;
   const btns=document.getElementById('pageBtns');
   if(total<=1){btns.innerHTML='';return;}
   let html=`<button class="page-btn" onclick="goPage(${currentPage-1})" ${currentPage===1?'disabled':''}>‹</button>`;
@@ -438,12 +469,10 @@ function renderPagination(){
 }
 
 function goPage(p){
-  const total=Math.ceil(filtered.length/pageSize);
+  const total=Math.max(1,Math.ceil(totalCount/pageSize));
   if(p<1||p>total)return;
   currentPage=p;
-  renderTable();
-  renderPagination();
-  document.querySelector('.table-wrap').scrollTop=0;
+  loadAll();  // يجيب صفحة السيرفر الجديدة (40 صف)
 }
 
 function showLoad(s){document.getElementById('lo').classList.toggle('show',s);}
