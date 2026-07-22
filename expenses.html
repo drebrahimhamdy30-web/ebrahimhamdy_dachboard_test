@@ -57,6 +57,23 @@
     .rule-text { font-size:0.85rem; color:var(--text-primary); }
     .rule-text b { color:var(--accent-dark); }
     .rule-label { font-size:0.72rem; color:var(--text-muted); margin-top:2px; }
+
+    /* بحث عميل */
+    .cust-search-bar {
+      display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end;
+      background:var(--surface-3); border:1px solid var(--border); border-radius:14px;
+      padding:14px; margin-bottom:16px;
+    }
+    .cust-card {
+      background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md);
+      padding:16px 18px; max-width:420px;
+    }
+    .cust-row { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px dashed var(--border); font-size:0.85rem; }
+    .cust-row:last-child { border-bottom:none; }
+    .cust-row span { color:var(--text-muted); }
+    .cust-row b { color:var(--text-primary); font-weight:700; }
+    .cust-balance b.pos { color:#16a34a; }
+    .cust-balance b.neg { color:#dc2626; }
   </style>
 </head>
 <body>
@@ -81,6 +98,9 @@
         </button>
         <button class="exp-tab-btn" data-tab="rules" onclick="switchTab('rules')">
           <i class="fas fa-filter"></i> قواعد الإخفاء التلقائي
+        </button>
+        <button class="exp-tab-btn" data-tab="customer" onclick="switchTab('customer')">
+          <i class="fas fa-user-check"></i> رصيد عميل
         </button>
       </div>
 
@@ -164,6 +184,30 @@
         </div>
       </div>
 
+      <!-- ===== تاب بحث رصيد عميل ===== -->
+      <div class="exp-tab-content" id="tab-customer">
+        <div class="cust-search-bar">
+          <div class="rule-field">
+            <label>الفرع</label>
+            <select id="custBranch" class="form-select">
+              <option value="المعمورة">المعمورة</option>
+              <option value="سان ستيفانو">سان ستيفانو</option>
+              <option value="سيدى بشر">سيدى بشر</option>
+            </select>
+          </div>
+          <div class="rule-field grow">
+            <label>اسم العميل أو الكود</label>
+            <input type="text" id="custQuery" class="form-input" placeholder="مثلاً: 150 أو ابراهيم حمدى"
+                   onkeydown="if(event.key==='Enter') searchCustomerBalance()">
+          </div>
+          <button class="btn btn-primary" onclick="searchCustomerBalance()">
+            <i class="fas fa-search"></i> بحث
+          </button>
+        </div>
+
+        <div id="cust-result"></div>
+      </div>
+
     </div>
   </div>
 
@@ -222,6 +266,7 @@
       document.querySelectorAll('.exp-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
       document.getElementById('tab-list').classList.toggle('active', name === 'list');
       document.getElementById('tab-rules').classList.toggle('active', name === 'rules');
+      document.getElementById('tab-customer').classList.toggle('active', name === 'customer');
     }
 
     /* ===================== مدى التاريخ السريع ===================== */
@@ -388,6 +433,71 @@
       const { error } = await db.from('erp_expense_hide_rules').delete().eq('id', id);
       if (error) { alert('⚠️ فشل حذف القاعدة: ' + error.message); return; }
       await loadAll();
+    }
+
+    /* ===================== بحث رصيد عميل (n8n / eplus) ===================== */
+    const CUSTOMER_WEBHOOK_BASE = 'https://agent.ebrahimhamdy.com/webhook/';
+    const BRANCH_WEBHOOKS = {
+      'المعمورة':     'customer_mamora_search',
+      'سان ستيفانو':  'customer_san_search',
+      'سيدى بشر':     'customer_bishr_search'
+    };
+
+    function escapeHtml(str) {
+      return String(str == null ? '' : str)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    async function searchCustomerBalance() {
+      const branch = document.getElementById('custBranch').value;
+      const query  = document.getElementById('custQuery').value.trim();
+      const resEl  = document.getElementById('cust-result');
+
+      if (!query) { alert('اكتب اسم العميل أو الكود'); return; }
+
+      const path   = BRANCH_WEBHOOKS[branch];
+      const isCode = /^\d+$/.test(query);
+      const body   = isCode ? { code: query, name: '' } : { name: query, code: '' };
+
+      resEl.innerHTML = `<div class="empty-note"><i class="fas fa-spinner fa-spin"></i><br>جارِ البحث...</div>`;
+
+      try {
+        const resp = await fetch(CUSTOMER_WEBHOOK_BASE + path, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const json = await resp.json();
+        renderCustomerResult(json);
+      } catch (e) {
+        console.error('customer search error:', e);
+        resEl.innerHTML = `<div class="empty-note"><i class="fas fa-triangle-exclamation"></i><br>حصل خطأ في الاتصال بالسيرفر</div>`;
+      }
+    }
+
+    function renderCustomerResult(json) {
+      const resEl = document.getElementById('cust-result');
+      const outer = Array.isArray(json) ? json[0] : json;
+
+      if (!outer || outer.Message !== 'Success' || !outer.Data || !outer.Data.length) {
+        resEl.innerHTML = `<div class="empty-note"><i class="fas fa-user-slash"></i><br>مفيش عميل مطابق للبحث</div>`;
+        return;
+      }
+
+      const c = outer.Data[0];
+      const balance = parseFloat(c.current_customer_balance) || 0;
+
+      resEl.innerHTML = `
+        <div class="cust-card">
+          <div class="cust-row"><span>الاسم</span><b>${escapeHtml(c.cust_name_ar)}</b></div>
+          <div class="cust-row"><span>الكود</span><b>${escapeHtml(c.cust_code)}</b></div>
+          <div class="cust-row"><span>الموبايل</span><b>${escapeHtml(c.cust_mobileno)}</b></div>
+          <div class="cust-row"><span>النوع</span><b>${escapeHtml(c.cust_type)}</b></div>
+          <div class="cust-row"><span>الحالة</span><b>${c.cust_active === 1 ? 'نشط' : 'غير نشط'}</b></div>
+          <div class="cust-row cust-balance"><span>الرصيد الحالي</span>
+            <b class="${balance < 0 ? 'neg' : 'pos'}">${balance.toLocaleString('ar-EG', {maximumFractionDigits:2})}</b>
+          </div>
+        </div>`;
     }
   </script>
 </body>
