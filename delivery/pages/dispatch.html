@@ -2095,7 +2095,7 @@ async function autoCloseTripIfEmpty(tripId){
     const {data:tripRow} = await db.from('trips').select('status,driver_id').eq('id', tripId).single();
     if(tripRow && tripRow.status === 'active'){
       const now = new Date().toISOString();
-      await db.from('trips').update({status:'completed', updated_at:now}).eq('id', tripId);
+      await db.from('trips').update({status:'completed', completed_at:now, updated_at:now}).eq('id', tripId);
       await addTripLog(tripId, 'trip_completed', {auto:true, reason:'empty_trip'});
       // ملحوظة: لا نحدّث last_completed_at هنا عمداً — الطيار محتفظ بمكانه في الطابور
     }
@@ -2489,7 +2489,7 @@ async function completeTrip(tripId){
   showLoading(true);
   const nowC=new Date().toISOString();
   const tripRow=activeTrips.find(t=>t.id===tripId);
-  await db.from('trips').update({status:'completed',updated_at:nowC}).eq('id',tripId);
+  await db.from('trips').update({status:'completed',completed_at:nowC,updated_at:nowC}).eq('id',tripId);
   if(oIds.length)await db.from('orders').update({status:'completed',completed_at:nowC,updated_at:nowC}).in('id',oIds);
   await addTripLog(tripId,'trip_completed',{orders:oIds.length});
   for(const id of oIds)await addOrderLog(id,'order_completed',{trip_id:tripId});
@@ -2604,7 +2604,7 @@ async function approveComplete(){
   const deliveredIds=tO.filter(o=>o.status==='delivered').map(o=>o.id);
   if(deliveredIds.length)await db.from('orders').update({status:'completed',completed_at:now,updated_at:now}).in('id',deliveredIds);
   // الرحلة → completed (وقت الموافقة = وقت الإنهاء الفعلي)
-  await db.from('trips').update({status:'completed',updated_at:now}).eq('id',tripId);
+  await db.from('trips').update({status:'completed',completed_at:now,updated_at:now}).eq('id',tripId);
   await addTripLog(tripId,'trip_completed',{by:'admin_approved'});
   for(const id of deliveredIds)await addOrderLog(id,'order_completed',{trip_id:tripId});
   // الطيار فعلاً وصّل واستحق يترتيب آخر الطابور

@@ -357,24 +357,33 @@ async function renderTripOrders(tripId){
 
 
 
-  // تقييم الرحلة ككل: مجموع الفعلي مقابل مجموع المتوقع + إجمالي المسافة
+  // تقييم الرحلة ككل: مجموع الفعلي مقابل مجموع المتوقع + العودة + إجمالي المسافة
+  const trip=allTrips.find(t=>t.id===tripId)||{};
+  const rExp=Number(trip.return_expected_minutes)||0;
+  const rAct=Number(trip.return_actual_minutes)||0;
   const perfOrders=orders.filter(o=>o.perf_rating&&o.expected_minutes!=null&&o.actual_minutes!=null);
   let tripRatingHtml='';
   if(perfOrders.length){
-    const sa=perfOrders.reduce((s,o)=>s+Number(o.actual_minutes),0);
-    const se=perfOrders.reduce((s,o)=>s+Number(o.expected_minutes),0);
+    const sa=perfOrders.reduce((s,o)=>s+Number(o.actual_minutes),0)+rAct;
+    const se=perfOrders.reduce((s,o)=>s+Number(o.expected_minutes),0)+rExp;
     const ratio=se>0?sa/se:1;
     const trate=ratio<=0.90?'ممتاز':ratio>=1.10?'متأخر':'جيد';
     const tc=trate==='ممتاز'?'#16a34a':trate==='متأخر'?'#dc2626':'#ca8a04';
     tripRatingHtml=`<span style="font-size:.7rem;font-weight:700;color:${tc};background:${tc}14;border-radius:6px;padding:.15rem .5rem">تقييم الرحلة: ${trate} · فعلي ${sa.toFixed(0)} / متوقع ${se.toFixed(0)} د</span>`;
   }
-  const sumDist=orders.reduce((s,o)=>s+(Number(o.distance_meters)||0),0);
+  // بادج مرحلة العودة للصيدلية
+  let returnHtml='';
+  if(trip.return_rating){
+    const rc=trip.return_rating==='ممتاز'?'#16a34a':trip.return_rating==='متأخر'?'#dc2626':'#ca8a04';
+    returnHtml=`<span style="font-size:.7rem;font-weight:700;color:${rc};background:${rc}14;border-radius:6px;padding:.15rem .5rem">العودة: ${trip.return_rating} · فعلي ${rAct.toFixed(0)} / متوقع ${rExp.toFixed(0)} د</span>`;
+  }
+  const sumDist=orders.reduce((s,o)=>s+(Number(o.distance_meters)||0),0)+(Number(trip.return_distance_meters)||0);
   const kmHtml=sumDist>0?`<span style="font-size:.7rem;font-weight:700;color:#0e7490;background:#0e749014;border-radius:6px;padding:.15rem .5rem">المسافة: ${(sumDist/1000).toFixed(1)} كم</span>`:'';
 
   container.innerHTML=`
     <div style="display:flex;align-items:center;justify-content:space-between;gap:.4rem;flex-wrap:wrap;margin-bottom:.4rem;padding-bottom:.4rem;border-bottom:1px solid var(--border)">
       <span style="font-size:.72rem;font-weight:700;color:var(--text-muted)">${orders.length} طلب في الرحلة</span>
-      <span style="display:flex;gap:.4rem;flex-wrap:wrap">${kmHtml}${tripRatingHtml}</span>
+      <span style="display:flex;gap:.4rem;flex-wrap:wrap">${kmHtml}${returnHtml}${tripRatingHtml}</span>
     </div>
     <table class="orders-inner-table">
       <thead style="background:#f1f5f9">
