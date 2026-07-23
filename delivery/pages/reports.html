@@ -195,10 +195,11 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
   <!-- شرح المعادلة -->
   <div class="card" style="margin-bottom:1rem;background:#fefce8;border-color:#fde68a">
     <div class="card-body" style="font-size:.75rem;color:#78350f;line-height:1.7">
-      💰 <strong>طريقة الحساب:</strong> لكل طلب مؤهّل، الحافز = <strong>قيمة حافز الطلب × نسبة أداء الطيار</strong>.
-      نسبة الأداء = الوقت المتوقّع ÷ الوقت الفعلي. يعني أداء 100% = القيمة كاملة، 50% = نصفها، 150% = مرة ونص.
-      الطلبات المحتسَبة حسب نطاق التقييم في إعدادات التوزيع (ممتاز فقط / ممتاز وجيد / الكل).
-      <span style="color:#92400e">النسبة مسقوفة بـ 200% لمنع الأخطاء (تسليم فوري) من تضخيم الحافز. طلبات/ساعة تقديرية من ساعات الحضور.</span>
+      💰 <strong>طريقة الحساب:</strong> الحافز = <strong>عدد الطلبات المؤهّلة × قيمة حافز الطلب × التقييم العادل للطيار</strong>.
+      التقييم العادل مأخوذ مباشرة من قسم "تقييم الطيارين العادل" (فعلي ÷ نصيبه المفترض) — أي تعديل هناك ينعكس هنا تلقائياً.
+      يعني تقييم 100% = القيمة كاملة، 50% = نصفها، 150% = مرة ونص.
+      الطلبات المؤهّلة تُحسب حسب نطاق التقييم في إعدادات التوزيع (ممتاز فقط / ممتاز وجيد / الكل).
+      <span style="color:#92400e">التقييم مسقوف بـ 200%. طلبات/ساعة من جلسات الحضور الفعلية.</span>
     </div>
   </div>
 
@@ -341,29 +342,32 @@ async function loadIncentiveSettings() {
   (data||[]).forEach(s => { incSettingsMap[s.branch_id] = s; });
 }
 
-// ساعات عمل تقديرية لكل طيار من جلسات الحضور (approved_at → ended_at)
+// ساعات عمل لكل طيار من جلسات الحضور (نفس منطق fair-score: نبني الجلسات
+// من تسلسل online/offline لأن ended_at غالباً فاضي في البيانات)
 async function computeWorkedHours(from, to) {
-  const { data } = await db.from('driver_attendance')
-    .select('driver_id,approved_at,ended_at').gte('date', from).lte('date', to);
+  const rows = await _fsFetchAll(() => db.from('driver_attendance')
+    .select('driver_id,status,approved_at,ended_at,date')
+    .in('status', ['online', 'offline', 'break'])
+    .not('approved_at', 'is', null)
+    .gte('date', from).lte('date', to)
+    .order('date', { ascending: true }));
+  const sessions = buildAttendanceSessions(rows || []);
   const m = {};
-  (data||[]).forEach(r => {
-    if (!r.approved_at || !r.ended_at) return;
-    const h = (new Date(r.ended_at) - new Date(r.approved_at)) / 3600000;
-    if (h > 0 && h < 24) m[r.driver_id] = (m[r.driver_id]||0) + h;
-  });
+  sessions.forEach(s => { const h = (s.end - s.start) / 3600000; if (h > 0) m[s.driver_id] = (m[s.driver_id]||0) + h; });
   return m;
 }
 
 function incScope(s) {
   return (s && s.incentive_rating_enabled !== false) ? (s.incentive_rating_scope || 'excellent_good') : 'all';
 }
+// هل يُحتسب الطلب في الحافز حسب النطاق؟ (الكل = أي طلب مسلّم؛ غيره حسب التقييم)
 function orderQualifies(o, s) {
   if (!s || s.incentive_enabled !== true) return false;
-  if (!(o.perf_rating && o.expected_minutes != null && o.actual_minutes != null && Number(o.actual_minutes) > 0)) return false;
   const scope = incScope(s);
+  if (scope === 'all') return ['delivered','completed'].includes(o.status);
+  if (!o.perf_rating) return false;
   if (scope === 'excellent') return o.perf_rating === 'ممتاز';
-  if (scope === 'excellent_good') return o.perf_rating === 'ممتاز' || o.perf_rating === 'جيد';
-  return true; // all
+  return o.perf_rating === 'ممتاز' || o.perf_rating === 'جيد'; // excellent_good
 }
 
 async function loadIncentivesTab(from, to) {
@@ -372,33 +376,43 @@ async function loadIncentivesTab(from, to) {
   if (!incSettingsMap) await loadIncentiveSettings();
   if (!driversCache) { const { data } = await db.from('drivers').select('id,full_name'); driversCache = data || []; }
   const nameById = {}; driversCache.forEach(d => nameById[d.id] = d.full_name);
+
+  // 1) التقييم العادل (كفاءة = فعلي ÷ نصيب مفترض) — نفس منطق قسم "تقييم الطيارين العادل"
+  const fair = await computeFairScores(from, to, effectiveBranch() || null);
+  const effById = {}, expById = {}, actById = {};
+  fair.rows.forEach(r => { effById[r.driver_id] = r.efficiency; expById[r.driver_id] = r.expected; actById[r.driver_id] = r.actual; });
+
+  // 2) ساعات العمل (لشرط الحد الأدنى للطلبات/ساعة)
   const hours = await computeWorkedHours(from, to);
 
+  // 3) عدّ الطلبات المؤهّلة حسب النطاق لكل طيار (مع إعدادات فرعه)
   const byDrv = {};
   reportOrders.forEach(o => {
     const drv = o.driver_id; if (!drv) return;
     const s = incSettingsMap[o.branch_id];
-    if (!byDrv[drv]) byDrv[drv] = { name: nameById[drv] || o.deliveryman || '—', q: 0, bonus: 0, ratioSum: 0, delivered: 0, s: s };
+    if (!byDrv[drv]) byDrv[drv] = { name: nameById[drv] || o.deliveryman || '—', q: 0, delivered: 0, s: s };
     const rec = byDrv[drv]; rec.s = s || rec.s;
     if (['delivered','completed'].includes(o.status)) rec.delivered++;
-    if (!orderQualifies(o, s)) return;
-    const base = (s.incentive_per_order_enabled !== false) ? Number(s.incentive_per_order || 0) : 0;
-    let ratio = Number(o.expected_minutes) / Number(o.actual_minutes);
-    if (!isFinite(ratio) || ratio < 0) ratio = 0;
-    ratio = Math.min(ratio, RATING_CAP);
-    rec.q++; rec.ratioSum += ratio; rec.bonus += base * ratio;
+    if (orderQualifies(o, s)) rec.q++;
   });
 
+  // 4) الحافز = عدد الطلبات المؤهّلة × قيمة الطلب × التقييم العادل (مسقوف)
   const rows = Object.entries(byDrv).map(([id, r]) => {
     const s = r.s || {};
+    const eff = effById[id]; // قد تكون null (وصّل بدون جلسة حضور)
+    const effPct = eff == null ? null : Math.round(eff * 100);
+    const effUsed = eff == null ? 0 : Math.min(eff, RATING_CAP);
+    const base = (s.incentive_per_order_enabled !== false) ? Number(s.incentive_per_order || 0) : 0;
+    const rawBonus = r.q * base * effUsed;
     const hrs = hours[id] || 0;
     const oph = hrs > 0 ? r.delivered / hrs : 0;
     const minEnabled = s.incentive_min_enabled === true;
     const minOph = Number(s.incentive_min_orders_per_hour || 0);
     const meetsMin = !minEnabled || (hrs > 0 ? oph >= minOph : true); // بدون ساعات لا نعاقب
-    const avgRatioPct = r.q > 0 ? Math.round((r.ratioSum / r.q) * 100) : 0;
-    return { id, name: r.name, q: r.q, delivered: r.delivered, avgRatioPct, hrs, oph,
-      minEnabled, minOph, meetsMin, wouldBe: r.bonus, bonus: meetsMin ? r.bonus : 0,
+    return { id, name: r.name, q: r.q, delivered: r.delivered, effPct,
+      expected: expById[id] ?? 0, actual: actById[id] ?? r.delivered,
+      hrs, oph, minEnabled, minOph, meetsMin,
+      wouldBe: rawBonus, bonus: meetsMin ? rawBonus : 0,
       incentiveOn: s.incentive_enabled === true };
   }).filter(r => r.incentiveOn).sort((a, b) => b.bonus - a.bonus);
 
@@ -429,13 +443,17 @@ function renderIncentiveTable(rows) {
       <thead><tr style="text-align:right;color:var(--text-muted);border-bottom:2px solid var(--border)">
         <th style="padding:.5rem">الطيار</th>
         <th style="padding:.5rem">طلبات مؤهلة</th>
-        <th style="padding:.5rem">متوسط الأداء</th>
+        <th style="padding:.5rem" title="نصيبه المفترض من الطلبات وقت حضوره">نصيبه</th>
+        <th style="padding:.5rem" title="اللي وصّله فعلاً">وصّل</th>
+        <th style="padding:.5rem" title="التقييم العادل = فعلي ÷ نصيبه">التقييم العادل</th>
         ${anyMin ? '<th style="padding:.5rem">طلبات/ساعة</th><th style="padding:.5rem">الحالة</th>' : ''}
         <th style="padding:.5rem;text-align:left">الحافز</th>
       </tr></thead>
       <tbody>
         ${rows.map(r => {
-          const rc = r.avgRatioPct >= 100 ? '#16a34a' : r.avgRatioPct >= 70 ? '#ca8a04' : '#dc2626';
+          const e = r.effPct;
+          const rc = e == null ? 'var(--text-muted)' : e >= 110 ? '#16a34a' : e >= 90 ? '#ca8a04' : e >= 70 ? '#ea580c' : '#dc2626';
+          const effTxt = e == null ? '—' : e + '%';
           const statusCell = !r.minEnabled ? '' :
             (r.meetsMin
               ? `<td style="padding:.5rem"><span style="color:#16a34a">✓ مؤهل</span></td>`
@@ -448,7 +466,9 @@ function renderIncentiveTable(rows) {
           return `<tr style="border-bottom:1px solid var(--border)">
             <td style="padding:.5rem;font-weight:700">${r.name}</td>
             <td style="padding:.5rem">${r.q}</td>
-            <td style="padding:.5rem;color:${rc};font-weight:700">${r.avgRatioPct}%</td>
+            <td style="padding:.5rem">${r.expected.toFixed(1)}</td>
+            <td style="padding:.5rem;font-weight:700">${r.actual}</td>
+            <td style="padding:.5rem;color:${rc};font-weight:700">${effTxt}</td>
             ${ophCell}${statusCell}${bonusCell}
           </tr>`;
         }).join('')}
@@ -457,9 +477,10 @@ function renderIncentiveTable(rows) {
 }
 
 function exportIncentivesCSV() {
-  const headers = ['الطيار','طلبات مؤهلة','متوسط الأداء %','طلبات/ساعة','مؤهل','الحافز (ج)'];
+  const headers = ['الطيار','طلبات مؤهلة','نصيبه المفترض','وصّل فعلاً','التقييم العادل %','طلبات/ساعة','مؤهل','الحافز (ج)'];
   const rows = lastIncentiveRows.map(r => [
-    r.name, r.q, r.avgRatioPct, (r.hrs > 0 ? r.oph.toFixed(1) : ''),
+    r.name, r.q, r.expected.toFixed(1), r.actual, (r.effPct == null ? '' : r.effPct),
+    (r.hrs > 0 ? r.oph.toFixed(1) : ''),
     (r.minEnabled ? (r.meetsMin ? 'نعم' : 'لا') : '—'),
     r.bonus.toFixed(2)
   ]);
