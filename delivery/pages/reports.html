@@ -77,6 +77,7 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
 <div style="display:flex;gap:.5rem;margin-bottom:1rem;border-bottom:1px solid var(--border)">
   <button id="tabBtn-drivers" onclick="switchTab('drivers')" style="background:none;border:none;border-bottom:3px solid var(--primary);color:var(--primary);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تقارير الطيارين</button>
   <button id="tabBtn-orders" onclick="switchTab('orders')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تقارير الطلبات</button>
+  <button id="tabBtn-incentives" onclick="switchTab('incentives')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">حوافز الطيارين</button>
 </div>
 
 <!-- ========== TAB: تقارير الطيارين ========== -->
@@ -188,6 +189,36 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
 
 </div><!-- /tab-orders -->
 
+<!-- ========== TAB: حوافز الطيارين ========== -->
+<div id="tab-incentives" style="display:none">
+
+  <!-- شرح المعادلة -->
+  <div class="card" style="margin-bottom:1rem;background:#fefce8;border-color:#fde68a">
+    <div class="card-body" style="font-size:.75rem;color:#78350f;line-height:1.7">
+      💰 <strong>طريقة الحساب:</strong> لكل طلب مؤهّل، الحافز = <strong>قيمة حافز الطلب × نسبة أداء الطيار</strong>.
+      نسبة الأداء = الوقت المتوقّع ÷ الوقت الفعلي. يعني أداء 100% = القيمة كاملة، 50% = نصفها، 150% = مرة ونص.
+      الطلبات المحتسَبة حسب نطاق التقييم في إعدادات التوزيع (ممتاز فقط / ممتاز وجيد / الكل).
+      <span style="color:#92400e">النسبة مسقوفة بـ 200% لمنع الأخطاء (تسليم فوري) من تضخيم الحافز. طلبات/ساعة تقديرية من ساعات الحضور.</span>
+    </div>
+  </div>
+
+  <div class="kpi-grid" id="incKpiGrid"></div>
+
+  <div class="export-row">
+    <button class="btn btn-outline btn-sm" onclick="exportIncentivesCSV()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      تصدير CSV
+    </button>
+  </div>
+
+  <div class="card" style="margin-bottom:1.25rem">
+    <div class="card-header"><span class="card-title">حافز كل طيار</span>
+      <span style="font-size:.68rem;color:var(--text-muted)" id="incNote"></span></div>
+    <div class="card-body" id="incBody"><div class="empty-state"><p>اختر الفترة</p></div></div>
+  </div>
+
+</div><!-- /tab-incentives -->
+
 <div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -261,9 +292,10 @@ function setPrevMonth() {
 let currentTab = 'drivers';
 function switchTab(tab) {
   currentTab = tab;
-  document.getElementById('tab-drivers').style.display = tab==='drivers' ? '' : 'none';
-  document.getElementById('tab-orders').style.display  = tab==='orders'  ? '' : 'none';
-  for (const t of ['drivers','orders']) {
+  document.getElementById('tab-drivers').style.display    = tab==='drivers'    ? '' : 'none';
+  document.getElementById('tab-orders').style.display     = tab==='orders'     ? '' : 'none';
+  document.getElementById('tab-incentives').style.display = tab==='incentives' ? '' : 'none';
+  for (const t of ['drivers','orders','incentives']) {
     const b = document.getElementById('tabBtn-'+t);
     const on = t===tab;
     b.style.borderBottomColor = on ? 'var(--primary)' : 'transparent';
@@ -292,7 +324,150 @@ async function loadReport() {
   renderDriverRankings();
   await loadFairScores(from, to);
   await loadOrdersTab(from, to);
+  await loadIncentivesTab(from, to);
   showLoading(false);
+}
+
+// ===== تاب حوافز الطيارين =====
+const RATING_CAP = 2.0; // سقف نسبة الأداء (200%) — يمنع خطأ التسليم الفوري من تضخيم الحافز
+
+let incSettingsMap = null; // branch_id -> إعدادات الحوافز
+let lastIncentiveRows = [];
+
+async function loadIncentiveSettings() {
+  const { data } = await db.from('dispatch_settings').select(
+    'branch_id,incentive_enabled,incentive_rating_enabled,incentive_rating_scope,incentive_per_order_enabled,incentive_per_order,incentive_min_enabled,incentive_min_orders_per_hour');
+  incSettingsMap = {};
+  (data||[]).forEach(s => { incSettingsMap[s.branch_id] = s; });
+}
+
+// ساعات عمل تقديرية لكل طيار من جلسات الحضور (approved_at → ended_at)
+async function computeWorkedHours(from, to) {
+  const { data } = await db.from('driver_attendance')
+    .select('driver_id,approved_at,ended_at').gte('date', from).lte('date', to);
+  const m = {};
+  (data||[]).forEach(r => {
+    if (!r.approved_at || !r.ended_at) return;
+    const h = (new Date(r.ended_at) - new Date(r.approved_at)) / 3600000;
+    if (h > 0 && h < 24) m[r.driver_id] = (m[r.driver_id]||0) + h;
+  });
+  return m;
+}
+
+function incScope(s) {
+  return (s && s.incentive_rating_enabled !== false) ? (s.incentive_rating_scope || 'excellent_good') : 'all';
+}
+function orderQualifies(o, s) {
+  if (!s || s.incentive_enabled !== true) return false;
+  if (!(o.perf_rating && o.expected_minutes != null && o.actual_minutes != null && Number(o.actual_minutes) > 0)) return false;
+  const scope = incScope(s);
+  if (scope === 'excellent') return o.perf_rating === 'ممتاز';
+  if (scope === 'excellent_good') return o.perf_rating === 'ممتاز' || o.perf_rating === 'جيد';
+  return true; // all
+}
+
+async function loadIncentivesTab(from, to) {
+  const el = document.getElementById('incBody');
+  if (!from || !to) { el.innerHTML = '<div class="empty-state"><p>اختر الفترة</p></div>'; return; }
+  if (!incSettingsMap) await loadIncentiveSettings();
+  if (!driversCache) { const { data } = await db.from('drivers').select('id,full_name'); driversCache = data || []; }
+  const nameById = {}; driversCache.forEach(d => nameById[d.id] = d.full_name);
+  const hours = await computeWorkedHours(from, to);
+
+  const byDrv = {};
+  reportOrders.forEach(o => {
+    const drv = o.driver_id; if (!drv) return;
+    const s = incSettingsMap[o.branch_id];
+    if (!byDrv[drv]) byDrv[drv] = { name: nameById[drv] || o.deliveryman || '—', q: 0, bonus: 0, ratioSum: 0, delivered: 0, s: s };
+    const rec = byDrv[drv]; rec.s = s || rec.s;
+    if (['delivered','completed'].includes(o.status)) rec.delivered++;
+    if (!orderQualifies(o, s)) return;
+    const base = (s.incentive_per_order_enabled !== false) ? Number(s.incentive_per_order || 0) : 0;
+    let ratio = Number(o.expected_minutes) / Number(o.actual_minutes);
+    if (!isFinite(ratio) || ratio < 0) ratio = 0;
+    ratio = Math.min(ratio, RATING_CAP);
+    rec.q++; rec.ratioSum += ratio; rec.bonus += base * ratio;
+  });
+
+  const rows = Object.entries(byDrv).map(([id, r]) => {
+    const s = r.s || {};
+    const hrs = hours[id] || 0;
+    const oph = hrs > 0 ? r.delivered / hrs : 0;
+    const minEnabled = s.incentive_min_enabled === true;
+    const minOph = Number(s.incentive_min_orders_per_hour || 0);
+    const meetsMin = !minEnabled || (hrs > 0 ? oph >= minOph : true); // بدون ساعات لا نعاقب
+    const avgRatioPct = r.q > 0 ? Math.round((r.ratioSum / r.q) * 100) : 0;
+    return { id, name: r.name, q: r.q, delivered: r.delivered, avgRatioPct, hrs, oph,
+      minEnabled, minOph, meetsMin, wouldBe: r.bonus, bonus: meetsMin ? r.bonus : 0,
+      incentiveOn: s.incentive_enabled === true };
+  }).filter(r => r.incentiveOn).sort((a, b) => b.bonus - a.bonus);
+
+  lastIncentiveRows = rows;
+  renderIncentiveKPIs(rows);
+  renderIncentiveTable(rows);
+}
+
+function renderIncentiveKPIs(rows) {
+  const totalBonus = rows.reduce((s, r) => s + r.bonus, 0);
+  const totalOrders = rows.reduce((s, r) => s + r.q, 0);
+  const eligible = rows.filter(r => r.bonus > 0).length;
+  document.getElementById('incKpiGrid').innerHTML = `
+    <div class="stat-card"><div class="stat-label">إجمالي الحوافز</div><div class="stat-value" style="color:#ca8a04">${totalBonus.toLocaleString('ar-EG',{maximumFractionDigits:2})}</div><div class="stat-sub">جنيه</div></div>
+    <div class="stat-card"><div class="stat-label">طلبات محتسَبة</div><div class="stat-value">${totalOrders}</div></div>
+    <div class="stat-card"><div class="stat-label">طيارين لهم حافز</div><div class="stat-value">${eligible}</div></div>`;
+}
+
+function renderIncentiveTable(rows) {
+  const note = document.getElementById('incNote');
+  const el = document.getElementById('incBody');
+  const anyMin = rows.some(r => r.minEnabled);
+  note.textContent = `(${rows.length} طيار)`;
+  if (!rows.length) { el.innerHTML = '<div class="empty-state"><p>لا يوجد طيارين بحافز في هذه الفترة (تأكد من تفعيل الحوافز في إعدادات التوزيع)</p></div>'; return; }
+  el.innerHTML = `
+    <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:.78rem">
+      <thead><tr style="text-align:right;color:var(--text-muted);border-bottom:2px solid var(--border)">
+        <th style="padding:.5rem">الطيار</th>
+        <th style="padding:.5rem">طلبات مؤهلة</th>
+        <th style="padding:.5rem">متوسط الأداء</th>
+        ${anyMin ? '<th style="padding:.5rem">طلبات/ساعة</th><th style="padding:.5rem">الحالة</th>' : ''}
+        <th style="padding:.5rem;text-align:left">الحافز</th>
+      </tr></thead>
+      <tbody>
+        ${rows.map(r => {
+          const rc = r.avgRatioPct >= 100 ? '#16a34a' : r.avgRatioPct >= 70 ? '#ca8a04' : '#dc2626';
+          const statusCell = !r.minEnabled ? '' :
+            (r.meetsMin
+              ? `<td style="padding:.5rem"><span style="color:#16a34a">✓ مؤهل</span></td>`
+              : `<td style="padding:.5rem"><span style="color:#dc2626" title="أقل من الحد الأدنى ${r.minOph} طلب/ساعة">✗ أقل من الحد</span></td>`);
+          const ophCell = !r.minEnabled ? '' :
+            `<td style="padding:.5rem">${r.hrs > 0 ? r.oph.toFixed(1) : '—'}</td>`;
+          const bonusCell = (r.minEnabled && !r.meetsMin)
+            ? `<td style="padding:.5rem;text-align:left"><span style="text-decoration:line-through;color:var(--text-muted)">${r.wouldBe.toLocaleString('ar-EG',{maximumFractionDigits:2})}</span> <strong style="color:#dc2626">0 ج</strong></td>`
+            : `<td style="padding:.5rem;text-align:left;font-weight:800;color:#ca8a04">${r.bonus.toLocaleString('ar-EG',{maximumFractionDigits:2})} ج</td>`;
+          return `<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:.5rem;font-weight:700">${r.name}</td>
+            <td style="padding:.5rem">${r.q}</td>
+            <td style="padding:.5rem;color:${rc};font-weight:700">${r.avgRatioPct}%</td>
+            ${ophCell}${statusCell}${bonusCell}
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table></div>`;
+}
+
+function exportIncentivesCSV() {
+  const headers = ['الطيار','طلبات مؤهلة','متوسط الأداء %','طلبات/ساعة','مؤهل','الحافز (ج)'];
+  const rows = lastIncentiveRows.map(r => [
+    r.name, r.q, r.avgRatioPct, (r.hrs > 0 ? r.oph.toFixed(1) : ''),
+    (r.minEnabled ? (r.meetsMin ? 'نعم' : 'لا') : '—'),
+    r.bonus.toFixed(2)
+  ]);
+  const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+  const blob = new Blob(['﻿'+csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `حوافز_الطيارين_${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
 }
 
 // ===== تاب تقارير الطلبات =====
