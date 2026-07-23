@@ -226,9 +226,16 @@
           <span class="highlight" id="branch-tag"></span>
         </div>
         <div class="header-actions">
-          <span id="my-daily-count" style="font-size:0.82rem;font-weight:700;color:var(--primary);padding:6px 12px;background:var(--surface-3);border-radius:20px;white-space:nowrap;">
-            📊 معدلك اليومي: <b>0</b>
-          </span>
+          <div style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--surface-3);border-radius:20px;white-space:nowrap;">
+            <span id="my-daily-count" style="font-size:0.82rem;font-weight:700;color:var(--primary);">
+              📊 معدلك اليومي: <b>0</b>
+            </span>
+            <input type="date" id="my-rate-from" class="form-input" title="من تاريخ"
+              onchange="loadMyDailyCount()" style="width:118px;font-size:0.72rem;padding:2px 4px;">
+            <span style="font-size:0.7rem;color:var(--text-muted);">→</span>
+            <input type="date" id="my-rate-to" class="form-input" title="إلى تاريخ"
+              onchange="loadMyDailyCount()" style="width:118px;font-size:0.72rem;padding:2px 4px;">
+          </div>
           <button class="btn btn-secondary" onclick="openFullReport()">
             <i class="fas fa-list-check"></i> تقرير شامل
           </button>
@@ -623,6 +630,7 @@
       currentPage = 1;
       updateBranchTag();
       loadCurrentTab();
+      loadMyDailyCount();
     }
 
     function updateTabUIVisibility() {
@@ -1396,9 +1404,19 @@
     // ===== معدل الجرد اليومي (شخصي + فريق) =====
     async function loadMyDailyCount() {
       try {
-        const todayStr = new Date().toISOString().slice(0, 10);
-        // بنجيب كل تاريخ الموظف (من بداية النظام لحد النهاردة) عشان نحسب معدل حقيقي
-        const stats = await fetchDailyJardStats('2020-01-01', todayStr, userBranch);
+        const todayStr  = new Date().toISOString().slice(0, 10);
+        const fromInput = document.getElementById('my-rate-from');
+        const toInput   = document.getElementById('my-rate-to');
+
+        // افتراضيًا: من بداية النظام لحد النهاردة (زي ما كان الحساب قبل كده)،
+        // لكن دلوقتي المستخدم يقدر يغيّر المدة من حقلي التاريخ جنب البادچ
+        if (fromInput && !fromInput.value) fromInput.value = '2020-01-01';
+        if (toInput   && !toInput.value)   toInput.value   = todayStr;
+
+        const dateFrom = (fromInput && fromInput.value) || '2020-01-01';
+        const dateTo   = (toInput   && toInput.value)   || todayStr;
+
+        const stats = await fetchDailyJardStats(dateFrom, dateTo, userBranch);
         const mine  = stats.filter(s => s.audited_by === employeeName);
         const total = mine.reduce((sum, s) => sum + (parseInt(s.audits_count) || 0), 0);
         const daysWorked = new Set(mine.map(s => s.audit_date)).size;
