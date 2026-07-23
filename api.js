@@ -162,6 +162,28 @@ async function updateData(data) {
   }
 }
 
+// زي updateData بالظبط، لكن بترجع الرد الفعلي اللي راجع من الوركفلو (مش true/false بس)
+// عشان الصفحة تقدر تعرض البيانات "زي ما اتخزنت فعلاً" بدل رسالة عامة، وتكشف أي حقل ناقص.
+// ملحوظة: دي دالة جديدة منفصلة عمداً — updateData() الأصلية فيها استخدامات كتير في صفحات
+// تانية بتتعامل معاها كـ true/false بس، فمش هينفع نغيّر شكل الرجوع بتاعها من غير ما نكسرهم.
+async function updateDataWithResponse(data) {
+  try {
+    const response = await fetch(POST_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    let row = null;
+    try {
+      const raw = await response.json();
+      row = Array.isArray(raw) ? (raw[0] || null) : raw;
+    } catch (e) { /* الرد ممكن يكون فاضي أو مش JSON */ }
+    return { ok: response.ok, data: row };
+  } catch (e) {
+    return { ok: false, data: null };
+  }
+}
+
 async function verifyToken() {
   const token = localStorage.getItem('authToken');
   if (!token) return false;

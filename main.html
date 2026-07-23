@@ -90,6 +90,25 @@
     .lookup-loading.show { display: block; }
     .lookup-found { font-size: 0.75rem; margin-top: 4px; color: var(--success); display: none; }
     .lookup-found.show { display: block; }
+
+    /* كارت تأكيد البيانات "زي ما اتخزنت فعلياً" في الجدول بعد الإرسال */
+    .stored-confirm-card {
+      background: #f0fdf4; border: 1.5px solid #86efac; border-radius: var(--radius-md);
+      padding: 14px 16px; margin-top: 14px;
+    }
+    .stored-confirm-head {
+      font-size: 0.85rem; font-weight: 700; color: #166534; margin-bottom: 10px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .stored-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 6px 0; border-bottom: 1px dashed #bbf7d0; font-size: 0.82rem;
+    }
+    .stored-row:last-child { border-bottom: none; }
+    .stored-row span { color: var(--text-muted); }
+    .stored-row b { color: var(--text-primary); font-weight: 700; }
+    .stored-row.stored-empty { background: #fef2f2; border-radius: 6px; padding-right: 6px; }
+    .stored-row.stored-empty b { color: #dc2626; }
   </style>
 </head>
 <body>
@@ -297,6 +316,13 @@
         <button class="btn-submit-full" id="submitBtn" onclick="submitOrder()">
           <i class="fas fa-paper-plane"></i> إرسال الطلب
         </button>
+
+        <div class="stored-confirm-card" id="storedConfirmCard" style="display:none;">
+          <div class="stored-confirm-head">
+            <i class="fas fa-database"></i> البيانات كما اتخزنت فعلاً في الجدول
+          </div>
+          <div id="storedConfirmBody"></div>
+        </div>
       </div>
 
       <!-- ===== قسم: فاتورة تعاقد ===== -->
@@ -515,7 +541,50 @@
       currentType = type;
       document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
+      hideStoredConfirm();
       handleTypeInit();
+    }
+
+    // ===== تأكيد البيانات "زي ما اتخزنت فعلاً" في الجدول (بعد إرسال طلب شراء/تحويل) =====
+    const STORED_CONFIRM_FIELDS = [
+      { key: 'type',       label: 'نوع الطلب' },
+      { key: 'branch',     label: 'الفرع (المخزَّن)' },
+      { key: 'item_code',  label: 'كود الصنف' },
+      { key: 'item_name',  label: 'اسم الصنف' },
+      { key: 'qty',        label: 'الكمية' },
+      { key: 'cust_code',  label: 'كود العميل' },
+      { key: 'cust_name',  label: 'اسم العميل' },
+      { key: 'order_type', label: 'نوع الطلب (شراء)' },
+      { key: 'state',      label: 'الحالة' },
+      { key: 'note',       label: 'ملاحظات' }
+    ];
+
+    function escapeStoredHtml(str) {
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function showStoredConfirm(row) {
+      const card = document.getElementById('storedConfirmCard');
+      const body = document.getElementById('storedConfirmBody');
+      if (!row) {
+        body.innerHTML = `<div class="stored-row stored-empty"><span>تنبيه</span><b>الطلب اتبعت، بس الرد من السيرفر مكنش فيه بيانات نقدر نعرضها — اتأكد يدويًا من الجدول</b></div>`;
+        card.style.display = 'block';
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      body.innerHTML = STORED_CONFIRM_FIELDS.map(f => {
+        const val   = row[f.key];
+        const empty = (val === null || val === undefined || val === '');
+        return `<div class="stored-row${empty ? ' stored-empty' : ''}">
+          <span>${f.label}</span><b>${empty ? '⚠️ فاضي في الجدول' : escapeStoredHtml(val)}</b>
+        </div>`;
+      }).join('');
+      card.style.display = 'block';
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function hideStoredConfirm() {
+      document.getElementById('storedConfirmCard').style.display = 'none';
     }
 
     function handleTargetType() {
@@ -688,11 +757,26 @@
 
       try {
         const isJardType = (currentType === 'جرد');
-        const success = isJardType
-          ? await updateInventoryAudit(payload)
-          : await updateData(payload);
-        if (success) { showToast(); resetOriginalForm(); }
-        else alert('فشل الإرسال ❌');
+        if (isJardType) {
+          const success = await updateInventoryAudit(payload);
+          if (success) { showToast(); hideStoredConfirm(); resetOriginalForm(); }
+          else alert('فشل الإرسال ❌');
+        } else if (actualType === 'شراء' || actualType === 'تحويل') {
+          // طلب شراء/تحويل: نعرض البيانات "زي ما اتخزنت فعلاً" (مش اللي كتبناه في الفورم)
+          // عشان نتأكد إن التخزين صح ونمسك أي حقل بيضيع
+          const result = await updateDataWithResponse(payload);
+          if (result.ok) {
+            showToast();
+            showStoredConfirm(result.data);
+            resetOriginalForm();
+          } else {
+            alert('فشل الإرسال ❌');
+          }
+        } else {
+          const success = await updateData(payload);
+          if (success) { showToast(); hideStoredConfirm(); resetOriginalForm(); }
+          else alert('فشل الإرسال ❌');
+        }
       } catch(e) { alert('خطأ في الاتصال'); }
       finally {
         btn.disabled  = false;
