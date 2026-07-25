@@ -47,6 +47,17 @@
     .wl-box-machines { margin-top:5px; }
     .wl-box-mline { display:flex; justify-content:space-between; gap:8px; padding:2px 0; border-top:1px dashed var(--border); font-size:0.68rem; }
 
+    /* كارت ماكينة قابل للضغط */
+    .wl-box-clickable { cursor:pointer; transition:all 0.15s; }
+    .wl-box-clickable:hover { border-color:var(--accent); transform:translateY(-1px); box-shadow:0 3px 10px rgba(0,0,0,0.08); }
+    .wl-box-clickable.selected { border-color:var(--accent); border-width:2px; background:var(--surface-3); }
+    .wl-box-clickable.selected .wl-box-name::after { content:' ●'; color:var(--accent); font-size:0.7rem; }
+
+    /* شريط الفلتر النشط */
+    .wl-active-filter { display:none; align-items:center; gap:10px; background:var(--surface-3); border:1px solid var(--accent); border-radius:12px; padding:8px 14px; margin-bottom:12px; font-size:0.8rem; font-weight:700; }
+    .wl-active-filter.show { display:flex; }
+    .wl-clear-filter { background:var(--danger,#dc2626); color:#fff; border:none; border-radius:20px; padding:4px 12px; font-size:0.74rem; font-weight:700; cursor:pointer; font-family:var(--font); }
+
     .badge-sale   { background:#dcfce7; color:#15803d; }
     .badge-refund { background:#ede9fe; color:#7c3aed; }
     .mono { font-family:monospace; font-size:0.72rem; color:var(--text-secondary); }
@@ -97,6 +108,11 @@
       <!-- مجاميع الفروع والماكينات -->
       <div id="wl-groups"></div>
 
+      <div class="wl-active-filter" id="wl-active-filter">
+        <span><i class="fas fa-filter" style="color:var(--accent);"></i> المعاملات المعروضة: <span id="wl-active-machine"></span></span>
+        <button class="wl-clear-filter" onclick="clearMachineFilter()"><i class="fas fa-xmark"></i> إلغاء الفلتر</button>
+      </div>
+
       <div class="wl-group-title"><i class="fas fa-list" style="color:var(--accent);"></i> المعاملات</div>
       <div class="table-wrap">
         <table>
@@ -137,22 +153,30 @@
     // ترتيب ثابت للفروع
     const STORE_ORDER = ['الصيدلية', 'ابراهيم حمدي 2', 'ابراهيم حمدي 3'];
 
+    // ربط فرع المستخدم (اللي في localStorage) بالاسم الموحّد
+    const USER_BRANCH_MAP = {
+      'المعمورة':    'الصيدلية',
+      'سان ستيفانو': 'ابراهيم حمدي 2',
+      'سيدى بشر':   'ابراهيم حمدي 3',
+      'سيدي بشر':   'ابراهيم حمدي 3',
+    };
 
-
-    // الصفحة دي للأدمن فقط (متحكوم فيها من جدول الصلاحيات)
-    const isAdmin    = true;
+    let userBranch   = '';
+    let userRole     = '';
+    let isAdmin      = false;
+    let myStore      = '';
     let allRows      = [];
     let activeQuick  = 'all';
+    let selectedMachine = null;   // الماكينة المختارة لفلترة الجدول
 
     checkAuth().then(async user => {
       if (!user) return;
-      const role = (localStorage.getItem('userRole') || '').trim();
-      if (role !== 'admin') {
-        document.querySelector('.card').innerHTML =
-          '<div class="empty-note">🔒 الصفحة دي متاحة للأدمن بس</div>';
-        return;
-      }
-      document.getElementById('display-branch').textContent = 'كل الفروع';
+      userBranch = (localStorage.getItem('userBranch') || '').trim();
+      userRole   = (localStorage.getItem('userRole')   || '').trim();
+      isAdmin    = (userRole === 'admin');
+      myStore    = USER_BRANCH_MAP[userBranch] || userBranch;
+      document.getElementById('display-branch').textContent = isAdmin ? 'كل الفروع' : myStore;
+      document.getElementById('th-branch').style.display = isAdmin ? '' : 'none';
       await loadWallet();
     });
 
@@ -162,29 +186,16 @@
       tbody.innerHTML = '<tr class="loading-row"><td colspan="8">⏳ جاري جلب البيانات...</td></tr>';
       try {
         const resp = await fetch(WALLET_ENDPOINT);
-        if (!resp.ok) {
-          tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ السيرفر رجّع كود ${resp.status}</td></tr>`;
-          return;
-        }
         const data = await resp.json();
-        // الويب هوك ساعات بيرجّع array وساعات object واحد أو {data:[...]}
-        let rows;
-        if (Array.isArray(data))              rows = data;
-        else if (Array.isArray(data?.data))   rows = data.data;
-        else if (data && typeof data === 'object') rows = [data];
-        else                                  rows = [];
-        // لو الصفوف جاية ملفوفة في {json:{...}} زي شكل n8n
-        rows = rows.map(r => (r && r.json && typeof r.json === 'object') ? r.json : r);
-        console.log('wallet rows:', rows.length, rows[0]);
-        allRows = rows;
-        if (!rows.length) {
-          tbody.innerHTML = '<tr><td colspan="8" class="empty-note">السيرفر رجّع صفر صفوف</td></tr>';
-          return;
+        let rows = Array.isArray(data) ? data : (data.data || []);
+        // لو المستخدم مش أدمن، نعرض فرعه بس
+        if (!isAdmin) {
+          rows = rows.filter(r => storeOf(r) === myStore);
         }
+        allRows = rows;
         applyFilter();
       } catch (e) {
-        console.error('wallet load error:', e);
-        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال بالسيرفر<br><span style="font-size:0.72rem;color:var(--text-muted);">${e.message}</span></td></tr>`;
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال بالسيرفر</td></tr>';
       }
     }
 
@@ -232,17 +243,10 @@
     }
     function pad(n) { return String(n).padStart(2,'0'); }
     // تحويل قيمة الـ datetime-local لملي ثانية بنفس مرجع توقيت مصر
-    // ملاحظة: المتصفح ساعات بيرجّع "2026-07-20T23:59" وساعات "2026-07-20T23:59:00"
     function inputToEgyptMs(v) {
       if (!v) return NaN;
-      let s = String(v).trim();
-      // لو فيه ثواني نسيبها، لو مفيش نضيفها
-      const parts = s.split('T');
-      if (parts.length !== 2) return NaN;
-      const timeParts = parts[1].split(':');
-      if (timeParts.length === 2) s = s + ':00';
       // بنعاملها كأنها UTC عشان تتقارن مع egyptMs مباشرة
-      return Date.parse(s + 'Z');
+      return Date.parse(v + ':00Z');
     }
     // نهارده بتوقيت مصر كـ Date (بمكوّنات UTC)
     function egyptNow() { return toEgypt(new Date().toISOString()); }
@@ -316,6 +320,18 @@
     }
 
     function applyFilter() { render(getFiltered()); }
+
+    /* ===== فلترة الجدول بضغط كارت الماكينة ===== */
+    function toggleMachineFilter(m) {
+      selectedMachine = (selectedMachine === m) ? null : m;
+      applyFilter();
+      // تمرير لأعلى جدول المعاملات عشان يبان الفلتر اشتغل
+      document.getElementById('wl-active-filter').scrollIntoView({ behavior:'smooth', block:'nearest' });
+    }
+    function clearMachineFilter() {
+      selectedMachine = null;
+      applyFilter();
+    }
 
     /* ===================== الرسم ===================== */
     function render(items) {
@@ -426,7 +442,8 @@
         groupsHtml += `<div class="wl-group-title"><i class="fas fa-mobile-screen-button" style="color:var(--accent);"></i> إجمالي كل ماكينة</div><div class="wl-boxes">`;
         groupsHtml += machineKeys.map(m => {
           const v = byMachine[m];
-          return `<div class="wl-box">
+          const sel = selectedMachine === m ? ' selected' : '';
+          return `<div class="wl-box wl-box-clickable${sel}" onclick="toggleMachineFilter('${m.replace(/'/g,"\\'")}')" title="اضغط لعرض معاملات ${m} فقط">
             <div class="wl-box-head">
               <span class="wl-box-name">${m}</span>
               <span class="wl-box-cnt">${v.count} معاملة</span>
@@ -441,12 +458,29 @@
       document.getElementById('wl-groups').innerHTML = groupsHtml;
 
       /* ---------- الجدول ---------- */
-      if (!items.length) {
-        tbody.innerHTML = `<tr><td colspan="${colCount}" class="empty-note">لا توجد معاملات في المدى المحدد</td></tr>`;
+      // شريط الفلتر النشط
+      const afEl = document.getElementById('wl-active-filter');
+      if (selectedMachine) {
+        afEl.classList.add('show');
+        document.getElementById('wl-active-machine').textContent = selectedMachine;
+      } else {
+        afEl.classList.remove('show');
+      }
+
+      // فلترة صفوف الجدول بس على الماكينة المختارة (المجاميع فوق بتفضل شاملة)
+      let tableItems = items;
+      if (selectedMachine) {
+        tableItems = items.filter(r => machineOf(r) === selectedMachine);
+      }
+      // الأحدث بالأعلى (متأكدين من الترتيب حتى بعد الفلترة)
+      tableItems.sort((a,b) => new Date(b.createdAt||0) - new Date(a.createdAt||0));
+
+      if (!tableItems.length) {
+        tbody.innerHTML = `<tr><td colspan="${colCount}" class="empty-note">لا توجد معاملات${selectedMachine ? ' لهذه الماكينة' : ''} في المدى المحدد</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = items.map(r => {
+      tbody.innerHTML = tableItems.map(r => {
         const ref = isRefund(r);
         const branchCell = isAdmin ? `<td style="font-size:0.78rem;">${storeOf(r)}</td>` : '';
         return `<tr>
