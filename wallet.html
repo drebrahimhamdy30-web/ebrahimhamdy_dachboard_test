@@ -6,6 +6,7 @@
   <title>مبيعات الماكينات - Phalix</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     .wl-header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px; }
     .wl-header-right { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
@@ -13,7 +14,6 @@
     .search-wrap i { position:absolute; right:11px; top:50%; transform:translateY(-50%); color:var(--text-muted); font-size:0.85rem; pointer-events:none; }
     .search-wrap input { padding-right:34px; }
 
-    /* فلتر المدى الزمني */
     .wl-range { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; background:var(--surface-3); border:1px solid var(--border); border-radius:14px; padding:12px 14px; margin-bottom:12px; }
     .wl-range-field { display:flex; flex-direction:column; gap:4px; }
     .wl-range-field label { font-size:0.72rem; font-weight:700; color:var(--text-secondary); }
@@ -23,7 +23,6 @@
     .quick-btn:hover { border-color:var(--accent); color:var(--text-primary); }
     .quick-btn.active { background:var(--accent); color:var(--primary); border-color:var(--accent); }
 
-    /* كروت الملخص */
     .wl-summary { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
     .wl-card { border-radius:14px; padding:12px 18px; border:1.5px solid var(--border); background:var(--surface); min-width:150px; }
     .wl-card .lbl { font-size:0.72rem; font-weight:700; color:var(--text-secondary); display:block; margin-bottom:3px; }
@@ -34,8 +33,8 @@
     .wl-card-tax    { border-color:#fdba74; }
     .wl-card-net    { border-color:#86efac; }
     .wl-card-refund { border-color:#c4b5fd; }
+    .wl-card-uncoll { border-color:#fca5a5; }
 
-    /* مجاميع الماكينات والفروع */
     .wl-group-title { font-size:0.85rem; font-weight:800; color:var(--text-primary); margin:14px 0 8px; display:flex; align-items:center; gap:7px; }
     .wl-boxes { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
     .wl-box { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:9px 14px; min-width:185px; }
@@ -46,22 +45,37 @@
     .wl-box-sub { font-size:0.63rem; color:var(--text-muted); margin-top:2px; }
     .wl-box-machines { margin-top:5px; }
     .wl-box-mline { display:flex; justify-content:space-between; gap:8px; padding:2px 0; border-top:1px dashed var(--border); font-size:0.68rem; }
-
-    /* كارت ماكينة قابل للضغط */
     .wl-box-clickable { cursor:pointer; transition:all 0.15s; }
     .wl-box-clickable:hover { border-color:var(--accent); transform:translateY(-1px); box-shadow:0 3px 10px rgba(0,0,0,0.08); }
     .wl-box-clickable.selected { border-color:var(--accent); border-width:2px; background:var(--surface-3); }
     .wl-box-clickable.selected .wl-box-name::after { content:' ●'; color:var(--accent); font-size:0.7rem; }
 
-    /* شريط الفلتر النشط */
     .wl-active-filter { display:none; align-items:center; gap:10px; background:var(--surface-3); border:1px solid var(--accent); border-radius:12px; padding:8px 14px; margin-bottom:12px; font-size:0.8rem; font-weight:700; }
     .wl-active-filter.show { display:flex; }
     .wl-clear-filter { background:var(--danger,#dc2626); color:#fff; border:none; border-radius:20px; padding:4px 12px; font-size:0.74rem; font-weight:700; cursor:pointer; font-family:var(--font); }
 
+    /* شريط التحصيل */
+    .wl-collect-bar { display:none; align-items:center; gap:12px; background:#ecfdf5; border:1.5px solid #86efac; border-radius:12px; padding:10px 16px; margin-bottom:12px; flex-wrap:wrap; }
+    .wl-collect-bar.show { display:flex; }
+    .wl-collect-info { font-size:0.82rem; font-weight:700; color:#15803d; }
+    .wl-collect-info b { font-size:0.95rem; }
+    .wl-collect-save { background:#16a34a; color:#fff; border:none; border-radius:20px; padding:6px 16px; font-size:0.8rem; font-weight:800; cursor:pointer; font-family:var(--font); }
+    .wl-collect-cancel { background:var(--surface); color:var(--text-secondary); border:1px solid var(--border); border-radius:20px; padding:6px 14px; font-size:0.78rem; font-weight:700; cursor:pointer; font-family:var(--font); }
+
     .badge-sale   { background:#dcfce7; color:#15803d; }
     .badge-refund { background:#ede9fe; color:#7c3aed; }
+    .badge-collected { background:#dcfce7; color:#15803d; }
+    .badge-pending   { background:#fef9c3; color:#a16207; }
     .mono { font-family:monospace; font-size:0.72rem; color:var(--text-secondary); }
     .empty-note { text-align:center; padding:40px; color:var(--text-muted); }
+
+    /* أزرار التحصيل في الصف */
+    .row-collect-btn { border:none; border-radius:16px; padding:3px 10px; font-size:0.68rem; font-weight:800; cursor:pointer; font-family:var(--font); white-space:nowrap; }
+    .row-mark   { background:#dbeafe; color:#1d4ed8; }
+    .row-exclude{ background:#fee2e2; color:#b91c1c; }
+    tr.row-will-collect { background:#f0fdf4; }
+    tr.row-excluded    { background:#fef2f2; opacity:0.7; }
+    tr.row-collected   { opacity:0.55; }
   </style>
 </head>
 <body>
@@ -79,11 +93,11 @@
             <i class="fas fa-search"></i>
             <input type="text" id="searchInput" class="form-input" placeholder="بحث بالقيمة أو رقم الطلب..." oninput="applyFilter()">
           </div>
+          <button class="btn" id="collect-mode-btn" style="background:var(--primary);color:#fff;" onclick="toggleCollectMode()"><i class="fas fa-hand-holding-dollar"></i> وضع التحصيل</button>
           <button class="btn btn-primary" onclick="loadWallet()"><i class="fas fa-sync-alt"></i> تحديث</button>
         </div>
       </div>
 
-      <!-- فلتر المدى الزمني -->
       <div class="wl-range">
         <div class="wl-range-field">
           <label><i class="fas fa-calendar-day"></i> من</label>
@@ -102,10 +116,19 @@
         </div>
       </div>
 
-      <!-- ملخص المدى -->
+      <!-- شريط التحصيل -->
+      <div class="wl-collect-bar" id="wl-collect-bar">
+        <span class="wl-collect-info">
+          <i class="fas fa-hand-holding-dollar"></i>
+          وضع التحصيل: اضغط على معاملة لتعليم كل المعاملات الأقدم منها (بما فيها) كـ «محصّلة».
+        </span>
+        <span id="wl-collect-count" class="wl-collect-info"></span>
+        <button class="wl-collect-save"   id="wl-collect-save" onclick="saveCollection()" style="display:none;"><i class="fas fa-check"></i> حفظ التحصيل</button>
+        <button class="wl-collect-cancel" onclick="cancelCollection()">إلغاء</button>
+      </div>
+
       <div class="wl-summary" id="wl-summary"></div>
 
-      <!-- مجاميع الفروع والماكينات -->
       <div id="wl-groups"></div>
 
       <div class="wl-active-filter" id="wl-active-filter">
@@ -125,11 +148,12 @@
               <th>الماكينة</th>
               <th id="th-branch">الفرع</th>
               <th>رقم الطلب</th>
-              <th>النوع</th>
+              <th>الحالة</th>
+              <th id="th-collect">التحصيل</th>
             </tr>
           </thead>
           <tbody id="table-body">
-            <tr class="loading-row"><td colspan="8">⏳ جاري التحميل...</td></tr>
+            <tr class="loading-row"><td colspan="9">⏳ جاري التحميل...</td></tr>
           </tbody>
         </table>
       </div>
@@ -140,62 +164,70 @@
   <script src="api.js"></script>
   <script src="nav.js" defer></script>
   <script>
-    const WALLET_ENDPOINT = 'https://agent.ebrahimhamdy.com/webhook/paymobdaily';
+    /* ===================== إعداد Supabase ===================== */
+    const SUPABASE_URL = 'https://rxtjoqulmgkkcohmgzgi.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
+    const _authJwt = localStorage.getItem('authJwt');
+    const { createClient } = supabase;
+    const db = createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: _authJwt ? { Authorization: 'Bearer ' + _authJwt } : {} }
+    });
 
-    // ربط فرع الماكينة (زي ما هو في جدول wallet) باسم الفرع في السيستم
     const BRANCH_NORMALIZE = {
       'المعمورة':    'الصيدلية',
       'سان ستيفانو': 'ابراهيم حمدي 2',
       'سيدي بشر':   'ابراهيم حمدي 3',
       'سيدى بشر':   'ابراهيم حمدي 3',
     };
-
-    // ترتيب ثابت للفروع
     const STORE_ORDER = ['الصيدلية', 'ابراهيم حمدي 2', 'ابراهيم حمدي 3'];
 
-    // ربط فرع المستخدم (اللي في localStorage) بالاسم الموحّد
-    const USER_BRANCH_MAP = {
-      'المعمورة':    'الصيدلية',
-      'سان ستيفانو': 'ابراهيم حمدي 2',
-      'سيدى بشر':   'ابراهيم حمدي 3',
-      'سيدي بشر':   'ابراهيم حمدي 3',
-    };
+    const isAdmin = true;                // الصفحة للأدمن فقط (متحكوم فيها من جدول الصلاحيات)
+    let allRows = [];
+    let activeQuick = 'all';
+    let selectedMachine = null;
 
-    let userBranch   = '';
-    let userRole     = '';
-    let isAdmin      = false;
-    let myStore      = '';
-    let allRows      = [];
-    let activeQuick  = 'all';
-    let selectedMachine = null;   // الماكينة المختارة لفلترة الجدول
+    // وضع التحصيل
+    let collectMode = false;
+    let pendingCollect = new Set();      // ids هتتعلّم done=true
+    let excluded = new Set();            // ids استثناها المستخدم يدوياً
 
     checkAuth().then(async user => {
       if (!user) return;
-      userBranch = (localStorage.getItem('userBranch') || '').trim();
-      userRole   = (localStorage.getItem('userRole')   || '').trim();
-      isAdmin    = (userRole === 'admin');
-      myStore    = USER_BRANCH_MAP[userBranch] || userBranch;
-      document.getElementById('display-branch').textContent = isAdmin ? 'كل الفروع' : myStore;
-      document.getElementById('th-branch').style.display = isAdmin ? '' : 'none';
+      const role = (localStorage.getItem('userRole') || '').trim();
+      if (role !== 'admin') {
+        document.querySelector('.card').innerHTML = '<div class="empty-note">🔒 الصفحة دي متاحة للأدمن بس</div>';
+        return;
+      }
+      document.getElementById('display-branch').textContent = 'كل الفروع';
       await loadWallet();
     });
 
-    /* ===================== تحميل البيانات ===================== */
+    /* ===================== تحميل البيانات من Supabase ===================== */
     async function loadWallet() {
       const tbody = document.getElementById('table-body');
-      tbody.innerHTML = '<tr class="loading-row"><td colspan="8">⏳ جاري جلب البيانات...</td></tr>';
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="9">⏳ جاري جلب البيانات...</td></tr>';
       try {
-        const resp = await fetch(WALLET_ENDPOINT);
-        const data = await resp.json();
-        let rows = Array.isArray(data) ? data : (data.data || []);
-        // لو المستخدم مش أدمن، نعرض فرعه بس
-        if (!isAdmin) {
-          rows = rows.filter(r => storeOf(r) === myStore);
+        // Supabase بترجّع 1000 صف افتراضياً؛ نجيب على دفعات
+        let all = [];
+        let from = 0;
+        const page = 1000;
+        while (true) {
+          const { data, error } = await db
+            .from('wallet')
+            .select('*')
+            .order('createdAt', { ascending: false })
+            .range(from, from + page - 1);
+          if (error) throw error;
+          all = all.concat(data);
+          if (data.length < page) break;
+          from += page;
         }
-        allRows = rows;
+        allRows = all;
         applyFilter();
       } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال بالسيرفر</td></tr>';
+        console.error('wallet load error:', e);
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل تحميل البيانات<br><span style="font-size:0.72rem;color:var(--text-muted);">${e.message||e}</span></td></tr>`;
       }
     }
 
@@ -204,9 +236,7 @@
       const b = String(r.branch || '').trim();
       return BRANCH_NORMALIZE[b] || b || '---';
     }
-    function machineOf(r) {
-      return String(r.machine_name || r.to || r.terminal_id || '---').trim();
-    }
+    function machineOf(r) { return String(r.machine_name || r.to || r.terminal_id || '---').trim(); }
     function amountOf(r)  { return parseFloat(r.ammount)    || 0; }
     function feesOf(r)    { return parseFloat(r.fees)       || 0; }
     function vatOf(r)     { return parseFloat(r.vat)        || 0; }
@@ -215,19 +245,15 @@
       return isNaN(n) ? (amountOf(r) - feesOf(r)) : n;
     }
     function isRefund(r) { return String(r.type || '').trim().toUpperCase() === 'REFUND'; }
+    function isDone(r)   { return r.done === true; }
 
-    // تحويل createdAt لتوقيت مصر (+3)
     function toEgypt(t) {
       if (!t) return null;
       const ms = new Date(t).getTime();
       if (isNaN(ms)) return null;
       return new Date(ms + 3 * 60 * 60 * 1000);
     }
-    // رقم قابل للمقارنة بتوقيت مصر (بيرجّع ملي ثانية بعد الإزاحة)
-    function egyptMs(t) {
-      const d = toEgypt(t);
-      return d ? d.getTime() : NaN;
-    }
+    function egyptMs(t) { const d = toEgypt(t); return d ? d.getTime() : NaN; }
     function fmtDate(t) {
       const d = toEgypt(t);
       if (!d) return '---';
@@ -242,56 +268,41 @@
       return `${String(h12).padStart(2,'0')}:${String(m).padStart(2,'0')} ${ampm}`;
     }
     function pad(n) { return String(n).padStart(2,'0'); }
-    // تحويل قيمة الـ datetime-local لملي ثانية بنفس مرجع توقيت مصر
     function inputToEgyptMs(v) {
       if (!v) return NaN;
-      // بنعاملها كأنها UTC عشان تتقارن مع egyptMs مباشرة
-      return Date.parse(v + ':00Z');
+      let s = String(v).trim();
+      const parts = s.split('T');
+      if (parts.length !== 2) return NaN;
+      if (parts[1].split(':').length === 2) s = s + ':00';
+      return Date.parse(s + 'Z');
     }
-    // نهارده بتوقيت مصر كـ Date (بمكوّنات UTC)
     function egyptNow() { return toEgypt(new Date().toISOString()); }
-    function egyptDateStr(d) {
-      return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}`;
-    }
+    function egyptDateStr(d) { return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}`; }
 
     /* ===================== الفلاتر السريعة ===================== */
     function quickRange(kind, btn) {
       activeQuick = kind;
       document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
       if (btn) btn.classList.add('active');
-
       const fromEl = document.getElementById('fromInput');
       const toEl   = document.getElementById('toInput');
       const now    = egyptNow();
-
-      if (kind === 'all') {
-        fromEl.value = '';
-        toEl.value   = '';
-        applyFilter();
-        return;
-      }
-
-      let start = new Date(now.getTime());
+      if (kind === 'all') { fromEl.value = ''; toEl.value = ''; applyFilter(); return; }
       if (kind === 'today') {
-        start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0));
-        fromEl.value = `${egyptDateStr(start)}T00:00`;
-        toEl.value   = `${egyptDateStr(now)}T23:59`;
+        const s = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0));
+        fromEl.value = `${egyptDateStr(s)}T00:00`; toEl.value = `${egyptDateStr(now)}T23:59`;
       } else if (kind === 'yest') {
         const y = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
-        fromEl.value = `${egyptDateStr(y)}T00:00`;
-        toEl.value   = `${egyptDateStr(y)}T23:59`;
+        fromEl.value = `${egyptDateStr(y)}T00:00`; toEl.value = `${egyptDateStr(y)}T23:59`;
       } else if (kind === '7d') {
         const s = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6));
-        fromEl.value = `${egyptDateStr(s)}T00:00`;
-        toEl.value   = `${egyptDateStr(now)}T23:59`;
+        fromEl.value = `${egyptDateStr(s)}T00:00`; toEl.value = `${egyptDateStr(now)}T23:59`;
       } else if (kind === '30d') {
         const s = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 29));
-        fromEl.value = `${egyptDateStr(s)}T00:00`;
-        toEl.value   = `${egyptDateStr(now)}T23:59`;
+        fromEl.value = `${egyptDateStr(s)}T00:00`; toEl.value = `${egyptDateStr(now)}T23:59`;
       }
       applyFilter();
     }
-
     function onManualRange() {
       activeQuick = '';
       document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
@@ -300,49 +311,124 @@
 
     /* ===================== الفلترة ===================== */
     function getFiltered() {
-      const search  = document.getElementById('searchInput').value.trim().toLowerCase();
-      const fromMs  = inputToEgyptMs(document.getElementById('fromInput').value);
-      const toMs    = inputToEgyptMs(document.getElementById('toInput').value);
-
+      const search = document.getElementById('searchInput').value.trim().toLowerCase();
+      const fromMs = inputToEgyptMs(document.getElementById('fromInput').value);
+      const toMs   = inputToEgyptMs(document.getElementById('toInput').value);
       return allRows.filter(r => {
         const ms = egyptMs(r.createdAt);
         if (!isNaN(fromMs) && (isNaN(ms) || ms < fromMs)) return false;
         if (!isNaN(toMs)   && (isNaN(ms) || ms > toMs + 59999)) return false;
         if (search) {
           const hit = String(amountOf(r).toFixed(2)).includes(search) ||
-                      String(r.order_id     || '').toLowerCase().includes(search) ||
-                      String(r.terminal_id  || '').toLowerCase().includes(search) ||
+                      String(r.order_id || '').toLowerCase().includes(search) ||
+                      String(r.terminal_id || '').toLowerCase().includes(search) ||
                       machineOf(r).toLowerCase().includes(search);
           if (!hit) return false;
         }
         return true;
       });
     }
-
     function applyFilter() { render(getFiltered()); }
 
-    /* ===== فلترة الجدول بضغط كارت الماكينة ===== */
+    /* ===================== فلترة الجدول بضغط كارت الماكينة ===================== */
     function toggleMachineFilter(m) {
+      if (collectMode) return;   // في وضع التحصيل الضغط بيعلّم مش بيفلتر
       selectedMachine = (selectedMachine === m) ? null : m;
       applyFilter();
-      // تمرير لأعلى جدول المعاملات عشان يبان الفلتر اشتغل
       document.getElementById('wl-active-filter').scrollIntoView({ behavior:'smooth', block:'nearest' });
     }
-    function clearMachineFilter() {
-      selectedMachine = null;
+    function clearMachineFilter() { selectedMachine = null; applyFilter(); }
+
+    /* ===================== وضع التحصيل ===================== */
+    function toggleCollectMode() {
+      collectMode = !collectMode;
+      const btn = document.getElementById('collect-mode-btn');
+      const bar = document.getElementById('wl-collect-bar');
+      if (collectMode) {
+        selectedMachine = null;   // نلغي فلتر الماكينة عشان نشوف كل المعاملات مرتبة بالوقت
+        pendingCollect.clear();
+        excluded.clear();
+        btn.style.background = 'var(--accent)';
+        btn.innerHTML = '<i class="fas fa-xmark"></i> إغلاق التحصيل';
+        bar.classList.add('show');
+      } else {
+        btn.style.background = 'var(--primary)';
+        btn.innerHTML = '<i class="fas fa-hand-holding-dollar"></i> وضع التحصيل';
+        bar.classList.remove('show');
+        pendingCollect.clear();
+        excluded.clear();
+      }
       applyFilter();
+    }
+    function cancelCollection() { if (collectMode) toggleCollectMode(); }
+
+    // تعليم: كل المعاملات الأقدم من دي (بما فيها) في كل الماكينات — من كل allRows مش المفلتر
+    function markCollectFrom(id) {
+      const target = allRows.find(r => String(r.id) === String(id));
+      if (!target) return;
+      const cutoff = egyptMs(target.createdAt);
+      pendingCollect.clear();
+      allRows.forEach(r => {
+        if (isDone(r)) return;                       // متحصّلة خلاص
+        if (egyptMs(r.createdAt) <= cutoff) pendingCollect.add(String(r.id));
+      });
+      // نشيل المستثنَيات
+      excluded.forEach(x => pendingCollect.delete(x));
+      updateCollectBar();
+      applyFilter();
+    }
+    function toggleExclude(id) {
+      id = String(id);
+      if (excluded.has(id)) { excluded.delete(id); if (window._lastCutoffId) markCollectFrom(window._lastCutoffId); }
+      else { excluded.add(id); pendingCollect.delete(id); }
+      updateCollectBar();
+      applyFilter();
+    }
+    function updateCollectBar() {
+      const cnt = pendingCollect.size;
+      document.getElementById('wl-collect-count').textContent = cnt ? `${cnt} معاملة هتتعلّم كمحصّلة` : '';
+      document.getElementById('wl-collect-save').style.display = cnt ? '' : 'none';
+    }
+
+    async function saveCollection() {
+      const ids = Array.from(pendingCollect).map(x => isNaN(Number(x)) ? x : Number(x));
+      if (!ids.length) return;
+      const saveBtn = document.getElementById('wl-collect-save');
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
+      try {
+        // تحديث على دفعات (Supabase بتحب الدفعات الصغيرة في in())
+        const chunk = 200;
+        for (let i = 0; i < ids.length; i += chunk) {
+          const slice = ids.slice(i, i + chunk);
+          const { error } = await db.from('wallet').update({ done: true }).in('id', slice);
+          if (error) throw error;
+        }
+        // نحدّث النسخة المحلية بدل إعادة التحميل الكامل
+        const done = new Set(ids.map(String));
+        allRows.forEach(r => { if (done.has(String(r.id))) r.done = true; });
+        pendingCollect.clear();
+        excluded.clear();
+        toggleCollectMode();
+        alert('✅ تم تسجيل التحصيل بنجاح');
+      } catch (e) {
+        console.error('collection save error:', e);
+        alert('❌ فشل حفظ التحصيل: ' + (e.message || e));
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<i class="fas fa-check"></i> حفظ التحصيل';
+      }
     }
 
     /* ===================== الرسم ===================== */
     function render(items) {
       const tbody = document.getElementById('table-body');
-      const colCount = isAdmin ? 8 : 7;
+      document.getElementById('th-collect').style.display = collectMode ? '' : 'none';
+      const colCount = collectMode ? 9 : 8;
 
-      // الأحدث بالأعلى
       items.sort((a,b) => new Date(b.createdAt||0) - new Date(a.createdAt||0));
 
-      /* ---------- المجاميع ---------- */
-      let totSale = 0, totRefund = 0, totFees = 0, totVat = 0, totNet = 0;
+      // ===== المجاميع (على غير المحصّل افتراضياً) =====
+      let totSale = 0, totRefund = 0, totFees = 0, totVat = 0, totNet = 0, totCollected = 0, totUncollected = 0;
       let cntSale = 0, cntRefund = 0;
       const byMachine = {};
       const byStore   = {};
@@ -350,151 +436,138 @@
       items.forEach(r => {
         const amt = amountOf(r), f = feesOf(r), v = vatOf(r), n = netOf(r);
         const mch = machineOf(r), st = storeOf(r);
-        const ref = isRefund(r);
+        const ref = isRefund(r), done = isDone(r);
 
-        if (ref) { totRefund += amt; cntRefund++; }
-        else     { totSale   += amt; cntSale++;   }
+        if (ref) { totRefund += amt; cntRefund++; } else { totSale += amt; cntSale++; }
         totFees += f; totVat += v; totNet += n;
+        if (done) totCollected += amt; else if (!ref) totUncollected += amt;
 
-        if (!byMachine[mch]) byMachine[mch] = { store:st, total:0, fees:0, net:0, count:0, refund:0 };
-        byMachine[mch].total  += ref ? 0 : amt;
-        byMachine[mch].refund += ref ? amt : 0;
-        byMachine[mch].fees   += f;
-        byMachine[mch].net    += n;
+        if (!byMachine[mch]) byMachine[mch] = { store:st, total:0, uncollected:0, count:0, refund:0 };
+        byMachine[mch].total       += ref ? 0 : amt;
+        byMachine[mch].uncollected += (!ref && !done) ? amt : 0;
+        byMachine[mch].refund      += ref ? amt : 0;
         byMachine[mch].count++;
 
-        if (!byStore[st]) byStore[st] = { total:0, fees:0, net:0, count:0, refund:0, machines:{} };
-        byStore[st].total  += ref ? 0 : amt;
-        byStore[st].refund += ref ? amt : 0;
-        byStore[st].fees   += f;
-        byStore[st].net    += n;
+        if (!byStore[st]) byStore[st] = { total:0, uncollected:0, count:0, refund:0, machines:{} };
+        byStore[st].total       += ref ? 0 : amt;
+        byStore[st].uncollected += (!ref && !done) ? amt : 0;
+        byStore[st].refund      += ref ? amt : 0;
         byStore[st].count++;
-        if (!byStore[st].machines[mch]) byStore[st].machines[mch] = { total:0, count:0, net:0 };
-        byStore[st].machines[mch].total += ref ? 0 : amt;
-        byStore[st].machines[mch].net   += n;
+        if (!byStore[st].machines[mch]) byStore[st].machines[mch] = { total:0, uncollected:0, count:0 };
+        byStore[st].machines[mch].total       += ref ? 0 : amt;
+        byStore[st].machines[mch].uncollected += (!ref && !done) ? amt : 0;
         byStore[st].machines[mch].count++;
       });
 
       const feesPct = totSale > 0 ? ((totFees / totSale) * 100).toFixed(2) : '0.00';
 
-      /* ---------- كروت الملخص ---------- */
       document.getElementById('wl-summary').innerHTML = `
-        <div class="wl-card wl-card-total">
-          <span class="lbl">إجمالي المبيعات</span>
-          <span class="val">${totSale.toFixed(2)}</span>
-          <span class="sub">جنيه</span>
-        </div>
-        <div class="wl-card wl-card-count">
-          <span class="lbl">عدد المعاملات</span>
-          <span class="val">${cntSale}</span>
-          <span class="sub">${cntRefund ? `+ ${cntRefund} مرتجع` : 'معاملة'}</span>
-        </div>
-        <div class="wl-card wl-card-tax">
-          <span class="lbl">الرسوم</span>
-          <span class="val" style="color:#c2410c;">${totFees.toFixed(2)}</span>
-          <span class="sub">${feesPct}% من الإجمالي${totVat ? ` | ضريبة: ${totVat.toFixed(2)}` : ''}</span>
-        </div>
-        <div class="wl-card wl-card-net">
-          <span class="lbl">الصافي</span>
-          <span class="val" style="color:#15803d;">${totNet.toFixed(2)}</span>
-          <span class="sub">بعد خصم الرسوم</span>
-        </div>
-        ${totRefund ? `<div class="wl-card wl-card-refund">
-          <span class="lbl">المرتجعات</span>
-          <span class="val" style="color:#7c3aed;">${totRefund.toFixed(2)}</span>
-          <span class="sub">${cntRefund} معاملة</span>
-        </div>` : ''}`;
+        <div class="wl-card wl-card-total"><span class="lbl">إجمالي المبيعات</span><span class="val">${totSale.toFixed(2)}</span><span class="sub">جنيه</span></div>
+        <div class="wl-card wl-card-uncoll"><span class="lbl">غير محصّل</span><span class="val" style="color:#b91c1c;">${totUncollected.toFixed(2)}</span><span class="sub">لسه ما وصلش من البنك</span></div>
+        <div class="wl-card wl-card-net"><span class="lbl">محصّل</span><span class="val" style="color:#15803d;">${totCollected.toFixed(2)}</span><span class="sub">وصل من البنك</span></div>
+        <div class="wl-card wl-card-count"><span class="lbl">عدد المعاملات</span><span class="val">${cntSale}</span><span class="sub">${cntRefund ? `+ ${cntRefund} مرتجع` : 'معاملة'}</span></div>
+        <div class="wl-card wl-card-tax"><span class="lbl">الرسوم</span><span class="val" style="color:#c2410c;">${totFees.toFixed(2)}</span><span class="sub">${feesPct}%${totVat ? ` | ضريبة: ${totVat.toFixed(2)}` : ''}</span></div>
+        ${totRefund ? `<div class="wl-card wl-card-refund"><span class="lbl">المرتجعات</span><span class="val" style="color:#7c3aed;">${totRefund.toFixed(2)}</span><span class="sub">${cntRefund} معاملة</span></div>` : ''}`;
 
-      /* ---------- مجاميع الفروع والماكينات ---------- */
+      // ===== مجاميع الفروع والماكينات =====
       const orderedStores = Object.keys(byStore).sort((a,b) => {
         let ia = STORE_ORDER.indexOf(a); if (ia === -1) ia = 999;
         let ib = STORE_ORDER.indexOf(b); if (ib === -1) ib = 999;
         return ia - ib;
       });
-
       let groupsHtml = '';
-
-      if (isAdmin && orderedStores.length) {
+      if (orderedStores.length) {
         groupsHtml += `<div class="wl-group-title"><i class="fas fa-store" style="color:var(--accent);"></i> إجمالي كل فرع</div><div class="wl-boxes">`;
         groupsHtml += orderedStores.map(st => {
           const v = byStore[st];
-          const mLines = Object.entries(v.machines)
-            .sort((a,b) => a[0].localeCompare(b[0]))
-            .map(([m, mv]) => `<div class="wl-box-mline">
+          const mLines = Object.entries(v.machines).sort((a,b)=>a[0].localeCompare(b[0])).map(([m,mv]) =>
+            `<div class="wl-box-mline">
               <span style="color:var(--text-secondary);"><i class="fas fa-mobile-screen-button" style="font-size:0.6rem;color:var(--accent);margin-left:3px;"></i> ${m} <span style="color:var(--text-muted);">(${mv.count})</span></span>
               <b style="color:var(--warning);">${mv.total.toFixed(2)}</b>
             </div>`).join('');
           return `<div class="wl-box">
-            <div class="wl-box-head">
-              <span class="wl-box-name">${st}</span>
-              <span class="wl-box-cnt">${v.count} معاملة</span>
-            </div>
+            <div class="wl-box-head"><span class="wl-box-name">${st}</span><span class="wl-box-cnt">${v.count} معاملة</span></div>
             <div class="wl-box-total">${v.total.toFixed(2)}</div>
-            <div class="wl-box-sub">رسوم: ${v.fees.toFixed(2)} | صافي: ${v.net.toFixed(2)}${v.refund ? ` | مرتجع: ${v.refund.toFixed(2)}` : ''}</div>
+            <div class="wl-box-sub">غير محصّل: ${v.uncollected.toFixed(2)}${v.refund ? ` | مرتجع: ${v.refund.toFixed(2)}` : ''}</div>
             <div class="wl-box-machines">${mLines}</div>
           </div>`;
         }).join('');
         groupsHtml += `</div>`;
       }
-
-      const machineKeys = Object.keys(byMachine).sort((a,b) => a.localeCompare(b));
+      const machineKeys = Object.keys(byMachine).sort((a,b)=>a.localeCompare(b));
       if (machineKeys.length) {
         groupsHtml += `<div class="wl-group-title"><i class="fas fa-mobile-screen-button" style="color:var(--accent);"></i> إجمالي كل ماكينة</div><div class="wl-boxes">`;
         groupsHtml += machineKeys.map(m => {
           const v = byMachine[m];
           const sel = selectedMachine === m ? ' selected' : '';
-          return `<div class="wl-box wl-box-clickable${sel}" onclick="toggleMachineFilter('${m.replace(/'/g,"\\'")}')" title="اضغط لعرض معاملات ${m} فقط">
-            <div class="wl-box-head">
-              <span class="wl-box-name">${m}</span>
-              <span class="wl-box-cnt">${v.count} معاملة</span>
-            </div>
+          const clickable = collectMode ? '' : ' wl-box-clickable' + sel;
+          const onclick = collectMode ? '' : ` onclick="toggleMachineFilter('${m.replace(/'/g,"\\'")}')"`;
+          return `<div class="wl-box${clickable}"${onclick}${collectMode?'':` title="اضغط لعرض معاملات ${m} فقط"`}>
+            <div class="wl-box-head"><span class="wl-box-name">${m}</span><span class="wl-box-cnt">${v.count} معاملة</span></div>
             <div class="wl-box-total">${v.total.toFixed(2)}</div>
-            <div class="wl-box-sub">${isAdmin ? v.store + ' | ' : ''}رسوم: ${v.fees.toFixed(2)} | صافي: ${v.net.toFixed(2)}${v.refund ? ` | مرتجع: ${v.refund.toFixed(2)}` : ''}</div>
+            <div class="wl-box-sub">${v.store} | غير محصّل: ${v.uncollected.toFixed(2)}${v.refund ? ` | مرتجع: ${v.refund.toFixed(2)}` : ''}</div>
           </div>`;
         }).join('');
         groupsHtml += `</div>`;
       }
-
       document.getElementById('wl-groups').innerHTML = groupsHtml;
 
-      /* ---------- الجدول ---------- */
-      // شريط الفلتر النشط
+      // ===== شريط فلتر الماكينة =====
       const afEl = document.getElementById('wl-active-filter');
-      if (selectedMachine) {
+      if (selectedMachine && !collectMode) {
         afEl.classList.add('show');
         document.getElementById('wl-active-machine').textContent = selectedMachine;
-      } else {
-        afEl.classList.remove('show');
-      }
+      } else { afEl.classList.remove('show'); }
 
-      // فلترة صفوف الجدول بس على الماكينة المختارة (المجاميع فوق بتفضل شاملة)
+      // ===== الجدول =====
       let tableItems = items;
-      if (selectedMachine) {
-        tableItems = items.filter(r => machineOf(r) === selectedMachine);
-      }
-      // الأحدث بالأعلى (متأكدين من الترتيب حتى بعد الفلترة)
+      if (selectedMachine && !collectMode) tableItems = items.filter(r => machineOf(r) === selectedMachine);
       tableItems.sort((a,b) => new Date(b.createdAt||0) - new Date(a.createdAt||0));
 
       if (!tableItems.length) {
-        tbody.innerHTML = `<tr><td colspan="${colCount}" class="empty-note">لا توجد معاملات${selectedMachine ? ' لهذه الماكينة' : ''} في المدى المحدد</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${colCount}" class="empty-note">لا توجد معاملات في المدى المحدد</td></tr>`;
         return;
       }
 
       tbody.innerHTML = tableItems.map(r => {
-        const ref = isRefund(r);
-        const branchCell = isAdmin ? `<td style="font-size:0.78rem;">${storeOf(r)}</td>` : '';
-        return `<tr>
-          <td style="font-size:0.78rem;white-space:nowrap;">
-            ${fmtDate(r.createdAt)}<br>
-            <span style="color:var(--text-muted);font-size:0.7rem;">${fmtTime(r.createdAt)}</span>
-          </td>
+        const ref = isRefund(r), done = isDone(r);
+        const id = String(r.id);
+        const willCollect = pendingCollect.has(id);
+        const isExcluded  = excluded.has(id);
+
+        let rowClass = '';
+        if (done) rowClass = 'row-collected';
+        else if (collectMode && isExcluded) rowClass = 'row-excluded';
+        else if (collectMode && willCollect) rowClass = 'row-will-collect';
+
+        const branchCell = `<td style="font-size:0.78rem;">${storeOf(r)}</td>`;
+
+        let collectCell = '';
+        if (collectMode) {
+          if (done) {
+            collectCell = '<td><span class="badge badge-collected">✅ محصّل</span></td>';
+          } else if (isExcluded) {
+            collectCell = `<td><button class="row-collect-btn row-mark" onclick="toggleExclude('${id}')"><i class="fas fa-rotate-left"></i> رجّع</button></td>`;
+          } else if (willCollect) {
+            collectCell = `<td><button class="row-collect-btn row-exclude" onclick="toggleExclude('${id}')"><i class="fas fa-ban"></i> استثنِ</button></td>`;
+          } else {
+            collectCell = `<td><button class="row-collect-btn row-mark" onclick="markCollectFrom('${id}'); window._lastCutoffId='${id}';"><i class="fas fa-hand-pointer"></i> من هنا</button></td>`;
+          }
+        }
+
+        const rowOnclick = (collectMode && !done && !isExcluded)
+          ? ` style="cursor:pointer;" onclick="markCollectFrom('${id}'); window._lastCutoffId='${id}';"` : '';
+
+        return `<tr class="${rowClass}"${rowOnclick}>
+          <td style="font-size:0.78rem;white-space:nowrap;">${fmtDate(r.createdAt)}<br><span style="color:var(--text-muted);font-size:0.7rem;">${fmtTime(r.createdAt)}</span></td>
           <td><b style="color:${ref ? '#7c3aed' : 'var(--warning)'};">${amountOf(r).toFixed(2)}</b></td>
           <td style="font-size:0.75rem;color:#c2410c;">${feesOf(r).toFixed(2)}</td>
           <td style="font-size:0.75rem;color:#15803d;">${netOf(r).toFixed(2)}</td>
           <td><span class="badge badge-blue" style="font-size:0.72rem;">${machineOf(r)}</span></td>
           ${branchCell}
           <td class="mono">${r.order_id || '---'}</td>
-          <td>${ref ? '<span class="badge badge-refund">🔄 مرتجع</span>' : '<span class="badge badge-sale">✅ بيع</span>'}</td>
+          <td>${ref ? '<span class="badge badge-refund">🔄 مرتجع</span>' : (done ? '<span class="badge badge-collected">✅ محصّل</span>' : '<span class="badge badge-pending">⏳ معلّق</span>')}</td>
+          ${collectCell}
         </tr>`;
       }).join('');
     }
