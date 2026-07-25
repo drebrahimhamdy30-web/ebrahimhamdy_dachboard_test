@@ -243,7 +243,7 @@ async function posUpdate(payload){
   const t=await r.text();let d=t&&t.trim()?JSON.parse(t):{};if(Array.isArray(d))d=d[0]||{};return d;
 }
 
-const EXPECTED_COLS=['تاريخ','فاتورة بيع','ن.رسوم تحصيل','القيمة','الإسم','البنك','ت.صلاحية','الرقم','العميل','تحصيل'];
+const EXPECTED_COLS=['تحصيل','تاريخ','فاتورة بيع','ن.رسوم تحصيل','القيمة','الإسم','البنك','ت.صلاحية','الرقم','العميل'];
 
 // ===== جدول مركزي لأسباب فواتير الكاش المحوّلة لمحفظة (label + طريقة حساب الفرق) =====
 const C2W_REASONS={
@@ -263,6 +263,7 @@ function computeC2WDiff(r){
 
 let ROWS=[],WALLET=[],LINKS=[],CASH2WALLET=[];
 let walletLoaded=false;
+let REVIEWED_INVOICES=new Set();   // أرقام فواتير سبق مراجعتها (من imported_sales)
 let C2W_CHECKED_MI=new Set(JSON.parse(localStorage.getItem('c2w.mi.checked.v1')||'[]'));
 function saveC2WCheckedMI(){ localStorage.setItem('c2w.mi.checked.v1',JSON.stringify([...C2W_CHECKED_MI])); }
 function toggleC2WCheckMI(id){
@@ -326,7 +327,7 @@ function parsePastedText(text){
 function hashStr(s){let h=0;for(let i=0;i<s.length;i++)h=((h<<5)-h+s.charCodeAt(i))|0;return (h>>>0).toString(36);}
 function rowSignature(row){return row.names.map(n=>String(row.byCol[n]??'').trim()).join('|');}
 
-// الشكل الوحيد المدعوم: تاريخ، فاتورة بيع، ن.رسوم تحصيل، القيمة، الإسم، البنك، ت.صلاحية، الرقم، العميل، تحصيل (True/False)
+// الشكل المدعوم (الترتيب الجديد): تحصيل، تاريخ، فاتورة بيع، ن.رسوم تحصيل، القيمة، الإسم، البنك، ت.صلاحية، الرقم، العميل
 function buildRowsFromParsed(parsed){
   if(!parsed.length)return[];
 
@@ -336,7 +337,7 @@ function buildRowsFromParsed(parsed){
       const byCol={};
       EXPECTED_COLS.forEach((name,i)=>{
         let val=String(cells[i]??'').trim();
-        if(name==='تحصيل') val = /^true$/i.test(val) ? 'تم' : '';
+        if(name==='تحصيل') val = /^(true|نعم|تم)$/i.test(val) ? 'تم' : '';
         byCol[name]=val;
       });
       const row={id:'imp-'+idx+'-'+Date.now()+'-'+Math.floor(Math.random()*9999),byCol,names:EXPECTED_COLS};
@@ -345,21 +346,62 @@ function buildRowsFromParsed(parsed){
 }
 
 const zone=$('#paste-zone');
-zone.addEventListener('paste',e=>{
+zone.addEventListener('paste',async e=>{
   e.preventDefault();
   const text=e.clipboardData.getData('text/plain');
   if(!text||!text.trim()){toast('مفيش نص في الكليب بورد','err');return;}
   const parsed=parsePastedText(text);
   if(!parsed.length){toast('متقدرش أقرا الجدول الملصوق','err');return;}
-  ROWS=buildRowsFromParsed(parsed);
+  let built=buildRowsFromParsed(parsed);
+
+  // نجيب أحدث قائمة فواتير سبق مراجعتها من Supabase
+  await loadReviewedInvoices();
+
+  // نفصل المكرر (فاتورة موجودة واتراجعت قبل كده) عن الجديد
+  const seen=new Set();
+  const fresh=[], dupes=[];
+  built.forEach(r=>{
+    const inv=String(r.byCol['فاتورة بيع']||'').trim();
+    // مكرر لو موجود في imported_sales أو مكرر جوه نفس اللصقة
+    if((inv && REVIEWED_INVOICES.has(inv)) || (inv && seen.has(inv))){
+      dupes.push(r);
+    }else{
+      if(inv) seen.add(inv);
+      fresh.push(r);
+    }
+  });
+
+  ROWS=fresh;
   SEL_R=new Set();
   saveRowsLocal();
-  zone.innerHTML='<i class="fas fa-check-circle" style="color:#16a34a;"></i> تم — '+ROWS.length+' صف. تقدر تلصق جدول جديد فوق ده لو حبيت.';
+
+  let msg='تم — '+fresh.length+' صف جديد.';
+  if(dupes.length){
+    msg+=' <span style="color:#b91c1c;">('+dupes.length+' صف مكرر اتشال — سبق مراجعته)</span>';
+    toast(dupes.length+' صف مكرر سبق مراجعته — اتشال ومتعرضش','err');
+  }else{
+    toast('تم استيراد '+fresh.length+' صف','ok');
+  }
+  zone.innerHTML='<i class="fas fa-check-circle" style="color:#16a34a;"></i> '+msg+' تقدر تلصق جدول جديد فوق ده لو حبيت.';
   applyLinksToData();
   buildMachineFilters();
   renderAll();
-  toast('تم استيراد '+ROWS.length+' صف','ok');
 });
+
+// جلب أرقام الفواتير اللي سبق مراجعتها من imported_sales
+async function loadReviewedInvoices(){
+  try{
+    let all=[],from=0;const page=1000;
+    while(true){
+      const {data,error}=await sdb.from('imported_sales').select('sale_invoice_no').range(from,from+page-1);
+      if(error) throw error;
+      all=all.concat(data);
+      if(data.length<page) break;
+      from+=page;
+    }
+    REVIEWED_INVOICES=new Set(all.map(r=>String(r.sale_invoice_no||'').trim()).filter(Boolean));
+  }catch(e){ console.error('loadReviewedInvoices error:',e); }
+}
 $('#btn-clear').onclick=()=>{
   ROWS=[];SEL_R=new Set();
   localStorage.removeItem(LS_ROWS);
@@ -697,11 +739,12 @@ function renderConfirmBar(){
 $('#cb-cancel').onclick=()=>{ SEL_R=new Set(); SEL_L=new Set(); renderAll(); };
 $('#cb-confirm').onclick=confirmLinking;
 
-// ترحيل المراجعة: يعلّم المعاملات المحددة (جانب المحافظ/باي موب) كـ reviewed=true في Supabase
+// ترحيل المراجعة: يعلّم المحدد (معاملات المحافظ + الصفوف المستوردة) كمُراجَع
 $('#cb-review').onclick=async function(){
   const wals=[...SEL_L].map(id=>WALLET.find(w=>w.id===id)).filter(Boolean);
-  if(!wals.length){ toast('اختَر معاملات من جانب المحافظ أولاً','err'); return; }
-  if(!confirm('تعليم '+wals.length+' معاملة كمُراجَعة؟')) return;
+  const impCount=SEL_R.size;
+  if(!wals.length && !impCount){ toast('اختَر صفوف أو معاملات أولاً','err'); return; }
+  if(!confirm('ترحيل المراجعة للمحدد؟ ('+wals.length+' معاملة محفظة + '+impCount+' صف مستورد)')) return;
   const btn=$('#cb-review'); btn.disabled=true; btn.innerHTML='<i class="fas fa-spinner fa-spin"></i>';
   try{
     // نجمّع الـ ids حسب الجدول المصدر (باي موب = wallet، محافظ = wallet_sms)
@@ -720,11 +763,42 @@ $('#cb-review').onclick=async function(){
       const {error}=await sdb.from('wallet_sms').update({reviewed:true}).in('id',smsIds);
       if(error) throw error;
     }
+
+    // حفظ الصفوف المستوردة المحددة في imported_sales (للكشف عن التكرار مستقبلاً)
+    const impRows=[...SEL_R].map(id=>ROWS.find(r=>r.id===id)).filter(Boolean);
+    if(impRows.length){
+      const payload=impRows.map(r=>({
+        sale_invoice_no: String(r.byCol['فاتورة بيع']||'').trim(),
+        collected:       r.byCol['تحصيل']||'',
+        row_date:        r.byCol['تاريخ']||'',
+        collect_fees:    num(r.byCol['ن.رسوم تحصيل'])||0,
+        amount:          num(r.byCol['القيمة'])||0,
+        cust_ref_name:   r.byCol['الإسم']||'',
+        bank:            r.byCol['البنك']||'',
+        validity:        r.byCol['ت.صلاحية']||'',
+        card_number:     r.byCol['الرقم']||'',
+        customer:        r.byCol['العميل']||'',
+        sig_key:         String(r.sigKey||''),
+        reviewed:        true,
+        branch:          USER_BRANCH||null
+      })).filter(x=>x.sale_invoice_no);
+      if(payload.length){
+        // upsert عشان لو صف مكرر ما يفشلش الترحيل كله
+        const {error}=await sdb.from('imported_sales').upsert(payload,{onConflict:'sale_invoice_no',ignoreDuplicates:true});
+        if(error) throw error;
+        // نضيف أرقام الفواتير للكاش المحلي ونشيلهم من ROWS
+        payload.forEach(p=>REVIEWED_INVOICES.add(p.sale_invoice_no));
+        const savedIds=new Set(impRows.map(r=>r.id));
+        ROWS=ROWS.filter(r=>!savedIds.has(r.id));
+        saveRowsLocal();
+      }
+    }
+
     // تحديث محلي: نشيل المُراجَع من WALLET (عشان يختفي زي ما كان قبل الترحيل)
     const doneIds=new Set(wals.map(w=>w.id));
     WALLET=WALLET.filter(w=>!doneIds.has(w.id));
-    SEL_L=new Set();
-    toast('تم ترحيل المراجعة ('+wals.length+' معاملة)','ok');
+    SEL_L=new Set(); SEL_R=new Set();
+    toast('تم ترحيل المراجعة','ok');
     renderAll();
   }catch(e){
     console.error('review error:',e);
