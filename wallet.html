@@ -93,6 +93,7 @@
             <i class="fas fa-search"></i>
             <input type="text" id="searchInput" class="form-input" placeholder="بحث بالقيمة أو رقم الطلب..." oninput="applyFilter()">
           </div>
+          <button class="btn" id="show-collected-btn" style="background:var(--surface-3);color:var(--text-secondary);border:1px solid var(--border);" onclick="toggleShowCollected()"><i class="fas fa-eye"></i> إظهار المحصّل</button>
           <button class="btn" id="collect-mode-btn" style="background:var(--primary);color:#fff;" onclick="toggleCollectMode()"><i class="fas fa-hand-holding-dollar"></i> وضع التحصيل</button>
           <button class="btn btn-primary" onclick="loadWallet()"><i class="fas fa-sync-alt"></i> تحديث</button>
         </div>
@@ -186,6 +187,7 @@
     let allRows = [];
     let activeQuick = 'all';
     let selectedMachine = null;
+    let showCollected = false;   // الافتراضي: نعرض غير المحصّل بس
 
     // وضع التحصيل
     let collectMode = false;
@@ -213,11 +215,14 @@
         let from = 0;
         const page = 1000;
         while (true) {
-          const { data, error } = await db
+          let q = db
             .from('wallet')
             .select('*')
             .order('createdAt', { ascending: false })
             .range(from, from + page - 1);
+          // الافتراضي: غير المحصّل فقط. لو showCollected بنجيب الكل
+          if (!showCollected) q = q.eq('done', false);
+          const { data, error } = await q;
           if (error) throw error;
           all = all.concat(data);
           if (data.length < page) break;
@@ -338,6 +343,24 @@
       document.getElementById('wl-active-filter').scrollIntoView({ behavior:'smooth', block:'nearest' });
     }
     function clearMachineFilter() { selectedMachine = null; applyFilter(); }
+
+    /* ===================== إظهار/إخفاء المحصّل ===================== */
+    function toggleShowCollected() {
+      showCollected = !showCollected;
+      const btn = document.getElementById('show-collected-btn');
+      if (showCollected) {
+        btn.style.background = 'var(--accent)';
+        btn.style.color = 'var(--primary)';
+        btn.style.borderColor = 'var(--accent)';
+        btn.innerHTML = '<i class="fas fa-eye-slash"></i> إخفاء المحصّل';
+      } else {
+        btn.style.background = 'var(--surface-3)';
+        btn.style.color = 'var(--text-secondary)';
+        btn.style.borderColor = 'var(--border)';
+        btn.innerHTML = '<i class="fas fa-eye"></i> إظهار المحصّل';
+      }
+      loadWallet();   // إعادة الجلب من قاعدة البيانات بالفلتر الجديد
+    }
 
     /* ===================== وضع التحصيل ===================== */
     function toggleCollectMode() {
