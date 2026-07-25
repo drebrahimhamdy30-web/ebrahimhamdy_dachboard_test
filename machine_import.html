@@ -419,7 +419,11 @@ function normWallet(r){
   let srcLabel='محفظة',src='other';
   const to=String(r.to||'').toLowerCase();
   const sourceFld=String(r.source||'').toLowerCase();
-  if(String(r.type||'').toUpperCase()==='SALE'||to.includes('paymob')||sourceFld==='paymob'){src='paymob';srcLabel='Paymob';}
+  if(r._srcHint){
+    // تلميح صريح للنوع (للمحافظ المصنّفة برقم المحفظة)
+    src=r._srcHint; srcLabel=r._label||src;
+  }
+  else if(String(r.type||'').toUpperCase()==='SALE'||to.includes('paymob')||sourceFld==='paymob'){src='paymob';srcLabel='Paymob';}
   else if(to.includes('orange')){src='orange';srcLabel='أورنج كاش';}
   else if(to.includes('vodafone')){src='vodafone';srcLabel='فودافون كاش';}
   else if(to.includes('instapay')||sourceFld==='instapay'){src='instapay';srcLabel='إنستاباي';}
@@ -431,7 +435,7 @@ function normWallet(r){
   return{
     id:'wal-'+(r.id??Math.random()),raw:r,
     amount:num(r.ammount??r.amount),store,storeKey:normBranchKey(store),
-    to:r.to||'',terminal:r.terminal_id||'',src,srcLabel,dir,dirLabel,
+    to:r._label||r.to||'',terminal:r.terminal_id||'',src,srcLabel,dir,dirLabel,
     date:r.transaction_time||r.createdAt,bill_no:String(r.bill_no??'').trim(),
     closed:(r.closed===true||r.closed==='true'),
     extra_received:(r.is_excess===true||r.is_excess==='true')
@@ -444,19 +448,18 @@ async function loadWallet(){
       sbFetchAll('wallet'),
       sbFetchAll('wallet_sms')
     ]);
-    // باي موب: نضيف تلميح to='paymob' لو مش موجود عشان normWallet يصنّفها صح
-    const pm = paymobRows.map(r => ({ ...r, id:'pm'+r.id, to: r.to || 'paymob' }));
-    // محافظ: نستنتج نوع المحفظة من نص الرسالة (فودافون/أورنج) عشان srcLabel يطلع صح
+    // باي موب: مفتاح الفلتر = اسم الماكينة (paymob1..) والنوع paymob
+    const pm = paymobRows.map(r => ({ ...r, id:'pm'+r.id, _srcHint:'paymob', _label:(r.machine_name||'Paymob') }));
+    // محافظ: النوع الداخلي من رقم المحفظة، والعرض بالرقم نفسه زي ما هو
+    const WALLET_SRC = {
+      '01070400654':'vodafone',
+      '01070640033':'vodafone',
+      '01038867748':'vodafone',
+      '01205415869':'orange'
+    };
     const sms = smsRows.map(r => {
-      let toHint = r.to || '';
-      const msg = String(r.message||'');
-      if (!toHint) {
-        if (/فودافون|vodafone/i.test(msg)) toHint = 'vodafone';
-        else if (/اورنج|أورنج|orange/i.test(msg)) toHint = 'orange';
-        else if (/انستا|instapay/i.test(msg)) toHint = 'instapay';
-        else toHint = 'wallet';
-      }
-      return { ...r, to: toHint };
+      const no = String(r.to_no||'').trim();
+      return { ...r, _srcHint:(WALLET_SRC[no]||'other'), _label:(no||'—') };
     });
     const merged = [...pm, ...sms];
 
