@@ -28,6 +28,10 @@
 
   .paste-zone{border:2px dashed #93c5fd;border-radius:var(--radius-md);background:#eff6ff;min-height:70px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:text;padding:10px;text-align:center;color:#1d4ed8;font-weight:700;outline:none;font-size:0.82rem;}
   .paste-zone .hint{font-size:0.72rem;color:#3b82f6;font-weight:600;}
+  .machine-chips{display:flex;flex-wrap:wrap;gap:5px;align-items:center;}
+  .mfilter-chip{border:1px solid var(--border);background:#fff;color:var(--text-secondary);border-radius:20px;padding:4px 12px;font-size:0.74rem;font-weight:700;cursor:pointer;font-family:var(--font);transition:all 0.15s;white-space:nowrap;}
+  .mfilter-chip:hover{border-color:var(--accent);}
+  .mfilter-chip.active{background:var(--accent);color:#fff;border-color:var(--accent);}
 
   .toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0;}
   .toolbar .stat{background:var(--surface-3);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:0.75rem;font-weight:700;color:var(--text-secondary);}
@@ -151,7 +155,7 @@
         <span class="cnt" id="left-cnt">—</span>
       </div>
       <div class="pane-filters">
-        <select id="left-machine-filter"><option value="">كل الماكينات</option></select>
+        <div id="left-machine-chips" class="machine-chips"><button class="mfilter-chip active" data-m="">كل الماكينات</button></div>
         <select id="left-link-filter" style="font-family:var(--font);font-size:0.76rem;border:1px solid var(--border);border-radius:8px;padding:5px 8px;background:#fff;color:var(--text-secondary);">
           <option value="open">غير المغلق</option>
           <option value="all">الكل</option>
@@ -505,18 +509,33 @@ function applyLinksToData(){
   });
 }
 
+let SEL_MACHINES=new Set();   // المحافظ/الماكينات المختارة (فاضية = الكل)
 function buildMachineFilters(){
-  const rSel=$('#right-machine-filter'), lSel=$('#left-machine-filter');
-  const rVal=rSel.value, lVal=lSel.value;
+  const rSel=$('#right-machine-filter');
+  const rVal=rSel.value;
   const rMachines=[...new Set(ROWS.map(r=>r.byCol['البنك']).filter(Boolean))].sort();
-  const lMachines=[...new Set(WALLET.map(w=>w.to||w.srcLabel).filter(Boolean))].sort();
   rSel.innerHTML='<option value="">كل الماكينات</option>'+rMachines.map(m=>'<option value="'+m+'">'+m+'</option>').join('');
-  lSel.innerHTML='<option value="">كل الماكينات</option>'+lMachines.map(m=>'<option value="'+m+'">'+m+'</option>').join('');
   if(rMachines.includes(rVal))rSel.value=rVal;
-  if(lMachines.includes(lVal))lSel.value=lVal;
+
+  // جانب المحافظ: أزرار متعددة الاختيار
+  const lMachines=[...new Set(WALLET.map(w=>w.to||w.srcLabel).filter(Boolean))].sort();
+  // نشيل أي مختار مبقاش موجود
+  [...SEL_MACHINES].forEach(m=>{ if(!lMachines.includes(m)) SEL_MACHINES.delete(m); });
+  const chips=$('#left-machine-chips');
+  const allActive = SEL_MACHINES.size===0 ? ' active' : '';
+  chips.innerHTML='<button class="mfilter-chip'+allActive+'" data-m="">كل الماكينات</button>'+
+    lMachines.map(m=>'<button class="mfilter-chip'+(SEL_MACHINES.has(m)?' active':'')+'" data-m="'+m.replace(/"/g,'&quot;')+'">'+m+'</button>').join('');
+  chips.querySelectorAll('.mfilter-chip').forEach(btn=>{
+    btn.onclick=()=>{
+      const m=btn.dataset.m;
+      if(m===''){ SEL_MACHINES.clear(); }        // "الكل" يمسح الاختيارات
+      else { if(SEL_MACHINES.has(m)) SEL_MACHINES.delete(m); else SEL_MACHINES.add(m); }
+      buildMachineFilters();   // إعادة رسم حالة الأزرار
+      renderLeft();
+    };
+  });
 }
 $('#right-machine-filter').addEventListener('change',renderRight);
-$('#left-machine-filter').addEventListener('change',renderLeft);
 $('#right-link-filter').addEventListener('change',renderRight);
 $('#left-link-filter').addEventListener('change',renderLeft);
 $('#left-amt-search').addEventListener('input',renderLeft);
@@ -657,11 +676,14 @@ function renderLeft(){
     $('#left-cnt').textContent='0 معاملة';
     return;
   }
-  const mf=$('#left-machine-filter').value;
   const lf=$('#left-link-filter').value; // 'open','closed','all'
   const searchAmt=parseFloat($('#left-amt-search').value);
   let rows=WALLET.filter(w=>{
-    if(mf && w.to!==mf && w.srcLabel!==mf) return false;
+    // فلتر الماكينات المتعدد: فاضي = الكل، وإلا لازم يكون ضمن المختار
+    if(SEL_MACHINES.size){
+      const key1=w.to, key2=w.srcLabel;
+      if(!SEL_MACHINES.has(key1) && !SEL_MACHINES.has(key2)) return false;
+    }
     if(lf==='open') return !w.closed;
     if(lf==='closed') return w.closed;
     return true;
