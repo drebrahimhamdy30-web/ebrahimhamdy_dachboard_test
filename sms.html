@@ -6,6 +6,7 @@
   <title>معاملات المحافظ - Phalix</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     /* توسيع الشاشة لصفحة المحافظ */
     .container { max-width:1500px !important; }
@@ -214,7 +215,7 @@
   <script src="nav.js" defer></script>
   <script>
     /* ============================================================
-       معاملات المحافظ (SMS) — مربوطة بـ n8n webhook bmonline?type=sms
+       معاملات المحافظ (SMS) — بتقرأ وتكتب من Supabase (جدول wallet_sms) مباشرة
        أعمدة الجدول: id, branch, ammount, from_no, to_no, balance,
                      message, type, fees, bill_no, done
        - المحفظة = رقم to_no (كل رقم محفظة، وياخد لون ثابت)
@@ -223,9 +224,14 @@
        - فحص الرصيد داخل كل محفظة على حدة بالترتيب
        ============================================================ */
 
-    const SMS_GET_URL = 'https://agent.ebrahimhamdy.com/webhook/bmonline?type=sms';
-    // webhook الكتابة (bmonlinepost) — للترحيل والإضافة
-    const SMS_POST_URL = 'https://agent.ebrahimhamdy.com/webhook/bmonlinepost';
+    /* ===== Supabase (بدل الويب هوك) ===== */
+    const SUPABASE_URL = 'https://rxtjoqulmgkkcohmgzgi.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
+    const _authJwt = localStorage.getItem('authJwt');
+    const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: _authJwt ? { Authorization: 'Bearer ' + _authJwt } : {} }
+    });
 
     // ألوان ثابتة لكل رقم محفظة (عدّل/أضف أرقامك هنا)
     // غيّر اللون لو عايز رقم معيّن يبقى برتقالي (أورانج) أو أحمر (فودافون)
@@ -323,21 +329,20 @@
       const tbody = document.getElementById('table-body');
       tbody.innerHTML = '<tr class="loading-row"><td colspan="10">⏳ جاري جلب البيانات...</td></tr>';
       try {
-        const resp = await fetch(SMS_GET_URL);
-        const text = await resp.text();
-        let data = [];
-        if (text && text.trim()) {
-          const parsed = JSON.parse(text);
-          data = Array.isArray(parsed) ? parsed
-               : (parsed.data && Array.isArray(parsed.data)) ? parsed.data
-               : (Array.isArray(parsed) && parsed[0]?.data) ? parsed[0].data : [];
+        // جلب من Supabase على دفعات (تخطّي حد الـ 1000)
+        let all = [], from = 0; const page = 1000;
+        while (true) {
+          let q = db.from('wallet_sms').select('*').order('id', { ascending: true }).range(from, from + page - 1);
+          if (userBranch) q = q.eq('branch', userBranch);
+          const { data, error } = await q;
+          if (error) throw error;
+          all = all.concat(data);
+          if (data.length < page) break;
+          from += page;
         }
-        // فلترة بالفرع لو الموظف ليه فرع محدد
-        allData = (!userBranch) ? data
-          : data.filter(r => String(r.branch||'').trim() === userBranch);
+        allData = all;
 
-        // ترتيب زمني تصاعدي (الأقدم أولاً) — مهم عشان فحص الرصيد يطلع صح
-        // ترتيب بالـ id (ترتيب الإدخال الحقيقي) — أدق من الوقت عند تطابق createdAt
+        // ترتيب بالـ id (ترتيب الإدخال الحقيقي) — مهم عشان فحص الرصيد يطلع صح
         allData.sort((a,b) => sortKey(a) - sortKey(b));
 
         allData.forEach((r,i)=>{ if(r.id===undefined||r.id===null) r.id='_'+i; });
@@ -346,7 +351,7 @@
         applyFilter();
       } catch(e) {
         console.error(e);
-        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل تحميل البيانات<br><span style="font-size:0.72rem;color:var(--text-muted);">${e.message||e}</span></td></tr>`;
       }
     }
 
@@ -552,21 +557,19 @@
       icon.className = 'fas fa-spinner fa-spin';
       label.textContent = 'جاري الترحيل...';
       try {
-        const r = await fetch(SMS_POST_URL, {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ type:'sms_update', ids: ids, done: true })
-        });
-        if (r.ok) {
-          // تحديث محلي فوري
-          allData.forEach(it => { if (selected.has(String(it.id))) it.done = true; });
-          selected.clear();
-          applyFilter();
-        } else {
-          alert('❌ فشل الترحيل — تأكد إن فرع sms_update موجود في n8n');
+        const numIds = ids.map(x => isNaN(Number(x)) ? x : Number(x));
+        const chunk = 200;
+        for (let i = 0; i < numIds.length; i += chunk) {
+          const slice = numIds.slice(i, i + chunk);
+          const { error } = await db.from('wallet_sms').update({ done: true }).in('id', slice);
+          if (error) throw error;
         }
+        allData.forEach(it => { if (selected.has(String(it.id))) it.done = true; });
+        selected.clear();
+        applyFilter();
       } catch(e) {
-        console.error('postSelected REAL ERROR:', e);
-        alert('❌ خطأ في الاتصال — التفاصيل: ' + e.message);
+        console.error('postSelected error:', e);
+        alert('❌ فشل الترحيل: ' + (e.message || e));
       }
       btn.disabled = false;
       icon.className = 'fas fa-check-double';
@@ -623,29 +626,26 @@
       const btn = document.getElementById('add-save-btn');
       btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
-      // الـ payload — type بيبدأ بكلمة النوع زي شكل الجدول
-      const payload = {
-        type:    'sms_insert',
-        branch:  branch || null,
-        ammount: num(ammount),
-        from_no: from_no || null,
-        to_no:   to_no,
-        balance: num(balance),
-        message: message || null,
-        sms_type: typeSel,          // استلام / إرسال (للمنطق لو حبيت تستخدمه في n8n)
-        fees:    num(fees),
-        bill_no: null,
-        done:    null
-      };
-
       try {
-        const r = await fetch(SMS_POST_URL, {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify(payload)
+        // op_ref فريد للإضافة اليدوية عشان ما يتعارضش مع قيد التفرّد
+        const manualRef = 'MANUAL-' + Date.now();
+        const { error } = await db.from('wallet_sms').insert({
+          branch:  branch || null,
+          ammount: num(ammount),
+          from_no: from_no || null,
+          to_no:   to_no,
+          balance: num(balance),
+          message: message || null,
+          type:    typeSel,
+          fees:    num(fees),
+          op_ref:  manualRef
         });
-        if (r.ok) { closeAdd(); clearAdd(); await loadAll(); }
-        else alert('❌ فشل الحفظ — تأكد إن فرع sms_insert موجود في n8n');
-      } catch(e) { alert('❌ خطأ في الاتصال'); }
+        if (error) throw error;
+        closeAdd(); clearAdd(); await loadAll();
+      } catch(e) {
+        console.error('saveAdd error:', e);
+        alert('❌ فشل الحفظ: ' + (e.message || e));
+      }
       btn.disabled=false; btn.innerHTML='<i class="fas fa-save"></i> حفظ';
     }
     function clearAdd(){
