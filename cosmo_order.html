@@ -78,6 +78,10 @@
     .type-toggle { display:inline-flex;border:1.5px solid var(--border);border-radius:var(--radius-md);overflow:hidden; }
     .type-toggle button { border:none;padding:6px 16px;font-family:var(--font);font-size:0.82rem;font-weight:700;cursor:pointer;background:var(--surface);color:var(--text-secondary);transition:0.15s; }
     .type-toggle button.active { background:var(--accent,#3b82f6);color:#fff; }
+    /* توجل الفرع */
+    .branch-toggle { display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px; }
+    .branch-toggle button { flex:1;min-width:70px;border:1.5px solid var(--border);padding:6px 10px;font-family:var(--font);font-size:0.78rem;font-weight:700;cursor:pointer;background:var(--surface);color:var(--text-secondary);border-radius:var(--radius-sm);transition:0.15s; }
+    .branch-toggle button.active { background:var(--primary,#3b82f6);color:#fff;border-color:var(--primary,#3b82f6); }
     /* سويتش معامل الورقيات */
     .paper-switch-wrap { display:flex;align-items:center;gap:8px;margin-top:10px;padding-top:10px;border-top:1px dashed var(--border); }
     .paper-switch-wrap label { font-size:0.75rem;font-weight:700;color:var(--text-secondary);cursor:pointer; }
@@ -102,6 +106,14 @@
             <button id="type-cosmo" class="active" onclick="setType('cosmo')">🧴 كوزمو</button>
             <button id="type-medicine" onclick="setType('medicine')">💊 دوا</button>
           </div>
+        </div>
+
+        <!-- توجل الفرع -->
+        <div class="branch-toggle">
+          <button id="branch-all" class="active" onclick="setBranch('all')">🏢 كل الفروع</button>
+          <button id="branch-mamora" onclick="setBranch('mamora')">المعمورة</button>
+          <button id="branch-san" onclick="setBranch('san')">سان ستيفانو</button>
+          <button id="branch-bishr" onclick="setBranch('bishr')">سيدى بشر</button>
         </div>
 
         <!-- بحث + شركات في سطر واحد -->
@@ -204,6 +216,7 @@
     var dataLoaded=false, allResults=[], filteredResults=[];
     var itemStates = {};
     var currentType = 'cosmo';          // 'cosmo' = itm_ismedicine 0 | 'medicine' = 1
+    var currentBranch = 'all';          // all | mamora | san | bishr
     var allCompanies = [];              // كل الشركات المتاحة للنوع الحالي
     var selectedCompanies = [];         // المختارة ([] = الكل)
     var companyActiveIdx = -1;          // للتنقل بالكيبورد في الاقتراحات
@@ -266,6 +279,16 @@
       if(dataLoaded) calculate();
     }
 
+    function setBranch(branch){
+      if(currentBranch === branch) return;
+      currentBranch = branch;
+      ['all','mamora','san','bishr'].forEach(function(b){
+        document.getElementById('branch-'+b).classList.toggle('active', b===branch);
+      });
+      // إعادة الحساب على أساس الفرع الجديد
+      if(dataLoaded) calculate();
+    }
+
     // ===== التنقل الرأسي بين خانات الكمية بـ Enter / Tab =====
     function qtyKeyNav(e, input){
       if(e.key !== 'Enter' && e.key !== 'Tab') return;
@@ -320,8 +343,7 @@
             delete itemStates[c].ordered;
           }
         });
-        // رجوع كل الكميات المعدَّلة يدويًا للمحسوبة — مش بس اللي كانت متعلّمة "تم الطلب"
-        // (ده اللي رسالة التأكيد بتوعد بيه فعليًا)
+        // رجوع كل الكميات المعدَّلة يدويًا للمحسوبة
         customQty = {};
         saveQty();
         applyFilters();
@@ -357,7 +379,6 @@
     function renderCompanyChips(){
       var chips = document.getElementById('company-chips');
       var input = document.getElementById('company-input');
-      // شيل كل الـ chips القديمة (سيب الإنبت)
       chips.querySelectorAll('.company-chip').forEach(function(c){c.remove();});
       selectedCompanies.forEach(function(name){
         var chip = document.createElement('span');
@@ -484,7 +505,7 @@
     function togglePaperMode(on){
       document.querySelectorAll('#rules-body .rule-multiply').forEach(function(inp){
         if(on){
-          if(!inp.dataset.orig) inp.dataset.orig = inp.value; // حفظ القيمة الأصلية
+          if(!inp.dataset.orig) inp.dataset.orig = inp.value;
           inp.value = 0.75;
         } else {
           if(inp.dataset.orig){ inp.value = inp.dataset.orig; delete inp.dataset.orig; }
@@ -524,7 +545,6 @@
       var wantMed = currentType === 'medicine' ? 1 : 0;
       function addStock(arr,branch){
         arr.forEach(function(item){
-          // فلترة النوع: كوزمو (0) أو دوا (1)
           var isMed = parseInt(item.itm_ismedicine);
           if(isNaN(isMed)) isMed = 0;
           if(isMed !== wantMed) return;
@@ -549,6 +569,9 @@
         salesMap[code].bishr[m] =(salesMap[code].bishr[m] ||0)+(parseFloat(row.bishr) ||0);
       });
 
+      // الفروع اللي هتُحسب: كلها أو فرع واحد
+      var branches = currentBranch==='all' ? ['mamora','san','bishr'] : [currentBranch];
+
       var list=[];
       Object.keys(stockMap).forEach(function(code){
         var s=stockMap[code];
@@ -567,14 +590,30 @@
         var nM=Math.ceil(Math.max(0,tM-s.mamora));
         var nN=Math.ceil(Math.max(0,tN-s.san));
         var nB=Math.ceil(Math.max(0,tB-s.bishr));
-        var totalTarget=tM+tN+tB,totalStock=s.mamora+s.san+s.bishr;
+
+        // بيانات كل فرع مجمّعة للوصول السهل
+        var branchData={
+          mamora:{stock:s.mamora,avg:m.avg,active:m.activeMonths,mul:mulM,target:tM,need:nM},
+          san:   {stock:s.san,   avg:n.avg,active:n.activeMonths,mul:mulN,target:tN,need:nN},
+          bishr: {stock:s.bishr, avg:b.avg,active:b.activeMonths,mul:mulB,target:tB,need:nB}
+        };
+
+        // الحساب على أساس الفروع المختارة فقط
+        var totalTarget=0, totalStock=0, totalAvgRaw=0;
+        branches.forEach(function(br){
+          totalTarget += branchData[br].target;
+          totalStock  += branchData[br].stock;
+          totalAvgRaw += branchData[br].avg;
+        });
+
         var orderQty=Math.ceil(totalTarget-totalStock);
         if(orderQty<0) orderQty=0;
-        // ضمان أن إجمالي الرصيد بعد الطلب لا يقل عن MIN_TOTAL (علبة لكل فرع)
-        if(totalStock+orderQty<MIN_TOTAL) orderQty=MIN_TOTAL-totalStock;
+        // ضمان أن إجمالي الرصيد بعد الطلب لا يقل عن MIN_TOTAL
+        var minTotal = MIN_TOTAL * branches.length; // علبة لكل فرع مختار
+        if(totalStock+orderQty<minTotal) orderQty=minTotal-totalStock;
         if(orderQty<=0||totalTarget===0) return;
 
-        origQty[code] = orderQty; // حفظ الكمية الأصلية المحسوبة
+        origQty[code] = orderQty;
 
         list.push({
           code,name:s.name,company:s.company,unit:s.unit,price:s.price,
@@ -582,16 +621,14 @@
           san:   {stock:s.san,   avg:r1(n.avg),active:n.activeMonths,mul:mulN,need:nN},
           bishr: {stock:s.bishr, avg:r1(b.avg),active:b.activeMonths,mul:mulB,need:nB},
           totalStock,totalTarget,orderQty,
-          totalAvg:r1(m.avg+n.avg+b.avg)
+          totalAvg:r1(totalAvgRaw)
         });
       });
 
       list.sort(function(a,b){return b.orderQty-a.orderQty;});
       allResults=list;
 
-      // بناء قائمة الشركات للبحث المرن
       allCompanies = [...new Set(list.map(function(i){return i.company;}).filter(Boolean))].sort();
-      // شيل أي شركة مختارة لم تعد موجودة في النوع الحالي
       selectedCompanies = selectedCompanies.filter(function(c){return allCompanies.includes(c);});
       renderCompanyChips();
 
@@ -631,15 +668,28 @@
     function renderResults(list){
       var container=document.getElementById('result-container');
       var ordered=list.filter(function(i){return (itemStates[i.code]||{}).ordered;}).length;
-      // عدّ المتجاهَل من كل النتائج (حتى لو مخفي من القائمة)
       var ignored=allResults.filter(function(i){return (itemStates[i.code]||{}).ignored;}).length;
       var totalQty=list.filter(function(i){return !(itemStates[i.code]||{}).ignored;})
                        .reduce(function(s,i){return s+qtyNum(i);},0);
 
+      // عناوين ديناميكية حسب الفرع
+      var branchNames={all:'كل الفروع',mamora:'المعمورة',san:'سان ستيفانو',bishr:'سيدى بشر'};
+      var scopeLabel = currentBranch==='all' ? 'إجمالي' : branchNames[currentBranch];
+      var branchTag = currentBranch==='all' ? '' : ' — '+branchNames[currentBranch];
+
       document.getElementById('result-count').textContent=
-        list.length+' صنف — تم: '+ordered+' · متجاهل: '+ignored;
+        list.length+' صنف'+branchTag+' — تم: '+ordered+' · متجاهل: '+ignored;
 
       if(!list.length){container.innerHTML='<div class="loading-overlay">لا توجد نتائج</div>';return;}
+
+      // الأعمدة التفصيلية للفروع: كلها لو "الكل"، أو الفرع المحدد فقط
+      var detailBranches = currentBranch==='all' ? ['mamora','san','bishr'] : [currentBranch];
+      var branchHeaders={
+        mamora:'المعمورة', san:'سان ستيفانو', bishr:'سيدى بشر'
+      };
+      var branchCols = detailBranches.map(function(br){
+        return '<th>'+branchHeaders[br]+'<br><small style="font-weight:400;opacity:0.8;">احتياج·رصيد·معدل·×</small></th>';
+      }).join('');
 
       var html=`
         <div class="summary-bar">
@@ -656,12 +706,10 @@
                 <th style="width:30px;">🚫</th>
                 <th style="text-align:right;">الصنف</th>
                 <th>الكمية المطلوبة</th>
-                <th>إجمالي المعدل الشهري</th>
-                <th>إجمالي الهدف</th>
-                <th>إجمالي الرصيد</th>
-                <th>المعمورة<br><small style="font-weight:400;opacity:0.8;">احتياج·رصيد·معدل·×</small></th>
-                <th>سان ستيفانو<br><small style="font-weight:400;opacity:0.8;">احتياج·رصيد·معدل·×</small></th>
-                <th>سيدى بشر<br><small style="font-weight:400;opacity:0.8;">احتياج·رصيد·معدل·×</small></th>
+                <th>${scopeLabel} المعدل الشهري</th>
+                <th>${scopeLabel} الهدف</th>
+                <th>${scopeLabel} الرصيد</th>
+                ${branchCols}
               </tr>
             </thead>
             <tbody>
@@ -681,6 +729,8 @@
             '<span class="branch-stock">'+b.stock+'</span> / '+b.avg+(b.active>0?' ('+b.active+'ش)':'')+
             ' <span class="multiply-badge">×'+b.mul+'</span></div></td>';
         }
+
+        var branchCells = detailBranches.map(function(br){ return bc(item[br]); }).join('');
 
         html+='<tr class="'+rowClass+'">'+
           '<td><input type="checkbox" class="cb-ordered" '+(state.ordered?'checked':'')+
@@ -704,7 +754,7 @@
           '<td style="font-weight:700;color:var(--primary);">'+item.totalAvg+'</td>'+
           '<td style="color:var(--accent-dark);font-weight:700;">'+Math.round(item.totalTarget)+'</td>'+
           '<td style="font-weight:600;">'+Math.round(item.totalStock)+'</td>'+
-          bc(item.mamora)+bc(item.san)+bc(item.bishr)+
+          branchCells+
         '</tr>';
       });
 
@@ -745,11 +795,10 @@
 
     // ===== Export Excel - عمودين =====
     function exportExcel(){
-      // استبعاد المتجاهل + استبعاد أي صنف كميته صفر (بعد التعديل)
       var list = filteredResults.filter(function(i){
         if((itemStates[i.code]||{}).ignored) return false;
         var v = qtyOf(i);
-        if(qtyIsText(v)) return true;   // نص زي "كرتونة" يتصدّر عادي
+        if(qtyIsText(v)) return true;
         return qtyNum(i) > 0;
       });
       if(!list.length){ alert('لا توجد أصناف بكمية أكبر من صفر'); return; }
@@ -773,17 +822,12 @@
 
       var wb = XLSX.utils.book_new();
       var ws = XLSX.utils.aoa_to_sheet(wsData);
-
-      // عرض الأعمدة
-      ws['!cols'] = [
-        {wch:42}, {wch:14}, {wch:3}, {wch:42}, {wch:14}
-      ];
-
-      // تجميد الصف الأول
+      ws['!cols'] = [ {wch:42}, {wch:14}, {wch:3}, {wch:42}, {wch:14} ];
       ws['!freeze'] = {xSplit:0, ySplit:1};
 
       XLSX.utils.book_append_sheet(wb, ws, 'الطلبية');
-      var fname = (currentType==='medicine'?'medicine':'cosmo') + '_order_';
+      var branchTag = currentBranch==='all' ? '' : '_'+currentBranch;
+      var fname = (currentType==='medicine'?'medicine':'cosmo') + branchTag + '_order_';
       XLSX.writeFile(wb, fname + new Date().toISOString().slice(0,10) + '.xlsx');
     }
   </script>
