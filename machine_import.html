@@ -6,6 +6,7 @@
 <title>استيراد جدول الماكينات - Phalix</title>
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root{
     --font:'Tajawal',system-ui,sans-serif;
@@ -120,6 +121,7 @@
     <span class="cb-stat">المحافظ: <b id="cb-left">0</b> (<span id="cb-left-sum">0.00</span> ج)</span>
     <div class="cb-actions">
       <button class="cb-cancel" id="cb-cancel">إلغاء</button>
+      <button class="cb-confirm" id="cb-review" style="background:#2563eb;"><i class="fas fa-clipboard-check"></i> ترحيل المراجعة</button>
       <button class="cb-confirm" id="cb-confirm"><i class="fas fa-check"></i> تأكيد التحديث</button>
     </div>
   </div>
@@ -219,6 +221,23 @@ if(IS_ACCOUNTANT_MI&&!USER_BRANCH)USER_BRANCH=BRANCHES_MI[0];
 
 const POSMGMT_URL='https://agent.ebrahimhamdy.com/webhook/posmanagement';
 const POSUPDATE_URL='https://agent.ebrahimhamdy.com/webhook/posupdate';
+
+/* ===== Supabase: مصدر المعاملات (باي موب + محافظ) من جدولين ===== */
+const SUPABASE_URL='https://rxtjoqulmgkkcohmgzgi.supabase.co';
+const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
+const _authJwt=localStorage.getItem('authJwt');
+const sdb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:false,autoRefreshToken:false},global:{headers:_authJwt?{Authorization:'Bearer '+_authJwt}:{}}});
+async function sbFetchAll(table){
+  let all=[],from=0;const page=1000;
+  while(true){
+    const {data,error}=await sdb.from(table).select('*').eq('reviewed',false).order('createdAt',{ascending:false}).range(from,from+page-1);
+    if(error)throw error;
+    all=all.concat(data);
+    if(data.length<page)break;
+    from+=page;
+  }
+  return all;
+}
 async function posUpdate(payload){
   const r=await fetch(POSUPDATE_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   const t=await r.text();let d=t&&t.trim()?JSON.parse(t):{};if(Array.isArray(d))d=d[0]||{};return d;
@@ -373,25 +392,53 @@ function normWallet(r){
 }
 async function loadWallet(){
   try{
-    const res=await fetch(POSMGMT_URL);
-    const data=await res.json();
-    const o=Array.isArray(data)?data[0]:data;
-    const all=(Array.isArray(o.wallet)?o.wallet:[]).map(normWallet);
-    const bk=normBranchKey(USER_BRANCH);
-    WALLET=bk?all.filter(w=>w.storeKey===bk):all;
-    LINKS=Array.isArray(o.links)?o.links:[];
-    CASH2WALLET=(Array.isArray(o.cash_to_wallet)?o.cash_to_wallet:[]).map(r=>({
-      id:r.id,bill_no:r.bill_no,branch:r.branch,
-      invoice_amount:num(r.invoice_amount),transaction_value:num(r.transaction_value),
-      customer_name:r.customer_name,created_at:r.created_at,reason:r.reason||'cash_as_visa',
-      disbursed:(r.disbursed===true||r.disbursed==='true'),disbursed_at:r.disbursed_at
-    }));
+    // المعاملات من الجدولين الجداد في Supabase (باي موب + محافظ)
+    const [paymobRows, smsRows] = await Promise.all([
+      sbFetchAll('wallet'),
+      sbFetchAll('wallet_sms')
+    ]);
+    // باي موب: نضيف تلميح to='paymob' لو مش موجود عشان normWallet يصنّفها صح
+    const pm = paymobRows.map(r => ({ ...r, id:'pm'+r.id, to: r.to || 'paymob' }));
+    // محافظ: نستنتج نوع المحفظة من نص الرسالة (فودافون/أورنج) عشان srcLabel يطلع صح
+    const sms = smsRows.map(r => {
+      let toHint = r.to || '';
+      const msg = String(r.message||'');
+      if (!toHint) {
+        if (/فودافون|vodafone/i.test(msg)) toHint = 'vodafone';
+        else if (/اورنج|أورنج|orange/i.test(msg)) toHint = 'orange';
+        else if (/انستا|instapay/i.test(msg)) toHint = 'instapay';
+        else toHint = 'wallet';
+      }
+      return { ...r, to: toHint };
+    });
+    const merged = [...pm, ...sms];
+
+    const all = merged.map(normWallet);
+    const bk = normBranchKey(USER_BRANCH);
+    WALLET = bk ? all.filter(w=>w.storeKey===bk) : all;
+
+    // links و cash_to_wallet لسه من posmanagement (جداول n8n منفصلة)
+    try {
+      const res = await fetch(POSMGMT_URL);
+      const data = await res.json();
+      const o = Array.isArray(data)?data[0]:data;
+      LINKS = Array.isArray(o.links)?o.links:[];
+      CASH2WALLET = (Array.isArray(o.cash_to_wallet)?o.cash_to_wallet:[]).map(r=>({
+        id:r.id,bill_no:r.bill_no,branch:r.branch,
+        invoice_amount:num(r.invoice_amount),transaction_value:num(r.transaction_value),
+        customer_name:r.customer_name,created_at:r.created_at,reason:r.reason||'cash_as_visa',
+        disbursed:(r.disbursed===true||r.disbursed==='true'),disbursed_at:r.disbursed_at
+      }));
+    } catch(e2) {
+      LINKS = LINKS || []; CASH2WALLET = CASH2WALLET || [];
+    }
     C2W_BILL_NOS=new Set(CASH2WALLET.map(r=>String(r.bill_no||'').trim()).filter(Boolean));
+
     applyLinksToData();
     buildMachineFilters();
     renderAll();
     renderC2W();
-  }catch(e){ toast('فشل تحميل البيانات','err'); }
+  }catch(e){ console.error(e); toast('فشل تحميل البيانات','err'); }
 }
 loadRowsLocal();
 if(ROWS.length){
@@ -641,6 +688,42 @@ function renderConfirmBar(){
 }
 $('#cb-cancel').onclick=()=>{ SEL_R=new Set(); SEL_L=new Set(); renderAll(); };
 $('#cb-confirm').onclick=confirmLinking;
+
+// ترحيل المراجعة: يعلّم المعاملات المحددة (جانب المحافظ/باي موب) كـ reviewed=true في Supabase
+$('#cb-review').onclick=async function(){
+  const wals=[...SEL_L].map(id=>WALLET.find(w=>w.id===id)).filter(Boolean);
+  if(!wals.length){ toast('اختَر معاملات من جانب المحافظ أولاً','err'); return; }
+  if(!confirm('تعليم '+wals.length+' معاملة كمُراجَعة؟')) return;
+  const btn=$('#cb-review'); btn.disabled=true; btn.innerHTML='<i class="fas fa-spinner fa-spin"></i>';
+  try{
+    // نجمّع الـ ids حسب الجدول المصدر (باي موب = wallet، محافظ = wallet_sms)
+    const pmIds=[], smsIds=[];
+    wals.forEach(w=>{
+      const rawId=(w.raw&&w.raw.id!=null)?w.raw.id:null;
+      if(rawId==null) return;
+      if(String(w.id).startsWith('pm')) pmIds.push(rawId);
+      else smsIds.push(rawId);
+    });
+    if(pmIds.length){
+      const {error}=await sdb.from('wallet').update({reviewed:true}).in('id',pmIds);
+      if(error) throw error;
+    }
+    if(smsIds.length){
+      const {error}=await sdb.from('wallet_sms').update({reviewed:true}).in('id',smsIds);
+      if(error) throw error;
+    }
+    // تحديث محلي: نشيل المُراجَع من WALLET (عشان يختفي زي ما كان قبل الترحيل)
+    const doneIds=new Set(wals.map(w=>w.id));
+    WALLET=WALLET.filter(w=>!doneIds.has(w.id));
+    SEL_L=new Set();
+    toast('تم ترحيل المراجعة ('+wals.length+' معاملة)','ok');
+    renderAll();
+  }catch(e){
+    console.error('review error:',e);
+    toast('فشل الترحيل: '+(e.message||e),'err');
+  }
+  btn.disabled=false; btn.innerHTML='<i class="fas fa-clipboard-check"></i> ترحيل المراجعة';
+};
 
 async function confirmLinking(){
   if(!SEL_R.size && !SEL_L.size){ toast('اختَر صفوف أو معاملات أولاً','err'); return; }
