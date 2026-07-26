@@ -199,6 +199,21 @@ async function sbMissingList() {
   } catch (e) { console.error('sbMissingList error:', e); return []; }
 }
 
+// ---- متابعة النواقص: طلبات "غير متوفر يحتاج متابعة" + رصيد المخزون الحالي (stq) لحظيًا ----
+// بيرجّع Array فيه {id,item_name,item_code,user,branch,cust_name,cust_code,cust_state,createdAt,stq}
+async function sbShortages(branch) {
+  try {
+    const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_shortages`, {
+      method: 'POST',
+      headers: SB_TASK_HEADERS,
+      body: JSON.stringify({ p_branch: branch || 'عام' })
+    });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    return Array.isArray(rows) ? rows : [];
+  } catch (e) { console.error('sbShortages error:', e); return []; }
+}
+
 async function fetchFromN8N(category) {
   try {
     const response = await fetch(`${FETCH_URL}?type=${category}`);
