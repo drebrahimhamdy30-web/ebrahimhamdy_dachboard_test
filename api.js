@@ -414,6 +414,23 @@ async function verifyToken() {
   }
 }
 
+// خروج إجباري لكل الجلسات: بيقارن وقت دخول المستخدم بقيمة force_logout_before على Supabase
+async function sbForcedLogoutCheck() {
+  try {
+    const r = await fetch(`${SB_URL_API}/rest/v1/app_control?id=eq.1&select=force_logout_before`, { headers: SB_TASK_HEADERS });
+    if (!r.ok) return false;
+    const rows = await r.json();
+    const cutoff = (rows && rows[0] && rows[0].force_logout_before) ? new Date(rows[0].force_logout_before).getTime() : 0;
+    const loginTime = parseInt(localStorage.getItem('loginTime') || '0', 10);
+    if (cutoff && loginTime && loginTime < cutoff) {
+      localStorage.clear();
+      window.location.replace('index.html');
+      return true;
+    }
+    return false;
+  } catch (e) { return false; }
+}
+
 async function checkAuth() {
   const user      = localStorage.getItem('activeUser');
   const token     = localStorage.getItem('authToken');
@@ -423,6 +440,8 @@ async function checkAuth() {
     window.location.replace('index.html');
     return null;
   }
+  if (await sbForcedLogoutCheck()) return null;
+  if (!window.__flTimer) { window.__flTimer = setInterval(sbForcedLogoutCheck, 120000); }
   const thirtyMinutes = 30 * 60 * 1000;
   if (lastCheck && (now - parseInt(lastCheck)) < thirtyMinutes) {
     return user;
