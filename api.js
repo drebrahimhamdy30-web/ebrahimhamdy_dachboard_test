@@ -80,10 +80,12 @@ async function sbTaskInsert(payload) {
 async function sbTaskList(opts = {}) {
   try {
     const params = new URLSearchParams();
-    params.set('select', '*');
+    params.set('select', opts.select || '*');
     params.set('order', 'created_at.desc');
-    if (opts.type)  params.set('type',  `eq.${opts.type}`);
-    if (opts.limit) params.set('limit', String(opts.limit));
+    if (opts.type)   params.set('type',  `eq.${opts.type}`);
+    if (opts.user)   params.set('user',  `eq.${opts.user}`);
+    if (opts.states && opts.states.length) params.set('state', `in.(${opts.states.join(',')})`);
+    if (opts.limit)  params.set('limit', String(opts.limit));
     const r = await fetch(`${SB_TASK_URL}?${params.toString()}`, { headers: SB_TASK_HEADERS });
     if (!r.ok) return [];
     const rows = await r.json();
