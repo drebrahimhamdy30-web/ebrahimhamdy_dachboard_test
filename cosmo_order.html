@@ -119,6 +119,17 @@
           </div>
         </div>
 
+        <!-- اختيار الفرع -->
+        <div style="margin-top:10px;">
+          <span class="filter-label">الفرع المطلوب له</span>
+          <div class="type-toggle branch-toggle" style="display:flex;width:100%;">
+            <button id="branch-all" class="active" onclick="setBranch('all')" style="flex:1;">🏬 كل الفروع</button>
+            <button id="branch-mamora" onclick="setBranch('mamora')" style="flex:1;">المعمورة</button>
+            <button id="branch-san" onclick="setBranch('san')" style="flex:1;">سان ستيفانو</button>
+            <button id="branch-bishr" onclick="setBranch('bishr')" style="flex:1;">سيدى بشر</button>
+          </div>
+        </div>
+
         <div class="filter-grid">
           <div>
             <span class="filter-label">الحالة</span>
@@ -204,6 +215,7 @@
     var dataLoaded=false, allResults=[], filteredResults=[];
     var itemStates = {};
     var currentType = 'cosmo';          // 'cosmo' = itm_ismedicine 0 | 'medicine' = 1
+    var selectedBranch = 'all';         // 'all' | 'mamora' | 'san' | 'bishr'
     var allCompanies = [];              // كل الشركات المتاحة للنوع الحالي
     var selectedCompanies = [];         // المختارة ([] = الكل)
     var companyActiveIdx = -1;          // للتنقل بالكيبورد في الاقتراحات
@@ -273,7 +285,15 @@
       if(dataLoaded) calculate();
     }
 
-    // ===== التنقل الرأسي بين خانات الكمية بـ Enter / Tab =====
+    function setBranch(b){
+      if(selectedBranch === b) return;
+      selectedBranch = b;
+      ['all','mamora','san','bishr'].forEach(function(x){
+        document.getElementById('branch-'+x).classList.toggle('active', x===b);
+      });
+      // إعادة الحساب لأن الكمية/الهدف/المعدل تتغير حسب الفرع
+      if(dataLoaded) calculate();
+    }
     function qtyKeyNav(e, input){
       if(e.key !== 'Enter' && e.key !== 'Tab') return;
       e.preventDefault();
@@ -572,7 +592,14 @@
         var nM=Math.ceil(Math.max(0,tM-s.mamora));
         var nN=Math.ceil(Math.max(0,tN-s.san));
         var nB=Math.ceil(Math.max(0,tB-s.bishr));
-        var totalTarget=tM+tN+tB,totalStock=s.mamora+s.san+s.bishr;
+
+        // الإجماليات حسب الفرع المختار (أو كل الفروع)
+        var totalTarget, totalStock, totalAvg;
+        if(selectedBranch==='mamora'){ totalTarget=tM; totalStock=s.mamora; totalAvg=m.avg; }
+        else if(selectedBranch==='san'){ totalTarget=tN; totalStock=s.san; totalAvg=n.avg; }
+        else if(selectedBranch==='bishr'){ totalTarget=tB; totalStock=s.bishr; totalAvg=b.avg; }
+        else { totalTarget=tM+tN+tB; totalStock=s.mamora+s.san+s.bishr; totalAvg=m.avg+n.avg+b.avg; }
+
         var orderQty=Math.ceil(totalTarget-totalStock);
         if(orderQty<=0||totalTarget===0) return;
 
@@ -584,7 +611,7 @@
           san:   {stock:s.san,   avg:r1(n.avg),active:n.activeMonths,mul:mulN,need:nN},
           bishr: {stock:s.bishr, avg:r1(b.avg),active:b.activeMonths,mul:mulB,need:nB},
           totalStock,totalTarget,orderQty,
-          totalAvg:r1(m.avg+n.avg+b.avg)
+          totalAvg:r1(totalAvg)
         });
       });
 
@@ -643,6 +670,9 @@
 
       if(!list.length){container.innerHTML='<div class="loading-overlay">لا توجد نتائج</div>';return;}
 
+      var brLbl = selectedBranch==='mamora' ? 'المعمورة —' :
+                  selectedBranch==='san'    ? 'سان —' :
+                  selectedBranch==='bishr'  ? 'بشر —' : 'إجمالي';
       var html=`
         <div class="summary-bar">
           <div class="summary-item">أصناف: <b>${list.filter(i=>!(itemStates[i.code]||{}).ignored).length}</b></div>
@@ -658,9 +688,9 @@
                 <th style="width:30px;">🚫</th>
                 <th style="text-align:right;">الصنف</th>
                 <th>الكمية المطلوبة</th>
-                <th>إجمالي المعدل الشهري</th>
-                <th>إجمالي الهدف</th>
-                <th>إجمالي الرصيد</th>
+                <th>${brLbl} المعدل الشهري</th>
+                <th>${brLbl} الهدف</th>
+                <th>${brLbl} الرصيد</th>
                 <th>المعمورة<br><small style="font-weight:400;opacity:0.8;">احتياج·رصيد·معدل·×</small></th>
                 <th>سان ستيفانو<br><small style="font-weight:400;opacity:0.8;">احتياج·رصيد·معدل·×</small></th>
                 <th>سيدى بشر<br><small style="font-weight:400;opacity:0.8;">احتياج·رصيد·معدل·×</small></th>
@@ -785,7 +815,8 @@
       ws['!freeze'] = {xSplit:0, ySplit:1};
 
       XLSX.utils.book_append_sheet(wb, ws, 'الطلبية');
-      var fname = (currentType==='medicine'?'medicine':'cosmo') + '_order_';
+      var brTag = selectedBranch==='all' ? '' : '_'+selectedBranch;
+      var fname = (currentType==='medicine'?'medicine':'cosmo') + brTag + '_order_';
       XLSX.writeFile(wb, fname + new Date().toISOString().slice(0,10) + '.xlsx');
     }
   </script>
