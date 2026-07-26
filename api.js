@@ -112,6 +112,93 @@ async function sbTaskUpdate(id, patch) {
   }
 }
 
+// ===================== التعاقدات + عدم الوصول على Supabase (بدل n8n) =====================
+const SB_CONTRACT_URL = `${SB_URL_API}/rest/v1/contracts`;
+const SB_MISSING_URL  = `${SB_URL_API}/rest/v1/missing_items`;
+
+// إدراج فاتورة تعاقد — بيفحص الحظر الأول (لو العميل عنده أي صف status='block')
+// بيرجّع { ok, blocked }
+async function sbContractInsert({ branch, cust_code, total_amount, notes }) {
+  try {
+    const chk = await fetch(
+      `${SB_CONTRACT_URL}?select=id&cust_code=eq.${encodeURIComponent(cust_code || '')}&status=eq.block&limit=1`,
+      { headers: SB_TASK_HEADERS }
+    );
+    if (chk.ok) {
+      const rows = await chk.json();
+      if (Array.isArray(rows) && rows.length) return { ok: false, blocked: true };
+    }
+    const r = await fetch(SB_CONTRACT_URL, {
+      method: 'POST',
+      headers: { ...SB_TASK_HEADERS, 'Prefer': 'return=minimal' },
+      body: JSON.stringify({
+        branch:       branch || null,
+        cust_code:    cust_code || null,
+        total_amount: (total_amount != null ? String(total_amount) : null),
+        notes:        notes || null,
+        status:       'unpaid'
+      })
+    });
+    return { ok: r.ok, blocked: false };
+  } catch (e) { console.error('sbContractInsert error:', e); return { ok: false, blocked: false }; }
+}
+
+async function sbContractUpdate(id, patch) {
+  try {
+    const r = await fetch(`${SB_CONTRACT_URL}?id=eq.${encodeURIComponent(id)}`, {
+      method: 'PATCH', headers: SB_TASK_HEADERS, body: JSON.stringify(patch || {})
+    });
+    return r.ok;
+  } catch (e) { console.error('sbContractUpdate error:', e); return false; }
+}
+
+async function sbContractList() {
+  try {
+    const r = await fetch(`${SB_CONTRACT_URL}?select=*&order=created_at.desc`, { headers: SB_TASK_HEADERS });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    return Array.isArray(rows) ? rows.map(x => ({ ...x, createdAt: x.created_at })) : [];
+  } catch (e) { console.error('sbContractList error:', e); return []; }
+}
+
+// إدراج بلاغ عدم وصول
+async function sbMissingInsert({ branch, invoice_no, item_name, qty, supplier_code }) {
+  try {
+    const r = await fetch(SB_MISSING_URL, {
+      method: 'POST',
+      headers: { ...SB_TASK_HEADERS, 'Prefer': 'return=minimal' },
+      body: JSON.stringify({
+        branch:        branch || null,
+        invoice_no:    invoice_no || null,
+        item_name:     item_name || null,
+        qty:           (qty != null ? String(qty) : null),
+        supplier_code: supplier_code || null,
+        state:         false,
+        call:          false
+      })
+    });
+    return r.ok;
+  } catch (e) { console.error('sbMissingInsert error:', e); return false; }
+}
+
+async function sbMissingUpdate(id, patch) {
+  try {
+    const r = await fetch(`${SB_MISSING_URL}?id=eq.${encodeURIComponent(id)}`, {
+      method: 'PATCH', headers: SB_TASK_HEADERS, body: JSON.stringify(patch || {})
+    });
+    return r.ok;
+  } catch (e) { console.error('sbMissingUpdate error:', e); return false; }
+}
+
+async function sbMissingList() {
+  try {
+    const r = await fetch(`${SB_MISSING_URL}?select=*&order=created_at.desc`, { headers: SB_TASK_HEADERS });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    return Array.isArray(rows) ? rows.map(x => ({ ...x, createdAt: x.created_at })) : [];
+  } catch (e) { console.error('sbMissingList error:', e); return []; }
+}
+
 async function fetchFromN8N(category) {
   try {
     const response = await fetch(`${FETCH_URL}?type=${category}`);
@@ -177,8 +264,8 @@ async function fetchVisaTransactions() { return await fetchFromN8N('visa_transac
 async function fetchMachines()         { return await fetchFromN8N('visa_machines'); }
 async function fetchOrders()           { return await fetchFromN8N('orders'); }
 async function fetchData()             { return await fetchFromN8N('orders'); }
-async function fetchContracts()        { return await fetchFromN8N('contracts'); }
-async function fetchMissing()          { return await fetchFromN8N('missing'); }
+async function fetchContracts()        { return await sbContractList(); }   // Supabase (بدل n8n)
+async function fetchMissing()          { return await sbMissingList(); }    // Supabase (بدل n8n)
 async function fetchInventory()        { return await fetchFromN8N('inventory'); }
 async function fetchOffers()           { return await fetchFromN8N('offers'); }
 

@@ -806,16 +806,17 @@
       };
 
       try {
-        const response = await fetch('https://agent.ebrahimhamdy.com/webhook/taskmanagement', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+        // فاتورة التعاقد: بتتكتب مباشرة في جدول contracts على Supabase (بدل n8n)
+        const res = await sbContractInsert({
+          branch:       userBranch,
+          cust_code:    custCode,
+          total_amount: amount,
+          notes:        document.getElementById('contract-notes').value.trim()
         });
-        let data = {};
-        try { const raw = await response.json(); data = Array.isArray(raw) ? (raw[0] || {}) : raw; } catch(e) {}
-        if (data.blocked) {
+        if (res.blocked) {
           document.getElementById('block-alert').classList.add('show');
           document.getElementById('block-alert').scrollIntoView({ behavior: 'smooth', block: 'center' });
-        } else if (response.ok) {
+        } else if (res.ok) {
           showToast();
           document.getElementById('contract-cust-code').value = '';
           document.getElementById('contract-amount').value    = '';
@@ -869,11 +870,12 @@
       btn.disabled  = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الإرسال...';
       try {
-        const results = await Promise.all(items.map(item => updateData({
-          type: 'عدم_وصول', branch: userBranch,
-          invoice_no: invoiceNo, supplier_code: supplierCode,
-          item_name: item.item_name, qty: item.qty,
-          createdAt: new Date().toISOString()
+        const results = await Promise.all(items.map(item => sbMissingInsert({
+          branch:        userBranch,
+          invoice_no:    invoiceNo,
+          supplier_code: supplierCode,
+          item_name:     item.item_name,
+          qty:           item.qty
         })));
         if (results.every(r => r === true)) {
           showToast();
