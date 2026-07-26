@@ -91,7 +91,7 @@
         const isMyBranch  = (String(item.user).trim() === String(userBranch).trim());
         const validStates = ['ordered', 'unavailable', 'transferred'];
         const isResponded = validStates.includes(String(item.state || "").trim().toLowerCase());
-        const hasAction   = (item.cust_state && item.cust_state !== "" && item.cust_state !== "null");
+        const hasAction   = (item.cust_state && item.cust_state !== "" && item.cust_state !== "null" && item.cust_state !== "حاولنا التواصل مع العميل");
         const hasCustomer = (
           (item.cust_name && item.cust_name.trim() !== "" && item.cust_name !== "null") ||
           (item.cust_code && item.cust_code.trim() !== "" && item.cust_code !== "null")
@@ -118,7 +118,8 @@
 
       tbody.innerHTML = filtered.map(item => {
         const currentAction = (item.cust_state && item.cust_state !== "null") ? item.cust_state : "";
-        const isDone        = (currentAction !== "");
+        const isDone        = (currentAction !== "" && currentAction !== "حاولنا التواصل مع العميل");
+        const attempts      = parseInt(item.contact_attempts) || 0;
         const s             = String(item.state || "").trim().toLowerCase();
 
         const dateObj = item.createdAt ? new Date(item.createdAt) : null;
@@ -161,6 +162,7 @@
                 <option value="حاولنا التواصل مع العميل" ${currentAction === 'حاولنا التواصل مع العميل' ? 'selected' : ''}>حاولنا التواصل مع العميل 📞</option>
                 <option value="العميل الغى الطلب"        ${currentAction === 'العميل الغى الطلب'        ? 'selected' : ''}>العميل الغى الطلب 🚫</option>
               </select>
+              ${attempts > 0 ? `<div style="margin-top:5px;font-size:0.74rem;color:var(--accent-dark);font-weight:700;"><i class="fas fa-phone-alt"></i> حاولنا التواصل: ${attempts} مرة</div>` : ''}
             </td>
             <td>
               ${!isDone
@@ -178,7 +180,13 @@
       btn.disabled  = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
-      const success = await sbTaskUpdate(id, { cust_state: decision });
+      const patch = { cust_state: decision };
+      if (decision === "حاولنا التواصل مع العميل") {
+        const item = allItems.find(x => x.id == id);
+        const prev = (item && parseInt(item.contact_attempts)) || 0;
+        patch.contact_attempts = prev + 1;   // كل مرة نختارها يزيد العداد والطلب يفضل مفتوح للمتابعة
+      }
+      const success = await sbTaskUpdate(id, patch);
 
       if (success) {
         loadCSData();
