@@ -20,6 +20,90 @@ async function sbItemLookup(code, branch) {
   } catch (e) { return { found: false }; }
 }
 
+// ===================== جدول task على Supabase (بدل n8n) =====================
+// نكتب/نقرأ/نحدّث الطلبات والتحويلات مباشرة على جدول task في Supabase عبر PostgREST
+// بمفتاح anon (نفس أسلوب صفحات الصيدلية). السكوب على الفرع بيتعمل في الصفحة زي ما هو دلوقتي.
+const SB_TASK_URL     = `${SB_URL_API}/rest/v1/task`;
+const SB_TASK_HEADERS = {
+  'Content-Type':  'application/json',
+  'apikey':        SB_ANON_API,
+  'Authorization': 'Bearer ' + SB_ANON_API
+};
+
+// إدراج طلب/تحويل جديد — بيرجّع { ok, data } (نفس شكل updateDataWithResponse)
+// بيحوّل حقول الفورم لأعمدة الجدول (نفس ماب n8n القديم، مع تصحيح الفرع:
+// للتحويل = الفرع المستهدف، وللشراء = فرع صاحب الطلب نفسه بدل ما يفضل فاضي)
+async function sbTaskInsert(payload) {
+  try {
+    const isTransfer = (payload.type === 'تحويل');
+    const branchVal  = isTransfer
+      ? (payload.target_branch || '')
+      : (payload.branch || payload.user || '');
+    const row = {
+      "user":     payload.user || null,
+      type:       payload.type || null,
+      branch:     branchVal || null,
+      qty:        (payload.qty != null ? String(payload.qty) : null),
+      cust_code:  payload.customer_code || null,
+      cust_name:  payload.customer_name || null,
+      item_name:  payload.item || payload.item_name_ar || payload.item_name || null,
+      item_code:  payload.item_code || null,
+      order_type: payload.order_type || null,
+      note:       payload.note || null,
+      state:      payload.state || 'pending'
+    };
+    const r = await fetch(SB_TASK_URL, {
+      method:  'POST',
+      headers: { ...SB_TASK_HEADERS, 'Prefer': 'return=representation' },
+      body:    JSON.stringify(row)
+    });
+    if (!r.ok) return { ok: false, data: null };
+    let data = null;
+    try { const raw = await r.json(); data = Array.isArray(raw) ? (raw[0] || null) : raw; } catch (e) {}
+    return { ok: true, data };
+  } catch (e) {
+    console.error('sbTaskInsert error:', e);
+    return { ok: false, data: null };
+  }
+}
+
+// جلب صفوف task — بيرجّع Array من objects (نفس شكل fetchOrders)
+// opts.type لفلترة النوع (شراء/تحويل...). بنرجّع createdAt (camelCase) عشان الصفحات القديمة.
+async function sbTaskList(opts = {}) {
+  try {
+    const params = new URLSearchParams();
+    params.set('select', '*');
+    params.set('order', 'created_at.desc');
+    if (opts.type)  params.set('type',  `eq.${opts.type}`);
+    if (opts.limit) params.set('limit', String(opts.limit));
+    const r = await fetch(`${SB_TASK_URL}?${params.toString()}`, { headers: SB_TASK_HEADERS });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    if (!Array.isArray(rows)) return [];
+    return rows.map(x => ({ ...x, createdAt: x.created_at }));
+  } catch (e) {
+    console.error('sbTaskList error:', e);
+    return [];
+  }
+}
+
+// تحديث صف task عبر id — patch عبارة عن أعمدة الجدول (state/company/item_name/...) — بيرجّع true/false
+async function sbTaskUpdate(id, patch) {
+  try {
+    const clean = {};
+    Object.keys(patch || {}).forEach(k => { if (patch[k] !== undefined) clean[k] = patch[k]; });
+    const r = await fetch(`${SB_TASK_URL}?id=eq.${encodeURIComponent(id)}`, {
+      method:  'PATCH',
+      headers: SB_TASK_HEADERS,
+      body:    JSON.stringify(clean)
+    });
+    return r.ok;
+  } catch (e) {
+    console.error('sbTaskUpdate error:', e);
+    return false;
+  }
+}
+
 async function fetchFromN8N(category) {
   try {
     const response = await fetch(`${FETCH_URL}?type=${category}`);
