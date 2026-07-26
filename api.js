@@ -5,6 +5,21 @@ const VERIFY_URL    = "https://agent.ebrahimhamdy.com/webhook/verify_token";
 const DASHBOARD_URL = "https://agent.ebrahimhamdy.com/webhook/dashboard";
 const PAYMOB_URL    = "https://agent.ebrahimhamdy.com/webhook/paymobtransaction";
 
+// بحث الصنف من مخزون Supabase مباشرة (بدل نداء ERP) — يرجّع {found,itm_name_ar,itm_name_en,balance,item_type}
+const SB_URL_API  = "https://rxtjoqulmgkkcohmgzgi.supabase.co";
+const SB_ANON_API = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0";
+async function lookupItem(code, branch) {
+  try {
+    const r = await fetch(`${SB_URL_API}/rest/v1/rpc/item_lookup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + SB_ANON_API },
+      body: JSON.stringify({ p_code: String(code || ''), p_branch: branch || localStorage.getItem('userBranch') || '' })
+    });
+    if (!r.ok) return { found: false };
+    return await r.json();
+  } catch (e) { return { found: false }; }
+}
+
 async function fetchFromN8N(category) {
   try {
     const response = await fetch(`${FETCH_URL}?type=${category}`);
