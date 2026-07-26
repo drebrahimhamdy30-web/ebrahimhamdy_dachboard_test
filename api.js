@@ -216,6 +216,20 @@ async function sbShortages(branch) {
   } catch (e) { console.error('sbShortages error:', e); return []; }
 }
 
+// طلبات خدمة العملاء لفرع — pendingOnly=true يرجّع بس اللي لسه محتاج إجراء (أسرع بكتير)
+async function sbCsOrders(branch, pendingOnly) {
+  try {
+    const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_cs_orders`, {
+      method: 'POST',
+      headers: SB_TASK_HEADERS,
+      body: JSON.stringify({ p_branch: branch || '', p_pending: pendingOnly !== false })
+    });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    return Array.isArray(rows) ? rows : [];
+  } catch (e) { console.error('sbCsOrders error:', e); return []; }
+}
+
 async function fetchFromN8N(category) {
   try {
     const response = await fetch(`${FETCH_URL}?type=${category}`);
