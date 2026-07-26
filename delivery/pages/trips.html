@@ -500,6 +500,8 @@ async function initTripMap(tripId, orders, branchId){
     }
     ph=_pharmCache[branchId];
   }
+  let retPoly=null;
+  try{ const {data:trow}=await db.from('trips').select('return_polyline').eq('id',tripId).maybeSingle(); retPoly=trow?trow.return_polyline:null; }catch(e){}
   const map=L.map(el,{scrollWheelZoom:true});
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
   const bounds=[];
@@ -535,8 +537,15 @@ async function initTripMap(tripId, orders, branchId){
     }
     prevPt=cur;
   });
-  // مسار العودة: آخر طلب → الصيدلية (بلون مختلف عشان يتميّز بالنظر)
-  if(prevPt && ph && ph.pharmacy_lat){
+  // مسار العودة: آخر طلب → الصيدلية — المسار الحقيقي لو متوفّر، وإلا خط مستقيم (بلون مختلف)
+  let retDrew=false;
+  if(retPoly){
+    try{
+      const rp=_decodePoly(retPoly);
+      if(rp.length>1){ L.polyline(rp,{color:'#f59e0b',weight:4,opacity:.9}).addTo(map); rp.forEach(p=>bounds.push(p)); retDrew=true; }
+    }catch(e){}
+  }
+  if(!retDrew && prevPt && ph && ph.pharmacy_lat){
     L.polyline([prevPt,[+ph.pharmacy_lat,+ph.pharmacy_lng]],{color:'#f59e0b',weight:3,opacity:.9,dashArray:'3,7'}).addTo(map);
   }
   // مفتاح الألوان
