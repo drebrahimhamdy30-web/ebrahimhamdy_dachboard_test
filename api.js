@@ -36,21 +36,29 @@ const SB_TASK_HEADERS = {
 async function sbTaskInsert(payload) {
   try {
     const isTransfer = (payload.type === 'تحويل');
+    const isNotif    = (payload.type === 'إشعار');
+    // الفرع: للتحويل = المستهدف، وللشراء/الإشعار = فرع صاحب الطلب (المُرسِل)
     const branchVal  = isTransfer
       ? (payload.target_branch || '')
       : (payload.branch || payload.user || '');
     const row = {
-      "user":     payload.user || null,
-      type:       payload.type || null,
-      branch:     branchVal || null,
-      qty:        (payload.qty != null ? String(payload.qty) : null),
-      cust_code:  payload.customer_code || null,
-      cust_name:  payload.customer_name || null,
-      item_name:  payload.item || payload.item_name_ar || payload.item_name || null,
-      item_code:  payload.item_code || null,
-      order_type: payload.order_type || null,
-      note:       payload.note || null,
-      state:      payload.state || 'pending'
+      "user":        payload.user || null,
+      type:          payload.type || null,
+      branch:        branchVal || null,
+      qty:           (payload.qty != null ? String(payload.qty) : null),
+      cust_code:     payload.customer_code || null,
+      cust_name:     payload.customer_name || null,
+      item_name:     payload.item || payload.item_name_ar || payload.item_name || null,
+      item_code:     payload.item_code || null,
+      order_type:    payload.order_type || null,
+      note:          payload.note || null,
+      state:         payload.state || 'pending',
+      // حقول الإشعارات (بتفضل فاضية في الشراء/التحويل)
+      target_branch: isNotif ? (payload.target_branch || null) : null,
+      target_type:   payload.target_type || null,
+      assigned_to:   payload.assigned_to || null,
+      done:          null,
+      comment:       null
     };
     const r = await fetch(SB_TASK_URL, {
       method:  'POST',
