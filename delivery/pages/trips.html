@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>سجل الرحلات</title>
@@ -453,7 +455,54 @@ async function renderTripOrders(tripId){
           </tr>`;
         }).join('')}
       </tbody>
-    </table>`;
+    </table>
+    <div style="margin-top:.5rem">
+      <div style="font-size:.68rem;font-weight:700;color:var(--text-muted);margin-bottom:.3rem">🗺️ مواقع تسليم الطلبات</div>
+      <div id="tripMap-${tripId}" style="height:300px;border:1px solid var(--border);border-radius:10px;overflow:hidden"></div>
+    </div>`;
+  initTripMap(tripId, orders, trip.branch_id);
+}
+
+let _pharmCache={};
+function _numIcon(n,color){
+  return L.divIcon({className:'',iconSize:[26,26],iconAnchor:[13,13],
+    html:`<div style="background:${color};color:#fff;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.45)">${n}</div>`});
+}
+async function initTripMap(tripId, orders, branchId){
+  const el=document.getElementById('tripMap-'+tripId);
+  if(!el || !window.L) return;
+  const pts=(orders||[]).filter(o=>o.delivery_lat&&o.delivery_lng)
+    .sort((a,b)=>new Date(a.delivered_at||a.picked_at||0)-new Date(b.delivered_at||b.picked_at||0));
+  if(!pts.length){
+    el.style.height='auto';
+    el.innerHTML='<div style="padding:1rem;text-align:center;color:var(--text-muted);font-size:.72rem">لا توجد إحداثيات تسليم مسجّلة (الطيار على نسخة قديمة أو الـGPS كان مقفول)</div>';
+    return;
+  }
+  let ph=null;
+  if(branchId){
+    if(_pharmCache[branchId]===undefined){
+      const {data}=await db.from('dispatch_settings').select('pharmacy_lat,pharmacy_lng').eq('branch_id',branchId).maybeSingle();
+      _pharmCache[branchId]=data||null;
+    }
+    ph=_pharmCache[branchId];
+  }
+  const map=L.map(el,{scrollWheelZoom:false});
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+  const bounds=[];
+  if(ph&&ph.pharmacy_lat){
+    L.marker([+ph.pharmacy_lat,+ph.pharmacy_lng],{icon:L.divIcon({className:'',iconSize:[26,26],iconAnchor:[13,13],html:'<div style="font-size:20px;line-height:1">🏥</div>'})})
+      .addTo(map).bindPopup('الصيدلية (نقطة الانطلاق)');
+    bounds.push([+ph.pharmacy_lat,+ph.pharmacy_lng]);
+  }
+  pts.forEach((o,i)=>{
+    const c=o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':o.perf_rating==='جيد'?'#ca8a04':'#2563eb';
+    const km=((Number(o.distance_meters)||0)/1000).toFixed(2);
+    L.marker([+o.delivery_lat,+o.delivery_lng],{icon:_numIcon(i+1,c)}).addTo(map)
+      .bindPopup(`<b>${o.bill_no||''}</b> · ${o.customer_name||o.cust_name||'—'}<br>${o.cust_region||''} · مسافة ${km} كم<br>الأداء: ${o.perf_rating||'—'}`);
+    bounds.push([+o.delivery_lat,+o.delivery_lng]);
+  });
+  if(bounds.length) map.fitBounds(bounds,{padding:[30,30],maxZoom:16});
+  setTimeout(()=>map.invalidateSize(),150);
 }
 
 function renderPagination(){
