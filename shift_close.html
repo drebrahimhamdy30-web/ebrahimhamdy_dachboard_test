@@ -148,31 +148,20 @@ select:focus,input:focus{border-color:#16a34a;box-shadow:0 0 0 3px rgba(22,163,7
 
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);padding:10px 22px;border-radius:10px;font-weight:700;font-size:0.85rem;color:#fff;z-index:999;display:none;box-shadow:0 4px 20px rgba(0,0,0,.2);}
 .empty{text-align:center;color:var(--muted);padding:40px;font-size:0.9rem;}
+/* جدول المحافظ */
+.methods-table{width:100%;border-collapse:collapse;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);overflow:hidden;}
+.methods-table th,.methods-table td{padding:9px 10px;text-align:center;border-bottom:1px solid var(--light);font-size:0.85rem;vertical-align:middle;}
+.methods-table thead th{background:#0f172a;color:#fff;font-weight:800;font-size:0.8rem;white-space:nowrap;}
+.methods-table tbody tr:hover{background:var(--light);}
+.methods-table .grp-row td{background:var(--accent-l,#eef2ff);color:var(--accent,#3730a3);font-weight:900;text-align:right;font-size:0.82rem;}
+.methods-table .insta-row td{text-align:right;}
+.methods-table .mt-inp{width:100%;max-width:150px;border:1px solid var(--border);border-radius:7px;padding:6px 9px;font-size:0.85rem;font-family:var(--font);outline:none;text-align:center;}
+.methods-table .mt-inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(59,130,246,.12);}
+.methods-table .net-display{margin:0;font-size:0.88rem;}
+.methods-table .muted{color:var(--muted);}
 </style>
 </head>
 <body>
-
-<!-- حاسبة تقفيل الدرج - عائمة -->
-<div class="calc-fab" id="calc-fab">
-  <div class="calc-fab-head" onclick="toggleCalc()">
-    <span><i class="fas fa-calculator"></i> حاسبة التقفيل</span>
-    <i class="fas fa-chevron-up" id="calc-chev"></i>
-  </div>
-  <div class="calc-fab-body" id="calc-fab-body">
-    <div class="calc-mini-group">
-      <label>النقدية بالدرج</label>
-      <input type="number" step="0.01" min="0" id="calc-cash" placeholder="0.00" oninput="recalcHelper()">
-    </div>
-    <div class="calc-line"><span>+ الفيزا والمحافظ</span><b id="calc-visa">0.00</b></div>
-    <div class="calc-line total"><span>نقدي + إلكتروني</span><b id="calc-sum1">0.00</b></div>
-    <div class="calc-mini-group" style="margin-top:9px;">
-      <label>نقدية التحويل للخزنة</label>
-      <input type="number" step="0.01" min="0" id="calc-transfer-cash" placeholder="0.00" oninput="recalcHelper()">
-    </div>
-    <div class="calc-line total teal"><span>التحويل للخزنة</span><b id="calc-sum2">0.00</b></div>
-    <div class="calc-hint">أداة حسابية فقط — لا تُحفظ.</div>
-  </div>
-</div>
 
 <div class="header">
   <h1><i class="fas fa-cash-register"></i> إغلاق الشيفت</h1>
@@ -484,69 +473,57 @@ function render(){
   }
   const pos=METHODS.filter(m=>m.method_type==='machine');
   const wal=METHODS.filter(m=>m.method_type==='wallet');
-  let html='';
 
+  const rowFor=(m,isWallet)=>{
+    const v=VALUES[m.id]||(isWallet?{opening:'',closing:''}:{closing:'',txn:''});
+    const isInsta = m.method_key==='instapay';
+    const opening = isWallet
+      ? `<input type="number" step="0.01" min="0" class="mt-inp" placeholder="البداية" value="${v.opening}"
+           ${v.opening?'readonly style="background:#f0fdf4;color:#15803d;border-color:#86efac;font-weight:800;"':''}
+           oninput="if(!this.readOnly){VALUES[${m.id}].opening=this.value;refreshNet(${m.id});}">`
+      : '<span class="muted">—</span>';
+    const closing = `<input type="number" step="0.01" min="0" class="mt-inp" placeholder="0.00" value="${v.closing}"
+         oninput="VALUES[${m.id}].closing=this.value;refreshNet(${m.id})">`;
+    const trAmt = transfersOf(m.method_key);
+    const trCell = isWallet ? (trAmt>0?`<b style="color:var(--wal-c,#7e22ce)">+${fmt(trAmt)}</b>`:'0.00') : '<span class="muted">—</span>';
+    let row=`<tr>
+      <td style="text-align:right;font-weight:800;">${esc(m.display_name)}</td>
+      <td>${opening}</td>
+      <td>${closing}</td>
+      <td style="font-variant-numeric:tabular-nums;">${trCell}</td>
+      <td>${netHtml(m)}</td>
+    </tr>`;
+    if(isInsta){
+      row+=`<tr class="insta-row"><td colspan="5">
+        ${LAST_INSTAPAY_NOTE?`<span class="insta-prev"><i class="fas fa-flag-checkered"></i> الشيفت السابق انتهى عند: <b>${esc(LAST_INSTAPAY_NOTE)}</b></span>`:'<span class="insta-prev muted"><i class="fas fa-circle-info"></i> لا توجد عملية سابقة مسجّلة</span>'}
+        <div class="input-group" style="margin:6px 0 0;">
+          <label><i class="fas fa-bookmark"></i> آخر عملية إنستاباي في هذا الشيفت (دليل للشيفت القادم)</label>
+          <input type="text" class="mt-inp" style="max-width:280px" placeholder="رقم / وقت آخر عملية إنستاباي" value="${esc(v.txn||'')}"
+            oninput="VALUES[${m.id}].txn=this.value">
+        </div>
+      </td></tr>`;
+    }
+    return row;
+  };
+
+  let body='';
   if(pos.length){
-    html+=`<div class="section-title"><i class="fas fa-credit-card" style="color:#1d4ed8"></i> ماكينات POS</div><div class="methods-grid">`;
-    pos.forEach(m=>{
-      const v=VALUES[m.id]||{closing:'',txn:''};
-      const isInsta = m.method_key==='instapay';
-      html+=`<div class="method-card pos-card">
-        <div class="method-head">
-          <div class="method-icon icon-pos"><i class="fas fa-cash-register"></i></div>
-          <div><div class="method-name">${esc(m.display_name)}</div><div class="method-type-label">قيمة إغلاق الشيفت من الورقة</div></div>
-        </div>
-        <div class="input-group">
-          <label>قيمة إغلاق الشيفت (ج)</label>
-          <input type="number" step="0.01" min="0" placeholder="0.00" value="${v.closing}"
-            oninput="VALUES[${m.id}].closing=this.value;refreshNet(${m.id})">
-        </div>
-        ${netHtml(m)}
-        ${isInsta?`
-        <div class="insta-box">
-          ${LAST_INSTAPAY_NOTE?`<div class="insta-prev"><i class="fas fa-flag-checkered"></i> الشيفت السابق انتهى عند: <b>${esc(LAST_INSTAPAY_NOTE)}</b></div>`:'<div class="insta-prev muted"><i class="fas fa-circle-info"></i> لا توجد عملية سابقة مسجّلة</div>'}
-          <div class="input-group" style="margin:8px 0 0;">
-            <label><i class="fas fa-bookmark"></i> آخر عملية في هذا الشيفت (دليل للشيفت القادم)</label>
-            <input type="text" placeholder="رقم / وقت آخر عملية إنستاباي" value="${esc(v.txn||'')}"
-              oninput="VALUES[${m.id}].txn=this.value">
-          </div>
-        </div>`:''}
-      </div>`;
-    });
-    html+='</div>';
+    body+=`<tr class="grp-row"><td colspan="5"><i class="fas fa-credit-card" style="color:#1d4ed8"></i> ماكينات POS</td></tr>`;
+    body+=pos.map(m=>rowFor(m,false)).join('');
   }
-
   if(wal.length){
-    html+=`<div class="section-title"><i class="fas fa-wallet" style="color:#7e22ce"></i> المحافظ الإلكترونية</div><div class="methods-grid">`;
-    wal.forEach(m=>{
-      const v=VALUES[m.id]||{opening:'',closing:''};
-      html+=`<div class="method-card wallet-card">
-        <div class="method-head">
-          <div class="method-icon icon-wal"><i class="fas fa-mobile-alt"></i></div>
-          <div><div class="method-name">${esc(m.display_name)}</div><div class="method-type-label">رصيد البداية والنهاية من الموبايل</div></div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
-          <div class="input-group">
-            <label>رصيد البداية (ج) ${v.opening?'<span style="font-size:0.65rem;color:#15803d;font-weight:700;">✓ تلقائي</span>':''}</label>
-            <input type="number" step="0.01" min="0" placeholder="اكتب رصيد البداية" value="${v.opening}"
-              ${v.opening?'readonly style="background:#f0fdf4;color:#15803d;border-color:#86efac;font-weight:800;"':''}
-              oninput="if(!this.readOnly){VALUES[${m.id}].opening=this.value;refreshNet(${m.id});}">
-          </div>
-          <div class="input-group">
-            <label>رصيد النهاية (ج)</label>
-            <input type="number" step="0.01" min="0" placeholder="0.00" value="${v.closing}"
-              oninput="VALUES[${m.id}].closing=this.value;refreshNet(${m.id})">
-          </div>
-        </div>
-        ${netHtml(m)}
-      </div>`;
-    });
-    html+='</div>';
+    body+=`<tr class="grp-row"><td colspan="5"><i class="fas fa-wallet" style="color:#7e22ce"></i> المحافظ الإلكترونية</td></tr>`;
+    body+=wal.map(m=>rowFor(m,true)).join('');
   }
 
-  document.getElementById('methods-area').innerHTML=html;
+  document.getElementById('methods-area').innerHTML=`
+    <table class="methods-table">
+      <thead><tr>
+        <th>الطريقة</th><th>رصيد البداية</th><th>رصيد النهاية</th><th>التحويلات</th><th>الصافي</th>
+      </tr></thead>
+      <tbody>${body}</tbody>
+    </table>`;
   renderTransfers(wal);
-  recalcHelper();
   renderActions();
 }
 
@@ -554,7 +531,6 @@ function refreshNet(mId){
   const m=METHODS.find(x=>x.id===mId); if(!m)return;
   const el=document.getElementById('net-'+mId); if(!el)return;
   el.outerHTML=netHtml(m);
-  recalcHelper();
 }
 
 function trRow(t,isOld){
@@ -625,22 +601,6 @@ function renderTransfers(wal){
         </div>
       </div>
     </div>`;
-}
-
-function recalcHelper(){
-  const{grand}=calcTotals();
-  const cash=parseFloat(document.getElementById('calc-cash')?.value)||0;
-  const tcash=parseFloat(document.getElementById('calc-transfer-cash')?.value)||0;
-  const visaEl=document.getElementById('calc-visa');
-  const s1=document.getElementById('calc-sum1');
-  const s2=document.getElementById('calc-sum2');
-  if(visaEl) visaEl.textContent=fmt(grand);
-  if(s1) s1.textContent=fmt(cash+grand);
-  if(s2) s2.textContent=fmt(tcash+grand);
-}
-
-function toggleCalc(){
-  document.getElementById('calc-fab').classList.toggle('collapsed');
 }
 
 function renderActions(){
