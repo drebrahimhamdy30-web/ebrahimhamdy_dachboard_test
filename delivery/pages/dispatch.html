@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>شاشة التوزيع</title>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -599,8 +601,26 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
     <button onclick="callDriver(currentPopupDriverId)" style="flex:1;padding:.5rem;background:#1a56db;color:white;border:none;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer">📞 استدعاء</button>
     <button onclick="openSendMessage(currentPopupDriverId)" style="flex:1;padding:.5rem;background:#334155;color:white;border:none;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer">💬 رسالة</button>
   </div>
+  <button onclick="showDriverLocation(currentPopupDriverId)" style="margin-top:.5rem;width:100%;padding:.5rem;background:#065f46;color:white;border:none;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer">📍 الموقع الحالي للطيار</button>
   <button id="dp-offline-btn" onclick="forceDriverOffline(currentPopupDriverId)" style="margin-top:.5rem;width:100%;padding:.5rem;background:var(--red-light);color:#b91c1c;border:1px solid #fecaca;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer">🔴 تسجيل انصراف الطيار</button>
 </div>
+
+<!-- Modal: Driver Live Location -->
+<div class="modal-overlay" id="locModal">
+  <div class="modal" style="width:min(560px,94vw);max-width:560px;padding:0;overflow:hidden">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem;background:#0f172a;color:#fff">
+      <div style="font-weight:800;font-size:.9rem">📍 موقع الطيار <span id="loc-driver-name"></span></div>
+      <button onclick="closeLocModal()" style="background:transparent;border:none;color:#fff;font-size:1.1rem;cursor:pointer">✕</button>
+    </div>
+    <div id="loc-status" style="padding:.6rem 1rem;font-size:.8rem;font-weight:700;color:#475569;background:#f1f5f9">جاري طلب الموقع من الطيار…</div>
+    <div id="loc-map" style="height:340px;width:100%;background:#e2e8f0"></div>
+    <div style="padding:.6rem 1rem;display:flex;gap:.5rem;align-items:center;justify-content:space-between">
+      <span id="loc-meta" style="font-size:.72rem;color:#64748b"></span>
+      <a id="loc-gmaps" href="#" target="_blank" rel="noopener" style="display:none;font-size:.75rem;font-weight:700;color:#1a56db;text-decoration:none">افتح في خرائط جوجل ↗</a>
+    </div>
+  </div>
+</div>
+
 <!-- Modal: Send Message -->
 <div class="modal-overlay" id="msgModal">
   <div class="modal modal-sm">
@@ -2776,6 +2796,85 @@ async function sendMessage(){
     closeModal('msgModal');
     showToast('✓ تم إرسال الرسالة');
   }catch(e){showToast('خطأ في الإرسال');}
+}
+
+// ===== موقع الطيار الحالي (on-demand عبر Realtime) =====
+let _locCh=null,_locMap=null,_locMarker=null,_locTimer=null,_locResponded=false;
+
+async function showDriverLocation(driverId){
+  if(!driverId){showToast('اختر طيار أولاً');return;}
+  closeDriverPopup();
+  const drv=(allDrivers||[]).find(d=>d.id===driverId);
+  document.getElementById('loc-driver-name').textContent=drv?drv.full_name:'';
+  const st=document.getElementById('loc-status');
+  st.textContent='جاري طلب الموقع من الطيار…'; st.style.color='#475569';
+  document.getElementById('loc-meta').textContent='';
+  document.getElementById('loc-gmaps').style.display='none';
+  document.getElementById('locModal').classList.add('open');
+  _locResponded=false;
+  setTimeout(initLocMap,60);
+
+  // آخر موقع معروف (يظهر فورًا لو موجود لحد ما الطيار يرد بالحي)
+  try{
+    const {data}=await db.from('driver_locations').select('lat,lng,acc,reported_at').eq('driver_id',driverId).maybeSingle();
+    if(data&&data.lat&&!_locResponded) placeLoc(data.lat,data.lng,data.acc,data.reported_at,true);
+  }catch(_){}
+
+  // اشترك في قناة الطيار واطلب الموقع الحي
+  cleanupLocCh();
+  _locCh=db.channel(`driver-loc-${driverId}`);
+  _locCh.on('broadcast',{event:'response'},({payload})=>{
+    _locResponded=true; clearTimeout(_locTimer);
+    if(payload&&payload.ok){
+      placeLoc(payload.lat,payload.lng,payload.acc,new Date().toISOString(),false);
+    }else{
+      const s=document.getElementById('loc-status');
+      s.textContent='⚠️ الطيار مش قادر يحدد موقعه (الـ GPS مقفول أو الإذن مرفوض)';
+      s.style.color='#b91c1c';
+    }
+  }).subscribe((status)=>{
+    if(status==='SUBSCRIBED') _locCh.send({type:'broadcast',event:'request',payload:{}});
+  });
+
+  clearTimeout(_locTimer);
+  _locTimer=setTimeout(()=>{
+    if(!_locResponded){
+      const s=document.getElementById('loc-status');
+      s.textContent='⏱️ الطيار مش بيرد — اتأكد إنه فاتح التطبيق وأونلاين';
+      s.style.color='#b45309';
+    }
+  },20000);
+}
+
+function initLocMap(){
+  const el=document.getElementById('loc-map'); if(!el||typeof L==='undefined')return;
+  if(_locMap){_locMap.remove();_locMap=null;_locMarker=null;}
+  _locMap=L.map(el,{scrollWheelZoom:true}).setView([31.2,29.92],12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(_locMap);
+  setTimeout(()=>_locMap&&_locMap.invalidateSize(),120);
+}
+
+function placeLoc(lat,lng,acc,ts,isLast){
+  lat=+lat;lng=+lng;
+  if(!_locMap) initLocMap();
+  if(_locMarker) _locMap.removeLayer(_locMarker);
+  _locMarker=L.marker([lat,lng]).addTo(_locMap);
+  _locMap.setView([lat,lng],16);
+  setTimeout(()=>_locMap&&_locMap.invalidateSize(),120);
+  const st=document.getElementById('loc-status');
+  st.textContent=isLast?'📍 آخر موقع معروف (بانتظار تحديث حي…)':'✅ تم تحديد موقع الطيار الآن';
+  st.style.color=isLast?'#64748b':'#065f46';
+  const when=ts?new Date(ts).toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'}):'';
+  document.getElementById('loc-meta').textContent=(acc?`الدقة ~${Math.round(acc)} متر · `:'')+(when?`الوقت ${when}`:'');
+  const g=document.getElementById('loc-gmaps');
+  g.href=`https://www.google.com/maps?q=${lat},${lng}`; g.style.display='inline';
+}
+
+function cleanupLocCh(){ if(_locCh){ try{db.removeChannel(_locCh);}catch(_){} _locCh=null; } }
+function closeLocModal(){
+  document.getElementById('locModal').classList.remove('open');
+  clearTimeout(_locTimer); cleanupLocCh();
+  if(_locMap){_locMap.remove();_locMap=null;_locMarker=null;}
 }
 
 // Utils
