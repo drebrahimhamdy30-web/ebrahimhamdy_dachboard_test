@@ -1066,8 +1066,8 @@ async function approveAtt(id,status,driverId){
 
   await db.from('driver_attendance').update({status:targetStatus,approved_at:now}).eq('id',id);
   if(targetStatus==='offline'||targetStatus==='break'){
-    const prevOnline=attendanceToday.find(r=>r.driver_id===driverId&&r.status==='online'&&!r.ended_at);
-    if(prevOnline)await db.from('driver_attendance').update({ended_at:now}).eq('id',prevOnline.id);
+    // اقفل أي جلسة online مفتوحة للطيار مهما كان يومها (مش النهاردة بس) — يمنع بقاء الجلسة مفتوحة
+    await db.from('driver_attendance').update({ended_at:now}).eq('driver_id',driverId).eq('status','online').is('ended_at',null);
   }
   showToast('✓ تمت الموافقة');
   await loadAttendanceData();
@@ -2737,8 +2737,8 @@ async function forceDriverOffline(driverId){
   try{
     const now=new Date().toISOString();
     // أنهِ آخر فترة online شغّالة
-    const prevOnline=attendanceToday.find(r=>r.driver_id===driverId&&r.status==='online'&&!r.ended_at);
-    if(prevOnline)await db.from('driver_attendance').update({ended_at:now}).eq('id',prevOnline.id);
+    // اقفل أي جلسة online مفتوحة للطيار مهما كان يومها (مش النهاردة بس) — يمنع بقاء الجلسة مفتوحة
+    await db.from('driver_attendance').update({ended_at:now}).eq('driver_id',driverId).eq('status','online').is('ended_at',null);
     // سجّل انصراف مباشر (موافَق عليه من الإدارة)
     await db.from('driver_attendance').insert({
       driver_id:driverId,
