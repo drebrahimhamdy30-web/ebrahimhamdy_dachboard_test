@@ -275,6 +275,102 @@ async function sbMaterialDelete(id) {
   } catch (e) { console.error('sbMaterialDelete error:', e); return false; }
 }
 
+// ===================== العروض على Supabase (بدل n8n) =====================
+const SB_OFFERS_URL = `${SB_URL_API}/rest/v1/offers`;
+async function sbOffersList() {
+  try {
+    const r = await fetch(`${SB_OFFERS_URL}?select=*&order=created_at.desc`, { headers: SB_TASK_HEADERS });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    return Array.isArray(rows) ? rows : [];
+  } catch (e) { console.error('sbOffersList error:', e); return []; }
+}
+async function sbOfferInsert({ name, type, details, expires_at, branch }) {
+  try {
+    const r = await fetch(SB_OFFERS_URL, {
+      method: 'POST', headers: { ...SB_TASK_HEADERS, 'Prefer': 'return=minimal' },
+      body: JSON.stringify({
+        name: name || null, type: type || null, details: details || null,
+        expires_at: (expires_at && expires_at !== 'null' && expires_at !== '') ? expires_at : null,
+        branch: branch || null
+      })
+    });
+    return r.ok;
+  } catch (e) { console.error('sbOfferInsert error:', e); return false; }
+}
+async function sbOfferUpdate(id, patch) {
+  try {
+    const r = await fetch(`${SB_OFFERS_URL}?id=eq.${encodeURIComponent(id)}`, {
+      method: 'PATCH', headers: SB_TASK_HEADERS, body: JSON.stringify(patch || {})
+    });
+    return r.ok;
+  } catch (e) { console.error('sbOfferUpdate error:', e); return false; }
+}
+async function sbOfferDelete(id) {
+  try {
+    const r = await fetch(`${SB_OFFERS_URL}?id=eq.${encodeURIComponent(id)}`, {
+      method: 'DELETE', headers: SB_TASK_HEADERS
+    });
+    return r.ok;
+  } catch (e) { console.error('sbOfferDelete error:', e); return false; }
+}
+
+// ===================== الحد الأدنى للمخزون على Supabase (بدل n8n) =====================
+// القراءة عبر RPC ترجّع الرصيد الحالي محسوباً لحظياً من مخزون كل فرع
+const SB_STOCKLIMIT_URL = `${SB_URL_API}/rest/v1/stock_limit`;
+async function sbStockLimits(branch) {
+  try {
+    const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_stock_limits`, {
+      method: 'POST', headers: SB_TASK_HEADERS,
+      body: JSON.stringify({ p_branch: branch || 'عام' })
+    });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    return Array.isArray(rows) ? rows : [];
+  } catch (e) { console.error('sbStockLimits error:', e); return []; }
+}
+// رصيد صنف واحد لحظياً من مخزون فرعه (بدل ويبهوك get_balance)
+async function sbItemBalance(code, branch) {
+  try {
+    const r = await fetch(`${SB_URL_API}/rest/v1/rpc/item_balance`, {
+      method: 'POST', headers: SB_TASK_HEADERS,
+      body: JSON.stringify({ p_code: String(code || ''), p_branch: branch || '' })
+    });
+    if (!r.ok) return 0;
+    const v = await r.json();
+    return Number(v) || 0;
+  } catch (e) { console.error('sbItemBalance error:', e); return 0; }
+}
+async function sbStockLimitInsert({ item_code, item_name, item_type, branch, min_stock }) {
+  try {
+    const r = await fetch(SB_STOCKLIMIT_URL, {
+      method: 'POST', headers: { ...SB_TASK_HEADERS, 'Prefer': 'return=minimal' },
+      body: JSON.stringify({
+        item_code: item_code || null, item_name: item_name || null,
+        item_type: item_type || null, branch: branch || null,
+        min_stock: (min_stock != null && min_stock !== '') ? Number(min_stock) : null
+      })
+    });
+    return r.ok;
+  } catch (e) { console.error('sbStockLimitInsert error:', e); return false; }
+}
+async function sbStockLimitUpdate(id, patch) {
+  try {
+    const r = await fetch(`${SB_STOCKLIMIT_URL}?id=eq.${encodeURIComponent(id)}`, {
+      method: 'PATCH', headers: SB_TASK_HEADERS, body: JSON.stringify(patch || {})
+    });
+    return r.ok;
+  } catch (e) { console.error('sbStockLimitUpdate error:', e); return false; }
+}
+async function sbStockLimitDelete(id) {
+  try {
+    const r = await fetch(`${SB_STOCKLIMIT_URL}?id=eq.${encodeURIComponent(id)}`, {
+      method: 'DELETE', headers: SB_TASK_HEADERS
+    });
+    return r.ok;
+  } catch (e) { console.error('sbStockLimitDelete error:', e); return false; }
+}
+
 async function fetchFromN8N(category) {
   try {
     const response = await fetch(`${FETCH_URL}?type=${category}`);

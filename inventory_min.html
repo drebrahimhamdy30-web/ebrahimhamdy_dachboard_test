@@ -142,8 +142,9 @@
       const tbody = document.getElementById('table-body');
       tbody.innerHTML = '<tr class="loading-row"><td colspan="8">⏳ جاري جلب البيانات...</td></tr>';
       try {
-        const response = await fetchFromN8N('stock_limit');
-        allData = Array.isArray(response) ? response : (response.data || []);
+        // من Supabase: كل صف بالرصيد الحالي محسوب لحظياً من مخزون فرعه
+        const response = await sbStockLimits('عام');
+        allData = Array.isArray(response) ? response : [];
         applyFilter();
       } catch(e) {
         tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
@@ -242,17 +243,8 @@
           return;
         }
 
-        // جلب الرصيد من get_balance
-        let balance = 0;
-        try {
-          const balResp = await fetch(
-            'https://agent.ebrahimhamdy.com/webhook/get_balance?code=' +
-            encodeURIComponent(code) + '&branch=' + encodeURIComponent(userBranch)
-          );
-          const balRaw  = await balResp.json();
-          const balData = Array.isArray(balRaw) ? balRaw[0] : balRaw;
-          balance = balData?.balance ?? 0;
-        } catch(e) {}
+        // الرصيد الحالي لحظياً من مخزون الفرع (بدل get_balance)
+        const balance = await sbItemBalance(code, userBranch);
 
         // تحقق لو موجود بالفعل
         const alreadyExists = allData.some(x =>
@@ -294,9 +286,8 @@
       btn.disabled  = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
 
-      const success = await updateData({
-        type: 'inventory_insert', item_code: code, item_name: name,
-        current_stock: stock, min_stock: minS, item_type: type, branch: userBranch
+      const success = await sbStockLimitInsert({
+        item_code: code, item_name: name, item_type: type, branch: userBranch, min_stock: minS
       });
 
       if (success) { resetLookup(); await loadAll(); }
@@ -318,9 +309,7 @@
 
     async function saveMinStock(id, newMin) {
       const item = allData.find(x => String(x.id) === String(id));
-      const success = await updateData({
-        type: 'inventory_update', id, min_stock: newMin, current_stock: item?.current_stock ?? 0
-      });
+      const success = await sbStockLimitUpdate(id, { min_stock: (newMin !== '' ? Number(newMin) : null) });
       if (success) {
         if (item) {
           item.min_stock = parseFloat(newMin);
@@ -342,21 +331,8 @@
       try {
         const item = allData.find(x => String(x.id) === String(id));
 
-        // اسم الصنف من مخزون Supabase مباشرة (بدل نداء ERP)
-        const nameItem = await sbItemLookup(itemCode, item?.branch);
-
-        // جلب الرصيد
-        const balResp = await fetch(
-          'https://agent.ebrahimhamdy.com/webhook/get_balance?code=' +
-          encodeURIComponent(itemCode) + '&branch=' + encodeURIComponent(item?.branch || userBranch)
-        );
-        const balRaw  = await balResp.json();
-        const balData = Array.isArray(balRaw) ? balRaw[0] : balRaw;
-        const balance = balData?.balance ?? 0;
-
-        await updateData({
-          type: 'inventory_update', id, current_stock: balance, min_stock: item?.min_stock ?? 0
-        });
+        // الرصيد الحالي لحظياً من مخزون الفرع (بدل get_balance) — الرصيد غير مخزّن، بيتحسب مباشرة
+        const balance = await sbItemBalance(itemCode, item?.branch || userBranch);
 
         if (item) {
           item.current_stock = balance;
@@ -376,7 +352,7 @@
 
     async function deleteItem(id, itemName) {
       if (!confirm(`هل تريد حذف "${itemName}" من قائمة حدود المخزون؟`)) return;
-      const success = await updateData({ type: 'inventory_delete', id });
+      const success = await sbStockLimitDelete(id);
       if (success) { allData = allData.filter(x => String(x.id) !== String(id)); renderStats(); applyFilter(); }
       else alert('❌ فشل الحذف');
     }
