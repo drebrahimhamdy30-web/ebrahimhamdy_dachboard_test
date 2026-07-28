@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>أسعار الزيوت والخامات - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    .add-bar { display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-bottom:16px;
+      background:var(--surface-3); border:1px solid var(--border); border-radius:var(--radius-md); padding:12px 14px; }
+    .add-bar .fld { display:flex; flex-direction:column; gap:4px; }
+    .add-bar .fld label { font-size:0.72rem; font-weight:700; color:var(--text-secondary); }
+    .add-bar input { padding:8px 10px; border:1.5px solid var(--border); border-radius:8px;
+      background:var(--bg-card); color:var(--text-primary); font-family:var(--font); font-size:0.85rem; }
+    .add-bar .fld-name  input { width:230px; }
+    .add-bar .fld-size  input { width:120px; }
+    .add-bar .fld-price input { width:110px; }
+    .grp-name { font-weight:800; color:var(--accent-dark); vertical-align:middle; }
+    .price-input { width:100px; padding:5px 8px; border:1.5px solid var(--border); border-radius:7px;
+      background:var(--bg-card); color:var(--text-primary); font-weight:700; font-size:0.85rem; text-align:center; }
+    .price-text { font-weight:800; color:var(--success); }
+  </style>
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+      <div class="page-header">
+        <div class="page-title">
+          <i class="fas fa-oil-can"></i> أسعار الزيوت والخامات
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <div class="field-icon-wrap" style="min-width:220px;">
+            <i class="fas fa-search field-icon"></i>
+            <input type="text" id="searchInput" class="form-input" placeholder="بحث بالاسم..."
+              oninput="applyFilter()" style="padding-right:34px;">
+          </div>
+          <button class="btn btn-primary" onclick="loadMaterials()">
+            <i class="fas fa-sync-alt"></i> تحديث
+          </button>
+        </div>
+      </div>
+
+      <!-- إضافة (للأدمن فقط) -->
+      <div class="add-bar" id="add-bar" style="display:none;">
+        <div class="fld fld-name">
+          <label>اسم الزيت / الخامة <span style="color:var(--danger)">*</span></label>
+          <input type="text" id="m-name" placeholder="مثال: زيت زيتون">
+        </div>
+        <div class="fld fld-size">
+          <label>الحجم</label>
+          <input type="text" id="m-size" placeholder="مثال: 250 مل">
+        </div>
+        <div class="fld fld-price">
+          <label>السعر <span style="color:var(--danger)">*</span></label>
+          <input type="number" id="m-price" placeholder="0.00" min="0" step="0.01"
+            onkeydown="if(event.key==='Enter') addMaterial()">
+        </div>
+        <button class="btn btn-success" id="addBtn" onclick="addMaterial()">
+          <i class="fas fa-plus"></i> إضافة
+        </button>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>الاسم</th>
+              <th>الحجم</th>
+              <th>السعر (ج)</th>
+              <th id="th-action">إجراء</th>
+            </tr>
+          </thead>
+          <tbody id="table-body">
+            <tr class="loading-row"><td colspan="4">⏳ جاري التحميل...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+<script src="api.js?v=matprices1"></script>
+<script src="nav.js" defer></script>
+  <script>
+    let rawData  = [];
+    let canEdit  = false;
+
+    checkAuth().then(user => {
+      if (!user) return;
+      const role = (localStorage.getItem('userRole') || '').trim();
+      canEdit = (role === 'admin' || role === 'manager');
+      if (canEdit) document.getElementById('add-bar').style.display = 'flex';
+      else document.getElementById('th-action').style.display = 'none';
+      loadMaterials();
+    });
+
+    async function loadMaterials() {
+      const tbody = document.getElementById('table-body');
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="4">⏳ جاري جلب البيانات...</td></tr>';
+      try {
+        rawData = await sbMaterialList();
+        applyFilter();
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--danger);padding:30px;">❌ خطأ في الاتصال</td></tr>';
+      }
+    }
+
+    function applyFilter() {
+      const q = document.getElementById('searchInput').value.trim().toLowerCase();
+      const filtered = q
+        ? rawData.filter(i => String(i.name || '').toLowerCase().includes(q))
+        : rawData;
+      renderTable(filtered);
+    }
+
+    function renderTable(items) {
+      const tbody = document.getElementById('table-body');
+      const cols  = canEdit ? 4 : 3;
+      if (!items.length) {
+        tbody.innerHTML = `<tr><td colspan="${cols}" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد أصناف</td></tr>`;
+        return;
+      }
+      // ترتيب بالاسم ثم الحجم، وتجميع الصفوف تحت نفس الاسم
+      const sorted = [...items].sort((a, b) => {
+        const n = String(a.name||'').localeCompare(String(b.name||''), 'ar');
+        if (n !== 0) return n;
+        return String(a.size||'').localeCompare(String(b.size||''), 'ar');
+      });
+      const counts = {};
+      sorted.forEach(i => { counts[i.name] = (counts[i.name] || 0) + 1; });
+
+      let html = '';
+      let lastName = null;
+      sorted.forEach(item => {
+        const first = item.name !== lastName;
+        lastName = item.name;
+        const priceCell = canEdit
+          ? `<input type="number" class="price-input" value="${item.price ?? ''}" min="0" step="0.01"
+               onchange="savePrice('${item.id}', this.value)">`
+          : `<span class="price-text">${item.price != null ? Number(item.price).toLocaleString('ar-EG') : '—'}</span>`;
+        html += `<tr>
+          ${first ? `<td class="grp-name" rowspan="${counts[item.name]}">${escapeHtml(item.name || '—')}</td>` : ''}
+          <td>${item.size ? escapeHtml(item.size) : '<span style="color:var(--text-muted)">—</span>'}</td>
+          <td>${priceCell}</td>
+          ${canEdit ? `<td><button class="btn btn-sm btn-icon" style="background:var(--danger);color:#fff;padding:5px 9px;"
+             onclick="delMaterial('${item.id}')" title="حذف"><i class="fas fa-trash"></i></button></td>` : ''}
+        </tr>`;
+      });
+      tbody.innerHTML = html;
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    async function addMaterial() {
+      if (!canEdit) return;
+      const name  = document.getElementById('m-name').value.trim();
+      const size  = document.getElementById('m-size').value.trim();
+      const price = document.getElementById('m-price').value.trim();
+      if (!name)  { alert('برجاء إدخال اسم الزيت أو الخامة'); return; }
+      if (!price) { alert('برجاء إدخال السعر'); return; }
+      const btn = document.getElementById('addBtn');
+      btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+      const ok = await sbMaterialInsert({ name, size, price });
+      btn.disabled = false; btn.innerHTML = '<i class="fas fa-plus"></i> إضافة';
+      if (ok) {
+        document.getElementById('m-name').value  = '';
+        document.getElementById('m-size').value  = '';
+        document.getElementById('m-price').value = '';
+        document.getElementById('m-name').focus();
+        loadMaterials();
+      } else { alert('فشل الإضافة ❌'); }
+    }
+
+    async function savePrice(id, val) {
+      if (!canEdit) return;
+      const ok = await sbMaterialUpdate(id, { price: (val !== '' ? Number(val) : null) });
+      if (ok) {
+        const it = rawData.find(x => x.id == id);
+        if (it) it.price = (val !== '' ? Number(val) : null);
+      } else { alert('فشل حفظ السعر ❌'); }
+    }
+
+    async function delMaterial(id) {
+      if (!canEdit) return;
+      if (!confirm('تأكيد حذف هذا الصنف/الحجم؟')) return;
+      const ok = await sbMaterialDelete(id);
+      if (ok) { rawData = rawData.filter(x => x.id != id); applyFilter(); }
+      else alert('فشل الحذف ❌');
+    }
+  </script>
+</body>
+</html>

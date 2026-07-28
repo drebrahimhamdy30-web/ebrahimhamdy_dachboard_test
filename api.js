@@ -230,6 +230,51 @@ async function sbCsOrders(branch, pendingOnly) {
   } catch (e) { console.error('sbCsOrders error:', e); return []; }
 }
 
+// ===================== أسعار الزيوت والخامات (material_prices) =====================
+const SB_MATERIAL_URL = `${SB_URL_API}/rest/v1/material_prices`;
+
+async function sbMaterialList() {
+  try {
+    const r = await fetch(`${SB_MATERIAL_URL}?select=*&order=name.asc,size.asc`, { headers: SB_TASK_HEADERS });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    return Array.isArray(rows) ? rows : [];
+  } catch (e) { console.error('sbMaterialList error:', e); return []; }
+}
+
+async function sbMaterialInsert({ name, size, price }) {
+  try {
+    const r = await fetch(SB_MATERIAL_URL, {
+      method: 'POST',
+      headers: { ...SB_TASK_HEADERS, 'Prefer': 'return=minimal' },
+      body: JSON.stringify({
+        name:  name  || null,
+        size:  size  || null,
+        price: (price != null && price !== '') ? Number(price) : null
+      })
+    });
+    return r.ok;
+  } catch (e) { console.error('sbMaterialInsert error:', e); return false; }
+}
+
+async function sbMaterialUpdate(id, patch) {
+  try {
+    const r = await fetch(`${SB_MATERIAL_URL}?id=eq.${encodeURIComponent(id)}`, {
+      method: 'PATCH', headers: SB_TASK_HEADERS, body: JSON.stringify(patch || {})
+    });
+    return r.ok;
+  } catch (e) { console.error('sbMaterialUpdate error:', e); return false; }
+}
+
+async function sbMaterialDelete(id) {
+  try {
+    const r = await fetch(`${SB_MATERIAL_URL}?id=eq.${encodeURIComponent(id)}`, {
+      method: 'DELETE', headers: SB_TASK_HEADERS
+    });
+    return r.ok;
+  } catch (e) { console.error('sbMaterialDelete error:', e); return false; }
+}
+
 async function fetchFromN8N(category) {
   try {
     const response = await fetch(`${FETCH_URL}?type=${category}`);

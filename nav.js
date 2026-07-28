@@ -81,7 +81,7 @@ function injectNavbar() {
   }
 
   var csPages          = ['customer_service.html', 'shortages.html', 'print_invoice.html'];
-  var purchasesPages   = ['purchases.html', 'cosmo_order.html', 'inventory_management.html', 'price_check.html'];
+  var purchasesPages   = ['purchases.html', 'cosmo_order.html', 'inventory_management.html', 'price_check.html', 'material_prices.html'];
   var visaPages        = ['visa_transactions.html', 'bank_monitor.html', 'paymob.html', 'sms.html', 'pos_reconciliation.html', 'machine_import.html'];
   var isContractPage   = contractPages.includes(currentPage);
   var isCSPage         = csPages.includes(currentPage);
@@ -198,6 +198,9 @@ var navContent =
   );
   purchasesItems.push(
     { href: 'price_check.html', icon: 'fa-tags', label: 'مراجعة السعر لإذون الصرف', active: currentPage === 'price_check.html' }
+  );
+  purchasesItems.push(
+    { href: 'material_prices.html', icon: 'fa-oil-can', label: 'أسعار الزيوت والخامات', active: currentPage === 'material_prices.html' }
   );
   createFloatingDropdown('purchases-dropdown', purchasesItems);
 
