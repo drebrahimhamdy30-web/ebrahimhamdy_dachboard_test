@@ -2716,21 +2716,34 @@ async function rejectComplete(){
   closeModal('completeApprovalModal');showToast('تم رفض الطلب — رجعت الرحلة للطيار');await loadAll();showLoading(false);
 }
 
-// ===== تثبيت كارت إنهاء الرحلة بالأعلى (نافذة عائمة فوق البرامج) =====
+// ===== تثبيت كارت إنهاء الرحلة بالأعلى (نافذة عائمة فوق كل البرامج) =====
 let _pipWin = null;
 
-// نسخ كل ستايلات الصفحة لنافذة تانية (نفس الشكل بالظبط)
-function injectStylesTo(win){
+// نسخ كل ستايلات مستند الكارت لمستند النافذة العائمة (نفس الشكل بالظبط)
+function copyStylesTo(srcDoc, dstDoc){
   try{
-    [...document.styleSheets].forEach(ss=>{
+    [...srcDoc.styleSheets].forEach(ss=>{
       try{
         const css=[...ss.cssRules].map(r=>r.cssText).join('\n');
-        const st=win.document.createElement('style'); st.textContent=css; win.document.head.appendChild(st);
+        const st=dstDoc.createElement('style'); st.textContent=css; dstDoc.head.appendChild(st);
       }catch(e){
-        if(ss.href){ const l=win.document.createElement('link'); l.rel='stylesheet'; l.href=ss.href; win.document.head.appendChild(l); }
+        if(ss.href){ const l=dstDoc.createElement('link'); l.rel='stylesheet'; l.href=ss.href; dstDoc.head.appendChild(l); }
       }
     });
-  }catch(e){ console.warn('injectStyles', e); }
+  }catch(e){ console.warn('copyStyles', e); }
+}
+
+// نلاقي نافذة فيها صلاحية Document PiP — نجرّب الإطار، ثم الصفحة الأب/الأساسية
+// (الطلب من الصفحة الأساسية بيتخطى حظر الـiframe فبيشتغل التثبيت الحقيقي)
+function pipHostWindow(){
+  const cands=[];
+  try{ cands.push(window); }catch(e){}
+  try{ if(window.parent && window.parent!==window) cands.push(window.parent); }catch(e){}
+  try{ if(window.top && window.top!==window && window.top!==window.parent) cands.push(window.top); }catch(e){}
+  for(const w of cands){
+    try{ if(w && 'documentPictureInPicture' in w && w.documentPictureInPicture) return w; }catch(e){}
+  }
+  return null;
 }
 
 async function pinCompleteCard(){
@@ -2738,58 +2751,54 @@ async function pinCompleteCard(){
   const card=modal?.querySelector('.modal');
   if(!card){ showToast('افتح كارت إنهاء الرحلة أولاً'); return; }
 
-  // Document Picture-in-Picture (تثبيت حقيقي فوق كل البرامج) — Chrome/Edge
-  if('documentPictureInPicture' in window){
-    try{
-      if(_pipWin && !_pipWin.closed){ _pipWin.focus(); return; }
-      const pip=await documentPictureInPicture.requestWindow({width:470,height:700});
-      _pipWin=pip;
-      pip.document.documentElement.setAttribute('dir','rtl');
-      pip.document.documentElement.setAttribute('lang','ar');
-      injectStylesTo(pip);
-      pip.document.body.style.margin='0';
-      pip.document.body.style.padding='10px';
-      pip.document.body.style.background=getComputedStyle(document.body).backgroundColor||'#f1f5f9';
-
-      // كلون الكارت كما هو
-      const clone=card.cloneNode(true);
-      clone.style.maxWidth='none'; clone.style.width='100%';
-      clone.style.margin='0'; clone.style.maxHeight='none';
-      pip.document.body.appendChild(clone);
-
-      // نخلي أزرار الكارت المثبّت تشتغل (تُنفّذ على المودال الأصلي ثم تقفل النافذة)
-      pip.closeModal=()=>{ if(_pipWin&&!_pipWin.closed)_pipWin.close(); };
-      pip.pinCompleteCard=()=>{ _pipWin.focus(); };
-      pip.approveComplete=async()=>{ await approveComplete(); if(_pipWin&&!_pipWin.closed)_pipWin.close(); };
-      pip.rejectComplete=async()=>{ await rejectComplete(); if(_pipWin&&!_pipWin.closed)_pipWin.close(); };
-      pip.approveCollected=(a,b,c)=> approveCollected(a,b,c);
-
-      // مزامنة تلقائية: أي تحديث في جسم المودال الأصلي ينعكس على المثبّت
-      const mainBody=document.getElementById('completeApprovalBody');
-      const cloneBody=clone.querySelector('#completeApprovalBody');
-      const mainFlags=document.getElementById('ca-review-flags');
-      const cloneFlags=clone.querySelector('#ca-review-flags');
-      const sync=()=>{ if(cloneBody&&mainBody)cloneBody.innerHTML=mainBody.innerHTML; if(cloneFlags&&mainFlags)cloneFlags.innerHTML=mainFlags.innerHTML; };
-      const obs=new MutationObserver(sync);
-      obs.observe(mainBody,{childList:true,subtree:true,characterData:true});
-      obs.observe(mainFlags,{childList:true,subtree:true,characterData:true});
-      pip.addEventListener('pagehide',()=>{ try{obs.disconnect();}catch(e){} _pipWin=null; });
-      showToast('📌 تم التثبيت بالأعلى — اسحبها فوق برنامجك');
-      return;
-    }catch(e){ console.error('PiP failed',e); }
+  const host=pipHostWindow();
+  if(!host){
+    showToast('التثبيت العائم متاح على Chrome أو Edge (نسخة حديثة) فقط');
+    return;
   }
 
-  // بديل: نافذة منفصلة (للمتصفحات اللي مش بتدعم — مش هتفضل فوق تلقائياً)
-  const w=window.open('','tripCardPin','width=470,height=700');
-  if(!w){ showToast('اسمح بالنوافذ المنبثقة لتثبيت الكارت'); return; }
-  w.document.open();
-  w.document.write('<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>كارت إنهاء الرحلة</title></head><body style="margin:0;padding:10px;background:#f1f5f9"></body></html>');
-  w.document.close();
-  injectStylesTo(w);
-  const clone2=card.cloneNode(true);
-  clone2.style.maxWidth='none'; clone2.style.width='100%'; clone2.style.margin='0'; clone2.style.maxHeight='none';
-  w.document.body.appendChild(clone2);
-  showToast('فُتحت نافذة الكارت — ثبّتها فوق يدويًا');
+  try{
+    if(_pipWin && !_pipWin.closed){ _pipWin.focus(); return; }
+    const pip=await host.documentPictureInPicture.requestWindow({width:470,height:700});
+    _pipWin=pip;
+    const pdoc=pip.document;
+    pdoc.documentElement.setAttribute('dir','rtl');
+    pdoc.documentElement.setAttribute('lang','ar');
+    copyStylesTo(document, pdoc);   // ستايلات الكارت موجودة في مستند الإطار
+    pdoc.body.style.margin='0';
+    pdoc.body.style.padding='10px';
+    pdoc.body.style.background=getComputedStyle(document.body).backgroundColor||'#f1f5f9';
+
+    // كلون الكارت (مستورد لمستند النافذة العائمة)
+    const clone=pdoc.importNode(card, true);
+    clone.style.maxWidth='none'; clone.style.width='100%';
+    clone.style.margin='0'; clone.style.maxHeight='none';
+    pdoc.body.appendChild(clone);
+
+    // أزرار الكارت المثبّت تشتغل (تُنفّذ على المودال الأصلي ثم تقفل النافذة)
+    pip.closeModal=()=>{ if(_pipWin&&!_pipWin.closed)_pipWin.close(); };
+    pip.pinCompleteCard=()=>{ try{_pipWin.focus();}catch(e){} };
+    pip.approveComplete=async()=>{ await approveComplete(); if(_pipWin&&!_pipWin.closed)_pipWin.close(); };
+    pip.rejectComplete=async()=>{ await rejectComplete(); if(_pipWin&&!_pipWin.closed)_pipWin.close(); };
+    pip.approveCollected=(a,b,c)=> approveCollected(a,b,c);
+
+    // مزامنة تلقائية: أي تحديث في جسم المودال الأصلي ينعكس على المثبّت
+    const mainBody=document.getElementById('completeApprovalBody');
+    const cloneBody=clone.querySelector('#completeApprovalBody');
+    const mainFlags=document.getElementById('ca-review-flags');
+    const cloneFlags=clone.querySelector('#ca-review-flags');
+    const sync=()=>{ if(cloneBody&&mainBody)cloneBody.innerHTML=mainBody.innerHTML; if(cloneFlags&&mainFlags)cloneFlags.innerHTML=mainFlags.innerHTML; };
+    const obs=new MutationObserver(sync);
+    if(mainBody)obs.observe(mainBody,{childList:true,subtree:true,characterData:true});
+    if(mainFlags)obs.observe(mainFlags,{childList:true,subtree:true,characterData:true});
+    pip.addEventListener('pagehide',()=>{ try{obs.disconnect();}catch(e){} _pipWin=null; });
+
+    showToast('📌 النافذة عائمة فوق كل البرامج — اسحبها لأي مكان على الشاشة');
+  }catch(e){
+    console.error('PiP failed', e);
+    _pipWin=null;
+    showToast('تعذّر التثبيت — تأكد إنك على Chrome/Edge حديث');
+  }
 }
 // ===== CALL & MESSAGE =====
   // ===== انصراف يدوي للطيار من الإدارة =====
