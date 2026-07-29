@@ -245,6 +245,16 @@ async function sbMarkPriceReviewed(id, by) {
     return r.ok;
   } catch(e){ console.error('sbMarkPriceReviewed', e); return false; }
 }
+async function sbBillItems(store, billNo) {
+  try {
+    const url = `${SB_SALES_URL}?store_name=eq.${encodeURIComponent(store)}&bill_no=eq.${encodeURIComponent(billNo)}`
+      + `&select=line_no,itm_code,itm_name_ar,unit_name,unit_price,itm_qty,line_total,itm_disc_value,itm_disc_perc&order=line_no.asc`;
+    const r = await fetch(url, { headers: SB_TASK_HEADERS });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    return Array.isArray(rows) ? rows : [];
+  } catch (e) { console.error('sbBillItems', e); return []; }
+}
 async function sbMarkDiscountReviewed(store, billNo, by) {
   try {
     const r = await fetch(SB_DISCREV_URL, {

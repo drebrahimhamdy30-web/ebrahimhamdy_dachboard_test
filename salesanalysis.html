@@ -24,6 +24,12 @@
     .diff-neg{color:#0e7490;font-weight:800;}
     .rev-btn{background:var(--success);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-family:var(--font);font-weight:700;font-size:0.78rem;cursor:pointer;}
     .rev-btn:hover{filter:brightness(.95);}
+    .disc-row{cursor:pointer;}
+    .caret{transition:transform .15s;color:var(--text-secondary);font-size:0.75rem;margin-left:5px;}
+    .sub-inner{padding:6px 4px 10px;}
+    .sub-tbl{width:100%;border-collapse:collapse;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+    .sub-tbl th,.sub-tbl td{padding:6px 9px;border-bottom:1px solid var(--border);font-size:0.78rem;}
+    .sub-tbl thead th{background:var(--surface-3);color:var(--text-secondary);font-weight:700;}
     .empty-tab{text-align:center;color:var(--text-muted);padding:40px;font-size:0.9rem;}
     .blocked{text-align:center;padding:60px 20px;color:var(--danger);font-size:1rem;font-weight:700;}
   </style>
@@ -135,8 +141,8 @@
       wrap.innerHTML = `<table><thead><tr>
         <th>رقم الفاتورة</th><th>التاريخ والوقت</th><th>الموظف</th><th>العميل</th><th>الدفع</th>
         <th>الإجمالي</th><th>الصافي</th><th>الخصم</th><th>مراجعة</th></tr></thead><tbody>
-        ${rows.map(r=>`<tr id="dr-${esc(r.store_name)}-${esc(r.bill_no)}">
-          <td><b>${esc(r.bill_no)}</b></td>
+        ${rows.map(r=>{ const k=esc(r.store_name)+'-'+esc(r.bill_no); return `<tr class="disc-row" id="dr-${k}" onclick="toggleBill('${esc(r.store_name)}','${esc(r.bill_no)}')">
+          <td><i class="fas fa-chevron-left caret" id="cr-${k}"></i><b>${esc(r.bill_no)}</b></td>
           <td style="white-space:nowrap">${fmtDT(r.bill_date)}</td>
           <td>${esc(r.employee_name||'—')}</td>
           <td style="text-align:right">${esc(r.cust_name||'—')}</td>
@@ -144,8 +150,9 @@
           <td>${num(r.total_bill)}</td>
           <td>${num(r.total_bill_net)}</td>
           <td class="diff-pos">${num(r.discount)}</td>
-          <td><button class="rev-btn" onclick="doDiscReviewed('${esc(r.store_name)}','${esc(r.bill_no)}')"><i class="fas fa-check"></i> تمت</button></td>
-        </tr>`).join('')}
+          <td><button class="rev-btn" onclick="event.stopPropagation();doDiscReviewed('${esc(r.store_name)}','${esc(r.bill_no)}')"><i class="fas fa-check"></i> تمت</button></td>
+        </tr>
+        <tr class="sub-row" id="sub-${k}" style="display:none"><td colspan="9"><div class="sub-inner"></div></td></tr>`;}).join('')}
       </tbody></table>`;
     }
 
@@ -159,10 +166,39 @@
       if(ok){ const tr=document.getElementById('pr-'+id); if(tr) tr.remove(); setCnt('price', document.querySelectorAll('#tableWrap tbody tr').length); }
       else alert('تعذّر الحفظ');
     }
+    async function toggleBill(store, bill){
+      const k=store+'-'+bill;
+      const sub=document.getElementById('sub-'+k); const cr=document.getElementById('cr-'+k);
+      if(!sub) return;
+      const isOpen = sub.style.display!=='none';
+      if(isOpen){ sub.style.display='none'; if(cr) cr.style.transform=''; return; }
+      sub.style.display='table-row'; if(cr) cr.style.transform='rotate(-90deg)';
+      const inner=sub.querySelector('.sub-inner');
+      if(inner.dataset.loaded) return;
+      inner.innerHTML='<i class="fas fa-spinner fa-spin"></i> جاري تحميل الأصناف...';
+      const items=await sbBillItems(store, bill);
+      inner.dataset.loaded='1';
+      if(!items.length){ inner.innerHTML='<span style="color:var(--text-muted)">لا توجد أصناف</span>'; return; }
+      inner.innerHTML = `<table class="sub-tbl"><thead><tr>
+        <th>الصنف</th><th>الوحدة</th><th>الكمية</th><th>سعر الوحدة</th><th>خصم السطر</th><th>الإجمالي</th></tr></thead><tbody>
+        ${items.map(it=>`<tr>
+          <td style="text-align:right">${esc(it.itm_name_ar||it.itm_code||'—')}</td>
+          <td>${esc(it.unit_name||'—')}</td>
+          <td>${num(it.itm_qty)}</td>
+          <td>${num(it.unit_price)}</td>
+          <td>${num(it.itm_disc_value)}</td>
+          <td>${num(it.line_total)}</td></tr>`).join('')}
+      </tbody></table>`;
+    }
+
     async function doDiscReviewed(store, bill){
       const ok = await sbMarkDiscountReviewed(store, bill, USER);
-      if(ok){ const tr=document.getElementById('dr-'+store+'-'+bill); if(tr) tr.remove(); setCnt('disc', document.querySelectorAll('#tableWrap tbody tr').length); }
-      else alert('تعذّر الحفظ');
+      if(ok){
+        const k=store+'-'+bill;
+        const tr=document.getElementById('dr-'+k); if(tr) tr.remove();
+        const sub=document.getElementById('sub-'+k); if(sub) sub.remove();
+        setCnt('disc', document.querySelectorAll('#tableWrap tbody tr.disc-row').length);
+      } else alert('تعذّر الحفظ');
     }
   </script>
 </body>
