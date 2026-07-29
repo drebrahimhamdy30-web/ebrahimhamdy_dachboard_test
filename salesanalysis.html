@@ -69,8 +69,8 @@
 
       <div id="main" style="display:none">
         <div class="filters">
-          <div class="fld"><label>من تاريخ</label><input type="date" id="fFrom"></div>
-          <div class="fld"><label>إلى تاريخ</label><input type="date" id="fTo"></div>
+          <div class="fld" id="fldFrom"><label>من تاريخ</label><input type="date" id="fFrom"></div>
+          <div class="fld" id="fldTo"><label>إلى تاريخ</label><input type="date" id="fTo"></div>
           <div class="fld"><label>الفرع</label>
             <select id="fStore">
               <option value="">كل الفروع</option>
@@ -190,10 +190,20 @@
     function switchTab(t){
       ACTIVE=t;
       ['overview','emp','price','disc'].forEach(x=>document.getElementById('tab-'+x).classList.toggle('active', t===x));
+      updateFilterVis();
       loadActive();
     }
 
+    // النظرة العامة دائمًا الشهر الحالي — نخفي فلتر التواريخ فيها لتفادي اللبس
+    function updateFilterVis(){
+      const show = ACTIVE !== 'overview';
+      const ff=document.getElementById('fldFrom'), ft=document.getElementById('fldTo');
+      if(ff) ff.style.display = show ? '' : 'none';
+      if(ft) ft.style.display = show ? '' : 'none';
+    }
+
     function loadActive(){
+      updateFilterVis();
       if(ACTIVE==='overview') return loadOverview();
       if(ACTIVE==='emp')      return loadEmployees();
       if(ACTIVE==='price')    return loadPrice();
@@ -202,16 +212,27 @@
 
     function pct(part, whole){ whole=Number(whole)||0; return whole>0 ? Math.round((Number(part)||0)/whole*100) : 0; }
 
+    // مدى الشهر الحالي (من أول الشهر لحد دلوقتي) + عدد الأيام المنقضية + اسم الشهر
+    function curMonthRange(){
+      const now = new Date();
+      const from = new Date(now.getFullYear(), now.getMonth(), 1, 0,0,0,0);
+      const toEx = new Date(now.getFullYear(), now.getMonth()+1, 1, 0,0,0,0);
+      return { from: from.toISOString(), to: toEx.toISOString(), days: now.getDate(),
+               label: now.toLocaleDateString('ar-EG',{month:'long',year:'numeric'}) };
+    }
+
     async function loadOverview(){
       const wrap=document.getElementById('tableWrap');
       wrap.innerHTML='<div class="empty-tab"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>';
+      const mr = curMonthRange();   // النظرة العامة دائمًا الشهر الحالي
       const [o, branches, hours] = await Promise.all([
-        sbSalesOverview(fltFrom(), fltTo(), fltStore()),
-        sbSalesSummary(fltFrom(), fltTo(), fltStore()),
-        sbSalesByHour(fltFrom(), fltTo(), fltStore())
+        sbSalesOverview(mr.from, mr.to, fltStore()),
+        sbSalesSummary(mr.from, mr.to, fltStore()),
+        sbSalesByHour(mr.from, mr.to, fltStore())
       ]);
       const kpi = (label,val,sub)=>`<div class="kpi"><div class="kpi-val">${val}</div><div class="kpi-lbl">${label}</div>${sub?`<div class="kpi-sub">${sub}</div>`:''}</div>`;
       const netTot = Number(o.net)||0;
+      const dailyAvg = mr.days>0 ? netTot/mr.days : 0;   // المعدل اليومي = الصافي ÷ الأيام المنقضية
       // القنوات
       const chan = (name,bills,val,color)=>{
         const p=pct(val,netTot);
@@ -238,8 +259,10 @@
       }).join('');
 
       wrap.innerHTML = `
+        <div style="font-size:0.85rem;color:var(--text-secondary);font-weight:700;margin:0 2px 12px"><i class="fas fa-calendar-alt"></i> بيانات الشهر الحالي — ${esc(mr.label)} (حتى اليوم · ${mr.days} يوم)</div>
         <div class="kpi-row">
           ${kpi('صافي المبيعات', num(o.net)+' ج')}
+          ${kpi('المعدل اليومي', num(dailyAvg)+' ج', 'على '+mr.days+' يوم')}
           ${kpi('إجمالي (قبل الخصم)', num(o.gross)+' ج')}
           ${kpi('عدد الفواتير', o.bills||0)}
           ${kpi('متوسط الفاتورة', num(o.avg_bill)+' ج')}
