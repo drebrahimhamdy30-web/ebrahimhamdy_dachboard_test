@@ -231,6 +231,9 @@ function sbSalesSummary(from, to, store)      { return _sbRpc('sales_summary',  
 function sbSalesTopItems(from, to, store, lim){ return _sbRpc('sales_top_items',   { p_from: from||null, p_to: to||null, p_store: store||null, p_limit: lim||50 }); }
 function sbSalesByEmployee(from, to, store)   { return _sbRpc('sales_by_employee', { p_from: from||null, p_to: to||null, p_store: store||null }); }
 function sbSalesDetail(opts)                  { const o=opts||{}; return _sbRpc('sales_detail', { p_from:o.from||null, p_to:o.to||null, p_store:o.store||null, p_employee:o.employee||null, p_search:o.search||null, p_limit:o.limit||100, p_offset:o.offset||0 }); }
+// تحليل المبيعات — نظرة عامة + ساعات الذروة
+async function sbSalesOverview(from, to, store){ const r = await _sbRpc('sales_overview', { p_from: from||null, p_to: to||null, p_store: store||null }); return r[0] || {}; }
+function sbSalesByHour(from, to, store)        { return _sbRpc('sales_by_hour', { p_from: from||null, p_to: to||null, p_store: store||null }); }
 // تحليل المبيعات — مراجعة الأسعار والخصومات
 function sbSalesPriceReview(from, to, store)  { return _sbRpc('sales_price_review',  { p_from: from||null, p_to: to||null, p_store: store||null }); }
 function sbSalesDiscountBills(from, to, store){ return _sbRpc('sales_discount_bills', { p_from: from||null, p_to: to||null, p_store: store||null }); }

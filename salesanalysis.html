@@ -32,6 +32,24 @@
     .sub-tbl thead th{background:var(--surface-3);color:var(--text-secondary);font-weight:700;}
     .empty-tab{text-align:center;color:var(--text-muted);padding:40px;font-size:0.9rem;}
     .blocked{text-align:center;padding:60px 20px;color:var(--danger);font-size:1rem;font-weight:700;}
+    .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px;}
+    .kpi{background:var(--surface-3);border:1px solid var(--border);border-radius:12px;padding:12px 14px;text-align:center;}
+    .kpi-val{font-size:1.25rem;font-weight:900;color:var(--text-primary);}
+    .kpi-lbl{font-size:0.75rem;color:var(--text-secondary);font-weight:700;margin-top:3px;}
+    .kpi-sub{font-size:0.68rem;color:var(--text-muted);margin-top:2px;}
+    .sec-title{font-size:0.92rem;font-weight:800;color:var(--accent-dark,#3730a3);margin:18px 2px 10px;padding-right:8px;border-right:3px solid var(--accent);}
+    .chan-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;}
+    .chan{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:12px 14px;}
+    .chan-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;}
+    .chan-name{font-weight:800;font-size:0.88rem;}
+    .chan-pct{font-weight:900;font-size:1.05rem;}
+    .chan-bar{height:8px;background:var(--surface-3);border-radius:6px;overflow:hidden;}
+    .chan-bar>div{height:100%;border-radius:6px;}
+    .chan-meta{font-size:0.75rem;color:var(--text-secondary);margin-top:6px;}
+    .hours{display:flex;gap:4px;align-items:flex-end;height:130px;padding:6px 2px;overflow-x:auto;}
+    .hbar{flex:1;min-width:26px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;}
+    .hbar-fill{width:70%;min-height:2px;background:linear-gradient(180deg,var(--accent),#93c5fd);border-radius:5px 5px 0 0;}
+    .hbar-lbl{font-size:0.62rem;color:var(--text-muted);margin-top:4px;white-space:nowrap;}
   </style>
 </head>
 <body>
@@ -59,7 +77,13 @@
         </div>
 
         <div class="tabs">
-          <button class="tab-btn active" id="tab-price" onclick="switchTab('price')">
+          <button class="tab-btn active" id="tab-overview" onclick="switchTab('overview')">
+            <i class="fas fa-gauge-high"></i> نظرة عامة
+          </button>
+          <button class="tab-btn" id="tab-emp" onclick="switchTab('emp')">
+            <i class="fas fa-user-tie"></i> أداء الموظفين
+          </button>
+          <button class="tab-btn" id="tab-price" onclick="switchTab('price')">
             <i class="fas fa-tags"></i> مراجعة الأسعار <span class="cnt" id="cnt-price" style="display:none">0</span>
           </button>
           <button class="tab-btn" id="tab-disc" onclick="switchTab('disc')">
@@ -79,9 +103,9 @@
     </div>
   </div>
 
-  <script src="api.js?v=salesanalysis3"></script>
+  <script src="api.js?v=salesanalysis4"></script>
   <script>
-    let ACTIVE = 'price';
+    let ACTIVE = 'overview';
     let USER = '';
 
     checkAuth().then(user => {
@@ -102,12 +126,96 @@
 
     function switchTab(t){
       ACTIVE=t;
-      document.getElementById('tab-price').classList.toggle('active', t==='price');
-      document.getElementById('tab-disc').classList.toggle('active', t==='disc');
+      ['overview','emp','price','disc'].forEach(x=>document.getElementById('tab-'+x).classList.toggle('active', t===x));
       loadActive();
     }
 
-    function loadActive(){ ACTIVE==='price' ? loadPrice() : loadDisc(); }
+    function loadActive(){
+      if(ACTIVE==='overview') return loadOverview();
+      if(ACTIVE==='emp')      return loadEmployees();
+      if(ACTIVE==='price')    return loadPrice();
+      return loadDisc();
+    }
+
+    function pct(part, whole){ whole=Number(whole)||0; return whole>0 ? Math.round((Number(part)||0)/whole*100) : 0; }
+
+    async function loadOverview(){
+      const wrap=document.getElementById('tableWrap');
+      wrap.innerHTML='<div class="empty-tab"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>';
+      const [o, branches, hours] = await Promise.all([
+        sbSalesOverview(fltFrom(), fltTo(), fltStore()),
+        sbSalesSummary(fltFrom(), fltTo(), fltStore()),
+        sbSalesByHour(fltFrom(), fltTo(), fltStore())
+      ]);
+      const kpi = (label,val,sub)=>`<div class="kpi"><div class="kpi-val">${val}</div><div class="kpi-lbl">${label}</div>${sub?`<div class="kpi-sub">${sub}</div>`:''}</div>`;
+      const netTot = Number(o.net)||0;
+      // القنوات
+      const chan = (name,bills,val,color)=>{
+        const p=pct(val,netTot);
+        return `<div class="chan">
+          <div class="chan-top"><span class="chan-name" style="color:${color}">${name}</span><span class="chan-pct">${p}%</span></div>
+          <div class="chan-bar"><div style="width:${p}%;background:${color}"></div></div>
+          <div class="chan-meta">${num(val)} ج · ${bills} فاتورة</div>
+        </div>`;
+      };
+      // الفروع
+      const brName={'الصيدلية':'المعمورة','ابراهيم حمدي 2':'سان ستيفانو','ابراهيم حمدي 3':'سيدى بشر'};
+      const brRows=(branches||[]).map(b=>`<tr>
+        <td style="font-weight:700">${esc(brName[b.store_name]||b.store_name)}</td>
+        <td>${b.bills}</td><td>${num(b.bill_net)}</td>
+        <td>${num((Number(b.bill_net)||0)/(Number(b.bills)||1))}</td>
+        <td>${pct(b.bill_net, netTot)}%</td></tr>`).join('');
+      // الذروة
+      const maxH=Math.max(1,...(hours||[]).map(h=>Number(h.net_val)||0));
+      const hourBars=(hours||[]).map(h=>{
+        const hr=Number(h.hr); const lbl=(hr%12===0?12:hr%12)+(hr<12?'ص':'م');
+        return `<div class="hbar" title="${lbl}: ${num(h.net_val)} ج (${h.bills} فاتورة)">
+          <div class="hbar-fill" style="height:${Math.round((Number(h.net_val)||0)/maxH*100)}%"></div>
+          <div class="hbar-lbl">${lbl}</div></div>`;
+      }).join('');
+
+      wrap.innerHTML = `
+        <div class="kpi-row">
+          ${kpi('صافي المبيعات', num(o.net)+' ج')}
+          ${kpi('إجمالي (قبل الخصم)', num(o.gross)+' ج')}
+          ${kpi('عدد الفواتير', o.bills||0)}
+          ${kpi('متوسط الفاتورة', num(o.avg_bill)+' ج')}
+          ${kpi('الأصناف (بالكبرى)', num(o.qty_big))}
+          ${kpi('المرتجعات', num(o.returns_val)+' ج', (o.returns_cnt||0)+' سطر')}
+        </div>
+
+        <div class="sec-title">حجم القنوات من الإجمالي</div>
+        <div class="chan-row">
+          ${chan('توصيل منزلي', o.delivery_bills||0, o.delivery_net||0, '#2563eb')}
+          ${chan('حضور (Walk-in)', o.walkin_bills||0, o.walkin_net||0, '#16a34a')}
+          ${chan('تعاقدات', o.contract_bills||0, o.contract_net||0, '#7c3aed')}
+        </div>
+        <div style="font-size:0.78rem;color:var(--text-muted);margin:2px 2px 14px">الدفع: ${o.cash_bills||0} كاش · ${o.visa_bills||0} فيزا</div>
+
+        <div class="sec-title">مقارنة الفروع</div>
+        <table><thead><tr><th>الفرع</th><th>الفواتير</th><th>الصافي</th><th>متوسط الفاتورة</th><th>% من الإجمالي</th></tr></thead>
+          <tbody>${brRows||'<tr><td colspan="5" class="empty-tab">لا يوجد</td></tr>'}</tbody></table>
+
+        <div class="sec-title">ساعات الذروة (بالصافي)</div>
+        <div class="hours">${hourBars||'<div class="empty-tab">لا يوجد</div>'}</div>
+      `;
+    }
+
+    async function loadEmployees(){
+      const wrap=document.getElementById('tableWrap');
+      wrap.innerHTML='<div class="empty-tab"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>';
+      const rows = await sbSalesByEmployee(fltFrom(), fltTo(), fltStore());
+      if(!rows.length){ wrap.innerHTML='<div class="empty-tab">لا يوجد</div>'; return; }
+      wrap.innerHTML = `<table><thead><tr>
+        <th>الموظف</th><th>الفواتير</th><th>الأسطر</th><th>الكمية (بالكبرى)</th><th>إجمالي المبيعات</th><th>متوسط الفاتورة</th></tr></thead><tbody>
+        ${rows.map(r=>`<tr>
+          <td style="text-align:right;font-weight:700">${esc(r.employee_name||'—')}</td>
+          <td>${r.bills}</td><td>${r.lines}</td><td>${num(r.qty_big)}</td>
+          <td style="font-weight:700">${num(r.revenue)}</td>
+          <td>${num((Number(r.revenue)||0)/(Number(r.bills)||1))}</td>
+        </tr>`).join('')}
+      </tbody></table>`;
+    }
 
     async function loadPrice(){
       const wrap=document.getElementById('tableWrap');
