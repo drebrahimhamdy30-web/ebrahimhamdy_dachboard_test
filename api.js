@@ -268,6 +268,37 @@ async function sbMarkDiscountReviewed(store, billNo, by) {
   } catch(e){ console.error('sbMarkDiscountReviewed', e); return false; }
 }
 
+// ===================== صلاحيات شاشة تحليل المبيعات لكل فرع =====================
+const SB_SALES_ACCESS_URL = `${SB_URL_API}/rest/v1/sales_analysis_access`;
+// قائمة الفروع المسموح لها بفتح الشاشة — بترجّع Array من store_name
+async function sbSalesAccessList() {
+  try {
+    const r = await fetch(`${SB_SALES_ACCESS_URL}?select=store_name,enabled_at&order=store_name.asc`, { headers: SB_TASK_HEADERS });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    return Array.isArray(rows) ? rows : [];
+  } catch(e){ console.error('sbSalesAccessList', e); return []; }
+}
+// فتح الشاشة لفرع (upsert على store_name)
+async function sbSalesAccessEnable(store) {
+  try {
+    const r = await fetch(SB_SALES_ACCESS_URL, {
+      method:'POST', headers:{ ...SB_TASK_HEADERS, 'Prefer':'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ store_name: store })
+    });
+    return r.ok;
+  } catch(e){ console.error('sbSalesAccessEnable', e); return false; }
+}
+// إغلاق الشاشة لفرع
+async function sbSalesAccessDisable(store) {
+  try {
+    const r = await fetch(`${SB_SALES_ACCESS_URL}?store_name=eq.${encodeURIComponent(store)}`, {
+      method:'DELETE', headers:{ ...SB_TASK_HEADERS, 'Prefer':'return=minimal' }
+    });
+    return r.ok;
+  } catch(e){ console.error('sbSalesAccessDisable', e); return false; }
+}
+
 // طلبات خدمة العملاء لفرع — pendingOnly=true يرجّع بس اللي لسه محتاج إجراء (أسرع بكتير)
 async function sbCsOrders(branch, pendingOnly) {
   try {
