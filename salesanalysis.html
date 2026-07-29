@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>تحليل المبيعات - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;background:var(--surface-3);border:1px solid var(--border);border-radius:var(--radius-md,10px);padding:12px 14px;margin-bottom:14px;}
+    .filters .fld{display:flex;flex-direction:column;gap:4px;}
+    .filters label{font-size:0.72rem;font-weight:700;color:var(--text-secondary);}
+    .filters input,.filters select{padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text-primary);font-family:var(--font);font-size:0.85rem;}
+    .tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
+    .tab-btn{padding:9px 16px;border:1.5px solid var(--border);background:var(--bg-card);color:var(--text-secondary);border-radius:9px;font-family:var(--font);font-weight:700;font-size:0.85rem;cursor:pointer;display:flex;align-items:center;gap:7px;}
+    .tab-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+    .tab-btn .cnt{background:var(--danger);color:#fff;font-size:0.7rem;font-weight:800;min-width:20px;text-align:center;padding:1px 6px;border-radius:10px;}
+    .tab-btn.active .cnt{background:rgba(255,255,255,.25);}
+    table{width:100%;border-collapse:collapse;}
+    th,td{padding:9px 10px;text-align:center;border-bottom:1px solid var(--border);font-size:0.83rem;}
+    thead th{background:var(--surface-3);font-weight:800;font-size:0.78rem;color:var(--text-secondary);white-space:nowrap;}
+    tbody tr:hover{background:var(--surface-3);}
+    .diff-pos{color:var(--danger);font-weight:800;}
+    .diff-neg{color:#0e7490;font-weight:800;}
+    .rev-btn{background:var(--success);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-family:var(--font);font-weight:700;font-size:0.78rem;cursor:pointer;}
+    .rev-btn:hover{filter:brightness(.95);}
+    .empty-tab{text-align:center;color:var(--text-muted);padding:40px;font-size:0.9rem;}
+    .blocked{text-align:center;padding:60px 20px;color:var(--danger);font-size:1rem;font-weight:700;}
+  </style>
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+      <div class="page-header">
+        <div class="page-title"><i class="fas fa-chart-line"></i> تحليل المبيعات</div>
+        <button class="btn btn-primary" onclick="loadActive()"><i class="fas fa-sync-alt"></i> تحديث</button>
+      </div>
+
+      <div id="main" style="display:none">
+        <div class="filters">
+          <div class="fld"><label>من تاريخ</label><input type="date" id="fFrom"></div>
+          <div class="fld"><label>إلى تاريخ</label><input type="date" id="fTo"></div>
+          <div class="fld"><label>الفرع</label>
+            <select id="fStore">
+              <option value="">كل الفروع</option>
+              <option value="الصيدلية">المعمورة</option>
+              <option value="ابراهيم حمدي 2">سان ستيفانو</option>
+              <option value="ابراهيم حمدي 3">سيدى بشر</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="loadActive()" style="height:38px"><i class="fas fa-filter"></i> تطبيق</button>
+        </div>
+
+        <div class="tabs">
+          <button class="tab-btn active" id="tab-price" onclick="switchTab('price')">
+            <i class="fas fa-tags"></i> مراجعة الأسعار <span class="cnt" id="cnt-price" style="display:none">0</span>
+          </button>
+          <button class="tab-btn" id="tab-disc" onclick="switchTab('disc')">
+            <i class="fas fa-percent"></i> فواتير الخصومات <span class="cnt" id="cnt-disc" style="display:none">0</span>
+          </button>
+        </div>
+
+        <div id="tableWrap" style="overflow-x:auto">
+          <div class="empty-tab"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>
+        </div>
+      </div>
+
+      <div id="blocked" class="blocked" style="display:none">
+        <i class="fas fa-lock" style="font-size:2rem;display:block;margin-bottom:12px"></i>
+        هذه الشاشة متاحة للأدمن فقط
+      </div>
+    </div>
+  </div>
+
+  <script src="api.js?v=salesanalysis1"></script>
+  <script>
+    let ACTIVE = 'price';
+    let USER = '';
+
+    checkAuth().then(user => {
+      if (!user) return;
+      USER = localStorage.getItem('activeUser') || '';
+      const role = (localStorage.getItem('userRole') || '').trim();
+      if (role !== 'admin') { document.getElementById('blocked').style.display = 'block'; return; }
+      document.getElementById('main').style.display = 'block';
+      loadActive();
+    });
+
+    function fltFrom(){ const v=document.getElementById('fFrom').value; return v ? new Date(v+'T00:00:00').toISOString() : null; }
+    function fltTo(){ const v=document.getElementById('fTo').value; if(!v) return null; const d=new Date(v+'T00:00:00'); d.setDate(d.getDate()+1); return d.toISOString(); }
+    function fltStore(){ return document.getElementById('fStore').value || null; }
+    function fmtDT(s){ if(!s) return '—'; const d=new Date(s); return d.toLocaleDateString('ar-EG',{day:'2-digit',month:'2-digit',year:'numeric'})+' '+d.toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit',hour12:true}); }
+    function num(n){ return (Number(n)||0).toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+    function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+    function switchTab(t){
+      ACTIVE=t;
+      document.getElementById('tab-price').classList.toggle('active', t==='price');
+      document.getElementById('tab-disc').classList.toggle('active', t==='disc');
+      loadActive();
+    }
+
+    function loadActive(){ ACTIVE==='price' ? loadPrice() : loadDisc(); }
+
+    async function loadPrice(){
+      const wrap=document.getElementById('tableWrap');
+      wrap.innerHTML='<div class="empty-tab"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>';
+      const rows = await sbSalesPriceReview(fltFrom(), fltTo(), fltStore());
+      setCnt('price', rows.length);
+      if(!rows.length){ wrap.innerHTML='<div class="empty-tab">✅ لا توجد مخالفات أسعار للمراجعة</div>'; return; }
+      wrap.innerHTML = `<table><thead><tr>
+        <th>رقم الفاتورة</th><th>التاريخ والوقت</th><th>الموظف</th><th>الصنف</th><th>الوحدة</th>
+        <th>سعر البيع</th><th>سعر المخزون</th><th>الفرق</th><th>مراجعة</th></tr></thead><tbody>
+        ${rows.map(r=>`<tr id="pr-${r.id}">
+          <td><b>${esc(r.bill_no)}</b></td>
+          <td style="white-space:nowrap">${fmtDT(r.bill_date)}</td>
+          <td>${esc(r.employee_name||'—')}</td>
+          <td style="text-align:right;font-weight:600">${esc(r.itm_name_ar||'—')}</td>
+          <td>${esc(r.unit_name||'—')}</td>
+          <td>${num(r.unit_price)}</td>
+          <td>${num(r.stock_unit_price)}</td>
+          <td class="${Number(r.price_diff)>=0?'diff-pos':'diff-neg'}">${Number(r.price_diff)>=0?'+':''}${num(r.price_diff)}</td>
+          <td><button class="rev-btn" onclick="doPriceReviewed('${r.id}')"><i class="fas fa-check"></i> تمت</button></td>
+        </tr>`).join('')}
+      </tbody></table>`;
+    }
+
+    async function loadDisc(){
+      const wrap=document.getElementById('tableWrap');
+      wrap.innerHTML='<div class="empty-tab"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>';
+      const rows = await sbSalesDiscountBills(fltFrom(), fltTo(), fltStore());
+      setCnt('disc', rows.length);
+      if(!rows.length){ wrap.innerHTML='<div class="empty-tab">✅ لا توجد فواتير خصومات للمراجعة</div>'; return; }
+      wrap.innerHTML = `<table><thead><tr>
+        <th>رقم الفاتورة</th><th>التاريخ والوقت</th><th>الموظف</th><th>العميل</th><th>الدفع</th>
+        <th>الإجمالي</th><th>الصافي</th><th>الخصم</th><th>مراجعة</th></tr></thead><tbody>
+        ${rows.map(r=>`<tr id="dr-${esc(r.store_name)}-${esc(r.bill_no)}">
+          <td><b>${esc(r.bill_no)}</b></td>
+          <td style="white-space:nowrap">${fmtDT(r.bill_date)}</td>
+          <td>${esc(r.employee_name||'—')}</td>
+          <td style="text-align:right">${esc(r.cust_name||'—')}</td>
+          <td>${esc(r.bill_type||'—')}</td>
+          <td>${num(r.total_bill)}</td>
+          <td>${num(r.total_bill_net)}</td>
+          <td class="diff-pos">${num(r.discount)}</td>
+          <td><button class="rev-btn" onclick="doDiscReviewed('${esc(r.store_name)}','${esc(r.bill_no)}')"><i class="fas fa-check"></i> تمت</button></td>
+        </tr>`).join('')}
+      </tbody></table>`;
+    }
+
+    function setCnt(t, n){
+      const el=document.getElementById('cnt-'+t);
+      el.textContent=n; el.style.display = n>0 ? 'inline-block' : 'none';
+    }
+
+    async function doPriceReviewed(id){
+      const ok = await sbMarkPriceReviewed(id, USER);
+      if(ok){ const tr=document.getElementById('pr-'+id); if(tr) tr.remove(); setCnt('price', document.querySelectorAll('#tableWrap tbody tr').length); }
+      else alert('تعذّر الحفظ');
+    }
+    async function doDiscReviewed(store, bill){
+      const ok = await sbMarkDiscountReviewed(store, bill, USER);
+      if(ok){ const tr=document.getElementById('dr-'+store+'-'+bill); if(tr) tr.remove(); setCnt('disc', document.querySelectorAll('#tableWrap tbody tr').length); }
+      else alert('تعذّر الحفظ');
+    }
+  </script>
+</body>
+</html>

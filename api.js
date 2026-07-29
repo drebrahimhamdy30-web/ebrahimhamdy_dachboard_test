@@ -216,6 +216,45 @@ async function sbShortages(branch) {
   } catch (e) { console.error('sbShortages error:', e); return []; }
 }
 
+// ===================== تقارير المبيعات (RPCs على sales_items) =====================
+async function _sbRpc(fn, body) {
+  try {
+    const r = await fetch(`${SB_URL_API}/rest/v1/rpc/${fn}`, {
+      method: 'POST', headers: SB_TASK_HEADERS, body: JSON.stringify(body || {})
+    });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    return Array.isArray(rows) ? rows : [];
+  } catch (e) { console.error(fn + ' error:', e); return []; }
+}
+function sbSalesSummary(from, to, store)      { return _sbRpc('sales_summary',     { p_from: from||null, p_to: to||null, p_store: store||null }); }
+function sbSalesTopItems(from, to, store, lim){ return _sbRpc('sales_top_items',   { p_from: from||null, p_to: to||null, p_store: store||null, p_limit: lim||50 }); }
+function sbSalesByEmployee(from, to, store)   { return _sbRpc('sales_by_employee', { p_from: from||null, p_to: to||null, p_store: store||null }); }
+function sbSalesDetail(opts)                  { const o=opts||{}; return _sbRpc('sales_detail', { p_from:o.from||null, p_to:o.to||null, p_store:o.store||null, p_employee:o.employee||null, p_search:o.search||null, p_limit:o.limit||100, p_offset:o.offset||0 }); }
+// تحليل المبيعات — مراجعة الأسعار والخصومات
+function sbSalesPriceReview(from, to, store)  { return _sbRpc('sales_price_review',  { p_from: from||null, p_to: to||null, p_store: store||null }); }
+function sbSalesDiscountBills(from, to, store){ return _sbRpc('sales_discount_bills', { p_from: from||null, p_to: to||null, p_store: store||null }); }
+const SB_SALES_URL = `${SB_URL_API}/rest/v1/sales_items`;
+const SB_DISCREV_URL = `${SB_URL_API}/rest/v1/sales_discount_reviews`;
+async function sbMarkPriceReviewed(id, by) {
+  try {
+    const r = await fetch(`${SB_SALES_URL}?id=eq.${encodeURIComponent(id)}`, {
+      method:'PATCH', headers: SB_TASK_HEADERS,
+      body: JSON.stringify({ price_reviewed:true, price_reviewed_at:new Date().toISOString(), price_reviewed_by: by||null })
+    });
+    return r.ok;
+  } catch(e){ console.error('sbMarkPriceReviewed', e); return false; }
+}
+async function sbMarkDiscountReviewed(store, billNo, by) {
+  try {
+    const r = await fetch(SB_DISCREV_URL, {
+      method:'POST', headers:{ ...SB_TASK_HEADERS, 'Prefer':'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ store_name:store, bill_no:String(billNo), reviewed_by: by||null, reviewed_at:new Date().toISOString() })
+    });
+    return r.ok;
+  } catch(e){ console.error('sbMarkDiscountReviewed', e); return false; }
+}
+
 // طلبات خدمة العملاء لفرع — pendingOnly=true يرجّع بس اللي لسه محتاج إجراء (أسرع بكتير)
 async function sbCsOrders(branch, pendingOnly) {
   try {
