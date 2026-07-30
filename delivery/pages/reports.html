@@ -539,11 +539,15 @@ async function loadOrdersTab(from, to) {
     const driverNames = new Set((driversCache||[]).map(d => (d.full_name||'').trim()));
     const m = {};
     logs.forEach(l => {
-      // نتجاهل سجل الإرجاع عند إنهاء الرحلة (مش تعذّر جديد) عشان ما نعدّش المرة مرتين
-      if (l.details && l.details.released_on_trip_complete) return;
-      totalFails++; // كل مرات التعذّر الفعلية (بأي مسجّل — للعداد الإجمالي)
+      const d = l.details || {};
+      // تعذّر توصيل حقيقي فقط = اللي الطيار سجّله بنفسه من التطبيق (kept_in_trip).
+      // نستبعد إجراءات اللوحة الإدارية: إزالة الطلب من رحلة (removed_from_trip)،
+      // التأجيل اليدوي من اللوحة، والإرجاع عند إنهاء الرحلة (released_on_trip_complete)
+      // — دي مش فشل توصيل من الطيار، وبتشيل الطيار من الطلب أصلاً.
+      if (d.kept_in_trip !== true) return;
+      totalFails++;
       const n = (l.user_name || '').trim();
-      // الترتيب للطيارين الحقيقيين فقط
+      // أمان إضافي: نعدّ الطيارين الحقيقيين فقط
       if (!n || !driverNames.has(n)) return;
       m[n] = (m[n]||0)+1;
     });
