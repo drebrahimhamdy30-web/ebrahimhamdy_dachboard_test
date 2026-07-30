@@ -784,6 +784,10 @@ function buildTimers(o){
 
 // ===== LOAD =====
 let dispatchSettings = null;
+// التوزيع العادل للأماكن الصعبة
+let difficultLoad = [];          // نتيجة difficult_driver_load مرتّبة (الأقل معدلًا أولاً)
+let hardRegions = new Set();     // أسماء المناطق الصعبة في الفرع
+let difficultEnabled = false;    // مفعّل من الإعدادات؟
 function postponeInfo(o){
   if(o.status!=='postponed'||!o.postpone_time)return '';
   const t=new Date(o.postpone_time);
@@ -827,6 +831,19 @@ async function loadAll(){
     if(branchId){
       const dsRes=await db.from('dispatch_settings').select('*').eq('branch_id',branchId);
       dispatchSettings=dsRes.data?.[0]||null;
+    }
+    // التوزيع العادل للأماكن الصعبة — حمل المناطق الصعبة ومعدل كل طيار (الشهر الحالي)
+    difficultLoad=[]; hardRegions=new Set();
+    difficultEnabled = (dispatchSettings?.difficult_fair_enabled !== false);
+    if(branchId && difficultEnabled){
+      try{
+        const [hrRes, dlRes] = await Promise.all([
+          db.from('regions').select('name').eq('branch_id',branchId).contains('types',['hard']),
+          db.rpc('difficult_driver_load',{p_branch_id:branchId})
+        ]);
+        hardRegions = new Set((hrRes.data||[]).map(r=>r.name));
+        difficultLoad = dlRes.data||[];
+      }catch(e){ console.warn('difficult load', e); }
     }
     // تحديث لابل الفرع
     const bl=document.getElementById('branchLabel');
@@ -1103,6 +1120,15 @@ function renderDrivers(){
 const pickedMap={};allOrders.filter(o=>['picked','failed'].includes(o.status)&&o.driver_id).forEach(o=>pickedMap[o.driver_id]=(pickedMap[o.driver_id]||0)+1);
   const assignedMap={};allOrders.filter(o=>o.status==='assigned'&&o.driver_id).forEach(o=>assignedMap[o.driver_id]=(assignedMap[o.driver_id]||0)+1);
 
+  // التوزيع العادل: علّم أقل 2 طيار حاضر معدلًا في الأماكن الصعبة (لو الميزة مفعّلة وفيه مناطق صعبة)
+  let leastTwo=new Set(); const hardMap={};
+  if(difficultEnabled && hardRegions.size>0 && difficultLoad.length){
+    difficultLoad.forEach(r=>{ hardMap[r.driver_id]=r; });
+    const rank=new Map(difficultLoad.map((r,i)=>[r.driver_id,i]));
+    const present=displayDrivers.map(d=>d.id).filter(id=>rank.has(id)).sort((a,b)=>rank.get(a)-rank.get(b));
+    leastTwo=new Set(present.slice(0,2));
+  }
+
   el.innerHTML=displayDrivers.map((d,i)=>{
     const c=DC[i%DC.length];
     const attStatus=getDriverAttStatus(d.id);
@@ -1136,11 +1162,15 @@ const pickedMap={};allOrders.filter(o=>['picked','failed'].includes(o.status)&&o
     const ini=(d.full_name||'?').split(' ').slice(0,2).map(w=>w[0]).join('');
     const workLabel=workMins>0?fmWorkTime(workMins):'';
 
+    const hardBadge = leastTwo.has(d.id)
+      ? `<div title="الأقل ذهابًا للأماكن الصعبة هذا الشهر — أنسب لطلب مكان صعب" style="font-size:.5rem;font-weight:800;color:#c4b5fd;background:rgba(124,58,237,.25);border:1px solid rgba(167,139,250,.5);border-radius:8px;padding:.05rem .3rem;white-space:nowrap">🎯 الأقل للصعب${hardMap[d.id]?` · ${hardMap[d.id].hard_trips}`:''}</div>`
+      : '';
     return `<div class="driver-chip ${sc} ${filterDriver===d.id?'selected':''}" onclick="openDriverPopup('${d.id}')">
       <div class="driver-avatar" style="background:${c}">${ini}</div>
       <div class="dc-name">${(d.full_name||'').split(' ').slice(0,2).join(' ')}</div>
       <div class="dc-st ${st}">${sl}</div>
       ${workLabel?`<div style="font-size:.52rem;color:#94a3b8">${workLabel}</div>`:''}
+      ${hardBadge}
     </div>`;
   }).join('');
 }
