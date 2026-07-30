@@ -643,31 +643,30 @@ window.pinFloatingCard = async function(){
     });
     let bg='#f1f5f9'; try{ bg=iwin.getComputedStyle(idoc.body).backgroundColor||bg; }catch(e){}
     pdoc.body.style.cssText='margin:0;padding:10px;background:'+bg;
-    const clone = pdoc.importNode(card, true);
-    clone.style.maxWidth='none'; clone.style.width='100%'; clone.style.margin='0'; clone.style.maxHeight='none';
-    pdoc.body.appendChild(clone);
-    // نخفي الكارت الأصلي في الداشبورد طول ما النافذة العائمة مفتوحة (عشان مايبقاش فيه مربعين)
-    const overlay = idoc.getElementById('completeApprovalModal');
-    if(overlay) overlay.style.display='none';
-    // أزرار الكارت المثبّت تنفّذ دوال الإطار الأصلية ثم تقفل النافذة
-    pip.closeModal      = ()=>{ try{ if(!pip.closed) pip.close(); }catch(e){} };
+
+    // ننقل الكارت الأصلي نفسه (مش نسخة) للنافذة العائمة، ونحفظ مكانه الأصلي لإرجاعه
+    const overlay = idoc.getElementById('completeApprovalModal');   // الغلاف يفضل في الداشبورد
+    const prevCardCss = card.style.cssText;
+    pdoc.body.appendChild(pdoc.adoptNode(card));
+    card.style.maxWidth='none'; card.style.width='100%'; card.style.margin='0'; card.style.maxHeight='none';
+    if(overlay) overlay.style.display='none';                       // الغلاف بقى فاضي — نخفيه
+    // نخلي دوال الإطار تلاقي عناصر الكارت في النافذة العائمة
+    iwin._tripPipDoc = pdoc;
+
+    // أزرار الكارت (الحقيقي) تنفّذ دوال الإطار مباشرة — تنهي الرحلة من هنا بدون الرجوع للداشبورد
+    pip.closeModal      = ()=>{ try{ iwin.closeModal('completeApprovalModal'); }catch(e){} try{ if(!pip.closed) pip.close(); }catch(e){} };
     pip.pinCompleteCard = ()=>{ try{ pip.focus(); }catch(e){} };
     pip.approveComplete = async()=>{ try{ await iwin.approveComplete(); }finally{ if(!pip.closed) pip.close(); } };
     pip.rejectComplete  = async()=>{ try{ await iwin.rejectComplete(); }finally{ if(!pip.closed) pip.close(); } };
-    pip.approveCollected= (a,b,c)=> iwin.approveCollected(a,b,c);
-    // مزامنة تلقائية: تحديث جسم المودال في الإطار ينعكس على النافذة العائمة
-    const mainBody=idoc.getElementById('completeApprovalBody');
-    const cloneBody=clone.querySelector('#completeApprovalBody');
-    const mainFlags=idoc.getElementById('ca-review-flags');
-    const cloneFlags=clone.querySelector('#ca-review-flags');
-    const sync=()=>{ if(cloneBody&&mainBody)cloneBody.innerHTML=mainBody.innerHTML; if(cloneFlags&&mainFlags)cloneFlags.innerHTML=mainFlags.innerHTML; };
-    const obs=new MutationObserver(sync);
-    if(mainBody)obs.observe(mainBody,{childList:true,subtree:true,characterData:true});
-    if(mainFlags)obs.observe(mainFlags,{childList:true,subtree:true,characterData:true});
+    pip.approveCollected= (a,b,c)=> iwin.approveCollected(a,b,c);   // بيعيد رسم الكارت الحقيقي في النافذة مباشرة
+
+    // عند غلق النافذة: نرجّع الكارت الحقيقي لمكانه في الداشبورد (نحافظ عليه للمرات الجاية)
     pip.addEventListener('pagehide',()=>{
-      try{obs.disconnect();}catch(e){}
-      // نرجّع إظهار الكارت الأصلي (لو لسه مفتوح ومحصلش موافقة/رفض يرجع، ولو اتقفل يفضل مخفي)
-      try{ if(overlay) overlay.style.display=''; }catch(e){}
+      try{
+        card.style.cssText = prevCardCss;
+        if(overlay){ overlay.appendChild(idoc.adoptNode(card)); overlay.style.display=''; }
+      }catch(e){ console.error('restore card', e); }
+      try{ iwin._tripPipDoc = null; }catch(e){}
       window._tripPip=null;
     });
     return true;
