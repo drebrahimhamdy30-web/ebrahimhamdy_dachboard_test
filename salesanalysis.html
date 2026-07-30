@@ -50,6 +50,14 @@
     .hbar{flex:1;min-width:26px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;}
     .hbar-fill{width:70%;min-height:2px;background:linear-gradient(180deg,var(--accent),#93c5fd);border-radius:5px 5px 0 0;}
     .hbar-lbl{font-size:0.62rem;color:var(--text-muted);margin-top:4px;white-space:nowrap;}
+    .emp-sec{margin-bottom:16px;}
+    .emp-chart{display:flex;flex-direction:column;gap:7px;}
+    .ec-row{display:grid;grid-template-columns:110px 1fr auto;align-items:center;gap:10px;}
+    .ec-name{font-size:0.8rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right;}
+    .ec-track{height:15px;background:var(--surface-3);border-radius:8px;overflow:hidden;}
+    .ec-fill{height:100%;border-radius:8px;min-width:3px;}
+    .ec-val{font-size:0.75rem;font-weight:800;white-space:nowrap;color:var(--text-secondary);}
+    .ec-val b{color:var(--text-primary);}
   </style>
 </head>
 <body>
@@ -221,6 +229,13 @@
                label: now.toLocaleDateString('ar-EG',{month:'long',year:'numeric'}) };
     }
 
+    // المدى الفعّال: الشهر الحالي افتراضيًا، إلا لو المستخدم اختار تاريخ
+    function effRange(){
+      const f=document.getElementById('fFrom').value, t=document.getElementById('fTo').value;
+      if(!f && !t){ const m=curMonthRange(); return { from:m.from, to:m.to, label:'الشهر الحالي — '+m.label }; }
+      return { from: fltFrom(), to: fltTo(), label:'الفترة المختارة' };
+    }
+
     async function loadOverview(){
       const wrap=document.getElementById('tableWrap');
       wrap.innerHTML='<div class="empty-tab"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>';
@@ -290,9 +305,34 @@
     async function loadEmployees(){
       const wrap=document.getElementById('tableWrap');
       wrap.innerHTML='<div class="empty-tab"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>';
-      const rows = await sbSalesByEmployee(fltFrom(), fltTo(), fltStore());
-      if(!rows.length){ wrap.innerHTML='<div class="empty-tab">لا يوجد</div>'; return; }
-      wrap.innerHTML = `<table><thead><tr>
+      const rng = effRange();
+      const rows = await sbSalesByEmployee(rng.from, rng.to, fltStore());
+      if(!rows.length){ wrap.innerHTML='<div class="empty-tab">لا يوجد بيانات</div>'; return; }
+
+      const totRev = rows.reduce((s,r)=>s+(Number(r.revenue)||0),0);
+      const totBills = rows.reduce((s,r)=>s+(Number(r.bills)||0),0);
+
+      // رسم بار أفقي مرتّب تنازليًا: كل موظف + نسبته من الإجمالي
+      const chart=(title, valOf, fmtVal, total, color)=>{
+        const sorted=[...rows].sort((a,b)=>valOf(b)-valOf(a));
+        const max=Math.max(1,...sorted.map(valOf));
+        return `<div class="sec-title">${title}</div>
+          <div class="emp-sec"><div class="emp-chart">
+          ${sorted.map(r=>{ const v=valOf(r); const pctTot=total>0?Math.round(v/total*100):0;
+            return `<div class="ec-row" title="${esc(r.employee_name||'—')} — ${fmtVal(v)} (${pctTot}% من الإجمالي)">
+              <div class="ec-name">${esc(r.employee_name||'—')}</div>
+              <div class="ec-track"><div class="ec-fill" style="width:${Math.round(v/max*100)}%;background:${color}"></div></div>
+              <div class="ec-val"><b>${fmtVal(v)}</b> · ${pctTot}%</div>
+            </div>`;}).join('')}
+          </div></div>`;
+      };
+
+      wrap.innerHTML =
+        `<div style="font-size:0.8rem;color:var(--text-secondary);font-weight:700;margin:0 2px 12px"><i class="fas fa-calendar-alt"></i> ${esc(rng.label)}</div>`
+        + chart('مساهمة الموظفين — بالقيمة (ج)', r=>Number(r.revenue)||0, v=>num(v), totRev, '#2563eb')
+        + chart('مساهمة الموظفين — بعدد الفواتير', r=>Number(r.bills)||0, v=>String(v), totBills, '#0d9488')
+        + `<div class="sec-title">تفاصيل الموظفين</div>`
+        + `<table><thead><tr>
         <th>الموظف</th><th>الفواتير</th><th>الأسطر</th><th>الكمية (بالكبرى)</th><th>إجمالي المبيعات</th><th>متوسط الفاتورة</th></tr></thead><tbody>
         ${rows.map(r=>`<tr>
           <td style="text-align:right;font-weight:700">${esc(r.employee_name||'—')}</td>
