@@ -2747,58 +2747,23 @@ function pipHostWindow(){
 }
 
 async function pinCompleteCard(){
-  const modal=document.getElementById('completeApprovalModal');
-  const card=modal?.querySelector('.modal');
+  const card=document.querySelector('#completeApprovalModal .modal');
   if(!card){ showToast('افتح كارت إنهاء الرحلة أولاً'); return; }
 
-  const host=pipHostWindow();
-  if(!host){
-    showToast('التثبيت العائم متاح على Chrome أو Edge (نسخة حديثة) فقط');
-    return;
+  // نافذة PiP لازم تتفتح من الصفحة الأساسية (app.html) — الإطار محظور
+  const opener = (window.parent && window.parent!==window) ? window.parent.pinFloatingCard : null;
+  if(typeof opener === 'function'){
+    let res;
+    try{ res = await window.parent.pinFloatingCard(); }
+    catch(e){ console.error('pin call failed', e); res='error'; }
+    if(res===true){ showToast('📌 النافذة عائمة فوق كل البرامج — اسحبها لأي مكان'); return; }
+    if(res==='unsupported'){ showToast('التثبيت العائم متاح على Chrome/Edge حديث فقط'); return; }
+    if(res==='no-card'){ showToast('افتح كارت إنهاء الرحلة أولاً'); return; }
+    showToast('تعذّر التثبيت — جرّب Chrome/Edge حديث (وحدّث الصفحة)'); return;
   }
 
-  try{
-    if(_pipWin && !_pipWin.closed){ _pipWin.focus(); return; }
-    const pip=await host.documentPictureInPicture.requestWindow({width:470,height:700});
-    _pipWin=pip;
-    const pdoc=pip.document;
-    pdoc.documentElement.setAttribute('dir','rtl');
-    pdoc.documentElement.setAttribute('lang','ar');
-    copyStylesTo(document, pdoc);   // ستايلات الكارت موجودة في مستند الإطار
-    pdoc.body.style.margin='0';
-    pdoc.body.style.padding='10px';
-    pdoc.body.style.background=getComputedStyle(document.body).backgroundColor||'#f1f5f9';
-
-    // كلون الكارت (مستورد لمستند النافذة العائمة)
-    const clone=pdoc.importNode(card, true);
-    clone.style.maxWidth='none'; clone.style.width='100%';
-    clone.style.margin='0'; clone.style.maxHeight='none';
-    pdoc.body.appendChild(clone);
-
-    // أزرار الكارت المثبّت تشتغل (تُنفّذ على المودال الأصلي ثم تقفل النافذة)
-    pip.closeModal=()=>{ if(_pipWin&&!_pipWin.closed)_pipWin.close(); };
-    pip.pinCompleteCard=()=>{ try{_pipWin.focus();}catch(e){} };
-    pip.approveComplete=async()=>{ await approveComplete(); if(_pipWin&&!_pipWin.closed)_pipWin.close(); };
-    pip.rejectComplete=async()=>{ await rejectComplete(); if(_pipWin&&!_pipWin.closed)_pipWin.close(); };
-    pip.approveCollected=(a,b,c)=> approveCollected(a,b,c);
-
-    // مزامنة تلقائية: أي تحديث في جسم المودال الأصلي ينعكس على المثبّت
-    const mainBody=document.getElementById('completeApprovalBody');
-    const cloneBody=clone.querySelector('#completeApprovalBody');
-    const mainFlags=document.getElementById('ca-review-flags');
-    const cloneFlags=clone.querySelector('#ca-review-flags');
-    const sync=()=>{ if(cloneBody&&mainBody)cloneBody.innerHTML=mainBody.innerHTML; if(cloneFlags&&mainFlags)cloneFlags.innerHTML=mainFlags.innerHTML; };
-    const obs=new MutationObserver(sync);
-    if(mainBody)obs.observe(mainBody,{childList:true,subtree:true,characterData:true});
-    if(mainFlags)obs.observe(mainFlags,{childList:true,subtree:true,characterData:true});
-    pip.addEventListener('pagehide',()=>{ try{obs.disconnect();}catch(e){} _pipWin=null; });
-
-    showToast('📌 النافذة عائمة فوق كل البرامج — اسحبها لأي مكان على الشاشة');
-  }catch(e){
-    console.error('PiP failed', e);
-    _pipWin=null;
-    showToast('تعذّر التثبيت — تأكد إنك على Chrome/Edge حديث');
-  }
+  // لو الصفحة اتفتحت مباشرة من غير الشل (نادر) — التثبيت الحقيقي مش متاح من هنا
+  showToast('افتح الشاشة من داخل التطبيق لتفعيل التثبيت العائم');
 }
 // ===== CALL & MESSAGE =====
   // ===== انصراف يدوي للطيار من الإدارة =====

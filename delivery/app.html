@@ -172,7 +172,7 @@ html, body { max-width:100%; overflow-x:hidden; }
       <div class="load-spinner"></div>
       <div class="load-text">جاري التحميل...</div>
     </div>
-    <iframe class="page-frame active" id="mainFrame" src="about:blank" allow="document-picture-in-picture; clipboard-write" onload="if(typeof frameLoaded==='function')frameLoaded()"></iframe>
+    <iframe class="page-frame active" id="mainFrame" src="about:blank" allow="clipboard-write" onload="if(typeof frameLoaded==='function')frameLoaded()"></iframe>
   </div>
 </main>
 
@@ -618,6 +618,53 @@ window.addEventListener('message', (e) => {
     }
   }
 });
+
+// ===== تثبيت كارت إنهاء الرحلة كنافذة عائمة (يُنفَّذ من المستوى الأساسي — مسموح به) =====
+// تُستدعى من داخل الإطار عبر window.parent.pinFloatingCard()
+window.pinFloatingCard = async function(){
+  const iframe = document.getElementById('mainFrame');
+  const idoc = iframe && iframe.contentDocument;
+  const iwin = iframe && iframe.contentWindow;
+  if(!idoc || !iwin) return 'no-frame';
+  const card = idoc.querySelector('#completeApprovalModal .modal');
+  if(!card) return 'no-card';
+  if(!('documentPictureInPicture' in window)) return 'unsupported';
+  try{
+    if(window._tripPip && !window._tripPip.closed){ window._tripPip.focus(); return true; }
+    const pip = await window.documentPictureInPicture.requestWindow({width:470, height:700});
+    window._tripPip = pip;
+    const pdoc = pip.document;
+    pdoc.documentElement.setAttribute('dir','rtl');
+    pdoc.documentElement.setAttribute('lang','ar');
+    // انسخ ستايلات مستند الإطار (فيه ستايل الكارت)
+    [...idoc.styleSheets].forEach(ss=>{
+      try{ const css=[...ss.cssRules].map(r=>r.cssText).join('\n'); const st=pdoc.createElement('style'); st.textContent=css; pdoc.head.appendChild(st); }
+      catch(e){ if(ss.href){ const l=pdoc.createElement('link'); l.rel='stylesheet'; l.href=ss.href; pdoc.head.appendChild(l); } }
+    });
+    let bg='#f1f5f9'; try{ bg=iwin.getComputedStyle(idoc.body).backgroundColor||bg; }catch(e){}
+    pdoc.body.style.cssText='margin:0;padding:10px;background:'+bg;
+    const clone = pdoc.importNode(card, true);
+    clone.style.maxWidth='none'; clone.style.width='100%'; clone.style.margin='0'; clone.style.maxHeight='none';
+    pdoc.body.appendChild(clone);
+    // أزرار الكارت المثبّت تنفّذ دوال الإطار الأصلية ثم تقفل النافذة
+    pip.closeModal      = ()=>{ try{ if(!pip.closed) pip.close(); }catch(e){} };
+    pip.pinCompleteCard = ()=>{ try{ pip.focus(); }catch(e){} };
+    pip.approveComplete = async()=>{ try{ await iwin.approveComplete(); }finally{ if(!pip.closed) pip.close(); } };
+    pip.rejectComplete  = async()=>{ try{ await iwin.rejectComplete(); }finally{ if(!pip.closed) pip.close(); } };
+    pip.approveCollected= (a,b,c)=> iwin.approveCollected(a,b,c);
+    // مزامنة تلقائية: تحديث جسم المودال في الإطار ينعكس على النافذة العائمة
+    const mainBody=idoc.getElementById('completeApprovalBody');
+    const cloneBody=clone.querySelector('#completeApprovalBody');
+    const mainFlags=idoc.getElementById('ca-review-flags');
+    const cloneFlags=clone.querySelector('#ca-review-flags');
+    const sync=()=>{ if(cloneBody&&mainBody)cloneBody.innerHTML=mainBody.innerHTML; if(cloneFlags&&mainFlags)cloneFlags.innerHTML=mainFlags.innerHTML; };
+    const obs=new MutationObserver(sync);
+    if(mainBody)obs.observe(mainBody,{childList:true,subtree:true,characterData:true});
+    if(mainFlags)obs.observe(mainFlags,{childList:true,subtree:true,characterData:true});
+    pip.addEventListener('pagehide',()=>{ try{obs.disconnect();}catch(e){} window._tripPip=null; });
+    return true;
+  }catch(e){ console.error('pinFloatingCard', e); window._tripPip=null; return 'error:'+(e&&e.name||''); }
+};
 </script>
 </body>
 </html>
