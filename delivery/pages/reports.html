@@ -522,6 +522,7 @@ async function loadOrdersTab(from, to) {
   // أكثر الطيارين تعذّرًا: من order_logs (order_postponed) لأن الطلب المتعذّر بيرجع للتوزيع ويفقد الطيار
   const branchId = effectiveBranch();
   let failByDriver = [];
+  let totalFails = 0;
   try {
     const logs = await fetchAllPaged(() => {
       let q = db.from('order_logs')
@@ -532,16 +533,24 @@ async function loadOrdersTab(from, to) {
       if (to) q = q.lte('created_at', to + 'T23:59:59');
       return q;
     });
+    // نجيب أسماء الطيارين الحقيقيين عشان نستبعد أسماء الفروع (سان ستيفانو/المعمورة)
+    // وحسابات الإدارة اللي بتسجّل تعذّر من اللوحة — مش طيارين
+    if (!driversCache) { const { data } = await db.from('drivers').select('id,full_name'); driversCache = data || []; }
+    const driverNames = new Set((driversCache||[]).map(d => (d.full_name||'').trim()));
     const m = {};
     logs.forEach(l => {
       // نتجاهل سجل الإرجاع عند إنهاء الرحلة (مش تعذّر جديد) عشان ما نعدّش المرة مرتين
       if (l.details && l.details.released_on_trip_complete) return;
-      const n = l.user_name || '—'; m[n] = (m[n]||0)+1;
+      totalFails++; // كل مرات التعذّر الفعلية (بأي مسجّل — للعداد الإجمالي)
+      const n = (l.user_name || '').trim();
+      // الترتيب للطيارين الحقيقيين فقط
+      if (!n || !driverNames.has(n)) return;
+      m[n] = (m[n]||0)+1;
     });
     failByDriver = Object.entries(m).sort((a,b)=>b[1]-a[1]);
   } catch(e){ console.error(e); }
 
-  renderOrdKPIs(cancelled, late, failByDriver);
+  renderOrdKPIs(cancelled, late, failByDriver, totalFails);
   renderRankList('topCancelCustomers', groupCount(cancelled, custName), 'طلب');
   renderRankList('topLateCustomers', groupCount(late, custName), 'طلب');
   renderRankList('topFailDrivers', failByDriver, 'مرة');
@@ -585,8 +594,7 @@ function groupCount(arr, keyFn) {
   return Object.entries(m).sort((a,b)=>b[1]-a[1]);
 }
 
-function renderOrdKPIs(cancelled, late, failByDriver) {
-  const totalFails = failByDriver.reduce((s,[,c])=>s+c,0);
+function renderOrdKPIs(cancelled, late, failByDriver, totalFails) {
   document.getElementById('ordKpiGrid').innerHTML = `
     <div class="stat-card"><div class="stat-label">طلبات ملغية</div><div class="stat-value" style="color:#dc2626">${cancelled.length}</div></div>
     <div class="stat-card"><div class="stat-label">طلبات متأخرة</div><div class="stat-value" style="color:#b45309">${late.length}</div></div>
