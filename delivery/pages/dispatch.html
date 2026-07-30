@@ -318,7 +318,7 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
   <div class="orders-toolbar">
     <div class="search-wrap">
       <svg class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input type="text" class="toolbar-search" id="orderSearch" placeholder="بحث..." oninput="renderOrders()">
+      <input type="text" class="toolbar-search" id="orderSearch" placeholder="بحث برقم الفاتورة / اسم أو كود العميل (كل الطلبات)" oninput="renderOrders()">
     </div>
     <button class="ftab active" onclick="setFilter('all',this)">الكل <span id="f-all">0</span></button>
     <button class="ftab" onclick="setFilter('pending',this)">جاهز <span id="f-pending">0</span></button>
@@ -1325,20 +1325,23 @@ function renderTrips(){
 function setFilter(f,el){currentFilter=f;document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('active'));el.classList.add('active');renderOrders();}
 
 function renderOrders(){
-  const search=document.getElementById('orderSearch').value.toLowerCase();
-  let orders=[...allOrders];
-  if(currentFilter==='pending') orders=orders.filter(o=>o.status==='pending');
-  else if(currentFilter==='postponed') orders=orders.filter(o=>o.status==='postponed');
-  else if(currentFilter==='picked') orders=orders.filter(o=>o.status==='picked');
-  else if(currentFilter==='late') orders=orders.filter(o=>isLate(o));
-  else orders=orders.filter(o=>(o.status==='pending'&&!o.driver_id)||o.status==='postponed');
-
-  if(search) orders=orders.filter(o=>
-    (o.bill_no||'').toLowerCase().includes(search)||
-    (o.customer_name||o.cust_name||'').toLowerCase().includes(search)||
-    (o.cust_region||'').toLowerCase().includes(search)||
-    (o.customer_address||o.cust_address||'').toLowerCase().includes(search)
-  );
+  const search=document.getElementById('orderSearch').value.trim().toLowerCase();
+  let orders;
+  if(search){
+    // البحث يشمل كل الطلبات مهما كانت حالتها (زي شاشة الطلبات) — برقم الفاتورة أو اسم العميل أو كود العميل فقط
+    orders=allOrders.filter(o=>
+      (o.bill_no||'').toLowerCase().includes(search)||
+      (o.customer_name||o.cust_name||'').toLowerCase().includes(search)||
+      (o.cust_code||'').toLowerCase().includes(search)
+    );
+  } else {
+    orders=[...allOrders];
+    if(currentFilter==='pending') orders=orders.filter(o=>o.status==='pending');
+    else if(currentFilter==='postponed') orders=orders.filter(o=>o.status==='postponed');
+    else if(currentFilter==='picked') orders=orders.filter(o=>o.status==='picked');
+    else if(currentFilter==='late') orders=orders.filter(o=>isLate(o));
+    else orders=orders.filter(o=>(o.status==='pending'&&!o.driver_id)||o.status==='postponed');
+  }
 
   const all=allOrders.filter(o=>
     (o.status==='pending'&&!o.driver_id)||
