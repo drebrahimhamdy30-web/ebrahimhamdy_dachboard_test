@@ -515,8 +515,6 @@ async function updateCustomer({ cust_code, cust_type, note, category }) {
   }
 }
 
-async function fetchVisaTransactions() { return await fetchFromN8N('visa_transactions'); }
-async function fetchMachines()         { return await fetchFromN8N('visa_machines'); }
 async function fetchOrders()           { return await fetchFromN8N('orders'); }
 async function fetchData()             { return await fetchFromN8N('orders'); }
 async function fetchContracts()        { return await sbContractList(); }   // Supabase (بدل n8n)
