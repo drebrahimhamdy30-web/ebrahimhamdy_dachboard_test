@@ -77,6 +77,11 @@
     tr.row-will-collect { background:#f0fdf4; }
     tr.row-excluded    { background:#fef2f2; opacity:0.7; }
     tr.row-collected   { opacity:0.55; }
+    /* معاملة داخل إغلاق شيفت قيمته غير مطابقة لإجمالي الماكينة في الفترة */
+    tr.row-shift-mismatch { background:#fee2e2; }
+    tr.row-shift-mismatch:hover { background:#fecaca; }
+    tr.row-shift-mismatch td:first-child { border-right:3px solid #dc2626; }
+    #wl-shift-note { display:none; align-items:center; gap:8px; background:#fef2f2; border:1px solid #fca5a5; border-radius:12px; padding:8px 14px; margin-bottom:12px; font-size:0.8rem; font-weight:700; color:#b91c1c; }
 
     /* ===== مقارنة Excel ===== */
     .cmp-modal { position:fixed; inset:0; background:rgba(15,23,42,0.55); z-index:9999; display:flex; align-items:flex-start; justify-content:center; padding:24px 12px; overflow:auto; }
@@ -159,6 +164,8 @@
         <button class="wl-clear-filter" onclick="clearMachineFilter()"><i class="fas fa-xmark"></i> إلغاء الفلتر</button>
       </div>
 
+      <div id="wl-shift-note"></div>
+
       <div class="wl-group-title"><i class="fas fa-list" style="color:var(--accent);"></i> المعاملات</div>
       <div class="table-wrap">
         <table>
@@ -226,6 +233,9 @@
     let pendingCollect = new Set();      // ids هتتعلّم done=true
     let excluded = new Set();            // ids استثناها المستخدم يدوياً
 
+    // مطابقة إغلاق الشيفت: ids المعاملات اللي ماكينتها في إغلاق شيفت قيمته غير مطابقة → تتعلّم أحمر
+    let mismatchRedIds = new Set();
+
     checkAuth().then(async user => {
       if (!user) return;
       const role = (localStorage.getItem('userRole') || '').trim();
@@ -261,11 +271,129 @@
           from += page;
         }
         allRows = all;
+        await loadShiftRecon();     // مطابقة إغلاقات الشيفت (تعليم غير المطابق أحمر)
         applyFilter();
       } catch (e) {
         console.error('wallet load error:', e);
         tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل تحميل البيانات<br><span style="font-size:0.72rem;color:var(--text-muted);">${e.message||e}</span></td></tr>`;
       }
+    }
+
+    /* ===================== مطابقة إغلاق الشيفت ===================== */
+    // بنقارن القيمة المكتوبة لكل ماكينة عند إغلاق الشيفت (closing_balance) بإجمالي
+    // معاملات الماكينة الفعلية في فترة الشيفت (من الإغلاق السابق لنفس الفرع لحد الإغلاق ده).
+    // لو مختلفة (تطابق تام) → كل معاملات الماكينة دي في الفترة تتعلّم أحمر.
+    function _rawMs(t) {
+      if (!t) return NaN;
+      let s = String(t).trim().replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00');
+      const m = Date.parse(s);
+      return isNaN(m) ? NaN : m;
+    }
+
+    async function loadShiftRecon() {
+      mismatchRedIds = new Set();
+      try {
+        // نافذة ٨ أيام تكفي لتغطية الشيفتات الحديثة
+        const reconStart = new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString();
+
+        // 1) الشيفتات الحديثة (لكل فرع)
+        const { data: shifts, error: e0 } = await db
+          .from('pos_shifts')
+          .select('id,branch,created_at')
+          .gte('created_at', reconStart);
+        if (e0) throw e0;
+        if (!shifts || !shifts.length) { renderShiftNote(); return; }
+        const shiftById = new Map();
+        const shiftsByBranch = {};          // الفرع -> [{id, ms}] مرتبة زمنيًا
+        shifts.forEach(sh => {
+          shiftById.set(sh.id, sh);
+          (shiftsByBranch[sh.branch] = shiftsByBranch[sh.branch] || []).push({ id: sh.id, ms: _rawMs(sh.created_at) });
+        });
+        Object.values(shiftsByBranch).forEach(arr => arr.sort((a, b) => a.ms - b.ms));
+
+        // سطور الماكينات لهذه الشيفتات (القيمة المكتوبة لكل ماكينة)
+        const { data: lines, error: e1 } = await db
+          .from('pos_shift_lines')
+          .select('shift_id,method_key,closing_balance')
+          .eq('method_type', 'machine')
+          .like('method_key', 'paymob%')
+          .in('shift_id', shifts.map(s => s.id));
+        if (e1) throw e1;
+        if (!lines || !lines.length) { renderShiftNote(); return; }
+
+        const writtenByCombo = new Map();   // "shiftId|machine" -> القيمة المكتوبة
+        const machineBranch  = new Map();   // machine -> الفرع
+        lines.forEach(l => {
+          const sh = shiftById.get(l.shift_id); if (!sh) return;
+          writtenByCombo.set(l.shift_id + '|' + l.method_key, parseFloat(l.closing_balance) || 0);
+          machineBranch.set(l.method_key, sh.branch);
+        });
+
+        // بيرجّع id الشيفت اللي بيغطّي اللحظة دي لفرع معيّن (أو null)
+        function coveringShift(branch, ms) {
+          const arr = shiftsByBranch[branch]; if (!arr) return null;
+          for (let i = 0; i < arr.length; i++) {
+            const prevMs = i > 0 ? arr[i - 1].ms : null;  // أول شيفت في النافذة → بدايته مجهولة، نتجاهله
+            if (prevMs == null) continue;
+            if (ms > prevMs && ms <= arr[i].ms) return arr[i].id;
+          }
+          return null;
+        }
+
+        // 2) كل معاملات الماكينات في النافذة (محصّلة وغير محصّلة) لحساب الإجمالي الفعلي بدقة
+        let recon = [], from = 0; const page = 1000;
+        while (true) {
+          const { data, error } = await db.from('wallet')
+            .select('machine_name,ammount,type,createdAt')
+            .gte('createdAt', reconStart)
+            .order('createdAt', { ascending: true })
+            .range(from, from + page - 1);
+          if (error) throw error;
+          recon = recon.concat(data);
+          if (data.length < page) break;
+          from += page;
+        }
+
+        // 3) الإجمالي الفعلي لكل (شيفت|ماكينة) — المبيعات فقط
+        const actualByCombo = new Map();
+        recon.forEach(r => {
+          if (String(r.type || '').toUpperCase() !== 'SALE') return;
+          const mk = String(r.machine_name || '').trim();
+          const branch = machineBranch.get(mk); if (!branch) return;
+          const sid = coveringShift(branch, _rawMs(r.createdAt)); if (sid == null) return;
+          const combo = sid + '|' + mk;
+          actualByCombo.set(combo, (actualByCombo.get(combo) || 0) + (parseFloat(r.ammount) || 0));
+        });
+
+        // 4) التوليفات غير المطابقة (تطابق تام)
+        const mismatch = new Set();
+        writtenByCombo.forEach((written, combo) => {
+          const actual = actualByCombo.get(combo) || 0;
+          if (Math.abs(actual - written) > 0.009) mismatch.add(combo);
+        });
+
+        // 5) نعلّم معاملات الصفحة اللي في توليفة غير مطابقة
+        allRows.forEach(r => {
+          if (String(r.type || '').toUpperCase() !== 'SALE') return;
+          const mk = String(r.machine_name || '').trim();
+          const branch = machineBranch.get(mk); if (!branch) return;
+          const sid = coveringShift(branch, _rawMs(r.createdAt)); if (sid == null) return;
+          if (mismatch.has(sid + '|' + mk)) mismatchRedIds.add(String(r.id));
+        });
+      } catch (e) {
+        console.warn('shift recon failed:', e);
+      }
+      renderShiftNote();
+    }
+
+    function renderShiftNote() {
+      const el = document.getElementById('wl-shift-note');
+      if (!el) return;
+      const n = mismatchRedIds.size;
+      if (n > 0) {
+        el.style.display = 'flex';
+        el.innerHTML = `<i class="fas fa-triangle-exclamation"></i> فيه ${n} معاملة ماكينتها في إغلاق شيفت <b>قيمته غير مطابقة</b> لإجمالي الفترة — متعلّمة بخلفية حمراء تحت، راجعها.`;
+      } else { el.style.display = 'none'; }
     }
 
     /* ===================== دوال مساعدة ===================== */
@@ -592,10 +720,12 @@
         const willCollect = pendingCollect.has(id);
         const isExcluded  = excluded.has(id);
 
+        const shiftMismatch = !collectMode && !done && mismatchRedIds.has(id);
         let rowClass = '';
         if (done) rowClass = 'row-collected';
         else if (collectMode && isExcluded) rowClass = 'row-excluded';
         else if (collectMode && willCollect) rowClass = 'row-will-collect';
+        else if (shiftMismatch) rowClass = 'row-shift-mismatch';
 
         const branchCell = `<td style="font-size:0.78rem;">${storeOf(r)}</td>`;
 
@@ -615,7 +745,7 @@
         const rowOnclick = (collectMode && !done && !isExcluded)
           ? ` style="cursor:pointer;" onclick="markCollectFrom('${id}'); window._lastCutoffId='${id}';"` : '';
 
-        return `<tr class="${rowClass}"${rowOnclick}>
+        return `<tr class="${rowClass}"${rowOnclick}${shiftMismatch ? ' title="إغلاق شيفت غير مطابق لهذه الماكينة في الفترة — راجعها"' : ''}>
           <td style="font-size:0.78rem;white-space:nowrap;">${fmtDate(r.createdAt)}<br><span style="color:var(--text-muted);font-size:0.7rem;">${fmtTime(r.createdAt)}</span></td>
           <td><b style="color:${ref ? '#7c3aed' : 'var(--warning)'};">${amountOf(r).toFixed(2)}</b></td>
           <td style="font-size:0.75rem;color:#c2410c;">${feesOf(r).toFixed(2)}</td>
