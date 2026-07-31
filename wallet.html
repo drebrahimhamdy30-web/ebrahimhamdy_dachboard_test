@@ -235,6 +235,7 @@
 
     // مطابقة إغلاق الشيفت: ids المعاملات اللي ماكينتها في إغلاق شيفت قيمته غير مطابقة → تتعلّم أحمر
     let mismatchRedIds = new Set();
+    let shiftReconError = null;   // لو حصل خطأ أثناء الفحص نعرضه بدل الصمت
 
     checkAuth().then(async user => {
       if (!user) return;
@@ -292,6 +293,7 @@
 
     async function loadShiftRecon() {
       mismatchRedIds = new Set();
+      shiftReconError = null;
       try {
         // نافذة ٨ أيام تكفي لتغطية الشيفتات الحديثة
         const reconStart = new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString();
@@ -382,6 +384,7 @@
         });
       } catch (e) {
         console.warn('shift recon failed:', e);
+        shiftReconError = (e && (e.message || e.details || e.hint || e.code)) || String(e);
       }
       renderShiftNote();
     }
@@ -389,11 +392,20 @@
     function renderShiftNote() {
       const el = document.getElementById('wl-shift-note');
       if (!el) return;
+      el.style.display = 'flex';
+      if (shiftReconError) {
+        el.style.background = '#fef2f2'; el.style.borderColor = '#fca5a5'; el.style.color = '#b91c1c';
+        el.innerHTML = `<i class="fas fa-triangle-exclamation"></i> تعذّر فحص إغلاقات الشيفت: ${shiftReconError}`;
+        return;
+      }
       const n = mismatchRedIds.size;
       if (n > 0) {
-        el.style.display = 'flex';
+        el.style.background = '#fef2f2'; el.style.borderColor = '#fca5a5'; el.style.color = '#b91c1c';
         el.innerHTML = `<i class="fas fa-triangle-exclamation"></i> فيه ${n} معاملة ماكينتها في إغلاق شيفت <b>قيمته غير مطابقة</b> لإجمالي الفترة — متعلّمة بخلفية حمراء تحت، راجعها.`;
-      } else { el.style.display = 'none'; }
+      } else {
+        el.style.background = '#f0fdf4'; el.style.borderColor = '#86efac'; el.style.color = '#15803d';
+        el.innerHTML = `<i class="fas fa-circle-check"></i> تم فحص إغلاقات الشيفت — مفيش اختلافات في الفترة المعروضة.`;
+      }
     }
 
     /* ===================== دوال مساعدة ===================== */
