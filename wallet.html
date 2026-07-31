@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
     .wl-header { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px; }
     .wl-header-right { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
@@ -76,6 +77,25 @@
     tr.row-will-collect { background:#f0fdf4; }
     tr.row-excluded    { background:#fef2f2; opacity:0.7; }
     tr.row-collected   { opacity:0.55; }
+
+    /* ===== مقارنة Excel ===== */
+    .cmp-modal { position:fixed; inset:0; background:rgba(15,23,42,0.55); z-index:9999; display:flex; align-items:flex-start; justify-content:center; padding:24px 12px; overflow:auto; }
+    .cmp-box { background:var(--surface,#fff); border-radius:16px; width:100%; max-width:920px; box-shadow:0 20px 60px rgba(0,0,0,0.3); }
+    .cmp-head { display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid var(--border); font-size:1rem; font-weight:800; color:var(--text-primary); position:sticky; top:0; background:var(--surface,#fff); border-radius:16px 16px 0 0; }
+    .cmp-x { background:none; border:none; font-size:1.1rem; cursor:pointer; color:var(--text-muted); }
+    .cmp-body { padding:16px 18px; }
+    .cmp-note { font-size:0.74rem; color:var(--text-muted); background:var(--surface-3); border:1px solid var(--border); border-radius:10px; padding:8px 12px; margin-bottom:14px; line-height:1.6; }
+    .cmp-kpis { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+    .cmp-kpi { border-radius:12px; padding:9px 14px; border:1.5px solid var(--border); min-width:130px; }
+    .cmp-kpi .k-lbl { font-size:0.68rem; font-weight:700; color:var(--text-secondary); display:block; }
+    .cmp-kpi .k-val { font-size:1.1rem; font-weight:800; }
+    .cmp-sec-title { font-size:0.86rem; font-weight:800; margin:16px 0 7px; display:flex; align-items:center; gap:7px; }
+    .cmp-tbl { width:100%; border-collapse:collapse; font-size:0.74rem; }
+    .cmp-tbl th, .cmp-tbl td { padding:5px 8px; border-bottom:1px solid var(--border); text-align:right; white-space:nowrap; }
+    .cmp-tbl th { color:var(--text-secondary); font-weight:700; background:var(--surface-3); position:sticky; top:52px; }
+    .cmp-scroll { max-height:230px; overflow:auto; border:1px solid var(--border); border-radius:10px; }
+    .cmp-ok { text-align:center; padding:16px; color:#15803d; font-weight:700; }
+    .cmp-actions { display:flex; gap:8px; margin-top:6px; }
   </style>
 </head>
 <body>
@@ -95,6 +115,8 @@
           </div>
           <button class="btn" id="show-collected-btn" style="background:var(--surface-3);color:var(--text-secondary);border:1px solid var(--border);" onclick="toggleShowCollected()"><i class="fas fa-eye"></i> إظهار المحصّل</button>
           <button class="btn" id="collect-mode-btn" style="background:var(--primary);color:#fff;" onclick="toggleCollectMode()"><i class="fas fa-hand-holding-dollar"></i> وضع التحصيل</button>
+          <button class="btn" id="compare-btn" style="background:#7c3aed;color:#fff;" onclick="document.getElementById('cmpFile').click()" title="ارفع ملف Paymob (Excel/CSV) وقارنه بالمعاملات المعروضة"><i class="fas fa-file-excel"></i> قارن مع Excel</button>
+          <input type="file" id="cmpFile" accept=".xlsx,.xls,.csv" style="display:none" onchange="onCompareFile(event)">
           <button class="btn btn-primary" onclick="loadWallet()"><i class="fas fa-sync-alt"></i> تحديث</button>
         </div>
       </div>
@@ -159,6 +181,17 @@
         </table>
       </div>
 
+    </div>
+  </div>
+
+  <!-- مودال مقارنة Excel -->
+  <div id="cmpModal" class="cmp-modal" style="display:none;">
+    <div class="cmp-box">
+      <div class="cmp-head">
+        <span><i class="fas fa-scale-balanced" style="color:#7c3aed;"></i> مقارنة ملف Paymob بالمعاملات المعروضة</span>
+        <button class="cmp-x" onclick="closeCmp()">✕</button>
+      </div>
+      <div class="cmp-body" id="cmp-body"></div>
     </div>
   </div>
 
@@ -593,6 +626,149 @@
         </tr>`;
       }).join('');
     }
+
+    /* ===================== مقارنة ملف Paymob (Excel/CSV) ===================== */
+    function _normHeader(s){ return String(s==null?'':s).replace(/\s+/g,' ').trim(); }
+    function _cleanId(v){ return String(v==null?'':v).trim().replace(/\.0+$/,'').replace(/[^0-9]/g,''); }
+    function _num(v){ return parseFloat(String(v==null?'':v).replace(/,/g,'').trim()) || 0; }
+
+    // نلاقي أسماء الأعمدة في الملف (تحمّل اختلافات بسيطة في العناوين)
+    function _resolveCols(sampleRow){
+      const keys = Object.keys(sampleRow || {});
+      const find = subs => keys.find(k => { const h = _normHeader(k); return subs.some(s => h.includes(s)); });
+      return {
+        txn:     find(['رقم المعامل']),                         // رقم المعامله (= id عندنا)
+        amt:     find(['المبلغ الإجمالي','المبلغ الاجمالي','المبلغ']),
+        machine: find(['رقم المكينة','المكينة','المكنة']),
+        branch:  find(['اسم فرع الجهاز','فرع الجهاز']),
+        date:    find(['تاريخ المعامل']),
+        status:  find(['الحالة']),
+        orderNo: find(['رقم الطلب']),
+      };
+    }
+
+    function onCompareFile(ev){
+      const file = ev.target.files && ev.target.files[0];
+      ev.target.value = '';                 // نسمح باختيار نفس الملف تاني
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const wb = XLSX.read(e.target.result, { type:'array' });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(ws, { defval:'' });
+          compareExcel(rows, file.name);
+        } catch (err) {
+          alert('تعذّر قراءة الملف: ' + (err.message || err));
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function compareExcel(rows, fileName){
+      if (!rows || !rows.length) { alert('الملف فاضي أو مش مقروء'); return; }
+      const cols = _resolveCols(rows[0]);
+      if (!cols.txn) { alert('مش لاقي عمود «رقم المعامله» في الملف — اتأكد إنه تقرير Paymob الصحيح'); return; }
+
+      // المعاملات المعروضة حاليًا (بعد الفلتر الحالي على الصفحة)
+      const filtered = getFiltered();
+      const salesById = new Map();
+      filtered.forEach(r => { const k = _cleanId(r.id); if (k) salesById.set(k, r); });
+
+      // معاملات الملف — الناجحة فقط (نتجاهل الفاشلة/المعلّقة لو عمود الحالة موجود)
+      const excel = [];
+      const excelIds = new Set();
+      let skippedStatus = 0, skippedNoId = 0;
+      rows.forEach(row => {
+        if (cols.status) {
+          const st = String(row[cols.status] || '');
+          if (st && !st.includes('ناجح')) { skippedStatus++; return; }
+        }
+        const id = _cleanId(row[cols.txn]);
+        if (!id) { skippedNoId++; return; }
+        if (excelIds.has(id)) return;       // نتجنّب التكرار
+        excelIds.add(id);
+        excel.push({
+          id,
+          amount:  cols.amt     ? _num(row[cols.amt]) : 0,
+          machine: cols.machine ? String(row[cols.machine]||'').trim() : '',
+          branch:  cols.branch  ? String(row[cols.branch]||'').trim()  : '',
+          date:    cols.date    ? String(row[cols.date]||'').trim()    : '',
+          orderNo: cols.orderNo ? String(row[cols.orderNo]||'').trim() : '',
+        });
+      });
+
+      // 1) في الملف ومش في المبيعات المعروضة
+      const onlyExcel = excel.filter(e => !salesById.has(e.id));
+      // 2) في المبيعات المعروضة ومش في الملف
+      const onlySales = filtered.filter(r => !excelIds.has(_cleanId(r.id)));
+      // 3) موجودة في الاتنين بس القيمة مختلفة
+      const amtDiff = [];
+      excel.forEach(e => {
+        const s = salesById.get(e.id);
+        if (s) { const sa = amountOf(s); if (Math.abs(sa - e.amount) > 0.01) amtDiff.push({ id:e.id, excel:e.amount, sales:sa, machine:e.machine }); }
+      });
+
+      renderCmp({ onlyExcel, onlySales, amtDiff, excelCount:excel.length, salesCount:filtered.length, fileName, skippedStatus });
+    }
+
+    function _sum(arr, f){ return arr.reduce((s,x)=> s + f(x), 0); }
+
+    function renderCmp(res){
+      const { onlyExcel, onlySales, amtDiff, excelCount, salesCount, fileName, skippedStatus } = res;
+      const collectedNote = showCollected ? '' : ' <b style="color:#b91c1c;">(المحصّل مخفي حاليًا — فعّل «إظهار المحصّل» لو الملف بيشمل معاملات محصّلة)</b>';
+
+      const kpis = `
+        <div class="cmp-kpis">
+          <div class="cmp-kpi" style="border-color:#c4b5fd;"><span class="k-lbl">معاملات الملف (ناجحة)</span><span class="k-val" style="color:#7c3aed;">${excelCount}</span></div>
+          <div class="cmp-kpi" style="border-color:#93c5fd;"><span class="k-lbl">المعاملات المعروضة</span><span class="k-val" style="color:#1d4ed8;">${salesCount}</span></div>
+          <div class="cmp-kpi" style="border-color:#fca5a5;"><span class="k-lbl">في الملف ومش عندنا</span><span class="k-val" style="color:#b91c1c;">${onlyExcel.length}</span></div>
+          <div class="cmp-kpi" style="border-color:#fdba74;"><span class="k-lbl">عندنا ومش في الملف</span><span class="k-val" style="color:#c2410c;">${onlySales.length}</span></div>
+          <div class="cmp-kpi" style="border-color:#fbbf24;"><span class="k-lbl">قيمة مختلفة</span><span class="k-val" style="color:#a16207;">${amtDiff.length}</span></div>
+        </div>`;
+
+      const note = `<div class="cmp-note">
+        الملف: <b>${fileName || '—'}</b> · المقارنة بالمطابقة على <b>رقم المعامله</b>.
+        بنقارن <b>المعاملات المعروضة حاليًا فقط</b> (حسب الفلتر والتاريخ على الشاشة)${collectedNote}.
+        ${skippedStatus ? `<br>تم تجاهل <b>${skippedStatus}</b> معاملة غير ناجحة في الملف.` : ''}
+      </div>`;
+
+      let html = note + kpis;
+
+      // القسم 1
+      html += `<div class="cmp-sec-title" style="color:#b91c1c;"><i class="fas fa-file-arrow-down"></i> في الملف ومش موجودة في المبيعات المعروضة (${onlyExcel.length}) — إجمالي ${_sum(onlyExcel,x=>x.amount).toFixed(2)} ج</div>`;
+      if (onlyExcel.length) {
+        html += `<div class="cmp-scroll"><table class="cmp-tbl"><thead><tr><th>رقم المعامله</th><th>القيمة</th><th>المكينة</th><th>الفرع</th><th>التاريخ</th><th>رقم الطلب</th></tr></thead><tbody>` +
+          onlyExcel.map(e => `<tr><td class="mono">${e.id}</td><td><b>${e.amount.toFixed(2)}</b></td><td>${e.machine||'—'}</td><td>${e.branch||'—'}</td><td>${e.date||'—'}</td><td class="mono">${e.orderNo||'—'}</td></tr>`).join('') +
+          `</tbody></table></div>`;
+      } else { html += `<div class="cmp-ok">✅ كل معاملات الملف موجودة عندنا</div>`; }
+
+      // القسم 2
+      html += `<div class="cmp-sec-title" style="color:#c2410c;"><i class="fas fa-file-arrow-up"></i> في المبيعات المعروضة ومش في الملف (${onlySales.length}) — إجمالي ${_sum(onlySales,r=>amountOf(r)).toFixed(2)} ج</div>`;
+      if (onlySales.length) {
+        html += `<div class="cmp-scroll"><table class="cmp-tbl"><thead><tr><th>رقم المعامله</th><th>القيمة</th><th>المكينة</th><th>الفرع</th><th>التاريخ</th><th>رقم الطلب</th></tr></thead><tbody>` +
+          onlySales.map(r => `<tr><td class="mono">${r.id}</td><td><b>${amountOf(r).toFixed(2)}</b></td><td>${machineOf(r)}</td><td>${storeOf(r)}</td><td>${fmtDate(r.createdAt)} ${fmtTime(r.createdAt)}</td><td class="mono">${r.order_id||'—'}</td></tr>`).join('') +
+          `</tbody></table></div>`;
+      } else { html += `<div class="cmp-ok">✅ كل المعاملات المعروضة موجودة في الملف</div>`; }
+
+      // القسم 3
+      if (amtDiff.length) {
+        html += `<div class="cmp-sec-title" style="color:#a16207;"><i class="fas fa-triangle-exclamation"></i> موجودة في الاتنين لكن القيمة مختلفة (${amtDiff.length})</div>`;
+        html += `<div class="cmp-scroll"><table class="cmp-tbl"><thead><tr><th>رقم المعامله</th><th>قيمة الملف</th><th>قيمتنا</th><th>الفرق</th><th>المكينة</th></tr></thead><tbody>` +
+          amtDiff.map(d => `<tr><td class="mono">${d.id}</td><td>${d.excel.toFixed(2)}</td><td>${d.sales.toFixed(2)}</td><td style="color:#b91c1c;font-weight:800;">${(d.excel-d.sales).toFixed(2)}</td><td>${d.machine||'—'}</td></tr>`).join('') +
+          `</tbody></table></div>`;
+      }
+
+      if (!onlyExcel.length && !onlySales.length && !amtDiff.length) {
+        html += `<div class="cmp-ok" style="font-size:0.95rem;padding:24px;">🎉 مفيش أي اختلاف — الملف مطابق للمعاملات المعروضة تمامًا</div>`;
+      }
+
+      document.getElementById('cmp-body').innerHTML = html;
+      document.getElementById('cmpModal').style.display = 'flex';
+    }
+
+    function closeCmp(){ document.getElementById('cmpModal').style.display = 'none'; }
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeCmp(); });
   </script>
 </body>
 </html>
