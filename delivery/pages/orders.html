@@ -262,22 +262,32 @@ async function init(){
 async function loadAll(){
   showLoad(true);
   try{
-    let q=db.from('orders').select('*').order('created_at',{ascending:false});
     // نحمّل المدى الزمني المطلوب فقط (بدل ما نجيب 1000 طلب افتراضيًا) —
     // هامش يوم يغطّي فرق التوقيت وإزاحة الساعتين في bill_date، والفلتر الدقيق يتم بعدها في applyFilters
     const dFrom=document.getElementById('dateFrom')?.value;
     const dTo=document.getElementById('dateTo')?.value;
-    if(dFrom){ const f=new Date(dFrom+'T00:00:00'); f.setDate(f.getDate()-1); q=q.gte('created_at', f.toISOString()); }
-    if(dTo){ const t=new Date(dTo+'T23:59:59'); t.setDate(t.getDate()+1); q=q.lte('created_at', t.toISOString()); }
-    // فلتر الفرع
     const activeBranch=document.getElementById('branchFilter')?.value;
-    if(activeBranch){
-      q=q.eq('branch_id',activeBranch);
-    } else if(currentUser?.role!=='admin' && currentUser?.branch_id){
-      q=q.eq('branch_id',currentUser.branch_id);
+    // نبني نفس الاستعلام (بنفس الفلاتر) في كل دفعة — لأن استعلام PostgREST يُنفَّذ مرة واحدة
+    const buildQ=()=>{
+      let q=db.from('orders').select('*').order('created_at',{ascending:false});
+      if(dFrom){ const f=new Date(dFrom+'T00:00:00'); f.setDate(f.getDate()-1); q=q.gte('created_at', f.toISOString()); }
+      if(dTo){ const t=new Date(dTo+'T23:59:59'); t.setDate(t.getDate()+1); q=q.lte('created_at', t.toISOString()); }
+      if(activeBranch){ q=q.eq('branch_id',activeBranch); }
+      else if(currentUser?.role!=='admin' && currentUser?.branch_id){ q=q.eq('branch_id',currentUser.branch_id); }
+      return q;
+    };
+    // نجيب كل صفوف المدى على دفعات 1000 (PostgREST بيقف عند 1000، فنكمّل بالـ range) —
+    // بكده لو المدى واسع وفيه أكتر من ألف طلب مش هيتقصّ، وسقف أمان 20 ألف صف
+    const CHUNK=1000, MAX_ROWS=20000;
+    allOrders=[];
+    for(let off=0; off<MAX_ROWS; off+=CHUNK){
+      const {data,error}=await buildQ().range(off, off+CHUNK-1);
+      if(error){ console.error(error); break; }
+      if(!data||!data.length) break;
+      allOrders=allOrders.concat(data);
+      if(data.length<CHUNK) break;
+      if(off+CHUNK>=MAX_ROWS){ console.warn('orders: بلغنا سقف '+MAX_ROWS+' صف — ضيّق المدى الزمني'); }
     }
-    const {data}=await q;
-    allOrders=data||[];
     // ربط كل طلب برحلته (order → trip) على دفعات
     orderTrip={};
     const oids=allOrders.map(o=>o.id);
