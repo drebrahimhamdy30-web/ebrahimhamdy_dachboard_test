@@ -278,7 +278,9 @@ textarea.form-ctrl{height:80px;padding:.75rem;resize:none}
     </div>
     <div class="form-group">
       <label class="form-label">المبلغ المحصل (ج.م)</label>
-      <input type="number" class="form-ctrl" id="dlv-amt" placeholder="0" min="0">
+      <input type="number" class="form-ctrl" id="dlv-amt" placeholder="0" min="0" oninput="checkDlvDiff()">
+      <div id="dlv-billnote" style="font-size:.7rem;color:var(--text-muted);margin-top:.25rem"></div>
+      <div id="dlv-diffwarn" style="display:none;font-size:.72rem;color:#a16207;background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:.4rem .6rem;margin-top:.35rem">⚠️ غيّرت المبلغ عن الفاتورة — التسوية هتفضل على قيمة الفاتورة لحد ما الكاشير يقرّ الرقم</div>
     </div>
     <div class="form-group">
       <label class="form-label">ملاحظة (اختياري)</label>
@@ -749,6 +751,12 @@ async function endBreakManual(){
 
 async function requestAttendance(type){
   if(!driverRecord)return;
+
+  // طلب الحضور لازم يكون داخل نطاق الصيدلية
+  if(type==='online'){
+    const loc = await checkPickupLocation();
+    if(!loc.ok){ alert(locBlockMsg(loc,'تطلب الحضور')); return; }
+  }
 
   // تحقق من وجود رحلة جارية قبل الانصراف
   if(type==='offline'){
@@ -1221,14 +1229,42 @@ function buildTimers(o){
 
 function updateAllTimers(){renderContent();}
 
+// الكاش المحسوب: المبلغ المُدخل يُحسب فقط لو الكاشير أقرّه، وإلا نحسب على قيمة الفاتورة
+function cashOf(o){ return (o.collected_approved===true && o.collected_amount!=null) ? Number(o.collected_amount) : Number(o.total_bill_net||0); }
+function ratingColor(r){ return r==='ممتاز'?'var(--green)':r==='متأخر'?'var(--red)':'var(--yellow)'; }
+// ملاحظة إقرار الكاشير أسفل المبلغ المحصّل (تظهر فقط لو المبلغ مختلف عن الفاتورة)
+function collectedNote(o){
+  if(o.collected_amount==null) return '';
+  const diff=Math.abs(Number(o.collected_amount)-Number(o.total_bill_net||0))>0.01;
+  if(!diff) return '';
+  return o.collected_approved===true
+    ? `<div style="font-size:.66rem;color:#15803d">✓ الكاشير أقرّ المبلغ (يُحسب عليه)</div>`
+    : `<div style="font-size:.66rem;color:#a16207">⏳ مختلف عن الفاتورة — بانتظار إقرار الكاشير (يُحسب على الفاتورة حاليًا)</div>`;
+}
+// تقييم الرحلة الكلي (لو مفعّل في الإعدادات)
+function tripRatingHtml(orders){
+  if(settings?.driver_show_trip_rating!==true) return '';
+  const rated=(orders||[]).filter(o=>o.perf_rating&&o.actual_minutes!=null&&o.expected_minutes!=null);
+  if(!rated.length) return '';
+  const a=rated.reduce((s,o)=>s+Number(o.actual_minutes),0);
+  const e=rated.reduce((s,o)=>s+Number(o.expected_minutes),0);
+  if(e<=0) return '';
+  const ratio=a/e; const label=ratio<=0.90?'ممتاز':ratio>=1.10?'متأخر':'جيد';
+  const dist=rated.reduce((s,o)=>s+Number(o.distance_meters||0),0);
+  return `<div><div style="font-size:.62rem;color:var(--text-muted)">تقييم الرحلة</div><div style="font-size:.9rem;font-weight:800;color:${ratingColor(label)}">⭐ ${label}${dist?` · ${(dist/1000).toFixed(1)} كم`:''}</div></div>`;
+}
+
 function updateStats(){
+  // شريط الإحصائيات يظهر فقط لو مفعّل في إعدادات الفرع (زي التطبيق)
+  const statsEl=document.querySelector('.stats');
+  if(statsEl) statsEl.style.display=(settings?.driver_show_stats===true)?'':'none';
   const allOrders=Object.values(tripOrders).flat();
   const today=new Date();today.setHours(0,0,0,0);
   document.getElementById('s-assigned').textContent=allOrders.filter(o=>o.status==='assigned').length;
   document.getElementById('s-picked').textContent=allOrders.filter(o=>o.status==='picked').length;
   const del=allOrders.filter(o=>['delivered','completed'].includes(o.status)&&new Date(o.delivered_at||o.created_at)>=today);
   document.getElementById('s-delivered').textContent=del.length;
-  const cash=del.filter(o=>o.payment_method==='cash').reduce((s,o)=>s+Number(o.collected_amount||o.total_bill_net||0),0);
+  const cash=del.filter(o=>o.payment_method==='cash').reduce((s,o)=>s+cashOf(o),0);
   document.getElementById('s-cash').textContent=cash.toLocaleString('ar-EG');
 }
 
@@ -1265,7 +1301,7 @@ function renderContent(){
   const doneOrders=orders.filter(o=>['delivered','completed'].includes(o.status));
   const total=orders.reduce((s,o)=>s+Number(o.total_bill_net||0),0);
   const collected=orders.reduce((s,o)=>s+Number(o.collected_amount||0),0);
-  const cash=orders.filter(o=>o.payment_method==='cash'&&['delivered','completed'].includes(o.status)).reduce((s,o)=>s+Number(o.collected_amount||o.total_bill_net||0),0);
+  const cash=orders.filter(o=>o.payment_method==='cash'&&['delivered','completed'].includes(o.status)).reduce((s,o)=>s+cashOf(o),0);
   const canComplete=settings?.driver_can_complete_trip!==false;
   const blockingCount=orders.filter(o=>['assigned','picked'].includes(o.status)).length;
 
@@ -1319,7 +1355,8 @@ let actions='';
           </div>
         </div>
         <div class="or-amount">${amount.toLocaleString('ar-EG')} ج.م</div>
-        ${o.collected_amount?`<div style="font-size:.72rem;color:var(--green);font-weight:600;margin-bottom:.3rem">✓ محصل: ${Number(o.collected_amount).toLocaleString()} ج</div>`:''}
+        ${(settings?.driver_show_order_rating && o.perf_rating)?`<div style="font-size:.7rem;font-weight:700;color:${ratingColor(o.perf_rating)};margin-bottom:.3rem">⭐ ${o.perf_rating}${(o.actual_minutes!=null&&o.expected_minutes!=null)?` (${o.actual_minutes}/${o.expected_minutes} د)`:''}</div>`:''}
+        ${o.collected_amount!=null?`<div style="font-size:.72rem;color:var(--green);font-weight:600;margin-bottom:.3rem">✓ محصل: ${Number(o.collected_amount).toLocaleString()} ج</div>${collectedNote(o)}`:''}
         ${(o.notes||'').includes('🚨')?`<div class="or-note note-urgent">🚨 طلب عاجل</div>`:''}
 ${o.staff_notes?`<div class="or-note note-staff">💼 ${o.staff_notes}</div>`:''}
         ${o.status==='failed'&&o.postpone_reason?`<div class="or-note note-urgent">⚠️ تعذر: ${o.postpone_reason}</div>`:''}
@@ -1352,6 +1389,7 @@ ${o.staff_notes?`<div class="or-note note-staff">💼 ${o.staff_notes}</div>`:''
             <div style="font-size:.62rem;color:var(--text-muted)">إجمالي الكاش</div>
             <div style="font-size:.9rem;font-weight:800;color:var(--green)">${cash.toLocaleString('ar-EG')} ج.م</div>
           </div>
+          ${tripRatingHtml(orders)}
         </div>
         <div style="font-size:.75rem;color:var(--text-muted)">${doneOrders.length}/${orders.length} مكتمل</div>
       </div>
@@ -1371,16 +1409,15 @@ function toggleOrder(id){
 async function pickupAll(tripId){
   if(!confirm('تأكيد استلام جميع الطلبات؟'))return;
 
-  // فحص الموقع مرة واحدة للكل
+  // لازم يكون داخل نطاق الصيدلية — يمنع الاستلام لو بره النطاق أو تعذّر الموقع
   const loc = await checkPickupLocation();
-  if(!loc.ok) showPickupViolation(loc);
-  else if(loc.distance != null && DEBUG_LOCATION)
-    alert(`📍 اختبار: المسافة من الصيدلية ${loc.distance} متر (داخل النطاق)`);
+  if(!loc.ok){ alert(locBlockMsg(loc,'تستلم الطلبات')); return; }
 
   load(true);
   const now=new Date().toISOString();
   const toRes=await db.from('trip_orders').select('order_id').eq('trip_id',tripId);
   const orderIds=(toRes.data||[]).map(r=>r.order_id);
+  let pickedOrders=[];
   if(orderIds.length){
     const ordRes=await db.from('orders').select('id,status').in('id',orderIds).eq('status','assigned');
     const ids=(ordRes.data||[]).map(o=>o.id);
@@ -1388,22 +1425,24 @@ async function pickupAll(tripId){
       await db.from('orders').update({status:'picked',picked_at:now,updated_at:now}).in('id',ids);
       const logDetails = buildPickupLog(loc, {bulk:true});
       for(const id of ids){await addOrderLog(id,'order_picked',logDetails);}
+      pickedOrders=(tripOrders[tripId]||[]).filter(o=>ids.includes(o.id));
     }
   }
   await loadAll();load(false);
+  showBalanceNotice(pickedOrders);
 }
 async function pickupOne(orderId){
-  // فحص الموقع قبل الاستلام
+  // لازم يكون داخل نطاق الصيدلية — يمنع الاستلام
   const loc = await checkPickupLocation();
-  if(!loc.ok) showPickupViolation(loc);
-  else if(loc.distance != null && DEBUG_LOCATION)
-    alert(`📍 اختبار: المسافة من الصيدلية ${loc.distance} متر (داخل النطاق)`);
+  if(!loc.ok){ alert(locBlockMsg(loc,'تستلم الطلب')); return; }
 
   load(true);
   const now=new Date().toISOString();
   await db.from('orders').update({status:'picked',picked_at:now,updated_at:now}).eq('id',orderId);
   await addOrderLog(orderId,'order_picked', buildPickupLog(loc));
+  const o=Object.values(tripOrders).flat().find(x=>x.id===orderId);
   await loadAll();load(false);
+  if(o) showBalanceNotice([o]);
 }
 
 // تفاصيل لوج الاستلام — الموقع والمسافة دايماً (للمراجعة)
@@ -1412,18 +1451,34 @@ function buildPickupLog(loc, extra={}){
   if(loc.distance != null) base.distance_m = loc.distance;
   if(loc.lat != null){ base.pickup_lat = loc.lat; base.pickup_lng = loc.lng; }
   if(loc.acc != null) base.gps_accuracy_m = Math.round(loc.acc);
-  if(!loc.ok){
-    base.pickup_violation = true;
-    if(loc.noLoc) base.no_location = true;
-  }
   return base;
 }
 
-// شغّل ده مؤقتاً للاختبار — يعرض المسافة حتى لو الاستلام سليم
-const DEBUG_LOCATION = true;
+// رسالة منع موحّدة لما الطيار بره نطاق الصيدلية أو الموقع غير متاح
+function locBlockMsg(res, action){
+  return res.noLoc
+    ? `مش قادر أحدّد موقعك، فمش هينفع ${action} دلوقتي.\n\nشغّل الـGPS واسمح للموقع من إعدادات المتصفح، وافتح الصفحة عبر https، وبعدين حاول تاني.`
+    : `لازم تكون داخل نطاق الصيدلية عشان ${action}.\n\nإنت على بُعد ${res.distance} متر من الصيدلية.`;
+}
 
+// تنبيه رصيد سابق على العميل عند الاستلام
+function showBalanceNotice(orders){
+  const withBal=(orders||[]).filter(o=>Math.abs(Number(o.current_customer_balance||0))>=3);
+  if(!withBal.length) return;
+  const lines=withBal.map(o=>{
+    const b=Number(o.current_customer_balance||0);
+    const who=o.customer_name||o.cust_name||('#'+(o.bill_no||''))||'العميل';
+    return b>0 ? `• ${who}: مستحق عليه ${b.toLocaleString('ar-EG')} ج`
+               : `• ${who}: له ${Math.abs(b).toLocaleString('ar-EG')} ج`;
+  }).join('\n');
+  alert(`💰 تنبيه رصيد سابق على العميل:\n\n${lines}\n\nبرجاء الرجوع للصيدلية لإضافة الرصيد على فاتورة العميل الحالية.`);
+}
+
+let _dlvBill=0;
 function openDeliver(id){
   const o=Object.values(tripOrders).flat().find(x=>x.id===id);if(!o)return;
+  _dlvBill=Number(o.total_bill_net||0);
+  document.getElementById('dlv-billnote').textContent='قيمة الفاتورة: '+_dlvBill.toLocaleString('ar-EG')+' ج';
   document.getElementById('dlv-id').value=id;
   document.getElementById('dlv-note').value='';
   document.getElementById('dlv-amt').value=o.collected_amount||o.total_bill_net||'';
@@ -1437,18 +1492,31 @@ function openDeliver(id){
     if(match) b.classList.add(`po-${preselectedPay}`);
   });
   document.getElementById('deliverModal').classList.add('open');
+  checkDlvDiff();
 }
-function selPay(m,btn){document.querySelectorAll('.pay-opt').forEach(b=>b.className='pay-opt');btn.classList.add(`po-${m}`);document.getElementById('dlv-pay').value=m;}
+function selPay(m,btn){document.querySelectorAll('.pay-opt').forEach(b=>b.className='pay-opt');btn.classList.add(`po-${m}`);document.getElementById('dlv-pay').value=m;checkDlvDiff();}
+// تحذير: المبلغ المحصّل مختلف عن الفاتورة (كاش فقط)
+function checkDlvDiff(){
+  const amt=parseFloat(document.getElementById('dlv-amt').value)||0;
+  const pay=document.getElementById('dlv-pay').value;
+  const show=(pay==='cash' && Math.abs(amt-_dlvBill)>0.01);
+  document.getElementById('dlv-diffwarn').style.display=show?'block':'none';
+}
 async function confirmDeliver(){
   const id=document.getElementById('dlv-id').value;
   const pay=document.getElementById('dlv-pay').value;
   if(!pay){alert('اختر طريقة الدفع');return;}
   const amt=parseFloat(document.getElementById('dlv-amt').value)||0;
   const note=document.getElementById('dlv-note').value.trim();
+  // موقع التسليم (لحساب زمن الطريق والأداء) — لا يمنع التسليم لو تعذّر، لكن نطلب تفعيله
+  let dloc = await getMyLocation();
+  if(!dloc){
+    if(confirm('تعذّر تحديد موقعك (مطلوب لتقييم التوصيل).\n\nشغّل الـGPS واضغط "موافق" للمحاولة تاني، أو "إلغاء" للتوصيل بدون تقييم.')){
+      dloc = await getMyLocation();
+    }
+  }
   load(true);
   const now=new Date().toISOString();
-  // موقع التسليم (لحساب زمن الطريق والأداء) — لا يمنع التسليم لو تعذّر
-  const dloc = await getMyLocation();
   const upd = {status:'delivered',payment_method:pay,collected_amount:amt,driver_notes:note||null,delivered_at:now,updated_at:now};
   if(dloc){ upd.delivery_lat=dloc.lat; upd.delivery_lng=dloc.lng; }
   await db.from('orders').update(upd).eq('id',id);
@@ -1520,6 +1588,9 @@ async function completeTrip(tripId){
   // بس assigned و picked بيمنعوا الإنهاء — المتعذر (failed) مسموح
   const blocking=orders.filter(o=>['assigned','picked'].includes(o.status));
   if(blocking.length>0){alert('لا يمكن إنهاء الرحلة — يوجد '+blocking.length+' طلب لم يتم توصيله\nيجب توصيل أو تسجيل تعذر أولاً');return;}
+  // لازم يكون داخل نطاق الصيدلية عشان ينهي الرحلة
+  const cloc = await checkPickupLocation();
+  if(!cloc.ok){ alert(locBlockMsg(cloc,'تنهي الرحلة')); return; }
   const directComplete=settings?.driver_can_complete_trip!==false;
   if(!directComplete && tripId!=='direct'){
     load(true);
