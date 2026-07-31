@@ -54,6 +54,20 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
 .name-item:hover{background:var(--bg)}
 .name-item.selected{background:var(--primary-light)}
 .name-item input[type=checkbox]{accent-color:var(--primary);width:15px;height:15px;flex-shrink:0}
+
+/* شريط إحصاءات مضغوط */
+.stats-compact{display:flex;gap:1.1rem;flex-wrap:wrap;align-items:center;background:white;border:1px solid var(--border);border-radius:10px;padding:.5rem .9rem;margin-bottom:1rem;font-size:.78rem;color:var(--text-muted)}
+.stats-compact b{color:var(--primary);font-size:.95rem;margin-right:.15rem}
+/* جدول المناطق */
+.reg-table{width:100%;border-collapse:collapse;background:white;border:1px solid var(--border);border-radius:12px;overflow:hidden;font-size:.8rem}
+.reg-table th,.reg-table td{padding:.5rem .7rem;border-bottom:1px solid var(--border);text-align:right;vertical-align:middle}
+.reg-table th{background:var(--bg);font-weight:700;color:var(--text-muted);font-size:.72rem;white-space:nowrap}
+.reg-table tr.inactive{opacity:.55}
+.reg-table tbody tr:hover{background:var(--bg)}
+.reg-table input[type=checkbox]{accent-color:var(--primary);width:16px;height:16px;cursor:pointer}
+.reg-table .type-tag{margin:1px}
+/* شريط الإجراءات الجماعية */
+.bulk-bar{display:none;align-items:center;gap:.5rem;flex-wrap:wrap;background:var(--primary-light);border:1px solid var(--primary);border-radius:10px;padding:.5rem .8rem;margin-bottom:.85rem;font-size:.8rem}
 </style>
 </head>
 <body>
@@ -82,8 +96,28 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
     <button class="filter-chip" onclick="setFilter('inactive',this)">غير نشط</button>
   </div>
 
-  <div class="stats-grid" style="margin-bottom:1.25rem" id="statsRow"></div>
-  <div class="regions-grid" id="regionsGrid"></div>
+  <div class="stats-compact" id="statsRow"></div>
+
+  <!-- شريط الإجراءات الجماعية (يظهر عند تحديد مناطق) -->
+  <div class="bulk-bar" id="bulkBar">
+    <span id="bulkCount" style="font-weight:700"></span>
+    <span style="color:var(--text-muted)">التصنيف:</span>
+    <select id="bulkType" style="padding:.28rem .5rem;font-size:.78rem;border:1px solid var(--border);border-radius:8px;font-family:'Cairo',sans-serif">
+      <option value="inside">🟢 داخل الزون</option>
+      <option value="outside">🟡 خارج الزون</option>
+      <option value="permit">🟣 يحتاج ترخيص</option>
+      <option value="hard">🔴 صعب الوصول</option>
+    </select>
+    <button class="btn btn-primary btn-sm" onclick="bulkApplyType('add')">➕ إضافة للمحدد</button>
+    <button class="btn btn-outline btn-sm" onclick="bulkApplyType('set')">تعيين فقط</button>
+    <button class="btn btn-outline btn-sm" onclick="bulkApplyType('remove')">❌ إزالة</button>
+    <span style="width:1px;height:20px;background:var(--primary);opacity:.4"></span>
+    <button class="btn btn-outline btn-sm" onclick="bulkActive(true)">تفعيل</button>
+    <button class="btn btn-outline btn-sm" onclick="bulkActive(false)">تعطيل</button>
+    <button class="btn btn-sm" style="margin-right:auto;background:white;border:1px solid var(--border)" onclick="clearSelection()">مسح التحديد</button>
+  </div>
+
+  <div id="regionsGrid"></div>
 </div>
 
 <!-- Modal: Edit Region (per branch) -->
@@ -214,6 +248,7 @@ const TYPE_CLASS={inside:'type-inside',outside:'type-outside',permit:'type-permi
 let branches=[], allRegions=[], allRegionNames=[];
 let curBranchId=null, currentFilter='all';
 let deleteTargetId=null, importNewNames=[], selectedNames=new Set();
+let selectedRegions=new Set();   // مناطق محدّدة للإجراءات الجماعية
 
 async function init(){
   const user=getCurrentUser();if(!user)return;
@@ -247,6 +282,7 @@ async function init(){
 async function onBranchChange(){
   curBranchId=document.getElementById('branchSelect').value;
   if(!curBranchId){document.getElementById('mainContent').style.display='none';document.getElementById('addRegionBtn').style.display='none';return;}
+  selectedRegions.clear();
   showLoading(true);
   // جيب مناطق هذا الفرع
   const {data}=await db.from('regions').select('*').eq('branch_id',curBranchId).order('name');
@@ -264,13 +300,14 @@ async function onBranchChange(){
 function renderStats(){
   const total=allRegions.length;
   const active=allRegions.filter(r=>r.is_active).length;
-  const inside=allRegions.filter(r=>(r.types||[]).includes('inside')).length;
-  const outside=allRegions.filter(r=>(r.types||[]).includes('outside')).length;
-  document.getElementById('statsRow').innerHTML=`
-    <div class="stat-card"><div class="stat-label">مناطق الفرع</div><div class="stat-value">${total}</div></div>
-    <div class="stat-card"><div class="stat-label">نشطة</div><div class="stat-value">${active}</div></div>
-    <div class="stat-card"><div class="stat-label">داخل الزون</div><div class="stat-value">${inside}</div></div>
-    <div class="stat-card"><div class="stat-label">خارج الزون</div><div class="stat-value">${outside}</div></div>`;
+  const cnt=t=>allRegions.filter(r=>(r.types||[]).includes(t)).length;
+  document.getElementById('statsRow').innerHTML=
+    `<span>المناطق <b>${total}</b></span>`+
+    `<span>نشطة <b>${active}</b></span>`+
+    `<span>داخل الزون <b>${cnt('inside')}</b></span>`+
+    `<span>خارج الزون <b>${cnt('outside')}</b></span>`+
+    `<span>يحتاج ترخيص <b>${cnt('permit')}</b></span>`+
+    `<span>صعب الوصول <b>${cnt('hard')}</b></span>`;
 }
 
 function setFilter(f,el){
@@ -280,42 +317,91 @@ function setFilter(f,el){
   renderRegions();
 }
 
-function renderRegions(){
+function visibleRegions(){
   const search=document.getElementById('searchInput').value.toLowerCase();
-  let regions=allRegions.filter(r=>{
+  return allRegions.filter(r=>{
     if(search&&!(r.name||'').toLowerCase().includes(search))return false;
     if(currentFilter==='all')return true;
     if(currentFilter==='inactive')return !r.is_active;
     return (r.types||[]).includes(currentFilter);
   });
+}
 
+function renderRegions(){
+  const regions=visibleRegions();
   const grid=document.getElementById('regionsGrid');
   if(!regions.length){
-    grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:3rem;color:var(--text-muted)"><div style="font-size:2rem;margin-bottom:.75rem">📍</div><p>لا توجد مناطق في هذا الفرع</p><button class="btn btn-primary" style="margin-top:1rem" onclick="openAddFromList()">+ إضافة مناطق</button></div>';
+    grid.innerHTML='<div style="text-align:center;padding:3rem;color:var(--text-muted)"><div style="font-size:2rem;margin-bottom:.75rem">📍</div><p>لا توجد مناطق في هذا الفرع</p><button class="btn btn-primary" style="margin-top:1rem" onclick="openAddFromList()">+ إضافة مناطق</button></div>';
+    updateBulkBar();
     return;
   }
 
-  grid.innerHTML=regions.map(r=>{
+  const rows=regions.map(r=>{
     const types=r.types||[];
-    const typeTags=types.map(t=>`<span class="type-tag ${TYPE_CLASS[t]||''}">${TYPE_LABELS[t]||t}</span>`).join('');
-    return `<div class="region-card ${r.is_active?'':'inactive'}">
-      <div class="region-card-header">
-        <span class="region-name">${r.name}</span>
-        <div class="region-status ${r.is_active?'status-active':'status-inactive'}"></div>
-      </div>
-      <div class="region-card-body">
-        ${types.length?`<div class="region-types">${typeTags}</div>`:'<span style="font-size:.72rem;color:var(--text-muted)">لا يوجد تصنيف</span>'}
-        <div class="region-info-row"><span class="region-info-label">⏱ وقت الوصول</span><span class="region-info-value">${r.expected_minutes||'—'} د</span></div>
-        <div class="region-info-row"><span class="region-info-label">🚚 التوصيل</span><span class="region-info-value">${r.delivery_fee?r.delivery_fee+' ج':'مجاني'}</span></div>
-        <div class="region-info-row"><span class="region-info-label">📦 الحد الأدنى</span><span class="region-info-value">${r.min_order_amount?r.min_order_amount+' ج':'—'}</span></div>
-      </div>
-      <div class="region-card-footer">
+    const typeTags=types.length
+      ? types.map(t=>`<span class="type-tag ${TYPE_CLASS[t]||''}">${TYPE_LABELS[t]||t}</span>`).join(' ')
+      : '<span style="color:var(--text-muted)">—</span>';
+    const checked=selectedRegions.has(r.id)?'checked':'';
+    return `<tr class="${r.is_active?'':'inactive'}">
+      <td><input type="checkbox" ${checked} onclick="toggleSelect('${r.id}')"></td>
+      <td style="font-weight:700">${r.name}</td>
+      <td>${typeTags}</td>
+      <td style="white-space:nowrap">${r.expected_minutes||'—'} د</td>
+      <td style="white-space:nowrap">${r.delivery_fee?r.delivery_fee+' ج':'مجاني'}</td>
+      <td style="white-space:nowrap">${r.min_order_amount?r.min_order_amount+' ج':'—'}</td>
+      <td style="white-space:nowrap">${r.is_active?'<span style="color:var(--green)">● نشطة</span>':'<span style="color:#9ca3af">● موقوفة</span>'}</td>
+      <td style="white-space:nowrap">
         <button class="btn btn-outline btn-sm" onclick="toggleActive('${r.id}',${r.is_active})">${r.is_active?'تعطيل':'تفعيل'}</button>
         <button class="btn btn-outline btn-sm" onclick="openEdit('${r.id}')">تعديل</button>
         <button class="btn btn-sm" style="background:var(--red-light);color:#b91c1c" onclick="openDelete('${r.id}','${r.name}')">إزالة</button>
-      </div>
-    </div>`;
+      </td>
+    </tr>`;
   }).join('');
+
+  const allChecked=regions.every(r=>selectedRegions.has(r.id))?'checked':'';
+  grid.innerHTML=`<div style="overflow-x:auto"><table class="reg-table">
+    <thead><tr>
+      <th style="width:34px"><input type="checkbox" ${allChecked} onclick="toggleSelectAll(this.checked)" title="تحديد الكل"></th>
+      <th>المنطقة</th><th>التصنيف</th><th>وقت الوصول</th><th>التوصيل</th><th>الحد الأدنى</th><th>الحالة</th><th>إجراءات</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>`;
+  updateBulkBar();
+}
+
+// ===== تحديد جماعي =====
+function toggleSelect(id){ if(selectedRegions.has(id))selectedRegions.delete(id); else selectedRegions.add(id); updateBulkBar(); }
+function toggleSelectAll(on){ const vis=visibleRegions(); if(on)vis.forEach(r=>selectedRegions.add(r.id)); else vis.forEach(r=>selectedRegions.delete(r.id)); renderRegions(); }
+function clearSelection(){ selectedRegions.clear(); renderRegions(); }
+function updateBulkBar(){
+  const n=selectedRegions.size;
+  document.getElementById('bulkBar').style.display=n?'flex':'none';
+  document.getElementById('bulkCount').textContent=`المحدد: ${n} منطقة`;
+}
+
+// إضافة/تعيين/إزالة تصنيف على كل المناطق المحدّدة
+async function bulkApplyType(mode){
+  const t=document.getElementById('bulkType').value;
+  const ids=[...selectedRegions]; if(!ids.length)return;
+  showLoading(true);
+  try{
+    await Promise.all(ids.map(id=>{
+      const r=allRegions.find(x=>x.id===id); if(!r)return Promise.resolve();
+      let types=Array.from(new Set(r.types||[]));
+      if(mode==='add'){ if(!types.includes(t))types.push(t); }
+      else if(mode==='set'){ types=[t]; }
+      else if(mode==='remove'){ types=types.filter(x=>x!==t); }
+      return db.from('regions').update({types}).eq('id',id);
+    }));
+  }catch(e){ alert('حصل خطأ أثناء الحفظ: '+(e.message||e)); }
+  await onBranchChange();
+}
+
+// تفعيل/تعطيل كل المحدّد
+async function bulkActive(on){
+  const ids=[...selectedRegions]; if(!ids.length)return;
+  showLoading(true);
+  try{ await db.from('regions').update({is_active:on}).in('id',ids); }
+  catch(e){ alert('حصل خطأ: '+(e.message||e)); }
+  await onBranchChange();
 }
 
 // ===== EDIT =====
