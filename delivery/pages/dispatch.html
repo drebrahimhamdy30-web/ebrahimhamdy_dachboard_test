@@ -609,6 +609,7 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
     <button onclick="openSendMessage(currentPopupDriverId)" style="flex:1;padding:.5rem;background:#334155;color:white;border:none;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer">💬 رسالة</button>
   </div>
   <button onclick="showDriverLocation(currentPopupDriverId)" style="margin-top:.5rem;width:100%;padding:.5rem;background:#065f46;color:white;border:none;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer">📍 الموقع الحالي للطيار</button>
+  <button id="dp-break-btn" onclick="endDriverBreak(currentPopupDriverId)" style="display:none;margin-top:.5rem;width:100%;padding:.5rem;background:#dcfce7;color:#15803d;border:1px solid #bbf7d0;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer">🟢 إنهاء استراحة الطيار</button>
   <button id="dp-offline-btn" onclick="forceDriverOffline(currentPopupDriverId)" style="margin-top:.5rem;width:100%;padding:.5rem;background:var(--red-light);color:#b91c1c;border:1px solid #fecaca;border-radius:8px;font-family:'Cairo',sans-serif;font-size:.75rem;font-weight:700;cursor:pointer">🔴 تسجيل انصراف الطيار</button>
 </div>
 
@@ -1221,6 +1222,10 @@ const since=new Date(Date.now()-24*60*60*1000).toISOString();
         <span class="dp-val">${data.count} رحلة · ${data.orders} طلب</span>
       </div>`).join('');
   }
+
+  // زر "إنهاء الاستراحة" يظهر فقط لو الطيار في استراحة
+  const breakBtn=document.getElementById('dp-break-btn');
+  if(breakBtn) breakBtn.style.display = attStatus==='break' ? 'block' : 'none';
 
   currentPopupDriverId = driverId;
   document.getElementById('driverPopup').classList.add('open');
@@ -2839,6 +2844,36 @@ async function forceDriverOffline(driverId){
       notes:'انصراف بواسطة الإدارة'
     });
     showToast(`✓ تم تسجيل انصراف ${name}`);
+    closeDriverPopup();
+    await loadAttendanceData();
+    await loadAll();
+  }catch(e){console.error(e);showToast('حدث خطأ');}
+  showLoading(false);
+}
+async function endDriverBreak(driverId){
+  if(!driverId)return;
+  const driver=allDrivers.find(d=>d.id===driverId);
+  const name=driver?.full_name||'الطيار';
+  if(getDriverAttStatus(driverId)!=='break'){
+    showToast('الطيار ليس في استراحة');
+    return;
+  }
+  if(!confirm(`إنهاء استراحة ${name} وإرجاعه لحالة "حاضر"؟`))return;
+
+  showLoading(true);
+  try{
+    const now=new Date().toISOString();
+    // اقفل أي فترة استراحة مفتوحة
+    await db.from('driver_attendance').update({ended_at:now}).eq('driver_id',driverId).eq('status','break').is('ended_at',null);
+    // سجّل رجوعه "حاضر" فورًا (موافَق عليه من الإدارة)
+    await db.from('driver_attendance').insert({
+      driver_id:driverId,
+      date:getTodayCairo(),
+      status:'online',
+      approved_at:now,
+      notes:'إنهاء استراحة بواسطة الإدارة'
+    });
+    showToast(`✓ تم إنهاء استراحة ${name}`);
     closeDriverPopup();
     await loadAttendanceData();
     await loadAll();
