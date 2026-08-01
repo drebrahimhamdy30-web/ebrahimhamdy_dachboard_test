@@ -859,6 +859,7 @@ async function loadAll(){
     const regRes=await db.from('regions').select('name').eq('is_active',true);
     knownRegions=new Set((regRes.data||[]).map(r=>r.name));
     await loadAttendanceData();
+    await loadHardLoad();
     renderHeader();renderDrivers();renderTrips();renderOrders();
   }catch(e){console.error(e);showToast('خطأ في التحميل');}
   showLoading(false);
@@ -1140,6 +1141,19 @@ async function rejectAtt(id,driverId){
   await loadAll();
 }
 
+// حمل المناطق الصعبة — يحدّد أقل طيارين ذهابًا للمناطق الصعبة هذا الشهر (مع مراعاة ساعات العمل)
+let leastHardSet=new Set();
+async function loadHardLoad(){
+  try{
+    const branchId=currentUser?.role==='admin'?activeBranchId:(currentUser?.branch_id||null);
+    if(!branchId){ leastHardSet=new Set(); return; }
+    const {data}=await db.rpc('get_hard_load',{p_branch:branchId});
+    const rows=(data||[]).filter(r=>allDrivers.some(d=>d.id===r.driver_id));
+    rows.sort((a,b)=>(Number(a.hard_rate)-Number(b.hard_rate)));
+    leastHardSet=new Set(rows.slice(0,2).map(r=>r.driver_id));
+  }catch(e){ leastHardSet=new Set(); }
+}
+
 function renderDrivers(){
   const el=document.getElementById('driversScroll');
   // فقط الطيارين الحاضرين (online أو break)
@@ -1188,7 +1202,8 @@ const pickedMap={};allOrders.filter(o=>['picked','failed'].includes(o.status)&&o
     const ini=(d.full_name||'?').split(' ').slice(0,2).map(w=>w[0]).join('');
     const workLabel=workMins>0?fmWorkTime(workMins):'';
 
-    return `<div class="driver-chip ${sc} ${filterDriver===d.id?'selected':''}" onclick="openDriverPopup('${d.id}')">
+    return `<div class="driver-chip ${sc} ${filterDriver===d.id?'selected':''}" onclick="openDriverPopup('${d.id}')" style="position:relative">
+      ${leastHardSet.has(d.id)?`<div title="من أقل الطيارين ذهابًا للمناطق الصعبة هذا الشهر (محسوبة بالنسبة لساعات العمل)" style="position:absolute;top:-5px;left:-3px;background:#16a34a;color:#fff;font-size:.48rem;font-weight:800;padding:.05rem .3rem;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.25);z-index:2">🟢 صعب↓</div>`:''}
       <div class="driver-avatar" style="background:${c}">${ini}</div>
       <div class="dc-name">${(d.full_name||'').split(' ').slice(0,2).join(' ')}</div>
       <div class="dc-st ${st}">${sl}</div>
