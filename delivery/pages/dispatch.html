@@ -1910,37 +1910,39 @@ async function confirmAssign(){
   if(!orderIds.length){showToast('اختر طلب على الأقل');return;}
 
   showLoading(true);
-  const now=new Date().toISOString();
   const failed=[];
   let done=0;
 
   try{
-    // لو إعادة تعيين → شيل من الرحلة القديمة الأول
     if(window._reassignTripId){
-      const oldTrip=window._reassignTripId;
-      for(const id of orderIds){
-        await db.from('trip_orders').delete().eq('trip_id',oldTrip).eq('order_id',id);
-      }
-      const {data:to}=await db.from('trip_orders').select('id').eq('trip_id',oldTrip);
-      await db.from('trips').update({orders_count:(to||[]).length,updated_at:now}).eq('id',oldTrip);
-      await autoCloseTripIfEmpty(oldTrip);
+      // إعادة تعيين → عبر RPC واحدة (SECURITY DEFINER): بتشيل الطلبات من الرحلة القديمة
+      // وتعيّنها للطيار الجديد وتقفل الرحلة الفاضية — وبتتجاوز قيود RLS فتنفع للكاشير والمدير كمان
       window._reassignTripId=null;
-    }
-
-    // التعيين عن طريق RPC — كل طلب في transaction واحدة (الكل ينجح أو الكل يفشل)
-    for(const id of orderIds){
-      const o=allOrders.find(x=>x.id===id);
-      const {data,error}=await db.rpc('manual_assign_order',{
-        p_order_id:id,
-        p_driver_id:driverId,
+      const {data,error}=await db.rpc('transfer_orders_to_driver',{
+        p_order_ids:orderIds,
+        p_to_driver_id:driverId,
+        p_reason:'إعادة تعيين',
         p_user_name:currentUser?.full_name||'—'
       });
-      if(error){
-        failed.push(`${o?.bill_no||id.slice(0,6)}: ${error.message}`);
-      }else if(data?.success===false){
-        failed.push(`${o?.bill_no||id.slice(0,6)}: ${data.error}`);
-      }else{
-        done++;
+      if(error){ failed.push(error.message); }
+      else if(data?.success===false){ failed.push(data.error); }
+      else { done=(data&&data.moved!=null)?data.moved:orderIds.length; }
+    } else {
+      // تعيين جديد → كل طلب عبر manual_assign_order (الكل ينجح أو الكل يفشل لكل طلب)
+      for(const id of orderIds){
+        const o=allOrders.find(x=>x.id===id);
+        const {data,error}=await db.rpc('manual_assign_order',{
+          p_order_id:id,
+          p_driver_id:driverId,
+          p_user_name:currentUser?.full_name||'—'
+        });
+        if(error){
+          failed.push(`${o?.bill_no||id.slice(0,6)}: ${error.message}`);
+        }else if(data?.success===false){
+          failed.push(`${o?.bill_no||id.slice(0,6)}: ${data.error}`);
+        }else{
+          done++;
+        }
       }
     }
 
