@@ -376,7 +376,8 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
         </div>
         <div class="form-group">
           <label>المنطقة *</label>
-          <select class="form-control" id="ao-region"></select>
+          <input type="text" class="form-control" id="ao-region" list="ao-region-list" placeholder="🔍 اكتب حرف لتصفية المناطق" autocomplete="off">
+          <datalist id="ao-region-list"></datalist>
         </div>
         <div class="form-group">
           <label>القيمة (ج.م) *</label>
@@ -1576,11 +1577,12 @@ async function openAddOrder(){
   document.getElementById('ao-amount').value='0';
   document.getElementById('ao-notes').value='';
 
-  // حمّل المناطق
+  // حمّل المناطق في قائمة بحث بالكتابة (datalist)
   const {data:regions} = await db.from('regions').select('name').eq('branch_id',branchId).eq('is_active',true).order('name');
-  document.getElementById('ao-region').innerHTML =
-    '<option value="">— اختر المنطقة —</option>' +
-    (regions||[]).map(r=>`<option value="${r.name}">${r.name}</option>`).join('');
+  _aoRegionNames=(regions||[]).map(r=>r.name);
+  document.getElementById('ao-region-list').innerHTML =
+    _aoRegionNames.map(n=>`<option value="${(n||'').replace(/"/g,'&quot;')}"></option>`).join('');
+  document.getElementById('ao-region').value='';
 
   document.getElementById('addOrderModal').classList.add('open');
 }
@@ -1697,8 +1699,13 @@ async function saveNewOrder(){
       updated_at: now
     };
   } else {
-    const region = document.getElementById('ao-region').value;
+    let region = document.getElementById('ao-region').value.trim();
     if(!region){ showToast('اختر المنطقة'); return; }
+    // لازم تكون منطقة مسجّلة — نمنع الأخطاء الإملائية
+    const _rmatch = _aoRegionNames.find(n=>n===region)
+      || _aoRegionNames.find(n=>(n||'').trim().toLowerCase()===region.toLowerCase());
+    if(!_rmatch){ showToast('اكتب حرف واختر منطقة من القائمة'); return; }
+    region = _rmatch;
     const amount = parseFloat(document.getElementById('ao-amount').value);
     if(isNaN(amount) || amount < 0){ showToast('القيمة غير صحيحة'); return; }
 
@@ -2085,6 +2092,7 @@ async function confirmCancel(){
 
 // Edit
 let _edtRegionNames=[];
+let _aoRegionNames=[];
 async function openEdit(id,e){
   e?.stopPropagation();
   const o=allOrders.find(x=>x.id===id);if(!o)return;
