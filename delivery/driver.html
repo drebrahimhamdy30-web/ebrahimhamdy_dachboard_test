@@ -203,6 +203,7 @@ textarea.form-ctrl{height:80px;padding:.75rem;resize:none}
     <div class="h-sub" id="driverBranch">جاري التحميل...</div>
   </div>
 <div class="h-actions">
+    <button class="h-btn" id="muteBtn" onclick="toggleMute()" title="كتم صوت التنبيهات">🔊</button>
     <button class="h-btn" onclick="openChangePassword()">🔑 كلمة المرور</button>
     <button class="h-btn" onclick="doLogout()">خروج</button>
   </div>
@@ -360,6 +361,8 @@ let attRecord=null, attTimerInterval=null;
 
 // ===== SOUND SYSTEM =====
 let soundEnabled = true;
+let soundMuted = false;   // كتم الصوت باختيار الطيار (الإشعار المرئي يفضل ظاهر)
+try{ soundMuted = localStorage.getItem('phalix_sound_muted') === '1'; }catch(e){}
 let lastOrderIds = new Set();
 let firstOrderCheck = true;  // أول فحص بعد تحميل الصفحة — مايعملش إشعار
 let callChannel = null;
@@ -428,8 +431,22 @@ function initAudio(){
 
 let soundInterval = null;
 
+function toggleMute(){
+  soundMuted = !soundMuted;
+  try{ localStorage.setItem('phalix_sound_muted', soundMuted ? '1' : '0'); }catch(e){}
+  if(soundMuted) stopContinuousSound();   // اكتم أي رنين شغّال فورًا بدون الحاجة لفتح الإشعار
+  updateMuteBtn();
+}
+function updateMuteBtn(){
+  const b=document.getElementById('muteBtn');
+  if(!b) return;
+  b.textContent = soundMuted ? '🔇' : '🔊';
+  b.title = soundMuted ? 'الصوت مكتوم — اضغط للتشغيل' : 'كتم صوت التنبيهات';
+  b.style.opacity = soundMuted ? '0.55' : '1';
+}
+
 function playSound(type){
-  if(!soundEnabled || !audioCtx) return;
+  if(!soundEnabled || !audioCtx || soundMuted) return;
   try{
     if(audioCtx.state === 'suspended'){
       audioCtx.resume().then(()=>_playOnce(type));
@@ -601,6 +618,7 @@ window.addEventListener('DOMContentLoaded', async()=>{
   if(!_jwtOk&&!sessionStorage.getItem('jwtRefreshDone')){sessionStorage.setItem('jwtRefreshDone','1');window.location.href='auth.html';return;}
   if(currentUser.role!=='driver'){window.location.href='app.html';return;}
   document.getElementById('driverName').textContent=currentUser.full_name||'طيار';
+  updateMuteBtn();   // زر كتم الصوت — يعكس آخر اختيار محفوظ للطيار
 
   // شاشة تفعيل الصوت — مرة واحدة بس (تُحفظ بعد أول تفعيل)
   initSoundGate();
