@@ -1416,7 +1416,8 @@ function renderOrders(){
       actions+=`<button class="ab ab-cancel" onclick="openCancel('${o.id}',event)">إلغاء</button>`;
     }
     if(o.status==='picked'){
-      actions+=`<button class="ab ab-deliver" onclick="openDeliver('${o.id}',event)">وصّل</button>`;
+      if(currentUser?.role!=='cashier')
+        actions+=`<button class="ab ab-deliver" onclick="openDeliver('${o.id}',event)">وصّل</button>`;
       actions+=`<button class="ab ab-urgent" onclick="markUrgent('${o.id}',event)">عاجل</button>`;
       actions+=`<button class="ab ab-postpone" onclick="openPostpone('${o.id}',event)">تأجيل</button>`;
       actions+=`<button class="ab ab-cancel" onclick="openCancel('${o.id}',event)">إلغاء</button>`;
@@ -1995,6 +1996,7 @@ async function confirmAssign(){
 // Deliver
 function openDeliver(id,e){
   e?.stopPropagation();
+  if(currentUser?.role==='cashier'){ showToast('غير مصرّح — تأكيد التوصيل مش من صلاحيات الكاشير'); return; }
   const o=allOrders.find(x=>x.id===id);if(!o)return;
   document.getElementById('dlv-id').value=id;
   document.getElementById('dlv-note').value='';
@@ -2306,7 +2308,7 @@ function openTripOrderActions(orderId, tripId){
 
   // Show/hide buttons based on status
   document.getElementById('toa-btn-pickup').style.display=o.status==='assigned'?'flex':'none';
-  document.getElementById('toa-btn-deliver').style.display=o.status==='picked'?'flex':'none';
+  document.getElementById('toa-btn-deliver').style.display=(o.status==='picked'&&currentUser?.role!=='cashier')?'flex':'none';
   // الطيار خرج بالرحلة؟ → الأدوية معاه، فإعادة التعيين والإزالة خطر
   const _out = tripHasPicked(tripId);
   const _canReassign = o.status==='assigned' && !_out;
@@ -2421,7 +2423,7 @@ function openDetail(id){
     <button class="btn btn-outline" onclick="closeModal('detailModal')">إغلاق</button>
     <button class="btn btn-outline" onclick="closeModal('detailModal');openLog('${id}',null)">📋 السجل</button>
     ${['pending','postponed'].includes(o.status)?`<button class="btn btn-green" onclick="closeModal('detailModal');quickAssign('${id}',null)">تعيين طيار</button>`:''}
-    ${o.status==='picked'?`<button class="btn btn-yellow" onclick="closeModal('detailModal');openDeliver('${id}',null)">تأكيد التوصيل</button>`:''}`;
+    ${o.status==='picked'&&currentUser?.role!=='cashier'?`<button class="btn btn-yellow" onclick="closeModal('detailModal');openDeliver('${id}',null)">تأكيد التوصيل</button>`:''}`;
   document.getElementById('detailModal').classList.add('open');
 }
 
@@ -2560,7 +2562,8 @@ if(o.delivered_at){
     footerBtns+=`<button class="btn btn-red" onclick="closeModal('detailModal');openCancel('${orderId}',null)">إلغاء</button>`;
   }
   if(o.status==='picked'){
-    footerBtns+=`<button class="btn btn-yellow" onclick="closeModal('detailModal');openDeliver('${orderId}',null)">✅ وصّل</button>`;
+    if(currentUser?.role!=='cashier')
+      footerBtns+=`<button class="btn btn-yellow" onclick="closeModal('detailModal');openDeliver('${orderId}',null)">✅ وصّل</button>`;
     // الطلب في الشارع → النقل بس (إعادة التعيين هتخلي الأدوية ضايعة)
     footerBtns+=`<button class="btn btn-primary" onclick="closeModal('detailModal');openTransfer('${tripId}',{stopPropagation:()=>{}},'${orderId}')">🔄 نقل لطيار آخر</button>`;
     footerBtns+=`<button class="btn btn-outline" onclick="closeModal('detailModal');openPostpone('${orderId}',null)">⏰ تأجيل</button>`;
