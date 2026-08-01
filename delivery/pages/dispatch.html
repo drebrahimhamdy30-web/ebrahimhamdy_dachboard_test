@@ -1143,16 +1143,16 @@ async function rejectAtt(id,driverId){
 }
 
 // حمل المناطق الصعبة — يحدّد أقل طيارين ذهابًا للمناطق الصعبة هذا الشهر (مع مراعاة ساعات العمل)
-let leastHardSet=new Set();
+// خريطة معدّل المناطق الصعبة لكل طيار (رحلات صعبة ÷ ساعات العمل) — نحسب الأقل 2 بين الحاضرين وقت العرض
+let hardRateMap={};
 async function loadHardLoad(){
   try{
     const branchId=currentUser?.role==='admin'?activeBranchId:(currentUser?.branch_id||null);
-    if(!branchId){ leastHardSet=new Set(); return; }
+    if(!branchId){ hardRateMap={}; return; }
     const {data}=await db.rpc('get_hard_load',{p_branch:branchId});
-    const rows=(data||[]).filter(r=>allDrivers.some(d=>d.id===r.driver_id));
-    rows.sort((a,b)=>(Number(a.hard_rate)-Number(b.hard_rate)));
-    leastHardSet=new Set(rows.slice(0,2).map(r=>r.driver_id));
-  }catch(e){ leastHardSet=new Set(); }
+    const m={}; (data||[]).forEach(r=>{ m[r.driver_id]=Number(r.hard_rate)||0; });
+    hardRateMap=m;
+  }catch(e){ hardRateMap={}; }
 }
 
 // حمل عدد الرحلات الكلي لكل طيار هذا الشهر — لتمييز الطيار الأقل في عدد الرحلات
@@ -1187,6 +1187,13 @@ function renderDrivers(){
       const mn=Math.min(...counts);
       displayDrivers.forEach(d=>{ if(tripCountMap[d.id]===mn) leastTripsSet.add(d.id); });
     }
+  }
+  // أقل 2 طيار ذهابًا للمناطق الصعبة — بين الحاضرين على الشاشة (لضمان ظهورهم دائمًا)
+  let leastHardSet=new Set();
+  {
+    const present=displayDrivers.filter(d=>typeof hardRateMap[d.id]==='number');
+    present.sort((a,b)=>(hardRateMap[a.id]-hardRateMap[b.id]) || String(a.full_name||'').localeCompare(String(b.full_name||''),'ar'));
+    leastHardSet=new Set(present.slice(0,2).map(d=>d.id));
   }
 
 const pickedMap={};allOrders.filter(o=>['picked','failed'].includes(o.status)&&o.driver_id).forEach(o=>pickedMap[o.driver_id]=(pickedMap[o.driver_id]||0)+1);
