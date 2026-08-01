@@ -860,6 +860,7 @@ async function loadAll(){
     knownRegions=new Set((regRes.data||[]).map(r=>r.name));
     await loadAttendanceData();
     await loadHardLoad();
+    await loadTripCounts();
     renderHeader();renderDrivers();renderTrips();renderOrders();
   }catch(e){console.error(e);showToast('خطأ في التحميل');}
   showLoading(false);
@@ -1154,6 +1155,18 @@ async function loadHardLoad(){
   }catch(e){ leastHardSet=new Set(); }
 }
 
+// حمل عدد الرحلات الكلي لكل طيار هذا الشهر — لتمييز الطيار الأقل في عدد الرحلات
+let tripCountMap={};
+async function loadTripCounts(){
+  try{
+    const branchId=currentUser?.role==='admin'?activeBranchId:(currentUser?.branch_id||null);
+    if(!branchId){ tripCountMap={}; return; }
+    const {data}=await db.rpc('get_trip_counts',{p_branch:branchId});
+    const m={}; (data||[]).forEach(r=>{ m[r.driver_id]=Number(r.trips)||0; });
+    tripCountMap=m;
+  }catch(e){ tripCountMap={}; }
+}
+
 function renderDrivers(){
   const el=document.getElementById('driversScroll');
   // فقط الطيارين الحاضرين (online أو break)
@@ -1165,6 +1178,16 @@ function renderDrivers(){
   const displayDrivers=attendanceToday.length>0?presentDrivers:allDrivers.filter(d=>d.is_online);
   document.getElementById('driversLabel').textContent=`${displayDrivers.length} طيار`;
   if(!displayDrivers.length){el.innerHTML='<div style="color:#64748b;font-size:.75rem;padding:.5rem">لا يوجد طيارين حاضرين</div>';return;}
+
+  // الطيار الأقل في عدد الرحلات هذا الشهر (بين الحاضرين) — قد يكون أكثر من واحد لو متساوين
+  let leastTripsSet=new Set();
+  {
+    const counts=displayDrivers.map(d=>tripCountMap[d.id]).filter(v=>typeof v==='number');
+    if(counts.length){
+      const mn=Math.min(...counts);
+      displayDrivers.forEach(d=>{ if(tripCountMap[d.id]===mn) leastTripsSet.add(d.id); });
+    }
+  }
 
 const pickedMap={};allOrders.filter(o=>['picked','failed'].includes(o.status)&&o.driver_id).forEach(o=>pickedMap[o.driver_id]=(pickedMap[o.driver_id]||0)+1);
   const assignedMap={};allOrders.filter(o=>o.status==='assigned'&&o.driver_id).forEach(o=>assignedMap[o.driver_id]=(assignedMap[o.driver_id]||0)+1);
@@ -1202,9 +1225,12 @@ const pickedMap={};allOrders.filter(o=>['picked','failed'].includes(o.status)&&o
     const ini=(d.full_name||'?').split(' ').slice(0,2).map(w=>w[0]).join('');
     const workLabel=workMins>0?fmWorkTime(workMins):'';
 
+    const isLeastHard=leastHardSet.has(d.id);
+    const avatarBg=isLeastHard?'#dc2626':'#64748b';
+    const avatarTitle=isLeastHard?'من أقل الطيارين ذهابًا للمناطق الصعبة هذا الشهر (محسوبة بالنسبة لساعات العمل) — الأولوية له في المناطق الصعبة':'';
     return `<div class="driver-chip ${sc} ${filterDriver===d.id?'selected':''}" onclick="openDriverPopup('${d.id}')" style="position:relative">
-      ${leastHardSet.has(d.id)?`<div title="من أقل الطيارين ذهابًا للمناطق الصعبة هذا الشهر (محسوبة بالنسبة لساعات العمل)" style="position:absolute;top:-5px;left:-3px;background:#16a34a;color:#fff;font-size:.48rem;font-weight:800;padding:.05rem .3rem;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.25);z-index:2">🟢 صعب↓</div>`:''}
-      <div class="driver-avatar" style="background:${c}">${ini}</div>
+      ${leastTripsSet.has(d.id)?`<div title="أقل طيار في إجمالي عدد الرحلات هذا الشهر" style="position:absolute;top:-5px;left:-3px;background:#f59e0b;color:#fff;font-size:.5rem;font-weight:800;padding:.05rem .3rem;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.25);z-index:2">⬇ الأقل</div>`:''}
+      <div class="driver-avatar" title="${avatarTitle}" style="background:${avatarBg}">${ini}</div>
       <div class="dc-name">${(d.full_name||'').split(' ').slice(0,2).join(' ')}</div>
       <div class="dc-st ${st}">${sl}</div>
       ${workLabel?`<div style="font-size:.52rem;color:#94a3b8">${workLabel}</div>`:''}
