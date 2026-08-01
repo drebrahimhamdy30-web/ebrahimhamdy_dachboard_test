@@ -520,9 +520,8 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
     <div class="modal-body">
       <input type="hidden" id="edt-id">
       <div class="form-group"><label>المنطقة</label>
-        <select class="form-control" id="edt-region">
-          <option value="">بدون منطقة</option>
-        </select>
+        <input type="text" class="form-control" id="edt-region" list="edt-region-list" placeholder="🔍 اكتب حرف لتصفية المناطق (أو اتركها فاضية)" autocomplete="off">
+        <datalist id="edt-region-list"></datalist>
       </div>
       <div class="form-group"><label>ملاحظة الموظف</label><textarea class="form-control" id="edt-staff"></textarea></div>
       <div class="form-group" style="margin-bottom:0"><label>ملاحظات عامة</label><textarea class="form-control" id="edt-notes"></textarea></div>
@@ -2085,23 +2084,32 @@ async function confirmCancel(){
 }
 
 // Edit
+let _edtRegionNames=[];
 async function openEdit(id,e){
   e?.stopPropagation();
   const o=allOrders.find(x=>x.id===id);if(!o)return;
   document.getElementById('edt-id').value=id;
   document.getElementById('edt-staff').value=o.staff_notes||'';
   document.getElementById('edt-notes').value=o.notes||'';
-  // Load regions into select
+  // حمّل المناطق في قائمة بحث (datalist) — الطيار/الموظف يكتب حرف فتظهر المطابقة
   const {data:regions}=await db.from('regions').select('id,name').eq('is_active',true).order('name');
-  const sel=document.getElementById('edt-region');
-  sel.innerHTML='<option value="">بدون منطقة</option>'+
-    (regions||[]).map(r=>`<option value="${r.name}" ${o.cust_region===r.name?'selected':''}>${r.name}</option>`).join('');
+  _edtRegionNames=(regions||[]).map(r=>r.name);
+  document.getElementById('edt-region-list').innerHTML=
+    _edtRegionNames.map(n=>`<option value="${(n||'').replace(/"/g,'&quot;')}"></option>`).join('');
+  document.getElementById('edt-region').value=o.cust_region||'';
   document.getElementById('editModal').classList.add('open');
 }
 async function confirmEdit(){
   const id=document.getElementById('edt-id').value;
   const o=allOrders.find(x=>x.id===id);
-  const region=document.getElementById('edt-region').value;
+  let region=document.getElementById('edt-region').value.trim();
+  // لازم تكون منطقة مسجّلة (أو فاضية) — نمنع الأخطاء الإملائية اللي بتعمل منطقة غير معروفة
+  if(region){
+    const match=_edtRegionNames.find(n=>n===region)
+      || _edtRegionNames.find(n=>(n||'').trim().toLowerCase()===region.toLowerCase());
+    if(!match){ showToast('اكتب حرف واختر منطقة من القائمة'); return; }
+    region=match;
+  }
   const staff=document.getElementById('edt-staff').value;
   const notes=document.getElementById('edt-notes').value;
   showLoading(true);
