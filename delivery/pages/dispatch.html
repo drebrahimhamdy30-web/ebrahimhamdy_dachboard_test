@@ -1284,7 +1284,7 @@ async function openDriverPopup(driverId){
     const oids=[...new Set((tos||[]).map(r=>r.order_id))];
     const ordersById={};
     if(oids.length){
-      const {data:ords}=await db.from('orders').select('id,bill_no,customer_name,total_bill_net,status,cust_region,payment_method,cust_code').in('id',oids);
+      const {data:ords}=await db.from('orders').select('id,bill_no,customer_name,total_bill_net,status,cust_region,payment_method,cust_code,collected_amount,collected_approved').in('id',oids);
       (ords||[]).forEach(o=>ordersById[o.id]=o);
     }
     const byTrip={};
@@ -1292,16 +1292,34 @@ async function openDriverPopup(driverId){
     const stLabel={active:'جارية',pending_complete:'بانتظار الإنهاء',completed:'مكتملة',cancelled:'ملغاة'};
     const stColor={active:'#0891b2',pending_complete:'#d97706',completed:'#16a34a',cancelled:'#dc2626'};
     const isCash=o=>((o.payment_method||'cash')==='cash');
+    const notCounted=o=>['failed','cancelled'].includes(o.status); // تعذر/ملغي → يظهر لكن لا يُحسب
+    const collOf=o=>((o.collected_amount!=null&&o.collected_amount!=='')?Number(o.collected_amount):null);
+    // القيمة المحسوبة: لو الطيار غيّر القيمة والإدارة أقرّتها → قيمة الطيار، غير كده الفاتورة
+    const settle=o=>{ const c=collOf(o); return (o.collected_approved&&c!=null)?c:Number(o.total_bill_net||0); };
     const cards=trips.map((t,idx)=>{
       const os=(byTrip[t.id]||[]).filter(Boolean);
+      const counted=os.filter(o=>!notCounted(o));
       const when=new Date(t.completed_at||t.created_at).toLocaleString('ar-EG',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-      const tot=os.reduce((s,o)=>s+Number(o.total_bill_net||0),0)||Number(t.total_amount||0);
-      const cash=os.filter(isCash).reduce((s,o)=>s+Number(o.total_bill_net||0),0);
+      const tot=counted.reduce((s,o)=>s+settle(o),0);
+      const cash=counted.filter(isCash).reduce((s,o)=>s+settle(o),0);
       const rows=os.length?os.map(o=>{
         const pm=o.payment_method||'cash';
-        return `<div style="display:flex;justify-content:space-between;gap:.4rem;font-size:.66rem;padding:.16rem 0;border-top:1px dashed #e5e7eb">
+        const skip=notCounted(o);
+        const bill=Number(o.total_bill_net||0);
+        const coll=collOf(o);
+        const changed=coll!=null&&coll!==bill;
+        let valHtml;
+        if(skip){
+          valHtml=`<span style="color:#dc2626;font-weight:800">${o.status==='failed'?'⚠️ تعذّر':'ملغي'} · لا يُحسب</span>`;
+        } else if(changed){
+          // الطيار غيّر القيمة — يعرض قيمته والفاتورة، ولونها حسب الإقرار
+          valHtml=`<span style="color:${o.collected_approved?'#15803d':'#b45309'};font-weight:800" title="${o.collected_approved?'مُقرّ — يُحسب مبلغ الطيار':'غير مُقرّ — يُحسب مبلغ الفاتورة'}">${coll.toLocaleString()}ج</span> <span style="color:#94a3b8;text-decoration:line-through">${bill.toLocaleString()}</span>${o.collected_approved?' ✅':' <span style="color:#b45309;font-weight:700">⚠️غير مُقرّ</span>'}`;
+        } else {
+          valHtml=`<span style="color:#475569">${bill.toLocaleString()}ج</span>`;
+        }
+        return `<div style="display:flex;justify-content:space-between;gap:.4rem;font-size:.66rem;padding:.16rem 0;border-top:1px dashed #e5e7eb;${skip?'opacity:.75':''}">
           <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.customer_name||'—'}${o.cust_region?` · ${o.cust_region}`:''}</span>
-          <span style="white-space:nowrap;color:#475569">${Number(o.total_bill_net||0).toLocaleString()}ج · <span style="color:${pm==='cash'?'#15803d':'#b45309'};font-weight:700">${PL[pm]||pm}</span></span>
+          <span style="white-space:nowrap;color:#475569">${valHtml} · <span style="color:${pm==='cash'?'#15803d':'#b45309'};font-weight:700">${PL[pm]||pm}</span></span>
         </div>`;
       }).join(''):'<div style="font-size:.64rem;color:#94a3b8;padding:.16rem 0">لا توجد تفاصيل طلبات</div>';
       return `<div style="border:1px solid #e2e8f0;border-radius:8px;margin-bottom:.4rem;background:#fff;overflow:hidden">
@@ -1311,7 +1329,7 @@ async function openDriverPopup(driverId){
             <span style="font-size:.58rem;font-weight:700;color:#fff;background:${stColor[t.status]||'#64748b'};padding:.06rem .45rem;border-radius:10px">${stLabel[t.status]||t.status}</span>
           </div>
           <div style="display:flex;justify-content:space-between;font-size:.63rem;color:#64748b;margin-top:.18rem">
-            <span>${when} · ${os.length||t.orders_count||0} طلب</span>
+            <span>${when} · ${counted.length} طلب${os.length>counted.length?` <span style="color:#dc2626">(+${os.length-counted.length} تعذّر)</span>`:''}</span>
             <span>الإجمالي ${tot.toLocaleString()} · <strong style="color:#15803d">مطلوب ${cash.toLocaleString()} ج</strong></span>
           </div>
         </div>
