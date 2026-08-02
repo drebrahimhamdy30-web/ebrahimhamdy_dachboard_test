@@ -1309,18 +1309,28 @@ async function openDriverPopup(driverId){
         const coll=collOf(o);
         // "غيّر القيمة" فقط لو حصّل مبلغ حقيقي مختلف — مش صفر (الطلب اللسه ما اتوصلش collected=0 افتراضيًا)
         const changed=coll!=null&&coll>0&&coll!==bill;
-        let valHtml;
-        if(skip){
-          valHtml=`<span style="color:#dc2626;font-weight:800">${o.status==='failed'?'⚠️ تعذّر':'ملغي'} · لا يُحسب</span>`;
-        } else if(changed){
-          // الطيار غيّر القيمة — يعرض قيمته والفاتورة، ولونها حسب الإقرار
-          valHtml=`<span style="color:${o.collected_approved?'#15803d':'#b45309'};font-weight:800" title="${o.collected_approved?'مُقرّ — يُحسب مبلغ الطيار':'غير مُقرّ — يُحسب مبلغ الفاتورة'}">${coll.toLocaleString()}ج</span> <span style="color:#94a3b8;text-decoration:line-through">${bill.toLocaleString()}</span>${o.collected_approved?' ✅':' <span style="color:#b45309;font-weight:700">⚠️غير مُقرّ</span>'}`;
-        } else {
-          valHtml=`<span style="color:#475569">${bill.toLocaleString()}ج</span>`;
+        const pmHtml=`<span style="color:${pm==='cash'?'#15803d':'#b45309'};font-weight:700">${PL[pm]||pm}</span>`;
+        const nameHtml=`<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.customer_name||'—'}${o.cust_region?` · ${o.cust_region}`:''}</span>`;
+        // الطيار غيّر القيمة → اعرض قيمته عادي + زر اعتماد للكاشير (لو اعتمدها يتحسب عليها)
+        if(changed){
+          const appr=!!o.collected_approved;
+          const btn=appr
+            ? `<button onclick="event.stopPropagation();popupApproveCollected('${o.id}',false)" style="border:none;background:#fee2e2;color:#b91c1c;font-weight:700;font-size:.6rem;padding:.12rem .45rem;border-radius:6px;cursor:pointer;white-space:nowrap">↩ تراجع</button>`
+            : `<button onclick="event.stopPropagation();popupApproveCollected('${o.id}',true)" style="border:none;background:#16a34a;color:#fff;font-weight:800;font-size:.6rem;padding:.12rem .45rem;border-radius:6px;cursor:pointer;white-space:nowrap">✓ اعتمد قيمة الطيار</button>`;
+          return `<div style="padding:.24rem 0;border-top:1px dashed #e5e7eb;font-size:.66rem">
+            <div style="display:flex;justify-content:space-between;gap:.4rem">${nameHtml}<span style="white-space:nowrap">${pmHtml}</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:.4rem;margin-top:.2rem;background:${appr?'#f0fdf4':'#fffbeb'};border:1px solid ${appr?'#bbf7d0':'#fde68a'};border-radius:6px;padding:.18rem .4rem">
+              <span>الطيار <strong style="color:${appr?'#15803d':'#b45309'};font-size:.74rem">${coll.toLocaleString()}ج</strong> <span style="color:#94a3b8">· فاتورة ${bill.toLocaleString()}ج</span></span>
+              <span style="display:flex;gap:.3rem;align-items:center;white-space:nowrap">${appr?'<span style="color:#15803d;font-weight:800;font-size:.6rem">✅ مُعتمد</span>':''}${btn}</span>
+            </div>
+          </div>`;
         }
+        const valHtml = skip
+          ? `<span style="color:#dc2626;font-weight:800">${o.status==='failed'?'⚠️ تعذّر':'ملغي'} · لا يُحسب</span>`
+          : `<span style="color:#475569">${bill.toLocaleString()}ج</span>`;
         return `<div style="display:flex;justify-content:space-between;gap:.4rem;font-size:.66rem;padding:.16rem 0;border-top:1px dashed #e5e7eb;${skip?'opacity:.75':''}">
-          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.customer_name||'—'}${o.cust_region?` · ${o.cust_region}`:''}</span>
-          <span style="white-space:nowrap;color:#475569">${valHtml} · <span style="color:${pm==='cash'?'#15803d':'#b45309'};font-weight:700">${PL[pm]||pm}</span></span>
+          ${nameHtml}
+          <span style="white-space:nowrap;color:#475569">${valHtml} · ${pmHtml}</span>
         </div>`;
       }).join(''):'<div style="font-size:.64rem;color:#94a3b8;padding:.16rem 0">لا توجد تفاصيل طلبات</div>';
       return `<div style="border:1px solid #e2e8f0;border-radius:8px;margin-bottom:.4rem;background:#fff;overflow:hidden">
@@ -2867,6 +2877,16 @@ async function approveCollected(orderId, tripId, approve){
   const o=allOrders.find(x=>x.id===orderId); if(o) o.collected_approved=approve;
   showLoading(false);
   openCompleteApproval(tripId); // إعادة رسم المودال بالمبلغ الجديد
+}
+
+// اعتماد/تراجع قيمة الطيار من كارت الطيار (آخر 3 رحلات) — الكاشير يعتمدها فيتحسب عليها
+async function popupApproveCollected(orderId, approve){
+  showLoading(true);
+  await db.from('orders').update({collected_approved:approve, updated_at:new Date().toISOString()}).eq('id',orderId);
+  const o=allOrders.find(x=>x.id===orderId); if(o) o.collected_approved=approve;
+  showLoading(false);
+  showToast(approve?'✓ تم اعتماد قيمة الطيار':'↩ رجع لقيمة الفاتورة');
+  if(currentPopupDriverId) openDriverPopup(currentPopupDriverId); // إعادة رسم الكارت بالحساب الجديد
 }
 
 // تجيب الطلبات غير المغلقة على الصيدلية وتعرضها في مودال الموافقة
