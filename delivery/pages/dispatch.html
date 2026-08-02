@@ -1265,12 +1265,13 @@ async function openDriverPopup(driverId){
   statusEl.style.background=statusColors[attStatus]||'rgba(148,163,184,.2)';
   statusEl.style.color=attStatus==='online'?'#4ade80':attStatus==='break'?'#f87171':'#94a3b8';
 
-  // آخر 3 رحلات بتفاصيلها (طلباتها)
+  // آخر 3 رحلات بتفاصيلها (طلباتها) — اضغط الكارت لعرض العملاء والقيم وطريقة السداد
   const tripsEl=document.getElementById('dp-trips');
   tripsEl.innerHTML='<div style="color:#64748b;font-size:.72rem;text-align:center;padding:.4rem">...</div>';
   const {data:trips}=await db.from('trips')
     .select('id,status,orders_count,total_amount,created_at,completed_at')
     .eq('driver_id',driverId).order('created_at',{ascending:false}).limit(3);
+  const monthTrips=(typeof tripCountMap!=='undefined'&&tripCountMap[driverId]!=null)?tripCountMap[driverId]:null;
   if(!trips?.length){
     tripsEl.innerHTML='<div style="color:#64748b;font-size:.75rem;text-align:center;padding:.5rem">لا توجد رحلات</div>';
   } else {
@@ -1279,32 +1280,47 @@ async function openDriverPopup(driverId){
     const oids=[...new Set((tos||[]).map(r=>r.order_id))];
     const ordersById={};
     if(oids.length){
-      const {data:ords}=await db.from('orders').select('id,bill_no,customer_name,cust_name,total_bill_net,status,cust_region').in('id',oids);
+      const {data:ords}=await db.from('orders').select('id,bill_no,customer_name,total_bill_net,status,cust_region,payment_method,cust_code').in('id',oids);
       (ords||[]).forEach(o=>ordersById[o.id]=o);
     }
     const byTrip={};
     (tos||[]).forEach(r=>{ (byTrip[r.trip_id]=byTrip[r.trip_id]||[]).push(ordersById[r.order_id]); });
     const stLabel={active:'جارية',pending_complete:'بانتظار الإنهاء',completed:'مكتملة',cancelled:'ملغاة'};
     const stColor={active:'#0891b2',pending_complete:'#d97706',completed:'#16a34a',cancelled:'#dc2626'};
-    tripsEl.innerHTML=trips.map((t,idx)=>{
+    const isCash=o=>((o.payment_method||'cash')==='cash');
+    let grandTot=0, grandCash=0;
+    const cards=trips.map((t,idx)=>{
       const os=(byTrip[t.id]||[]).filter(Boolean);
       const when=new Date(t.completed_at||t.created_at).toLocaleString('ar-EG',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-      const tot=Number(t.total_amount||0)||os.reduce((s,o)=>s+Number(o.total_bill_net||0),0);
-      const rows=os.length?os.map(o=>`<div style="display:flex;justify-content:space-between;gap:.4rem;font-size:.66rem;padding:.14rem 0;border-top:1px dashed #e5e7eb">
-        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.bill_no||'—'} · ${o.customer_name||o.cust_name||'—'}${o.cust_region?` · ${o.cust_region}`:''}</span>
-        <span style="white-space:nowrap;color:#475569">${Number(o.total_bill_net||0).toLocaleString()}ج · ${SL[o.status]||o.status}</span>
-      </div>`).join(''):'<div style="font-size:.64rem;color:#94a3b8;padding:.14rem 0">لا توجد تفاصيل طلبات</div>';
-      return `<div style="border:1px solid #e2e8f0;border-radius:8px;padding:.4rem .5rem;margin-bottom:.4rem;background:#fff">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:.4rem">
-          <span style="font-weight:800;font-size:.72rem;color:#0f172a">رحلة${idx===0?' · الأحدث':''}</span>
-          <span style="font-size:.58rem;font-weight:700;color:#fff;background:${stColor[t.status]||'#64748b'};padding:.06rem .45rem;border-radius:10px">${stLabel[t.status]||t.status}</span>
+      const tot=os.reduce((s,o)=>s+Number(o.total_bill_net||0),0)||Number(t.total_amount||0);
+      const cash=os.filter(isCash).reduce((s,o)=>s+Number(o.total_bill_net||0),0);
+      grandTot+=tot; grandCash+=cash;
+      const rows=os.length?os.map(o=>{
+        const pm=o.payment_method||'cash';
+        return `<div style="display:flex;justify-content:space-between;gap:.4rem;font-size:.66rem;padding:.16rem 0;border-top:1px dashed #e5e7eb">
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.customer_name||'—'}${o.cust_region?` · ${o.cust_region}`:''}</span>
+          <span style="white-space:nowrap;color:#475569">${Number(o.total_bill_net||0).toLocaleString()}ج · <span style="color:${pm==='cash'?'#15803d':'#b45309'};font-weight:700">${PL[pm]||pm}</span></span>
+        </div>`;
+      }).join(''):'<div style="font-size:.64rem;color:#94a3b8;padding:.16rem 0">لا توجد تفاصيل طلبات</div>';
+      return `<div style="border:1px solid #e2e8f0;border-radius:8px;margin-bottom:.4rem;background:#fff;overflow:hidden">
+        <div onclick="var d=document.getElementById('dpd-${idx}');var op=d.style.display!=='none';d.style.display=op?'none':'block';this.querySelector('.dpx').textContent=op?'▾':'▴'" style="cursor:pointer;padding:.4rem .5rem">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:.4rem">
+            <span style="font-weight:800;font-size:.72rem;color:#0f172a">رحلة${idx===0?' · الأحدث':''} <span class="dpx" style="color:#94a3b8">▾</span></span>
+            <span style="font-size:.58rem;font-weight:700;color:#fff;background:${stColor[t.status]||'#64748b'};padding:.06rem .45rem;border-radius:10px">${stLabel[t.status]||t.status}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:.63rem;color:#64748b;margin-top:.18rem">
+            <span>${when} · ${os.length||t.orders_count||0} طلب</span>
+            <span>الإجمالي ${tot.toLocaleString()} · <strong style="color:#15803d">مطلوب ${cash.toLocaleString()} ج</strong></span>
+          </div>
         </div>
-        <div style="display:flex;justify-content:space-between;font-size:.63rem;color:#64748b;margin:.18rem 0">
-          <span>${when}</span><span>${os.length||t.orders_count||0} طلب · ${tot.toLocaleString()} ج</span>
-        </div>
-        ${rows}
+        <div id="dpd-${idx}" style="display:none;padding:0 .5rem .4rem">${rows}</div>
       </div>`;
     }).join('');
+    const head=`<div style="display:flex;justify-content:space-between;gap:.4rem;font-size:.65rem;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;padding:.4rem .5rem;margin-bottom:.45rem;font-weight:700;color:#334155">
+      <span>${monthTrips!=null?`رحلات الشهر: ${monthTrips}`:'آخر 3 رحلات'}</span>
+      <span>إجمالي ${grandTot.toLocaleString()} · <strong style="color:#15803d">المطلوب من الطيار ${grandCash.toLocaleString()} ج</strong></span>
+    </div>`;
+    tripsEl.innerHTML=head+cards;
   }
 
   // زر "إنهاء الاستراحة" يظهر فقط لو الطيار في استراحة
