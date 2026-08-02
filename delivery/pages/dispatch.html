@@ -1271,7 +1271,6 @@ async function openDriverPopup(driverId){
   const {data:trips}=await db.from('trips')
     .select('id,status,orders_count,total_amount,created_at,completed_at')
     .eq('driver_id',driverId).order('created_at',{ascending:false}).limit(3);
-  const monthTrips=(typeof tripCountMap!=='undefined'&&tripCountMap[driverId]!=null)?tripCountMap[driverId]:null;
   if(!trips?.length){
     tripsEl.innerHTML='<div style="color:#64748b;font-size:.75rem;text-align:center;padding:.5rem">لا توجد رحلات</div>';
   } else {
@@ -1288,13 +1287,11 @@ async function openDriverPopup(driverId){
     const stLabel={active:'جارية',pending_complete:'بانتظار الإنهاء',completed:'مكتملة',cancelled:'ملغاة'};
     const stColor={active:'#0891b2',pending_complete:'#d97706',completed:'#16a34a',cancelled:'#dc2626'};
     const isCash=o=>((o.payment_method||'cash')==='cash');
-    let grandTot=0, grandCash=0;
     const cards=trips.map((t,idx)=>{
       const os=(byTrip[t.id]||[]).filter(Boolean);
       const when=new Date(t.completed_at||t.created_at).toLocaleString('ar-EG',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
       const tot=os.reduce((s,o)=>s+Number(o.total_bill_net||0),0)||Number(t.total_amount||0);
       const cash=os.filter(isCash).reduce((s,o)=>s+Number(o.total_bill_net||0),0);
-      grandTot+=tot; grandCash+=cash;
       const rows=os.length?os.map(o=>{
         const pm=o.payment_method||'cash';
         return `<div style="display:flex;justify-content:space-between;gap:.4rem;font-size:.66rem;padding:.16rem 0;border-top:1px dashed #e5e7eb">
@@ -1316,11 +1313,7 @@ async function openDriverPopup(driverId){
         <div id="dpd-${idx}" style="display:none;padding:0 .5rem .4rem">${rows}</div>
       </div>`;
     }).join('');
-    const head=`<div style="display:flex;justify-content:space-between;gap:.4rem;font-size:.65rem;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;padding:.4rem .5rem;margin-bottom:.45rem;font-weight:700;color:#334155">
-      <span>${monthTrips!=null?`رحلات الشهر: ${monthTrips}`:'آخر 3 رحلات'}</span>
-      <span>إجمالي ${grandTot.toLocaleString()} · <strong style="color:#15803d">المطلوب من الطيار ${grandCash.toLocaleString()} ج</strong></span>
-    </div>`;
-    tripsEl.innerHTML=head+cards;
+    tripsEl.innerHTML=cards;
   }
 
   // زر "إنهاء الاستراحة" يظهر فقط لو الطيار في استراحة
