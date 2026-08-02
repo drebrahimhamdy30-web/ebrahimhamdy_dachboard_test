@@ -489,7 +489,10 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
     <div class="modal-header"><span class="modal-title" id="pst-title">تأجيل الطلب</span><button class="modal-close" onclick="closeModal('postponeModal')">✕</button></div>
     <div class="modal-body">
       <input type="hidden" id="pst-id">
-      <div class="form-group"><label>يعود للتوزيع في *</label><input type="datetime-local" class="form-control" id="pst-time">
+      <label style="display:flex;align-items:center;gap:.45rem;margin-bottom:.7rem;cursor:pointer;font-size:.82rem;font-weight:700;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:.5rem .6rem">
+        <input type="checkbox" id="pst-nodate" onchange="pstToggleNoDate()"> ⏸️ تأجيل بدون تاريخ (تشغيل يدوي فقط — لا يعود تلقائيًا)
+      </label>
+      <div class="form-group" id="pst-time-group"><label>يعود للتوزيع في *</label><input type="datetime-local" class="form-control" id="pst-time">
         <div style="display:flex;gap:.3rem;margin-top:.4rem;flex-wrap:wrap">
           <button class="ftab" onclick="setPstMins(5)">+5د</button>
           <button class="ftab" onclick="setPstMins(15)">+15د</button>
@@ -808,6 +811,8 @@ function buildTimers(o){
 let dispatchSettings = null;
 function postponeInfo(o){
   if(o.status!=='postponed'||!o.postpone_time)return '';
+  // بدون تاريخ (موقوف) — لا يعود إلا يدويًا
+  if(isHoldPostpone(o.postpone_time))return `<div style="font-size:.62rem;font-weight:700;background:#fef3c7;color:#92400e;padding:.15rem .45rem;border-radius:6px;margin-bottom:.3rem;display:inline-block">⏸️ موقوف — بدون تاريخ (تشغيل يدوي)</div>`;
   const t=new Date(o.postpone_time);
   const diff=Math.round((t-new Date())/1000);
   const timeStr=t.toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'});
@@ -2096,23 +2101,36 @@ async function confirmDeliver(){
 }
 
 // Postpone
+// تاريخ بعيد جدًا = تأجيل بدون تاريخ (لا يعيده التوزيع التلقائي — تشغيل يدوي فقط)
+const PST_HOLD='2999-12-31T00:00:00.000Z';
+function isHoldPostpone(pt){ if(!pt)return false; const d=new Date(pt); return !isNaN(d)&&d.getFullYear()>=2900; }
+function pstToggleNoDate(){
+  const on=document.getElementById('pst-nodate').checked;
+  const g=document.getElementById('pst-time-group');
+  if(g) g.style.display=on?'none':'block';
+}
 function openPostpone(id,e){
   e?.stopPropagation();
   window._removeFromTripId=null; // تأجيل عادي مش إزالة من رحلة
   const o=allOrders.find(x=>x.id===id);
   document.getElementById('pst-id').value=id;
-  // لو الطلب مؤجل بالفعل → اعرض وقته الحالي عشان تعدّله
+  // بدون تاريخ؟ لو الطلب موقوف بالفعل → فعّل الاختيار
+  const hold=o?.status==='postponed'&&isHoldPostpone(o.postpone_time);
+  document.getElementById('pst-nodate').checked=hold;
+  // لو الطلب مؤجل بوقت → اعرض وقته الحالي عشان تعدّله
   let t;
-  if(o?.status==='postponed'&&o.postpone_time){
+  if(o?.status==='postponed'&&o.postpone_time&&!hold){
     t=new Date(o.postpone_time);
   }else{
     t=new Date(); t.setHours(t.getHours()+1);
   }
   document.getElementById('pst-time').value=new Date(t.getTime()-t.getTimezoneOffset()*60000).toISOString().slice(0,16);
   document.getElementById('pst-reason').value=(o?.status==='postponed'?(o.postpone_reason||''):'');
+  pstToggleNoDate();
   document.getElementById('postponeModal').classList.add('open');
 }
 function setPstMins(mins){
+  const nd=document.getElementById('pst-nodate'); if(nd&&nd.checked){ nd.checked=false; pstToggleNoDate(); }
   const t=new Date(Date.now()+mins*60000);
   document.getElementById('pst-time').value=new Date(t.getTime()-t.getTimezoneOffset()*60000).toISOString().slice(0,16);
 }
@@ -2120,9 +2138,11 @@ function setPstMins(mins){
 async function confirmPostpone(){
   const id=document.getElementById('pst-id').value;
   const reason=document.getElementById('pst-reason').value;
+  const noDate=document.getElementById('pst-nodate').checked;
   const timeVal=document.getElementById('pst-time').value;
-  if(!timeVal){ showToast('حدد وقت التأجيل'); return; }
-  const postponeAt=new Date(timeVal).toISOString();
+  if(!noDate && !timeVal){ showToast('حدد وقت التأجيل'); return; }
+  // بدون تاريخ → وقت بعيد جدًا عشان التوزيع التلقائي ما يعيدهوش (تشغيل يدوي فقط)
+  const postponeAt=noDate?PST_HOLD:new Date(timeVal).toISOString();
   const wasRemove=!!window._removeFromTripId;
   showLoading(true);
   const now=new Date().toISOString();
@@ -2148,7 +2168,8 @@ async function confirmPostpone(){
 
   await addOrderLog(id,'order_postponed',{
     reason:reason||'—',
-    until:new Date(postponeAt).toLocaleString('ar-EG',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}),
+    until:noDate?'بدون تاريخ (تشغيل يدوي)':new Date(postponeAt).toLocaleString('ar-EG',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}),
+    ...(noDate?{hold:true}:{}),
     ...(wasRemove?{action:'removed_from_trip'}:{})
   });
 
