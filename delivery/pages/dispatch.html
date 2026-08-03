@@ -871,6 +871,16 @@ async function loadAll(){
   showLoading(false);
 }
 setInterval(()=>{renderOrders();},1000);
+// عدّاد مدة الرحلة (ساعة:دقيقة:ثانية) من وقت استلام أول طلب — تحديث حي كل ثانية بدون إعادة رسم
+setInterval(()=>{
+  const now=Date.now();
+  document.querySelectorAll('.tc-timer2[data-start]').forEach(el=>{
+    const st=Number(el.dataset.start); if(!st)return;
+    let d=Math.max(0,Math.floor((now-st)/1000));
+    const h=Math.floor(d/3600); d-=h*3600; const m=Math.floor(d/60); const s=d-m*60;
+    el.textContent='⏱️ مدة الرحلة: '+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+  });
+},1000);
 setInterval(()=>{renderTrips();},10000);
 setInterval(loadAll,30000);
 
@@ -1414,6 +1424,9 @@ function renderTrips(){
     const tot=tO.reduce((s,o)=>s+Number(o.total_bill_net||0),0);
     const done=tO.filter(o=>['delivered','completed'].includes(o.status)).length;
     const waitingPickup=tO.filter(o=>o.status==='assigned').length;
+    // مدة الرحلة = من وقت استلام أول طلب
+    const pickedMs=tO.map(o=>o.picked_at).filter(Boolean).map(t=>new Date(t).getTime()).filter(n=>!isNaN(n));
+    const firstPicked=pickedMs.length?Math.min(...pickedMs):null;
     // مناطق الرحلة (مميّزة) عشان نعرف الطيار في أنهي منطقة
     const tripRegions=[...new Set(tO.map(o=>o.cust_region).filter(Boolean))];
     return `<div class="trip-card ${filterDriver===trip.driver_id?'hl':''}" data-did="${trip.driver_id||''}">
@@ -1422,6 +1435,7 @@ function renderTrips(){
         <div class="tc-inf">
           <div class="tc-nm">${dn.split(' ').slice(0,2).join(' ')}</div>
           <div class="tc-mt">${done}/${tO.length} · ${tot.toLocaleString()} ج</div>
+          ${firstPicked?`<div class="tc-timer2" data-start="${firstPicked}" style="font-size:.62rem;color:#0e7490;font-weight:800;white-space:nowrap;margin-top:.1rem">⏱️ مدة الرحلة: 00:00:00</div>`:''}
         </div>
         <div class="tc-dot" style="background:${done===tO.length&&tO.length>0?'#4ade80':'#a78bfa'}"></div>
       </div>
