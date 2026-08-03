@@ -1181,6 +1181,25 @@ function renderDrivers(){
   });
   // لو مفيش attendance data → اعرض كل الأونلاين زي الأول
   const displayDrivers=attendanceToday.length>0?presentDrivers:allDrivers.filter(d=>d.is_online);
+
+  // رتّب الطيارين حسب الدور: المتاح وعليه الدور الأول (على اليمين)، ثم التالي، وهكذا — بنفس منطق التوزيع
+  {
+    const ordCnt={};
+    allOrders.forEach(o=>{ if(o.driver_id && ['assigned','picked'].includes(o.status)) ordCnt[o.driver_id]=(ordCnt[o.driver_id]||0)+1; });
+    const prio=dispatchSettings?.driver_priority||'least_orders';
+    const lct=d=>d.last_completed_at?new Date(d.last_completed_at).getTime():0; // 0 = لم ينهِ رحلة = الأطول فراغًا
+    displayDrivers.sort((a,b)=>{
+      const aAv=isDriverAvailable(a.id)?0:1, bAv=isDriverAvailable(b.id)?0:1;
+      if(aAv!==bAv) return aAv-bAv;                 // المتاح أولًا
+      if(aAv===0){                                   // بين المتاحين: ترتيب الدور
+        const ca=ordCnt[a.id]||0, cb=ordCnt[b.id]||0;
+        if(ca!==cb) return ca-cb;                    // الأقل طلبات أولًا
+        if(prio==='longest_idle'){ const dd=lct(a)-lct(b); if(dd) return dd; } // الأطول فراغًا أولًا
+        return String(a.full_name||'').localeCompare(String(b.full_name||''),'ar');
+      }
+      return 0;                                      // غير المتاحين يفضلوا بترتيبهم الحالي
+    });
+  }
   document.getElementById('driversLabel').textContent=`${displayDrivers.length} طيار`;
   if(!displayDrivers.length){el.innerHTML='<div style="color:#64748b;font-size:.75rem;padding:.5rem">لا يوجد طيارين حاضرين</div>';return;}
 
