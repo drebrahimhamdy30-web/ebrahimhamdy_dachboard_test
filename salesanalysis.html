@@ -241,15 +241,19 @@
     async function loadOverview(){
       const wrap=document.getElementById('tableWrap');
       wrap.innerHTML='<div class="empty-tab"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>';
-      const mr = curMonthRange();   // النظرة العامة دائمًا الشهر الحالي
-      const [o, branches, hours] = await Promise.all([
+      const mr = effRange();   // الشهر الحالي افتراضيًا، أو الفترة المختارة
+      const [o, branches, hours, adays] = await Promise.all([
         sbSalesOverview(mr.from, mr.to, fltStore()),
         sbSalesSummary(mr.from, mr.to, fltStore()),
-        sbSalesByHour(mr.from, mr.to, fltStore())
+        sbSalesByHour(mr.from, mr.to, fltStore()),
+        sbSalesActiveDays(mr.from, mr.to, fltStore())
       ]);
       const kpi = (label,val,sub)=>`<div class="kpi"><div class="kpi-val">${val}</div><div class="kpi-lbl">${label}</div>${sub?`<div class="kpi-sub">${sub}</div>`:''}</div>`;
       const netTot = Number(o.net)||0;
-      const dailyAvg = mr.days>0 ? netTot/mr.days : 0;   // المعدل اليومي = الصافي ÷ الأيام المنقضية
+      // المعدل اليومي = الصافي ÷ عدد أيام المبيعات الفعلية في الفترة (لحد آخر يوم فيه مبيعات) — يتفادى قسمة على يوم لسه ما اتسحبش
+      const activeDays = Number(adays.active_days)||0;
+      const lastDayStr = adays.last_day ? new Date(adays.last_day+'T00:00:00').toLocaleDateString('ar-EG',{day:'2-digit',month:'2-digit'}) : '';
+      const dailyAvg = activeDays>0 ? netTot/activeDays : 0;
       // القنوات
       const chan = (name,bills,val,color)=>{
         const p=pct(val,netTot);
@@ -276,10 +280,10 @@
       }).join('');
 
       wrap.innerHTML = `
-        <div style="font-size:0.85rem;color:var(--text-secondary);font-weight:700;margin:0 2px 12px"><i class="fas fa-calendar-alt"></i> بيانات الشهر الحالي — ${esc(mr.label)} (حتى أمس · ${mr.days} يوم مكتمل)</div>
+        <div style="font-size:0.85rem;color:var(--text-secondary);font-weight:700;margin:0 2px 12px"><i class="fas fa-calendar-alt"></i> ${esc(mr.label)} · ${activeDays} يوم مبيعات${lastDayStr?` (آخر يوم: ${lastDayStr})`:''}</div>
         <div class="kpi-row">
           ${kpi('صافي المبيعات', num(o.net)+' ج')}
-          ${kpi('المعدل اليومي', num(dailyAvg)+' ج', 'على '+mr.days+' يوم مكتمل')}
+          ${kpi('المعدل اليومي', num(dailyAvg)+' ج', 'على '+activeDays+' يوم مبيعات')}
           ${kpi('إجمالي (قبل الخصم)', num(o.gross)+' ج')}
           ${kpi('عدد الفواتير', o.bills||0)}
           ${kpi('متوسط الفاتورة', num(o.avg_bill)+' ج')}

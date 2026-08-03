@@ -233,6 +233,8 @@ function sbSalesByEmployee(from, to, store)   { return _sbRpc('sales_by_employee
 function sbSalesDetail(opts)                  { const o=opts||{}; return _sbRpc('sales_detail', { p_from:o.from||null, p_to:o.to||null, p_store:o.store||null, p_employee:o.employee||null, p_search:o.search||null, p_limit:o.limit||100, p_offset:o.offset||0 }); }
 // تحليل المبيعات — نظرة عامة + ساعات الذروة
 async function sbSalesOverview(from, to, store){ const r = await _sbRpc('sales_overview', { p_from: from||null, p_to: to||null, p_store: store||null }); return r[0] || {}; }
+// عدد أيام المبيعات الفعلية + آخر يوم مبيعات في الفترة (للمعدل اليومي الدقيق)
+async function sbSalesActiveDays(from, to, store){ const r = await _sbRpc('sales_active_days', { p_from: from||null, p_to: to||null, p_store: store||null }); return r[0] || { active_days:0, last_day:null }; }
 function sbSalesByHour(from, to, store)        { return _sbRpc('sales_by_hour', { p_from: from||null, p_to: to||null, p_store: store||null }); }
 // تحليل المبيعات — مراجعة الأسعار والخصومات
 function sbSalesPriceReview(from, to, store)  { return _sbRpc('sales_price_review',  { p_from: from||null, p_to: to||null, p_store: store||null }); }
