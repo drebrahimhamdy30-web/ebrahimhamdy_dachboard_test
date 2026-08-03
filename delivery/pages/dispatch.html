@@ -897,8 +897,8 @@ function renderHeader(){
   // طلبات معلّقة: مُستلمة/معيّنة لكن بلا رحلة نشطة
   const stuck=onwayAll.filter(o=>!activeOrderIds.has(o.id)).length;
   const l=allOrders.filter(o=>isLate(o)).length;
-// عدد الطيارين المتاحين (حاضرين online ومش في استراحة)
-const availableDrivers=allDrivers.filter(d=>isDriverAvailable(d.id)).length;
+// عدد الطيارين المتاحين فعليًا (فاضيين: مفيش طلبات ومش على رحلة)
+const availableDrivers=allDrivers.filter(d=>isDriverFree(d.id)).length;
 // عدد الطيارين الأونلاين (حاضرين online)
 const onlineDrivers=allDrivers.filter(d=>getDriverAttStatus(d.id)==='online').length;
 
@@ -979,6 +979,16 @@ function isDriverAvailable(driverId){
   const loose=allOrders.some(o=>o.driver_id===driverId&&['picked','failed'].includes(o.status));
   if(loose) return false;
 
+  return true;
+}
+
+// متاح فعليًا (فاضي جاهز): حاضر ومعتمد + مفيش أي طلب شغّال (معيّن أو مستلم) + مش على رحلة نشطة
+function isDriverFree(driverId){
+  const recs=attendanceToday.filter(r=>r.driver_id===driverId).sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  const last=recs[0];
+  if(!last||last.status!=='online'||!last.approved_at) return false;
+  if(allOrders.some(o=>o.driver_id===driverId&&['assigned','picked'].includes(o.status))) return false;
+  if(activeTrips.some(t=>t.driver_id===driverId&&['active','pending_complete'].includes(t.status))) return false;
   return true;
 }
 
@@ -1192,8 +1202,8 @@ function renderDrivers(){
     const prio=dispatchSettings?.driver_priority||'least_orders';
     const lct=d=>d.last_completed_at?new Date(d.last_completed_at).getTime():0; // 0 = لم ينهِ رحلة = الأطول فراغًا
     displayDrivers.sort((a,b)=>{
-      const aAv=isDriverAvailable(a.id)?0:1, bAv=isDriverAvailable(b.id)?0:1;
-      if(aAv!==bAv) return aAv-bAv;                 // المتاح أولًا
+      const aAv=isDriverFree(a.id)?0:1, bAv=isDriverFree(b.id)?0:1;
+      if(aAv!==bAv) return aAv-bAv;                 // المتاح (الفاضي) أولًا
       if(aAv===0){                                   // بين المتاحين: ترتيب الدور
         const ca=ordCnt[a.id]||0, cb=ordCnt[b.id]||0;
         if(ca!==cb) return ca-cb;                    // الأقل طلبات أولًا
