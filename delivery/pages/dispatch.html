@@ -571,6 +571,13 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
   </div>
 </div>
 
+<div class="modal-overlay" id="itemsModal">
+  <div class="modal modal-sm">
+    <div class="modal-header"><span class="modal-title" id="itemsTitle">🧾 أصناف الطلب</span><button class="modal-close" onclick="closeModal('itemsModal')">✕</button></div>
+    <div class="modal-body" id="itemsBody" style="max-height:60vh;overflow:auto"></div>
+  </div>
+</div>
+
 <!-- Trip Order Actions Modal -->
 <div class="modal-overlay" id="tripOrderActionsModal">
   <div class="modal modal-sm">
@@ -2555,31 +2562,31 @@ function custPhones(raw){
   return nums.map(n=>`<a href="tel:${n}" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:.25rem;margin:0 0 .15rem .3rem;color:#15803d;background:#dcfce7;border:1px solid #bbf7d0;border-radius:8px;padding:.15rem .45rem;font-weight:800;font-size:.78rem;text-decoration:none">📞 <bdi>${n}</bdi></a>`).join('');
 }
 
-// جلب أصناف الطلب عند الطلب من ويبهوك n8n (بناءً على رقم الفاتورة + الفرع)
+// أصناف الطلب — تُعرض في نافذة منبثقة عند الضغط، وتُجلب من ويبهوك n8n حسب رقم الفاتورة + الفرع
 const SALES_ITEMS_WEBHOOK='https://agent.ebrahimhamdy.com/webhook/sales_item';
-const billItemsCache={}; // كاش الأصناف حسب معرّف الطلب حتى تفضل ظاهرة بعد تحديث اللوحة
+const billItemsCache={}; // كاش الأصناف حسب معرّف الطلب
 
 function renderBillItems(items){
   const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-  if(!items||!items.length) return '<div style="color:#64748b;font-size:.78rem;padding:.3rem 0">لا توجد أصناف في هذه الفاتورة</div>';
+  if(!items||!items.length) return '<div style="color:#64748b;font-size:.85rem;padding:.6rem 0;text-align:center">لا توجد أصناف في هذه الفاتورة</div>';
   const rows=items.map(it=>{
     const nm=esc(it.name||'—');
     const q=it.qty;
-    const qs=(q!=null&&String(q).trim()!=='')?`<span style="color:#0A3D62;font-weight:800;white-space:nowrap">×${esc(q)}</span>`:'';
-    const unit=it.unit?`<span style="color:#94a3b8;font-size:.68rem"> · ${esc(it.unit)}</span>`:'';
-    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;padding:.24rem 0;border-bottom:1px dashed #e2e8f0"><span style="font-weight:600;font-size:.76rem">• ${nm}${unit}</span>${qs}</div>`;
+    const qs=(q!=null&&String(q).trim()!=='')?`<span style="background:#0A3D62;color:#fff;font-weight:800;font-size:.75rem;padding:.12rem .5rem;border-radius:6px;white-space:nowrap">×${esc(q)}</span>`:'';
+    const unit=it.unit?`<span style="color:#94a3b8;font-size:.72rem"> · ${esc(it.unit)}</span>`:'';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:.6rem;padding:.5rem .2rem;border-bottom:1px solid #eef2f7"><span style="font-weight:600;font-size:.9rem;color:#1e293b">${nm}${unit}</span>${qs}</div>`;
   }).join('');
-  return `<div style="font-weight:800;color:#0A3D62;font-size:.74rem;margin-bottom:.15rem">🧾 أصناف الفاتورة (${items.length})</div>${rows}`;
+  return `<div style="font-weight:800;color:#0A3D62;font-size:.85rem;margin-bottom:.35rem;display:flex;justify-content:space-between"><span>🧾 قائمة الأصناف</span><span style="color:#64748b">${items.length} صنف</span></div>${rows}`;
 }
 
-// key: سياق فريد يمنع تكرار معرّفات DOM (card-<id> للكارت، pop-<id> للنافذة)
-async function loadBillItems(billNo,branchId,oid,key){
-  const box=document.getElementById('billItems_'+key);
-  const btn=document.getElementById('billItemsBtn_'+key);
-  if(!box) return;
-  if(!billNo||billNo==='null'){ box.innerHTML='<div style="color:#b91c1c;font-size:.78rem">لا يوجد رقم فاتورة لهذا الطلب</div>'; return; }
-  if(btn){ btn.disabled=true; btn.textContent='⏳ جاري التحميل...'; }
-  box.innerHTML='<div style="color:#64748b;font-size:.78rem">⏳ جاري جلب الأصناف...</div>';
+// يفتح النافذة المنبثقة ويجلب الأصناف (مع كاش)
+async function openItemsModal(billNo,branchId,oid,cc){
+  const body=document.getElementById('itemsBody');
+  document.getElementById('itemsTitle').innerHTML='🧾 أصناف الفاتورة '+(billNo?('#'+billNo):'')+(cc?` <span style="color:#64748b;font-weight:600;font-size:.8rem">· كود ${cc}</span>`:'');
+  document.getElementById('itemsModal').classList.add('open');
+  if(billItemsCache[oid]){ body.innerHTML=renderBillItems(billItemsCache[oid]); return; }
+  if(!billNo||billNo==='null'){ body.innerHTML='<div style="color:#b91c1c;font-size:.85rem;text-align:center;padding:.6rem">لا يوجد رقم فاتورة لهذا الطلب</div>'; return; }
+  body.innerHTML='<div style="color:#64748b;font-size:.85rem;text-align:center;padding:1rem">⏳ جاري جلب الأصناف...</div>';
   try{
     const r=await fetch(SALES_ITEMS_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch_id:branchId||'',bill_no:String(billNo)})});
     if(!r.ok) throw new Error('HTTP '+r.status);
@@ -2595,30 +2602,27 @@ async function loadBillItems(billNo,branchId,oid,key){
       price:it.unit_price
     }));
     billItemsCache[oid]=items;
-    box.innerHTML=renderBillItems(items);
-    if(btn) btn.style.display='none';
+    body.innerHTML=renderBillItems(items);
   }catch(e){
-    box.innerHTML='<div style="color:#b91c1c;font-size:.78rem">❌ تعذّر جلب الأصناف: '+(e&&e.message||e)+'</div>';
-    if(btn){ btn.disabled=false; btn.textContent='🧾 إعادة المحاولة'; }
+    body.innerHTML='<div style="color:#b91c1c;font-size:.85rem;text-align:center;padding:.6rem">❌ تعذّر جلب الأصناف<br><span style="font-size:.75rem">'+(e&&e.message||e)+'</span></div>';
   }
 }
 
-function billItemsInner(o,key){
-  const bn=(o.bill_no!=null?String(o.bill_no):'').replace(/'/g,'');
-  const bid=(o.branch_id!=null?String(o.branch_id):'').replace(/'/g,'');
-  const cached=billItemsCache[o.id];
-  if(cached) return `<div id="billItems_${key}">${renderBillItems(cached)}</div>`;
-  return `<button id="billItemsBtn_${key}" onclick="loadBillItems('${bn}','${bid}','${o.id}','${key}')" style="background:#0A3D62;color:#fff;border:none;border-radius:8px;padding:.28rem .6rem;font-weight:700;font-size:.72rem;cursor:pointer">🧾 عرض الأصناف</button><div id="billItems_${key}" style="margin-top:.3rem"></div>`;
+function billItemsBtnHtml(o){
+  const bn=(o.bill_no!=null?String(o.bill_no):'').replace(/['"\\]/g,'');
+  const bid=(o.branch_id!=null?String(o.branch_id):'').replace(/['"\\]/g,'');
+  const cc=(o.cust_code!=null?String(o.cust_code):'').replace(/['"\\]/g,'');
+  return `<button onclick="event.stopPropagation();openItemsModal('${bn}','${bid}','${o.id}','${cc}')" style="background:#0A3D62;color:#fff;border:none;border-radius:8px;padding:.3rem .7rem;font-weight:700;font-size:.74rem;cursor:pointer;display:inline-flex;align-items:center;gap:.25rem">🧾 عرض الأصناف</button>`;
 }
 
 // سطر الأصناف داخل نافذة التفاصيل
 function billItemsRow(o){
-  return `<div class="d-row" style="align-items:flex-start"><span class="d-lbl">🧾 الأصناف</span><span class="d-val" style="text-align:right">${billItemsInner(o,'pop-'+o.id)}</span></div>`;
+  return `<div class="d-row"><span class="d-lbl">🧾 الأصناف</span><span class="d-val" style="text-align:left">${billItemsBtnHtml(o)}</span></div>`;
 }
 
-// كتلة الأصناف داخل كارت الطلب (تظهر لأي طلب حتى لو غير موزّع)
+// زر الأصناف داخل كارت الطلب (يظهر لأي طلب حتى غير موزّع)
 function billItemsCard(o){
-  return `<div class="oc-items" onclick="event.stopPropagation()" style="margin-bottom:.28rem;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:.35rem .5rem">${billItemsInner(o,'card-'+o.id)}</div>`;
+  return `<div class="oc-items" onclick="event.stopPropagation()" style="margin-bottom:.28rem">${billItemsBtnHtml(o)}</div>`;
 }
 // Detail
 function openDetail(id){
