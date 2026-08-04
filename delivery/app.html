@@ -754,6 +754,52 @@ window.pinFloatingCard = async function(){
     return true;
   }catch(e){ console.error('pinFloatingCard', e); window._tripPip=null; return 'error:'+(e&&e.name||''); }
 };
+
+// تثبيت نافذة الطيار كنافذة عائمة (Document PiP) — نفس فكرة كارت إنهاء الرحلة
+window.pinDriverPopup = async function(){
+  const iframe = document.getElementById('mainFrame');
+  const idoc = iframe && iframe.contentDocument;
+  const iwin = iframe && iframe.contentWindow;
+  if(!idoc || !iwin) return 'no-frame';
+  const card = idoc.getElementById('driverPopup');
+  if(!card) return 'no-card';
+  if(!('documentPictureInPicture' in window)) return 'unsupported';
+  try{
+    if(window._drvPip && !window._drvPip.closed){ window._drvPip.focus(); return true; }
+    let cw=340, ch=580;
+    try{ cw = Math.max(300, Math.min((card.offsetWidth||340), 460)); ch = Math.max(300, Math.min((card.offsetHeight||580), 800)); }catch(e){}
+    const pip = await window.documentPictureInPicture.requestWindow({width: Math.round(cw+24), height: Math.round(ch+24)});
+    window._drvPip = pip;
+    const pdoc = pip.document;
+    pdoc.documentElement.setAttribute('dir','rtl');
+    pdoc.documentElement.setAttribute('lang','ar');
+    [...idoc.styleSheets].forEach(ss=>{
+      try{ const css=[...ss.cssRules].map(r=>r.cssText).join('\n'); const st=pdoc.createElement('style'); st.textContent=css; pdoc.head.appendChild(st); }
+      catch(e){ if(ss.href){ const l=pdoc.createElement('link'); l.rel='stylesheet'; l.href=ss.href; pdoc.head.appendChild(l); } }
+    });
+    pdoc.body.style.cssText='margin:0;padding:12px;background:#1e293b';
+    // بريدج أزرار النافذة (تشتغل من داخل النافذة العائمة على دوال الداشبورد)
+    const did = iwin.currentPopupDriverId;
+    pip.currentPopupDriverId = did;
+    pip.callDriver         = (x)=> iwin.callDriver(x||did);
+    pip.openSendMessage    = (x)=> iwin.openSendMessage(x||did);
+    pip.showDriverLocation = (x)=> iwin.showDriverLocation(x||did);
+    pip.endDriverBreak     = (x)=> iwin.endDriverBreak(x||did);
+    pip.forceDriverOffline = (x)=> iwin.forceDriverOffline(x||did);
+    pip.popupApproveCollected = (a,b)=> iwin.popupApproveCollected(a,b);
+    pip.pinDriverPopupCard = ()=>{ try{ pip.focus(); }catch(e){} };
+    pip.closeDriverPopup   = ()=>{ try{ iwin.closeDriverPopup(); }catch(e){} try{ if(!pip.closed) pip.close(); }catch(e){} };
+    // ننقل النافذة الأصلية للنافذة العائمة ونحفظ ستايلها لإرجاعه
+    const prevCss = card.style.cssText;
+    pdoc.body.appendChild(pdoc.adoptNode(card));
+    card.style.cssText = 'position:static;transform:none;width:100%;max-width:100%;max-height:none;display:block;box-shadow:none';
+    pip.addEventListener('pagehide',()=>{
+      try{ card.style.cssText = prevCss; idoc.body.appendChild(idoc.adoptNode(card)); card.classList.remove('open'); }catch(e){}
+      window._drvPip=null;
+    });
+    return true;
+  }catch(e){ console.error('pinDriverPopup', e); window._drvPip=null; return 'error:'+(e&&e.name||''); }
+};
 </script>
 </body>
 </html>
