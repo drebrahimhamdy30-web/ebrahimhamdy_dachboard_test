@@ -166,12 +166,9 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text);heigh
 .orders-grid::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px}
 
 /* ORDER CARD */
-.order-card{background:white;border-radius:12px;border:1px solid #eef2f7;padding:.4rem .5rem;cursor:pointer;transition:all .18s;position:relative;box-shadow:var(--shadow-sm)}
-  .order-card:hover{border-color:#bfd4fb;box-shadow:var(--shadow-md);transform:translateY(-1px)}
-.order-card.sel{border-color:var(--primary);background:var(--primary-light);box-shadow:0 0 0 2px rgba(37,99,235,.25),var(--shadow-sm)}
-.order-card.late{border-right:3px solid var(--red)}
-.order-card.sp{border-right:3px solid var(--purple)}
-.order-card.sk{border-right:3px solid var(--blue)}
+.order-card{background:#fff;border-radius:12px;border:2px solid #e5e9f0;padding:.4rem .5rem;cursor:pointer;transition:all .18s;position:relative;box-shadow:var(--shadow-sm)}
+  .order-card:hover{box-shadow:var(--shadow-md);transform:translateY(-1px)}
+.order-card.sel{border-color:var(--primary)!important;background:var(--primary-light);box-shadow:0 0 0 2px rgba(37,99,235,.25),var(--shadow-sm)}
 @keyframes urg{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.3)}50%{box-shadow:0 0 0 5px rgba(220,38,38,0)}}
 .order-card.urgent{animation:urg 1.5s ease-in-out infinite}
 .oc-check{position:absolute;top:.4rem;left:.4rem;width:16px;height:16px;border-radius:4px;border:2px solid var(--border);background:white;display:flex;align-items:center;justify-content:center;font-size:.65rem;color:white;transition:all .12s}
@@ -214,6 +211,7 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text);heigh
 .ab-cancel  {background:var(--bg);color:#374151;border-color:#d1d5db}
 .ab-edit    {background:var(--blue-light);color:#0e7490;border-color:#a5f3fc}
 .ab-log     {background:var(--bg);color:var(--text-muted);border-color:#e5e7eb}
+.ab-detail  {background:var(--primary-light);color:var(--primary);border-color:#bfd4fb}
 
 /* MODALS */
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;align-items:center;justify-content:center;padding:1rem}
@@ -696,6 +694,11 @@ const DC=['#1a56db','#7c3aed','#16a34a','#ea580c','#0891b2','#ca8a04','#dc2626',
 const SC={pending:'#16a34a',assigned:'#ea580c',picked:'#0891b2',delivered:'#ca8a04',completed:'#6b7280',postponed:'#7c3aed',cancelled:'#dc2626',failed:'#dc2626'};
 const SL={pending:'جاهز',assigned:'على رحلة',picked:'استلم',delivered:'تم التوصيل',completed:'مكتمل',postponed:'مؤجل',cancelled:'ملغي',failed:'متعذر'};
 const PL={cash:'كاش',visa:'فيزا',transfer:'تحويل',deferred:'آجل',paid:'خالص'};
+// لون حافة الكارت حسب الحالة (خلفية بيضا دايمًا) — أحمر للحالات اللي محتاجة انتباه
+function ocBorder(o, late, owesBal){
+  if((o.notes||'').includes('🚨') || late || owesBal) return '#dc2626';
+  return SC[o.status] || '#e5e9f0';
+}
 const LOG_C={order_created:'#16a34a',driver_assigned:'#1a56db',order_picked:'#0891b2',order_delivered:'#ca8a04',order_completed:'#6b7280',order_postponed:'#7c3aed',order_cancelled:'#dc2626',order_edited:'#0891b2',order_urgent:'#dc2626',trip_created:'#1a56db',trip_completed:'#6b7280'};
 const LOG_I={order_created:'📦',driver_assigned:'🚗',order_picked:'▶️',order_delivered:'✅',order_completed:'✔️',order_postponed:'⏰',order_cancelled:'❌',order_edited:'✏️',order_urgent:'🚨',trip_created:'🗺️',trip_completed:'🏁'};
 const LOG_A={order_created:'تم إنشاء الطلب',driver_assigned:'تم تعيين طيار',order_picked:'الطيار استلم',order_delivered:'تم التسليم',order_completed:'مكتمل',order_postponed:'تم التأجيل',order_cancelled:'تم الإلغاء',order_edited:'تم التعديل',order_urgent:'تحديد كعاجل',trip_created:'إنشاء رحلة',trip_completed:'إنهاء الرحلة'};
@@ -1587,12 +1590,14 @@ function renderOrders(){
       actions+=`<button class="ab ab-postpone" onclick="openPostpone('${o.id}',event)">تأجيل</button>`;
       actions+=`<button class="ab ab-cancel" onclick="openCancel('${o.id}',event)">إلغاء</button>`;
     }
+    actions+=`<button class="ab ab-detail" onclick="openDetail('${o.id}')">👁 تفاصيل</button>`;
     actions+=`<button class="ab ab-edit" onclick="openEdit('${o.id}',event)">تعديل</button>`;
     actions+=`<button class="ab ab-log" onclick="openLog('${o.id}',event)">سجل</button>`;
 
     const _bal=Number(o.current_customer_balance||0);
     const owesBal=_bal>=3, creditBal=_bal<=-3;
-    return `<div class="order-card ${late?'late':''} ${o.status==='postponed'?'sp':''} ${['assigned','picked'].includes(o.status)?'sk':''} ${sel?'sel':''} ${(o.notes||'').includes('🚨')?'urgent':''}" id="oc-${o.id}" onclick="toggleSel('${o.id}',event)" ${owesBal?'style="background:#fee2e2;border:2px solid #dc2626"':''}>
+    const bColor = sel ? '' : `border-color:${ocBorder(o, late, owesBal)}`;
+    return `<div class="order-card ${sel?'sel':''} ${(o.notes||'').includes('🚨')?'urgent':''}" id="oc-${o.id}" onclick="toggleSel('${o.id}',event)" style="${bColor}">
       <div class="oc-check">${sel?'✓':''}</div>
       <div class="oc-timers">${buildTimers(o)}</div>
       ${postponeInfo(o)}
@@ -2661,6 +2666,7 @@ function openDetail(id){
     <div class="d-row"><span class="d-lbl">طريقة الدفع</span><span class="d-val">${pmL}</span></div>
     <div class="d-row"><span class="d-lbl">الحالة</span><span class="d-val">${SL[o.status]||o.status}</span></div>${o.perf_rating?`<div class="d-row"><span class="d-lbl">أداء التوصيل</span><span class="d-val">فعلي ${o.actual_minutes} / متوقع ${o.expected_minutes} د · <strong style="color:${o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.perf_rating}</strong></span></div>`:''}
     <div class="d-row"><span class="d-lbl">الطيار</span><span class="d-val">${o.deliveryman||'—'}</span></div>
+    <div class="d-row"><span class="d-lbl">الموظف</span><span class="d-val">${o.employee_name||'—'}</span></div>
     <div class="d-row"><span class="d-lbl">الأصناف</span><span class="d-val">${o.count_of_items||0}</span></div>
     ${billItemsRow(o)}
     ${o.driver_notes?`<div class="d-row"><span class="d-lbl">ملاحظة الطيار</span><span class="d-val">${o.driver_notes}</span></div>`:''}
@@ -2790,6 +2796,7 @@ if(o.delivered_at){
     <div class="d-row"><span class="d-lbl">طريقة الدفع</span><span class="d-val">${pmL}</span></div>
     <div class="d-row"><span class="d-lbl">الحالة</span><span class="d-val">${SL[o.status]||o.status}</span></div>${o.perf_rating?`<div class="d-row"><span class="d-lbl">أداء التوصيل</span><span class="d-val">فعلي ${o.actual_minutes} / متوقع ${o.expected_minutes} د · <strong style="color:${o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.perf_rating}</strong></span></div>`:''}
     <div class="d-row"><span class="d-lbl">الطيار</span><span class="d-val">${o.deliveryman||'—'}</span></div>
+    <div class="d-row"><span class="d-lbl">الموظف</span><span class="d-val">${o.employee_name||'—'}</span></div>
     <div class="d-row"><span class="d-lbl">الأصناف</span><span class="d-val">${o.count_of_items||0}</span></div>
     ${billItemsRow(o)}
     ${o.staff_notes?`<div class="d-row"><span class="d-lbl">ملاحظة الموظف</span><span class="d-val">${o.staff_notes}</span></div>`:''}
