@@ -67,7 +67,7 @@ function buildAttendanceSessions(records) {
 async function computeFairScores(from, to, branchId) {
   // 1) الطلبات المسلّمة فعلاً في الفترة (نفلتر على delivered_at مش created_at)
   // كل الطلبات وأحداث الحضور مع pagination (يتجاوز حد 1000 صف)
-  const [orders, attendanceRows] = await Promise.all([
+  const [orders, attendanceRows, driversRows] = await Promise.all([
     _fsFetchAll(() => {
       let oq = db.from('orders')
         .select('id,driver_id,deliveryman,delivered_at,total_bill_net,status,branch_id')
@@ -85,13 +85,16 @@ async function computeFairScores(from, to, branchId) {
       .not('approved_at', 'is', null)
       .gte('date', from).lte('date', to)
       .order('date', { ascending: true })),
+    _fsFetchAll(() => db.from('drivers').select('id,branch_id')),
   ]);
 
-  // ابنِ فترات الحضور من تسلسل الأحداث لكل يوم على حدة.
-  // السبب: ended_at غالباً فاضي، والاعتماد عليه بيضيّع الشيفتات.
-  // القاعدة: online تفتح فترة، وأول offline/break بعدها تقفلها.
-  //          offline من غير online قبله => الطيار كان شغّال من بداية اليوم (شيفت ليلي).
+  // خريطة الطيار -> الفرع (عشان نعدّ الحاضرين من نفس فرع الطلب فقط)
+  const driverBranch = {};
+  (driversRows || []).forEach(d => { driverBranch[d.id] = d.branch_id || null; });
+
+  // فترات الحضور متصلة عبر منتصف الليل (شيفت ليلي) عبر ended_at، وكل فترة معاها فرع الطيار.
   const sessions = buildAttendanceSessions(attendanceRows || []);
+  sessions.forEach(s => { s.branch_id = driverBranch[s.driver_id] || null; });
 
   // 3) لكل طلب: مين كان أونلاين لحظة التسليم؟
   const stats = {};   // driver_id -> { expected, actual, revenue }
@@ -102,7 +105,8 @@ async function computeFairScores(from, to, branchId) {
 
   orders.forEach(o => {
     const t = new Date(o.delivered_at).getTime();
-    const online = sessions.filter(s => t >= s.start && t < s.end);
+    // الحاضرين = طيارين نفس فرع الطلب اللي كانوا أونلاين وقت التسليم
+    const online = sessions.filter(s => s.branch_id === o.branch_id && t >= s.start && t < s.end);
 
     if (online.length === 0) {
       orphanOrders++;
