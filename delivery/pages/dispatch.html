@@ -56,7 +56,7 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text);heigh
 .att-approve{background:#16a34a;color:white;border:none;border-radius:5px;padding:.2rem .4rem;font-size:.65rem;cursor:pointer;font-family:'Cairo',sans-serif;font-weight:700}
 .att-reject{background:rgba(220,38,38,.3);color:#f87171;border:1px solid rgba(220,38,38,.3);border-radius:5px;padding:.2rem .4rem;font-size:.65rem;cursor:pointer;font-family:'Cairo',sans-serif;font-weight:700}
 /* DRIVER POPUP */
-.driver-popup{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:300px;background:#1e293b;border-radius:16px;border:1px solid #334155;box-shadow:0 20px 60px rgba(0,0,0,.6);z-index:200;display:none;padding:1.25rem}
+.driver-popup{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:360px;max-width:94vw;max-height:88vh;overflow-y:auto;background:#1e293b;border-radius:16px;border:1px solid #334155;box-shadow:0 20px 60px rgba(0,0,0,.6);z-index:200;display:none;padding:1.25rem}
 .driver-popup.open{display:block}
 .dp-close{position:absolute;top:.75rem;left:.75rem;background:rgba(255,255,255,.1);border:none;color:#94a3b8;width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:.9rem;display:flex;align-items:center;justify-content:center}
 .dp-avatar{width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.2rem;color:white;margin:0 auto .625rem}
@@ -1377,10 +1377,11 @@ async function openDriverPopup(driverId){
   // آخر 3 رحلات بتفاصيلها (طلباتها) — اضغط الكارت لعرض العملاء والقيم وطريقة السداد
   const tripsEl=document.getElementById('dp-trips');
   tripsEl.innerHTML='<div style="color:#64748b;font-size:.72rem;text-align:center;padding:.4rem">...</div>';
-  // آخر 3 رحلات منتهية فقط — بدون الرحلة الجارية حاليًا (بتبان في كروت الرحلات على الشاشة)
+  // آخر 3 رحلات (بما فيها الرحلة الجارية) — عشان الطلبات المسلّمة تظهر هنا كأحدث نشاط
+  // من غير ما الطيار يضطر ينهي الرحلة
   const {data:trips}=await db.from('trips')
     .select('id,status,orders_count,total_amount,created_at,completed_at')
-    .eq('driver_id',driverId).neq('status','active').order('created_at',{ascending:false}).limit(3);
+    .eq('driver_id',driverId).order('created_at',{ascending:false}).limit(3);
   if(!trips?.length){
     tripsEl.innerHTML='<div style="color:#64748b;font-size:.75rem;text-align:center;padding:.5rem">لا توجد رحلات</div>';
   } else {
@@ -1433,12 +1434,13 @@ async function openDriverPopup(driverId){
         const valHtml = skip
           ? `<span style="color:#dc2626;font-weight:800">${o.status==='failed'?'⚠️ تعذّر':'ملغي'} · لا يُحسب</span>`
           : `<span style="color:#475569">${bill.toLocaleString()}ج</span>`;
+        const stMini = (!skip && SL[o.status]) ? `<span style="color:${SC[o.status]||'#64748b'};font-weight:800">${SL[o.status]}</span> · ` : '';
         return `<div style="display:flex;justify-content:space-between;gap:.4rem;font-size:.66rem;padding:.16rem 0;border-top:1px dashed #e5e7eb;${skip?'opacity:.75':''}">
           ${nameHtml}
-          <span style="white-space:nowrap;color:#475569">${valHtml} · ${pmHtml}</span>
+          <span style="white-space:nowrap;color:#475569">${stMini}${valHtml} · ${pmHtml}</span>
         </div>`;
       }).join(''):'<div style="font-size:.64rem;color:#94a3b8;padding:.16rem 0">لا توجد تفاصيل طلبات</div>';
-      return `<div style="border:1px solid #e2e8f0;border-radius:8px;margin-bottom:.4rem;background:#fff;overflow:hidden">
+      return `<div style="border:2px solid ${stColor[t.status]||'#e2e8f0'};border-radius:8px;margin-bottom:.4rem;background:#fff;overflow:hidden">
         <div onclick="var d=document.getElementById('dpd-${idx}');var op=d.style.display!=='none';d.style.display=op?'none':'block';this.querySelector('.dpx').textContent=op?'▾':'▴'" style="cursor:pointer;padding:.4rem .5rem">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:.4rem">
             <span style="font-weight:800;font-size:.72rem;color:#0f172a">رحلة${idx===0?' · الأحدث':''} <span class="dpx" style="color:#94a3b8">▾</span></span>
