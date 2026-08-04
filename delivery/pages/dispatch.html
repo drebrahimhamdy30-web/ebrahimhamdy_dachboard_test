@@ -360,6 +360,7 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
     <button class="ftab" onclick="setFilter('postponed',this)">مؤجل <span id="f-postponed">0</span></button>
     <button class="ftab" onclick="setFilter('picked',this)">في الطريق <span id="f-picked">0</span></button>
     <button class="ftab" onclick="setFilter('late',this)">⚠️ متأخر <span id="f-late">0</span></button>
+    <button class="ftab" onclick="setFilter('unclosed',this)" style="border-color:#fecaca;color:#b91c1c">🔴 لم تُغلق <span id="f-unclosed">0</span></button>
     <button class="ftab" onclick="openAddOrder()" style="background:var(--green-light);color:#15803d;border-color:#bbf7d0;font-weight:700">➕ إضافة طلب</button>
     <button class="ftab" id="errBadge" onclick="showErrors()" title="سجل الأخطاء" style="display:none;background:#fee2e2;color:#b91c1c;border-color:#fecaca;font-weight:800"></button>
     <span class="sel-info" id="selInfo"></span>
@@ -754,6 +755,7 @@ const LOG_I={order_created:'📦',driver_assigned:'🚗',order_picked:'▶️',o
 const LOG_A={order_created:'تم إنشاء الطلب',driver_assigned:'تم تعيين طيار',order_picked:'الطيار استلم',order_delivered:'تم التسليم',order_completed:'مكتمل',order_postponed:'تم التأجيل',order_cancelled:'تم الإلغاء',order_edited:'تم التعديل',order_urgent:'تحديد كعاجل',trip_created:'إنشاء رحلة',trip_completed:'إنهاء الرحلة'};
 
 let allOrders=[],allDrivers=[],activeTrips=[],tripOrdersMap={};
+let unclosedFlags=[]; // طلبات مكتملة على Phalix لكن لم تُغلق على B Connect (trip_review_flags غير المحلولة)
 let currentPopupDriverId=null;
 let knownRegions=new Set();
 let selectedOrders=new Set(),currentFilter='all',filterDriver=null;
@@ -930,6 +932,7 @@ async function loadAll(){
     await loadAttendanceData();
     await loadHardLoad();
     await loadTripCounts();
+    await loadUnclosedFlags(branchId);
     renderHeader();renderDrivers();renderTrips();renderOrders();
   }catch(e){console.error(e);showToast('خطأ في التحميل');}
   showLoading(false);
@@ -1575,6 +1578,58 @@ function renderTrips(){
 // ===== ORDERS =====
 function setFilter(f,el){currentFilter=f;document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('active'));el.classList.add('active');renderOrders();}
 
+// ===== طلبات لم تُغلق على B Connect (trip_review_flags غير المحلولة) =====
+async function loadUnclosedFlags(branchId){
+  try{
+    const {data,error}=await db.rpc('get_open_review_flags',{p_branch:branchId||null});
+    unclosedFlags=(error||!data)?[]:data;
+  }catch(e){ unclosedFlags=[]; }
+}
+function unclosedTimeAgo(ts){
+  if(!ts) return '';
+  const mins=Math.floor((Date.now()-new Date(ts))/60000);
+  if(mins<1) return 'الآن';
+  if(mins<60) return `${mins} د`;
+  const h=Math.floor(mins/60); if(h<24) return `${h} س`;
+  return `${Math.floor(h/24)} يوم`;
+}
+function renderUnclosedFlags(){
+  const grid=document.getElementById('ordersGrid');
+  const billQ=(document.getElementById('searchBill')?.value||'').trim().toLowerCase();
+  const codeQ=(document.getElementById('searchCode')?.value||'').trim().toLowerCase();
+  let rows=[...unclosedFlags];
+  if(billQ.length>=3) rows=rows.filter(f=>String(f.bill_no||'').toLowerCase().includes(billQ));
+  if(codeQ.length>=1) rows=rows.filter(f=>String(f.cust_code||'').toLowerCase().includes(codeQ));
+  if(!rows.length){ grid.innerHTML='<div class="empty-msg">✅ لا توجد طلبات غير مغلقة</div>'; return; }
+  const total=rows.reduce((s,f)=>s+Number(f.amount||0),0);
+  const head=`<div style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem;background:#fff;border:1px solid #fecaca;border-right:4px solid #b91c1c;border-radius:12px;padding:.6rem .9rem;margin-bottom:.2rem">
+      <span style="font-weight:800;color:#b91c1c;font-size:.88rem">🔴 مكتملة على Phalix ولم تُغلق على B Connect</span>
+      <span style="font-weight:800;color:#334155;font-size:.82rem">${rows.length} فاتورة · ${total.toLocaleString('ar-EG')} ج</span>
+    </div>`;
+  const cards=rows.map(f=>{
+    const notFound=f.erp_status==='غير موجودة';
+    const col=notFound?'#dc2626':'#d97706';
+    const bg=notFound?'#fef2f2':'#fffbeb';
+    const stTxt=notFound?'⛔ غير موجودة على B Connect':'🕓 لم تُغلق (Pending)';
+    return `<div style="background:#fff;border:1px solid #eef2f7;border-right:4px solid ${col};border-radius:12px;padding:.65rem .8rem;display:flex;flex-direction:column;gap:.32rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem">
+        <span style="font-weight:800;color:#0f172a;font-size:.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.customer_name||'—'}</span>
+        <span style="font-weight:800;color:#0A3D62;font-size:.82rem;white-space:nowrap">${Number(f.amount||0).toLocaleString('ar-EG')} ج</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:.5rem;font-size:.72rem;color:#475569">
+        <span>🧾 <strong>${f.bill_no||'—'}</strong>${f.cust_code?` · كود ${f.cust_code}`:''}</span>
+        <span>${f.cust_region?('📍 '+f.cust_region):''}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:.5rem;align-items:center;font-size:.72rem">
+        <span style="color:#334155">🛵 ${f.driver_name||'—'}</span>
+        <span style="color:#94a3b8">${unclosedTimeAgo(f.created_at)}</span>
+      </div>
+      <div style="background:${bg};color:${col};font-weight:700;font-size:.68rem;padding:.2rem .5rem;border-radius:6px;text-align:center">${stTxt}</div>
+    </div>`;
+  }).join('');
+  grid.innerHTML=head+cards;
+}
+
 function renderOrders(){
   // خانتان: رقم الفاتورة (تبحث بعد ٣ أرقام) + كود العميل — تبحثان في كل الطلبات مهما كانت حالتها
   const billQ=(document.getElementById('searchBill')?.value||'').trim().toLowerCase();
@@ -1606,6 +1661,10 @@ function renderOrders(){
   document.getElementById('f-postponed').textContent=allOrders.filter(o=>o.status==='postponed').length;
   document.getElementById('f-picked').textContent=allOrders.filter(o=>['assigned','picked'].includes(o.status)).length;
   document.getElementById('f-late').textContent=allOrders.filter(o=>isLate(o)).length;
+  const fu=document.getElementById('f-unclosed'); if(fu) fu.textContent=unclosedFlags.length;
+
+  // تبويب "لم تُغلق" يعرض قائمة trip_review_flags بدل شبكة الطلبات
+  if(currentFilter==='unclosed'){ renderUnclosedFlags(); return; }
 
   orders.sort((a,b)=>{
     const ap=isLate(a)?0:{pending:1,postponed:2,assigned:3,picked:4}[a.status]||9;
