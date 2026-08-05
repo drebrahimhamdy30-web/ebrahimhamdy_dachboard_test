@@ -932,7 +932,6 @@ async function loadAll(){
     await loadAttendanceData();
     await loadHardLoad();
     await loadTripCounts();
-    await loadUnclosedFlags(branchId);
     renderHeader();renderDrivers();renderTrips();renderOrders();
   }catch(e){console.error(e);showToast('خطأ في التحميل');}
   showLoading(false);
@@ -1576,14 +1575,34 @@ function renderTrips(){
 }
 
 // ===== ORDERS =====
-function setFilter(f,el){currentFilter=f;document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('active'));el.classList.add('active');renderOrders();}
+function setFilter(f,el){currentFilter=f;document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('active'));el.classList.add('active');renderOrders();if(f==='unclosed')refreshUnclosed();}
 
 // ===== طلبات لم تُغلق على B Connect (trip_review_flags غير المحلولة) =====
-async function loadUnclosedFlags(branchId){
+// قراءة حية بحتة (بدون أي كتابة): نجيب أرقام فواتير B Connect المفتوحة دلوقتى،
+// ونعرض المكتمل منها والمتسلّم من طيار على Phalix — تقاطع برقم الفاتورة.
+const UNCLOSED_PENDING_URL='https://agent.ebrahimhamdy.com/webhook/lifependingorder';
+const UNCLOSED_SYNC_BRANCHES=['f13f20f2-9847-4c16-9946-668769f7ed20','42183044-0e64-4a73-bc66-2c9eea0c0832'];
+async function refreshUnclosed(){
+  const branchId=currentUser?.role==='admin'?activeBranchId:(currentUser?.branch_id||null);
+  const targets=branchId?[branchId]:UNCLOSED_SYNC_BRANCHES;
+  const grid=document.getElementById('ordersGrid');
+  if(grid && currentFilter==='unclosed') grid.innerHTML='<div class="empty-msg">⏳ جاري القراءة من B Connect...</div>';
+  let bills=[];
   try{
-    const {data,error}=await db.rpc('get_unclosed_orders',{p_branch:branchId||null});
-    unclosedFlags=(error||!data)?[]:data;
+    const resps=await Promise.all(targets.map(bb=>
+      fetch(UNCLOSED_PENDING_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch_id:bb})})
+        .then(r=>r.ok?r.json():null).catch(()=>null)));
+    resps.forEach(j=>{
+      if(!j) return;
+      const arr=Array.isArray(j)?j:(j.bills||j.Data||[]);
+      arr.forEach(x=>{ const bn=(x&&typeof x==='object')?x.bill_no:x; if(bn!=null&&String(bn).trim()) bills.push(String(bn).trim()); });
+    });
+  }catch(e){}
+  try{
+    const {data}=await db.rpc('get_completed_orders_for_bills',{p_branch:branchId||null,p_bills:bills});
+    unclosedFlags=data||[];
   }catch(e){ unclosedFlags=[]; }
+  if(currentFilter==='unclosed') renderOrders();
 }
 function unclosedTimeAgo(ts){
   if(!ts) return '';
