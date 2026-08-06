@@ -104,6 +104,9 @@ tr:last-child td{border-bottom:none;}
     <button class="tab" id="tab-transfers" onclick="switchTab('transfers')">
       <i class="fas fa-right-left"></i> تحويلات المحافظ <span class="cnt" id="pending-cnt">0</span>
     </button>
+    <button class="tab" id="tab-recon" onclick="switchTab('recon')">
+      <i class="fas fa-scale-balanced"></i> مطابقة ماكينات باي موب
+    </button>
   </div>
 
   <div class="pane active" id="pane-shifts">
@@ -113,6 +116,13 @@ tr:last-child td{border-bottom:none;}
 
   <div class="pane" id="pane-transfers">
     <div id="transfers-area"><div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div></div>
+  </div>
+
+  <div class="pane" id="pane-recon">
+    <div style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 12px;">
+      <i class="fas fa-circle-info"></i> كل إغلاق فيه ماكينات باي موب — اضغط عليه تشوف كل ماكينة بقيمة إغلاقها ومجموع معاملاتها (بين الإغلاق السابق وده)، والفرق لو موجود. اضغط على الماكينة تشوف معاملاتها.
+    </div>
+    <div id="recon-area"><div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div></div>
   </div>
 </div>
 
@@ -158,7 +168,7 @@ document.getElementById('f-from').value=weekAgo;
 document.getElementById('f-to').value=today;
 
 function switchTab(t){
-  ['shifts','transfers'].forEach(x=>{
+  ['shifts','transfers','recon'].forEach(x=>{
     document.getElementById('tab-'+x).classList.toggle('active',x===t);
     document.getElementById('pane-'+x).classList.toggle('active',x===t);
   });
@@ -180,7 +190,7 @@ async function init(){
 }
 
 async function reloadAll(){
-  await Promise.all([loadShifts(), loadTransfers(), loadUnreviewed()]);
+  await Promise.all([loadShifts(), loadTransfers(), loadUnreviewed(), loadRecon()]);
 }
 
 /* ===== إجمالي غير المراجَع (يتبع فلتر الفرع فوق، لكن مستقل عن التاريخ) ===== */
@@ -500,6 +510,99 @@ async function disburse(id,name,amount){
     toast('تم التوريد ✓');
     await loadTransfers();
   }catch(e){toast('فشل التوريد','err');}
+}
+
+/* ================= مطابقة ماكينات باي موب ================= */
+async function loadRecon(){
+  const{branch,from,to,status}=filters();
+  const effBranch = isAdminView ? branch : (MY_BRANCH||branch);
+  let q='pos_shifts?select=id,branch,shift_date,employee_name,closed_at,total_machines&order=id.desc&limit=200';
+  if(effBranch) q+=`&branch=eq.${encodeURIComponent(effBranch)}`;
+  if(from) q+=`&shift_date=gte.${from}`;
+  if(to) q+=`&shift_date=lte.${to}`;
+  if(status!=='') q+=`&is_settled=eq.${status}`;
+  const area=document.getElementById('recon-area');
+  area.innerHTML='<div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>';
+  try{
+    const shifts=await api(q);
+    if(!shifts.length){area.innerHTML='<div class="empty">لا توجد إغلاقات في هذه الفترة</div>';return;}
+    area.innerHTML=shifts.map(s=>`
+      <div class="card">
+        <div class="shift-head" onclick="toggleRecon(${s.id})">
+          <div class="shift-meta">
+            <span style="font-weight:800;font-size:0.95rem;">${esc(s.branch)}</span>
+            <span style="color:var(--muted);font-size:0.82rem;"><i class="fas fa-calendar"></i> ${s.shift_date}</span>
+            <span style="color:var(--muted);font-size:0.82rem;"><i class="fas fa-user"></i> ${esc(s.employee_name)}</span>
+            <span style="color:var(--muted);font-size:0.78rem;">${s.closed_at?new Date(s.closed_at).toLocaleString('ar-EG',{timeStyle:'short'}):''}</span>
+            <span id="rst-${s.id}"></span>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <span style="font-weight:800;color:#1d4ed8;">ماكينات: ${fmt(s.total_machines)} ج</span>
+            <i class="fas fa-chevron-down" style="color:var(--muted);font-size:0.8rem;transition:.2s;" id="rchev-${s.id}"></i>
+          </div>
+        </div>
+        <div class="detail-area" id="rdetail-${s.id}"><div id="rlines-${s.id}"><div style="text-align:center;color:var(--muted);font-size:0.8rem;"><i class="fas fa-spinner fa-spin"></i></div></div></div>
+      </div>`).join('');
+  }catch(e){ area.innerHTML='<div class="empty" style="color:var(--danger)">فشل التحميل</div>'; }
+}
+
+async function toggleRecon(id){
+  const d=document.getElementById('rdetail-'+id);
+  const chev=document.getElementById('rchev-'+id);
+  const isOpen=d.classList.contains('open');
+  d.classList.toggle('open');
+  chev.style.transform=isOpen?'':'rotate(180deg)';
+  if(isOpen)return;
+  const el=document.getElementById('rlines-'+id);
+  if(el.dataset.loaded)return;
+  try{
+    const rows=await api('rpc/get_closure_machine_recon',{method:'POST',body:JSON.stringify({p_shift:id})});
+    el.dataset.loaded='1';
+    const st=document.getElementById('rst-'+id);
+    const bad=rows.filter(r=>!r.matched).length;
+    if(st) st.innerHTML = !rows.length?'<span class="badge" style="background:#f1f5f9;color:#64748b;">لا يوجد ماكينات</span>'
+      :(bad?`<span class="badge" style="background:#fee2e2;color:#b91c1c;">⚠️ ${bad} فرق</span>`:'<span class="badge badge-settled">✓ الكل مطابق</span>');
+    if(!rows.length){ el.innerHTML='<div style="color:var(--muted);font-size:0.8rem;text-align:center;">لا توجد ماكينات باي موب في هذا الإغلاق</div>'; return; }
+    el.innerHTML=`<div class="tbl-wrap"><table>
+      <thead><tr><th>الماكينة</th><th class="num">قيمة الإغلاق</th><th class="num">مجموع المعاملات</th><th class="num">العدد</th><th class="num">الفرق</th><th class="num">الحالة</th></tr></thead>
+      <tbody>${rows.map(r=>`
+        <tr style="cursor:pointer;background:${r.matched?'':'#fef2f2'}" onclick="toggleReconTxns(${id},'${esc(r.method_key)}')">
+          <td><b>${esc(r.display_name)}</b> <i class="fas fa-chevron-down" style="font-size:.62rem;color:#94a3b8"></i></td>
+          <td class="num" style="font-weight:800;color:#1d4ed8">${fmt(r.closure_val)}</td>
+          <td class="num" style="font-weight:800">${fmt(r.txn_sum)}</td>
+          <td class="num" style="color:var(--muted)">${r.txn_count}</td>
+          <td class="num" style="font-weight:800;color:${r.matched?'var(--success)':'var(--danger)'}">${(+r.diff)>0?'+':''}${fmt(r.diff)}</td>
+          <td class="num">${r.matched?'<span class="badge badge-settled">✓ مطابق</span>':'<span class="badge" style="background:#fee2e2;color:#b91c1c;">⚠️ فرق</span>'}</td>
+        </tr>
+        <tr id="rtx-${id}-${esc(r.method_key)}" style="display:none"><td colspan="6" style="background:var(--light);padding:0"></td></tr>
+      `).join('')}</tbody></table></div>`;
+  }catch(e){ el.innerHTML='<div style="color:var(--danger);font-size:0.8rem;text-align:center;">فشل التحميل</div>'; }
+}
+
+async function toggleReconTxns(shiftId, machine){
+  const tr=document.getElementById('rtx-'+shiftId+'-'+machine);
+  if(!tr)return;
+  const cell=tr.firstElementChild;
+  if(tr.style.display!=='none'){ tr.style.display='none'; return; }
+  tr.style.display='table-row';
+  if(cell.dataset.loaded)return;
+  cell.innerHTML='<div style="padding:10px;color:var(--muted);font-size:0.78rem;text-align:center;"><i class="fas fa-spinner fa-spin"></i> جاري تحميل المعاملات...</div>';
+  try{
+    const txns=await api('rpc/get_closure_machine_txns',{method:'POST',body:JSON.stringify({p_shift:shiftId,p_machine:machine})});
+    cell.dataset.loaded='1';
+    if(!txns.length){ cell.innerHTML='<div style="padding:10px;color:var(--muted);font-size:0.78rem;text-align:center;">لا توجد معاملات في هذه الفترة</div>'; return; }
+    const tot=txns.reduce((s,t)=>s+(+t.ammount||0),0);
+    cell.innerHTML=`<div style="padding:6px 10px 10px"><table style="font-size:0.78rem">
+      <thead><tr><th>#</th><th>الوقت</th><th>رقم الطلب</th><th class="num">القيمة</th></tr></thead>
+      <tbody>${txns.map((t,i)=>`<tr>
+        <td style="color:#94a3b8">${i+1}</td>
+        <td style="color:var(--muted);white-space:nowrap">${dt(t.txn_time)}</td>
+        <td style="color:var(--muted)">${esc(t.order_id||'—')}</td>
+        <td class="num" style="font-weight:700">${fmt(t.ammount)}</td>
+      </tr>`).join('')}
+      <tr style="border-top:2px solid var(--border)"><td colspan="3" style="text-align:left;font-weight:800">إجمالي المعاملات</td><td class="num" style="font-weight:900">${fmt(tot)}</td></tr>
+      </tbody></table></div>`;
+  }catch(e){ cell.innerHTML='<div style="padding:10px;color:var(--danger);font-size:0.78rem;text-align:center;">فشل تحميل المعاملات</div>'; }
 }
 
 init();
