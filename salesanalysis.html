@@ -117,7 +117,7 @@
     </div>
   </div>
 
-  <script src="api.js?v=salesanalysis6"></script>
+  <script src="api.js?v=salesanalysis5"></script>
   <script>
     let ACTIVE = 'overview';
     let USER = '';
@@ -240,102 +240,25 @@
     async function loadOverview(){
       const wrap=document.getElementById('tableWrap');
       wrap.innerHTML='<div class="empty-tab"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>';
-      const mr = effRange();   // الشهر الحالي افتراضيًا، أو الفترة المختارة
-      const [o, branches, hours, adays, days] = await Promise.all([
-        sbSalesOverview(mr.from, mr.to, fltStore()),
-        sbSalesSummary(mr.from, mr.to, fltStore()),
-        sbSalesByHour(mr.from, mr.to, fltStore()),
-        sbSalesActiveDays(mr.from, mr.to, fltStore()),
-        sbSalesByDay(mr.from, mr.to, fltStore())
-      ]);
-      const kpi = (label,val,sub)=>`<div class="kpi"><div class="kpi-val">${val}</div><div class="kpi-lbl">${label}</div>${sub?`<div class="kpi-sub">${sub}</div>`:''}</div>`;
-      const netTot = Number(o.net)||0;
-      // المعدل اليومي = الصافي ÷ عدد أيام المبيعات الفعلية في الفترة (لحد آخر يوم فيه مبيعات) — يتفادى قسمة على يوم لسه ما اتسحبش
-      const activeDays = Number(adays.active_days)||0;
-      const lastDayStr = adays.last_day ? new Date(adays.last_day+'T00:00:00').toLocaleDateString('ar-EG',{day:'2-digit',month:'2-digit'}) : '';
-      const dailyAvg = activeDays>0 ? netTot/activeDays : 0;
-      // متوسط عدد الأصناف بالفاتورة = عدد أسطر الأصناف ÷ عدد الفواتير
-      const avgItems = (Number(o.bills)||0)>0 ? (Number(o.lines)||0)/(Number(o.bills)||1) : 0;
-      // نسبة المرتجعات من المبيعات (قبل خصم المرتجع)
-      const retVal = Number(o.returns_val)||0;
-      const retBase = netTot + retVal;
-      const retPct = retBase>0 ? retVal/retBase*100 : 0;
-      // أقل/أعلى يوم مبيعات (نستبعد يوم النهاردة الناقص والأيام الصفر)
-      const todayStr = new Date().toLocaleDateString('en-CA');
-      const compDays = (days||[]).filter(d => d.day !== todayStr && (Number(d.net_val)||0) > 0);
-      let hiDay=null, loDay=null;
-      if(compDays.length){
-        hiDay = compDays.reduce((a,b)=> (Number(b.net_val)||0) > (Number(a.net_val)||0) ? b : a);
-        loDay = compDays.reduce((a,b)=> (Number(b.net_val)||0) < (Number(a.net_val)||0) ? b : a);
-      }
-      const dLabel = s => s ? new Date(s+'T00:00:00').toLocaleDateString('ar-EG',{weekday:'long',day:'2-digit',month:'2-digit'}) : '—';
-      // اتجاه المبيعات اليومي (بار لكل يوم؛ أعلى يوم أخضر وأقل يوم أحمر)
-      const maxD=Math.max(1,...(days||[]).map(d=>Number(d.net_val)||0));
-      const dayBars=(days||[]).map(d=>{
-        const lbl=new Date(d.day+'T00:00:00').toLocaleDateString('ar-EG',{day:'2-digit',month:'2-digit'});
-        const isHi=hiDay&&d.day===hiDay.day, isLo=loDay&&d.day===loDay.day;
-        const bg = isHi?'background:#16a34a':(isLo?'background:#dc2626':'');
-        return `<div class="hbar" title="${lbl}: ${num(d.net_val)} ج (${d.bills} فاتورة)">
-          <div class="hbar-fill" style="height:${Math.round((Number(d.net_val)||0)/maxD*100)}%;${bg}"></div>
-          <div class="hbar-lbl">${lbl}</div></div>`;
+      const mr = effRange();
+      const hours = await sbSalesByHour(mr.from, mr.to, fltStore());
+      // عدد الفواتير لكل ساعة، ونرتّب الساعات من 9ص لـ8ص اليوم اللي بعده (يوم العمل 24 ساعة)
+      const byHr = {};
+      (hours||[]).forEach(h=>{ byHr[Number(h.hr)] = Number(h.bills)||0; });
+      const data = [];
+      for(let i=0;i<24;i++){ const hr=(9+i)%24; data.push({ hr, bills: byHr[hr]||0 }); }
+      const maxB = Math.max(1, ...data.map(d=>d.bills));
+      const hrLabel = hr => (hr%12===0?12:hr%12)+(hr<12?'ص':'م');
+      const bars = data.map(d=>{
+        const isPeak = d.bills===maxB && maxB>0;
+        return `<div class="hbar" title="${hrLabel(d.hr)}: ${d.bills} فاتورة">
+          <div class="hbar-fill" style="height:${Math.round(d.bills/maxB*100)}%;${isPeak?'background:#16a34a':''}"></div>
+          <div class="hbar-lbl">${hrLabel(d.hr)}</div></div>`;
       }).join('');
-      // القنوات
-      const chan = (name,bills,val,color)=>{
-        const p=pct(val,netTot);
-        return `<div class="chan">
-          <div class="chan-top"><span class="chan-name" style="color:${color}">${name}</span><span class="chan-pct">${p}%</span></div>
-          <div class="chan-bar"><div style="width:${p}%;background:${color}"></div></div>
-          <div class="chan-meta">${num(val)} ج · ${bills} فاتورة</div>
-        </div>`;
-      };
-      // الفروع
-      const brName={'الصيدلية':'المعمورة','ابراهيم حمدي 2':'سان ستيفانو','ابراهيم حمدي 3':'سيدى بشر'};
-      const brRows=(branches||[]).map(b=>`<tr>
-        <td style="font-weight:700">${esc(brName[b.store_name]||b.store_name)}</td>
-        <td>${b.bills}</td><td>${num(b.bill_net)}</td>
-        <td>${num((Number(b.bill_net)||0)/(Number(b.bills)||1))}</td>
-        <td>${pct(b.bill_net, netTot)}%</td></tr>`).join('');
-      // الذروة
-      const maxH=Math.max(1,...(hours||[]).map(h=>Number(h.net_val)||0));
-      const hourBars=(hours||[]).map(h=>{
-        const hr=Number(h.hr); const lbl=(hr%12===0?12:hr%12)+(hr<12?'ص':'م');
-        return `<div class="hbar" title="${lbl}: ${num(h.net_val)} ج (${h.bills} فاتورة)">
-          <div class="hbar-fill" style="height:${Math.round((Number(h.net_val)||0)/maxH*100)}%"></div>
-          <div class="hbar-lbl">${lbl}</div></div>`;
-      }).join('');
-
       wrap.innerHTML = `
-        <div style="font-size:0.85rem;color:var(--text-secondary);font-weight:700;margin:0 2px 12px"><i class="fas fa-calendar-alt"></i> ${esc(mr.label)} · ${activeDays} يوم مبيعات${lastDayStr?` (آخر يوم: ${lastDayStr})`:''}</div>
-        <div class="kpi-row">
-          ${kpi('صافي المبيعات', num(o.net)+' ج')}
-          ${kpi('المعدل اليومي', num(dailyAvg)+' ج', 'على '+activeDays+' يوم مبيعات')}
-          ${kpi('إجمالي (قبل الخصم)', num(o.gross)+' ج')}
-          ${kpi('عدد الفواتير', o.bills||0)}
-          ${kpi('متوسط الفاتورة', num(o.avg_bill)+' ج')}
-          ${kpi('متوسط الأصناف/فاتورة', avgItems.toLocaleString('en',{minimumFractionDigits:1,maximumFractionDigits:1}))}
-          ${kpi('الأصناف (بالكبرى)', num(o.qty_big))}
-          ${kpi('المرتجعات', num(o.returns_val)+' ج', (o.returns_cnt||0)+' سطر · '+retPct.toFixed(1)+'% من المبيعات')}
-          ${kpi('أعلى يوم مبيعات', hiDay?num(hiDay.net_val)+' ج':'—', hiDay?dLabel(hiDay.day):'')}
-          ${kpi('أقل يوم مبيعات', loDay?num(loDay.net_val)+' ج':'—', loDay?dLabel(loDay.day):'')}
-        </div>
-
-        <div class="sec-title">اتجاه المبيعات اليومي (بالصافي)</div>
-        <div class="hours">${dayBars||'<div class="empty-tab">لا يوجد</div>'}</div>
-
-        <div class="sec-title">حجم القنوات من الإجمالي</div>
-        <div class="chan-row">
-          ${chan('توصيل منزلي', o.delivery_bills||0, o.delivery_net||0, '#2563eb')}
-          ${chan('حضور (Walk-in)', o.walkin_bills||0, o.walkin_net||0, '#16a34a')}
-          ${chan('تعاقدات', o.contract_bills||0, o.contract_net||0, '#7c3aed')}
-        </div>
-        <div style="font-size:0.78rem;color:var(--text-muted);margin:2px 2px 14px">الدفع: ${o.cash_bills||0} كاش · ${o.visa_bills||0} فيزا</div>
-
-        <div class="sec-title">مقارنة الفروع</div>
-        <table><thead><tr><th>الفرع</th><th>الفواتير</th><th>الصافي</th><th>متوسط الفاتورة</th><th>% من الإجمالي</th></tr></thead>
-          <tbody>${brRows||'<tr><td colspan="5" class="empty-tab">لا يوجد</td></tr>'}</tbody></table>
-
-        <div class="sec-title">ساعات الذروة (بالصافي)</div>
-        <div class="hours">${hourBars||'<div class="empty-tab">لا يوجد</div>'}</div>
+        <div style="font-size:0.85rem;color:var(--text-secondary);font-weight:700;margin:0 2px 12px"><i class="fas fa-clock"></i> ${esc(mr.label)} · يوم العمل من 9ص إلى 8:59ص</div>
+        <div class="sec-title">ساعات الذروة (عدد الفواتير)</div>
+        <div class="hours">${bars||'<div class="empty-tab">لا يوجد بيانات</div>'}</div>
       `;
     }
 
