@@ -326,9 +326,21 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
     <div class="refresh-dot"></div>
     <span class="dh-time" id="clockTime"></span>
     <button class="icon-btn" id="switchBranchBtn" onclick="showBranchOverlay()" style="display:none">🏢 تغيير الفرع</button>
+    <button class="icon-btn" onclick="openHardTripsModal()" title="رحلات المناطق الصعبة النهاردة">🧭 المناطق الصعبة</button>
     <button class="icon-btn" onclick="loadAll()">↻ تحديث</button>
   </div>
 </header>
+
+<!-- مودال رحلات المناطق الصعبة (النهاردة) -->
+<div class="modal-overlay" id="hardTripsModal">
+  <div style="background:#fff;border-radius:14px;max-width:480px;width:100%;max-height:82vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:.9rem 1.1rem;border-bottom:1px solid #e2e8f0">
+      <div style="font-weight:800;font-size:.95rem;color:#0f172a">🧭 رحلات المناطق الصعبة — النهاردة</div>
+      <button onclick="closeModal('hardTripsModal')" style="background:none;border:none;font-size:1.2rem;cursor:pointer;color:#64748b">✕</button>
+    </div>
+    <div id="hardTripsBody" style="overflow-y:auto;padding:.6rem .8rem"></div>
+  </div>
+</div>
 
 <div class="section-label sl-dark" style="display:none">
   <span class="sl-title">👤 الطيارين</span>
@@ -1259,6 +1271,65 @@ async function loadTripCounts(){
     const m={}; (data||[]).forEach(r=>{ m[r.driver_id]=Number(r.trips)||0; });
     tripCountMap=m;
   }catch(e){ tripCountMap={}; }
+}
+
+// ===== رحلات المناطق الصعبة (النهاردة) — الحاضرين وقت فتح التبويب فقط =====
+async function openHardTripsModal(){
+  const modal=document.getElementById('hardTripsModal');
+  const body=document.getElementById('hardTripsBody');
+  modal.classList.add('open');
+  const e=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const branchId=currentUser?.role==='admin'?activeBranchId:(currentUser?.branch_id||null);
+  if(!branchId){ body.innerHTML='<div style="text-align:center;padding:2rem;color:#64748b">اختر فرعًا أولًا</div>'; return; }
+  // سناب شوت للحاضرين وقت الفتح (أونلاين أو استراحة)
+  const present=allDrivers.filter(d=>{ const s=getDriverAttStatus(d.id); return s==='online'||s==='break'; });
+  if(!present.length){ body.innerHTML='<div style="text-align:center;padding:2rem;color:#64748b">لا يوجد طيارين حاضرين الآن</div>'; return; }
+  const presentSet=new Set(present.map(d=>d.id));
+  body.innerHTML='<div style="text-align:center;padding:2rem;color:#64748b">جاري التحميل…</div>';
+  let rows=[];
+  try{ const {data}=await db.rpc('get_hard_trips_today',{p_branch:branchId}); rows=(data||[]).filter(r=>presentSet.has(r.driver_id)); }
+  catch(err){ body.innerHTML='<div style="text-align:center;padding:2rem;color:#dc2626">تعذّر التحميل</div>'; return; }
+  rows.sort((a,b)=>(b.hard_trips-a.hard_trips)||(b.total_trips-a.total_trips));
+  body.innerHTML=
+    `<div style="font-size:.72rem;color:#64748b;margin:.2rem .2rem .6rem">الحاضرين الآن: ${present.length} طيار · اضغط على الطيار لعرض رحلاته الصعبة</div>`+
+    (rows.map(r=>`
+      <div onclick="toggleHardDriver(this,'${r.driver_id}','${branchId}')" style="border:1px solid #e2e8f0;border-radius:10px;margin-bottom:.5rem;overflow:hidden;cursor:pointer">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:.6rem .75rem;background:#f8fafc">
+          <div style="font-weight:700;font-size:.85rem;color:#0f172a">${e(r.driver_name)}</div>
+          <div style="display:flex;align-items:center;gap:.5rem">
+            <span style="font-size:.68rem;color:#64748b">${r.total_trips} رحلة</span>
+            <span style="background:${r.hard_trips>0?'#dc2626':'#94a3b8'};color:#fff;font-weight:800;font-size:.75rem;padding:.15rem .55rem;border-radius:20px">${r.hard_trips} صعبة</span>
+          </div>
+        </div>
+        <div class="ht-detail" style="display:none;padding:.4rem .6rem;background:#fff"></div>
+      </div>`).join('') || '<div style="text-align:center;padding:2rem;color:#64748b">لا يوجد</div>');
+}
+
+async function toggleHardDriver(el, driverId, branchId){
+  const det=el.querySelector('.ht-detail');
+  if(det.style.display!=='none'){ det.style.display='none'; return; }
+  document.querySelectorAll('#hardTripsBody .ht-detail').forEach(d=>{ d.style.display='none'; });
+  det.style.display='block';
+  const e=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  if(det.dataset.loaded) return;
+  det.innerHTML='<div style="padding:.5rem;color:#64748b;font-size:.75rem">جاري التحميل…</div>';
+  let data=[];
+  try{ const r=await db.rpc('get_driver_hard_trips_today',{p_branch:branchId,p_driver:driverId}); data=r.data||[]; }
+  catch(err){ det.innerHTML='<div style="padding:.5rem;color:#dc2626;font-size:.75rem">تعذّر التحميل</div>'; return; }
+  det.dataset.loaded='1';
+  if(!data.length){ det.innerHTML='<div style="padding:.5rem;color:#64748b;font-size:.75rem">مفيش رحلات لمناطق صعبة النهاردة</div>'; return; }
+  const byTrip={};
+  data.forEach(r=>{ (byTrip[r.trip_id]=byTrip[r.trip_id]||{time:r.trip_time,orders:[]}).orders.push(r); });
+  det.innerHTML=Object.entries(byTrip).map(([tid,t],i)=>{
+    const tm=new Date(t.time).toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'});
+    return `<div style="border-top:1px solid #f1f5f9;padding:.45rem .3rem">
+      <div style="font-size:.72rem;font-weight:700;color:#334155;margin-bottom:.25rem">🚗 رحلة ${i+1} · ${tm} · ${t.orders.length} منطقة صعبة</div>
+      ${t.orders.map(o=>`<div style="display:flex;justify-content:space-between;font-size:.72rem;color:#475569;padding:.15rem 0">
+        <span>🔴 ${e(o.cust_region)}</span>
+        <span style="color:#94a3b8">${e(o.cust_name||'')} · ${e(o.bill_no||'')}</span>
+      </div>`).join('')}
+    </div>`;
+  }).join('');
 }
 
 function renderDrivers(){
