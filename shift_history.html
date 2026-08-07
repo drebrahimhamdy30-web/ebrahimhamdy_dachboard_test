@@ -19,6 +19,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
 .header h1{font-size:1rem;font-weight:900;color:var(--accent);display:flex;align-items:center;gap:8px;}
 .filters{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 .container{max-width:1150px;margin:0 auto;padding:20px;}
+
 /* Tabs */
 .tabs{display:flex;gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:5px;margin-bottom:16px;}
 .tab{flex:1;text-align:center;padding:9px;border-radius:8px;font-weight:800;font-size:0.84rem;cursor:pointer;color:var(--muted);border:none;background:transparent;font-family:var(--font);display:flex;align-items:center;justify-content:center;gap:6px;}
@@ -26,6 +27,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
 .tab .cnt{background:rgba(255,255,255,.25);padding:1px 7px;border-radius:20px;font-size:0.7rem;}
 .tab:not(.active) .cnt{background:#fee2e2;color:#b91c1c;}
 .pane{display:none;} .pane.active{display:block;}
+
 .btn{border:none;border-radius:8px;padding:8px 16px;font-family:var(--font);font-weight:800;font-size:0.82rem;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}
 .btn:hover{filter:brightness(.93);} .btn:disabled{opacity:.5;cursor:not-allowed;}
 .btn-primary{background:var(--accent);color:#fff;}
@@ -93,6 +95,7 @@ tr:last-child td{border-bottom:none;}
     <button class="btn btn-primary" onclick="reloadAll()"><i class="fas fa-search"></i> بحث</button>
   </div>
 </div>
+
 <div class="container">
   <div class="tabs">
     <button class="tab active" id="tab-shifts" onclick="switchTab('shifts')">
@@ -102,45 +105,54 @@ tr:last-child td{border-bottom:none;}
       <i class="fas fa-right-left"></i> تحويلات المحافظ <span class="cnt" id="pending-cnt">0</span>
     </button>
     <button class="tab" id="tab-recon" onclick="switchTab('recon')">
-      <i class="fas fa-scale-balanced"></i> مطابقة ماكينات باي موب
+      <i class="fas fa-scale-balanced"></i> مطابقة ماكينات ومحافظ
     </button>
   </div>
+
   <div class="pane active" id="pane-shifts">
     <div id="unreviewed-area"></div>
     <div id="shifts-area"><div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div></div>
   </div>
+
   <div class="pane" id="pane-transfers">
     <div id="transfers-area"><div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div></div>
   </div>
+
   <div class="pane" id="pane-recon">
     <div style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 12px;">
-      <i class="fas fa-circle-info"></i> كل إغلاق فيه ماكينات باي موب — اضغط عليه تشوف كل ماكينة بقيمة إغلاقها ومجموع معاملاتها (بين الإغلاق السابق وده)، والفرق لو موجود. اضغط على الماكينة تشوف معاملاتها.
+      <i class="fas fa-circle-info"></i> كل إغلاق فيه ماكينات باي موب ومحافظ إلكترونية — اضغط عليه تشوف كل وسيلة بقيمة إغلاقها ومجموع معاملاتها (بين الإغلاق السابق وده)، والفرق لو موجود. اضغط على الوسيلة تشوف معاملاتها، وتقدر تعدّل وقت أي معاملة لو فيه فرق ثوانى بيطلع فرق.
     </div>
     <div id="recon-area"><div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div></div>
   </div>
 </div>
+
 <div class="toast" id="toast"></div>
+
 <script>
 const SB_URL='https://rxtjoqulmgkkcohmgzgi.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
 const H_BASE={'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY};
 const H={...H_BASE,'Prefer':'return=representation'};
 const H_WRITE={...H_BASE,'Prefer':'return=minimal'};
+
 async function api(path,opts={}){
   const isWrite=['PATCH','DELETE','PUT'].includes(opts.method);
   const r=await fetch(SB_URL+'/rest/v1/'+path,{headers:isWrite?H_WRITE:H,...opts});
   if(!r.ok){throw new Error(await r.text());}
   return isWrite?null:r.json();
 }
+
 function fmt(n){return(+n||0).toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function dt(s){return s?new Date(s).toLocaleString('ar-EG',{dateStyle:'short',timeStyle:'short'}):'—';}
+
 let toastT;
 function toast(msg,type='ok'){
   const t=document.getElementById('toast');t.textContent=msg;
   t.style.background=type==='ok'?'#15803d':'#dc2626';
   t.style.display='block';clearTimeout(toastT);toastT=setTimeout(()=>t.style.display='none',2800);
 }
+
 const role=(localStorage.getItem('userRole')||'').trim();
 // admin + accountant => كل الفروع | manager => فرعه فقط
 const isAdminView = role==='admin' || role==='accountant';
@@ -149,16 +161,19 @@ const canConfirm  = isAdminView || isManager;   // صلاحية الاعتماد
 const MY_BRANCH   = (localStorage.getItem('userBranch')||'').trim();
 const settler=localStorage.getItem('activeUser')||localStorage.getItem('fullName')||'محاسب';
 const REASON_LABEL={supplier:'تحويل لمورد', customer_refund:'مرتجع لعميل'};
+
 const today=new Date().toISOString().slice(0,10);
 const weekAgo=new Date(Date.now()-6*86400000).toISOString().slice(0,10);
 document.getElementById('f-from').value=weekAgo;
 document.getElementById('f-to').value=today;
+
 function switchTab(t){
   ['shifts','transfers','recon'].forEach(x=>{
     document.getElementById('tab-'+x).classList.toggle('active',x===t);
     document.getElementById('pane-'+x).classList.toggle('active',x===t);
   });
 }
+
 async function init(){
   try{
     const branches=await api('branches?select=name&order=name');
@@ -173,18 +188,22 @@ async function init(){
   }catch(e){}
   await reloadAll();
 }
+
 async function reloadAll(){
   await Promise.all([loadShifts(), loadTransfers(), loadUnreviewed(), loadRecon()]);
 }
+
 /* ===== إجمالي غير المراجَع (يتبع فلتر الفرع فوق، لكن مستقل عن التاريخ) ===== */
 async function loadUnreviewed(){
   const area=document.getElementById('unreviewed-area');
   const topBranch=document.getElementById('f-branch').value;
   // الأدمن/المحاسب: يتبع فلتر الفرع فوق. غيرهم: فرعه فقط.
   const effBranch = isAdminView ? topBranch : MY_BRANCH;
+
   // 1) الشيفتات غير المراجَعة (بدون تاريخ)
   let q='pos_shifts?select=id,branch,grand_total,total_machines,total_wallets&is_settled=eq.false&limit=3000';
   if(effBranch) q+=`&branch=eq.${encodeURIComponent(effBranch)}`;
+
   try{
     const shifts=await api(q);
     if(!shifts.length){
@@ -193,10 +212,12 @@ async function loadUnreviewed(){
       </div>`;
       return;
     }
+
     const byBranch={};
     shifts.forEach(s=>{ byBranch[s.branch]=(byBranch[s.branch]||0)+(+s.grand_total||0); });
     const branches=Object.keys(byBranch).sort();
     const grandAll=shifts.reduce((s,r)=>s+(+r.grand_total||0),0);
+
     // 2) تفصيل كل ماكينة/محفظة من سطور هذه الشيفتات
     const ids = shifts.map(s=>s.id);
     let byMethod={};
@@ -212,9 +233,11 @@ async function loadUnreviewed(){
         });
       }
     }catch(e){ byMethod={}; }
+
     const methods=Object.values(byMethod);
     const machines=methods.filter(m=>m.type==='machine').sort((a,b)=>b.total-a.total);
     const wallets =methods.filter(m=>m.type==='wallet').sort((a,b)=>b.total-a.total);
+
     const methodBlock = (title,icon,arr)=> arr.length ? `
       <div style="margin-top:4px;">
         <div style="font-size:0.74rem;font-weight:800;opacity:.9;margin-bottom:6px;"><i class="fas ${icon}"></i> ${title}</div>
@@ -222,6 +245,7 @@ async function loadUnreviewed(){
           ${arr.map(m=>`<div class="unrev-item"><span>${esc(m.name)}</span><b>${fmt(m.total)} ج</b></div>`).join('')}
         </div>
       </div>` : '';
+
     area.innerHTML=`
       <div class="unrev-card">
         <div class="unrev-top">
@@ -231,6 +255,7 @@ async function loadUnreviewed(){
           </div>
           <div class="unrev-big">${fmt(grandAll)} ج</div>
         </div>
+
         ${(isAdminView && !effBranch && branches.length>1) ? `
         <div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.25);">
           <div style="font-size:0.74rem;font-weight:800;opacity:.9;margin-bottom:6px;"><i class="fas fa-store"></i> حسب الفرع</div>
@@ -238,6 +263,7 @@ async function loadUnreviewed(){
             ${branches.map(b=>`<div class="unrev-item"><span>${esc(b)}</span><b>${fmt(byBranch[b])} ج</b></div>`).join('')}
           </div>
         </div>`:''}
+
         <div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.25);">
           ${methodBlock('ماكينات POS','fa-credit-card',machines)}
           ${machines.length&&wallets.length?'<div style="height:10px;"></div>':''}
@@ -249,6 +275,7 @@ async function loadUnreviewed(){
     area.innerHTML='';
   }
 }
+
 function filters(){
   return{
     branch:document.getElementById('f-branch').value,
@@ -257,21 +284,25 @@ function filters(){
     status:document.getElementById('f-status').value
   };
 }
+
 /* ================= سجل الإغلاقات ================= */
 async function loadShifts(){
   const{branch,from,to,status}=filters();
   // مدير الفرع مقيّد بفرعه دائماً
   const effBranch = isAdminView ? branch : (MY_BRANCH||branch);
+
   let q='pos_shifts?order=id.desc&limit=200';
   if(effBranch) q+=`&branch=eq.${encodeURIComponent(effBranch)}`;
   if(from) q+=`&shift_date=gte.${from}`;
   if(to) q+=`&shift_date=lte.${to}`;
   if(status!=='') q+=`&is_settled=eq.${status}`;
+
   const area=document.getElementById('shifts-area');
   area.innerHTML='<div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>';
   try{
     const shifts=await api(q);
     if(!shifts.length){area.innerHTML='<div class="empty">لا توجد إغلاقات في هذه الفترة</div>';return;}
+
     area.innerHTML=shifts.map(s=>`
       <div class="card">
         <div class="shift-head" onclick="toggleDetail(${s.id})">
@@ -312,6 +343,7 @@ async function loadShifts(){
     area.innerHTML='<div class="empty" style="color:var(--danger)">فشل التحميل</div>';
   }
 }
+
 async function toggleDetail(id){
   const d=document.getElementById('detail-'+id);
   const chev=document.getElementById('chev-'+id);
@@ -319,12 +351,14 @@ async function toggleDetail(id){
   d.classList.toggle('open');
   chev.style.transform=isOpen?'':'rotate(180deg)';
   if(isOpen)return;
+
   const linesEl=document.getElementById('lines-'+id);
   try{
     const [lines,trs]=await Promise.all([
       api(`pos_shift_lines?shift_id=eq.${id}&order=method_type,display_name`),
       api(`pos_wallet_transfers?shift_id=eq.${id}&order=created_at`)
     ]);
+
     let h='';
     if(lines.length){
       h+=`<div class="tbl-wrap"><table>
@@ -340,6 +374,7 @@ async function toggleDetail(id){
     }else{
       h+='<div style="color:var(--muted);font-size:0.8rem;text-align:center;">لا توجد تفاصيل</div>';
     }
+
     if(trs.length){
       h+=`<div style="margin-top:14px;font-size:0.78rem;font-weight:800;color:var(--wal-c);margin-bottom:6px;">
         <i class="fas fa-right-left"></i> تحويلات هذه الفترة (${trs.length})
@@ -362,6 +397,7 @@ async function toggleDetail(id){
     linesEl.innerHTML='<div style="color:var(--danger);font-size:0.8rem;text-align:center;">فشل تحميل التفاصيل</div>';
   }
 }
+
 async function confirmShift(id){
   if(!confirm('تأكيد اعتماد هذا الإغلاق؟'))return;
   try{
@@ -372,26 +408,32 @@ async function confirmShift(id){
     await Promise.all([loadShifts(), loadUnreviewed()]);
   }catch(e){toast('فشل الاعتماد','err');}
 }
+
 /* ================= تحويلات المحافظ ================= */
 async function loadTransfers(){
   const{branch,from,to}=filters();
   const effBranch = isAdminView ? branch : (MY_BRANCH||branch);
   const area=document.getElementById('transfers-area');
   area.innerHTML='<div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>';
+
   // المعلّق: كل المعلّق بغض النظر عن التاريخ (لأنه دَين قائم)
   let qPend='pos_wallet_transfers?is_disbursed=eq.false&order=created_at.desc&limit=300';
   if(effBranch) qPend+=`&branch=eq.${encodeURIComponent(effBranch)}`;
+
   // التقرير: بفلترة التاريخ
   let qAll='pos_wallet_transfers?order=created_at.desc&limit=300';
   if(effBranch) qAll+=`&branch=eq.${encodeURIComponent(effBranch)}`;
   if(from) qAll+=`&created_at=gte.${from}T00:00:00`;
   if(to) qAll+=`&created_at=lte.${to}T23:59:59`;
+
   try{
     const [pending,all]=await Promise.all([api(qPend),api(qAll)]);
     document.getElementById('pending-cnt').textContent=pending.length;
+
     const totPend=pending.reduce((s,t)=>s+(+t.amount||0),0);
     const totDisb=all.filter(t=>t.is_disbursed).reduce((s,t)=>s+(+t.amount||0),0);
     const totAll=all.reduce((s,t)=>s+(+t.amount||0),0);
+
     area.innerHTML=`
       <div class="stat-row">
         <div class="stat hl">
@@ -408,6 +450,7 @@ async function loadTransfers(){
           <div class="stat-val">${fmt(totAll)} ج</div>
         </div>
       </div>
+
       <div class="card">
         <div style="font-weight:900;font-size:0.9rem;color:var(--warn);margin-bottom:12px;display:flex;align-items:center;gap:7px;">
           <i class="fas fa-hourglass-half"></i> بانتظار التوريد
@@ -430,6 +473,7 @@ async function loadTransfers(){
           </tr>`).join('')}</tbody>
         </table></div>`:'<div class="empty" style="padding:24px;">لا توجد تحويلات معلّقة ✓</div>'}
       </div>
+
       <div class="card">
         <div style="font-weight:900;font-size:0.9rem;color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:7px;">
           <i class="fas fa-file-lines"></i> تقرير كل التحويلات (حسب فلتر التاريخ)
@@ -453,6 +497,7 @@ async function loadTransfers(){
     area.innerHTML='<div class="empty" style="color:var(--danger)">فشل التحميل</div>';
   }
 }
+
 async function disburse(id,name,amount){
   if(!canConfirm){toast('لا تملك صلاحية التوريد','err');return;}
   if(!confirm(`تأكيد توريد ${fmt(amount)} ج من ${name}؟\n\nلن يمكن التراجع.`))return;
@@ -466,11 +511,12 @@ async function disburse(id,name,amount){
     await loadTransfers();
   }catch(e){toast('فشل التوريد','err');}
 }
+
 /* ================= مطابقة ماكينات باي موب ================= */
 async function loadRecon(){
   const{branch,from,to,status}=filters();
   const effBranch = isAdminView ? branch : (MY_BRANCH||branch);
-  let q='pos_shifts?select=id,branch,shift_date,employee_name,closed_at,total_machines&order=id.desc&limit=200';
+  let q='pos_shifts?select=id,branch,shift_date,employee_name,closed_at,total_machines,total_wallets&order=id.desc&limit=200';
   if(effBranch) q+=`&branch=eq.${encodeURIComponent(effBranch)}`;
   if(from) q+=`&shift_date=gte.${from}`;
   if(to) q+=`&shift_date=lte.${to}`;
@@ -492,6 +538,7 @@ async function loadRecon(){
           </div>
           <div style="display:flex;align-items:center;gap:12px;">
             <span style="font-weight:800;color:#1d4ed8;">ماكينات: ${fmt(s.total_machines)} ج</span>
+            <span style="font-weight:800;color:var(--wal-c);">محافظ: ${fmt(s.total_wallets)} ج</span>
             <i class="fas fa-chevron-down" style="color:var(--muted);font-size:0.8rem;transition:.2s;" id="rchev-${s.id}"></i>
           </div>
         </div>
@@ -499,6 +546,20 @@ async function loadRecon(){
       </div>`).join('');
   }catch(e){ area.innerHTML='<div class="empty" style="color:var(--danger)">فشل التحميل</div>'; }
 }
+
+const CAN_EDIT_TXN = (typeof canConfirm!=='undefined') ? canConfirm : false;
+
+function dtsec(s){return s?new Date(s).toLocaleString('ar-EG',{dateStyle:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'}):'—';}
+
+// يحوّل وقت timestamptz لصيغة datetime-local بتوقيت القاهرة
+function toCairoInput(iso){
+  const d=new Date(iso);
+  const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Cairo',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).formatToParts(d);
+  const g=t=>(p.find(x=>x.type===t)||{}).value||'00';
+  let h=g('hour'); if(h==='24')h='00';
+  return `${g('year')}-${g('month')}-${g('day')}T${h}:${g('minute')}:${g('second')}`;
+}
+
 async function toggleRecon(id){
   const d=document.getElementById('rdetail-'+id);
   const chev=document.getElementById('rchev-'+id);
@@ -508,29 +569,35 @@ async function toggleRecon(id){
   if(isOpen)return;
   const el=document.getElementById('rlines-'+id);
   if(el.dataset.loaded)return;
+  await loadReconLines(id);
+}
+
+async function loadReconLines(id){
+  const el=document.getElementById('rlines-'+id);
   try{
     const rows=await api('rpc/get_closure_machine_recon',{method:'POST',body:JSON.stringify({p_shift:id})});
     el.dataset.loaded='1';
     const st=document.getElementById('rst-'+id);
     const bad=rows.filter(r=>!r.matched).length;
-    if(st) st.innerHTML = !rows.length?'<span class="badge" style="background:#f1f5f9;color:#64748b;">لا يوجد ماكينات</span>'
+    if(st) st.innerHTML = !rows.length?'<span class="badge" style="background:#f1f5f9;color:#64748b;">لا يوجد بيانات</span>'
       :(bad?`<span class="badge" style="background:#fee2e2;color:#b91c1c;">⚠️ ${bad} فرق</span>`:'<span class="badge badge-settled">✓ الكل مطابق</span>');
-    if(!rows.length){ el.innerHTML='<div style="color:var(--muted);font-size:0.8rem;text-align:center;">لا توجد ماكينات باي موب في هذا الإغلاق</div>'; return; }
+    if(!rows.length){ el.innerHTML='<div style="color:var(--muted);font-size:0.8rem;text-align:center;">لا توجد ماكينات أو محافظ في هذا الإغلاق</div>'; return; }
     el.innerHTML=`<div class="tbl-wrap"><table>
-      <thead><tr><th>الماكينة</th><th class="num">قيمة الإغلاق</th><th class="num">مجموع المعاملات</th><th class="num">العدد</th><th class="num">الفرق</th><th class="num">الحالة</th></tr></thead>
-      <tbody>${rows.map(r=>`
+      <thead><tr><th>الوسيلة</th><th class="num">قيمة الإغلاق</th><th class="num">مجموع المعاملات</th><th class="num">العدد</th><th class="num">الفرق</th><th class="num">الحالة</th></tr></thead>
+      <tbody>${rows.map(r=>{const wal=r.method_type==='wallet';const icon=wal?'fa-wallet':'fa-credit-card';const c=wal?'var(--wal-c)':'#1d4ed8';return `
         <tr style="cursor:pointer;background:${r.matched?'':'#fef2f2'}" onclick="toggleReconTxns(${id},'${esc(r.method_key)}')">
-          <td><b>${esc(r.display_name)}</b> <i class="fas fa-chevron-down" style="font-size:.62rem;color:#94a3b8"></i></td>
-          <td class="num" style="font-weight:800;color:#1d4ed8">${fmt(r.closure_val)}</td>
+          <td><i class="fas ${icon}" style="color:${c};font-size:.72rem;margin-inline-end:5px"></i><b>${esc(r.display_name)}</b> <i class="fas fa-chevron-down" style="font-size:.62rem;color:#94a3b8"></i></td>
+          <td class="num" style="font-weight:800;color:${c}">${fmt(r.closure_val)}</td>
           <td class="num" style="font-weight:800">${fmt(r.txn_sum)}</td>
           <td class="num" style="color:var(--muted)">${r.txn_count}</td>
           <td class="num" style="font-weight:800;color:${r.matched?'var(--success)':'var(--danger)'}">${(+r.diff)>0?'+':''}${fmt(r.diff)}</td>
           <td class="num">${r.matched?'<span class="badge badge-settled">✓ مطابق</span>':'<span class="badge" style="background:#fee2e2;color:#b91c1c;">⚠️ فرق</span>'}</td>
         </tr>
         <tr id="rtx-${id}-${esc(r.method_key)}" style="display:none"><td colspan="6" style="background:var(--light);padding:0"></td></tr>
-      `).join('')}</tbody></table></div>`;
+      `}).join('')}</tbody></table></div>`;
   }catch(e){ el.innerHTML='<div style="color:var(--danger);font-size:0.8rem;text-align:center;">فشل التحميل</div>'; }
 }
+
 async function toggleReconTxns(shiftId, machine){
   const tr=document.getElementById('rtx-'+shiftId+'-'+machine);
   if(!tr)return;
@@ -538,24 +605,66 @@ async function toggleReconTxns(shiftId, machine){
   if(tr.style.display!=='none'){ tr.style.display='none'; return; }
   tr.style.display='table-row';
   if(cell.dataset.loaded)return;
+  await loadReconTxns(shiftId, machine);
+}
+
+async function loadReconTxns(shiftId, machine){
+  const tr=document.getElementById('rtx-'+shiftId+'-'+machine);
+  if(!tr)return;
+  const cell=tr.firstElementChild;
   cell.innerHTML='<div style="padding:10px;color:var(--muted);font-size:0.78rem;text-align:center;"><i class="fas fa-spinner fa-spin"></i> جاري تحميل المعاملات...</div>';
   try{
     const txns=await api('rpc/get_closure_machine_txns',{method:'POST',body:JSON.stringify({p_shift:shiftId,p_machine:machine})});
     cell.dataset.loaded='1';
     if(!txns.length){ cell.innerHTML='<div style="padding:10px;color:var(--muted);font-size:0.78rem;text-align:center;">لا توجد معاملات في هذه الفترة</div>'; return; }
+    const isWal=txns[0].source==='wallet';
     const tot=txns.reduce((s,t)=>s+(+t.ammount||0),0);
     cell.innerHTML=`<div style="padding:6px 10px 10px"><table style="font-size:0.78rem">
-      <thead><tr><th>#</th><th>الوقت</th><th>رقم الطلب</th><th class="num">القيمة</th></tr></thead>
+      <thead><tr><th>#</th><th>الوقت</th><th>${isWal?'المُرسِل':'رقم الطلب'}</th><th class="num">القيمة</th>${CAN_EDIT_TXN?'<th></th>':''}</tr></thead>
       <tbody>${txns.map((t,i)=>`<tr>
         <td style="color:#94a3b8">${i+1}</td>
-        <td style="color:var(--muted);white-space:nowrap">${dt(t.txn_time)}</td>
-        <td style="color:var(--muted)">${esc(t.order_id||'—')}</td>
-        <td class="num" style="font-weight:700">${fmt(t.ammount)}</td>
+        <td style="color:var(--muted);white-space:nowrap">${dtsec(t.txn_time)}</td>
+        <td style="color:var(--muted)">${t.source==='wallet'?`<span style="display:inline-block;font-size:.62rem;font-weight:700;padding:1px 6px;border-radius:6px;margin-inline-end:5px;${t.type==='ارسال'?'background:#fee2e2;color:#b91c1c':'background:#dcfce7;color:#15803d'}">${esc(t.type)}</span>`:''}${esc((t.source==='wallet'?t.counterparty:t.order_id)||'—')}</td>
+        <td class="num" style="font-weight:700;color:${(+t.ammount)<0?'#b91c1c':'inherit'}">${fmt(t.ammount)}</td>
+        ${CAN_EDIT_TXN?`<td class="num"><button title="تعديل وقت المعاملة" onclick="editTxnTime('${t.source}',${t.id},'${t.txn_time}',${shiftId},'${esc(machine)}')" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.82rem"><i class="fas fa-pen"></i></button></td>`:''}
       </tr>`).join('')}
-      <tr style="border-top:2px solid var(--border)"><td colspan="3" style="text-align:left;font-weight:800">إجمالي المعاملات</td><td class="num" style="font-weight:900">${fmt(tot)}</td></tr>
+      <tr style="border-top:2px solid var(--border)"><td colspan="3" style="text-align:left;font-weight:800">إجمالي المعاملات</td><td class="num" style="font-weight:900">${fmt(tot)}</td>${CAN_EDIT_TXN?'<td></td>':''}</tr>
       </tbody></table></div>`;
   }catch(e){ cell.innerHTML='<div style="padding:10px;color:var(--danger);font-size:0.78rem;text-align:center;">فشل تحميل المعاملات</div>'; }
 }
+
+function editTxnTime(source,id,iso,shiftId,machine){
+  const old=document.getElementById('txnEditModal'); if(old) old.remove();
+  const val=toCairoInput(iso);
+  const ov=document.createElement('div');
+  ov.id='txnEditModal';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:9999';
+  ov.innerHTML=`<div style="background:#fff;border-radius:12px;padding:18px 20px;width:300px;max-width:92vw;box-shadow:0 10px 40px rgba(0,0,0,.25)">
+    <div style="font-weight:800;margin-bottom:4px">تعديل وقت المعاملة</div>
+    <div style="font-size:.72rem;color:var(--muted);margin-bottom:10px">التوقيت بتوقيت القاهرة — عدّل الثواني لو فيه فرق بسيط بيطلع فرق فى المطابقة</div>
+    <input type="datetime-local" id="txnEditInput" step="1" value="${val}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin-bottom:14px">
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="document.getElementById('txnEditModal').remove()" style="padding:7px 14px;border:1px solid var(--border);background:#fff;border-radius:8px;cursor:pointer">إلغاء</button>
+      <button id="txnEditSave" style="padding:7px 14px;border:none;background:#2563eb;color:#fff;border-radius:8px;cursor:pointer;font-weight:700">حفظ</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
+  document.getElementById('txnEditSave').onclick=async()=>{
+    let v=document.getElementById('txnEditInput').value;
+    if(!v){toast('اكتب وقت صحيح','err');return;}
+    if(v.length===16) v+=':00';
+    const btn=document.getElementById('txnEditSave'); btn.disabled=true; btn.textContent='جاري الحفظ...';
+    try{
+      await api('rpc/update_txn_time',{method:'POST',body:JSON.stringify({p_source:source,p_id:id,p_time:v})});
+      ov.remove();
+      toast('تم تعديل وقت المعاملة');
+      await loadReconLines(shiftId);
+      const tr2=document.getElementById('rtx-'+shiftId+'-'+machine);
+      if(tr2){ tr2.style.display='table-row'; tr2.firstElementChild.dataset.loaded=''; await loadReconTxns(shiftId, machine); }
+    }catch(err){ toast('فشل الحفظ','err'); btn.disabled=false; btn.textContent='حفظ'; }
+  };
+}
+
 init();
 </script>
 </body>
