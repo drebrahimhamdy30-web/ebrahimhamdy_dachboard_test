@@ -120,7 +120,7 @@ tr:last-child td{border-bottom:none;}
 
   <div class="pane" id="pane-recon">
     <div style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 12px;">
-      <i class="fas fa-circle-info"></i> كل إغلاق فيه ماكينات باي موب ومحافظ إلكترونية — اضغط عليه تشوف كل وسيلة بقيمة إغلاقها ومجموع معاملاتها (بين الإغلاق السابق وده)، والفرق لو موجود. اضغط على الوسيلة تشوف معاملاتها، وتقدر تعدّل وقت أي معاملة لو فيه فرق ثوانى بيطلع فرق.
+      <i class="fas fa-circle-info"></i> كل إغلاق فيه ماكينات باي موب ومحافظ إلكترونية — اضغط عليه تشوف كل وسيلة بقيمة إغلاقها ومجموع معاملاتها (بين الإغلاق السابق وده)، والفرق لو موجود. اضغط على الوسيلة تشوف معاملاتها، وتقدر تنقل أي معاملة لشيفت أعلى (أحدث) أو أسفل (أقدم)، أو تضيف معاملة على نفس الشيفت.
     </div>
     <div id="recon-area"><div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div></div>
   </div>
@@ -551,15 +551,6 @@ const CAN_EDIT_TXN = (typeof canConfirm!=='undefined') ? canConfirm : false;
 
 function dtsec(s){return s?new Date(s).toLocaleString('ar-EG',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}):'—';}
 
-// يحوّل وقت timestamptz لصيغة datetime-local بتوقيت القاهرة
-function toCairoInput(iso){
-  const d=new Date(iso);
-  const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Cairo',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).formatToParts(d);
-  const g=t=>(p.find(x=>x.type===t)||{}).value||'00';
-  let h=g('hour'); if(h==='24')h='00';
-  return `${g('year')}-${g('month')}-${g('day')}T${h}:${g('minute')}:${g('second')}`;
-}
-
 async function toggleRecon(id){
   const d=document.getElementById('rdetail-'+id);
   const chev=document.getElementById('rchev-'+id);
@@ -585,7 +576,7 @@ async function loadReconLines(id){
     el.innerHTML=`<div class="tbl-wrap"><table>
       <thead><tr><th>الوسيلة</th><th class="num">قيمة الإغلاق</th><th class="num">مجموع المعاملات</th><th class="num">العدد</th><th class="num">الفرق</th><th class="num">الحالة</th></tr></thead>
       <tbody>${rows.map(r=>{const wal=r.method_type==='wallet';const icon=wal?'fa-wallet':'fa-credit-card';const c=wal?'var(--wal-c)':'#1d4ed8';return `
-        <tr style="cursor:pointer;background:${r.matched?'':'#fef2f2'}" onclick="toggleReconTxns(${id},'${esc(r.method_key)}')">
+        <tr style="cursor:pointer;background:${r.matched?'':'#fef2f2'}" onclick="toggleReconTxns(${id},'${esc(r.method_key)}','${r.method_type}')">
           <td><i class="fas ${icon}" style="color:${c};font-size:.72rem;margin-inline-end:5px"></i><b>${esc(r.display_name)}</b> <i class="fas fa-chevron-down" style="font-size:.62rem;color:#94a3b8"></i></td>
           <td class="num" style="font-weight:800;color:${c}">${fmt(r.closure_val)}</td>
           <td class="num" style="font-weight:800">${fmt(r.txn_sum)}</td>
@@ -598,17 +589,17 @@ async function loadReconLines(id){
   }catch(e){ el.innerHTML='<div style="color:var(--danger);font-size:0.8rem;text-align:center;">فشل التحميل</div>'; }
 }
 
-async function toggleReconTxns(shiftId, machine){
+async function toggleReconTxns(shiftId, machine, mtype){
   const tr=document.getElementById('rtx-'+shiftId+'-'+machine);
   if(!tr)return;
   const cell=tr.firstElementChild;
   if(tr.style.display!=='none'){ tr.style.display='none'; return; }
   tr.style.display='table-row';
   if(cell.dataset.loaded)return;
-  await loadReconTxns(shiftId, machine);
+  await loadReconTxns(shiftId, machine, mtype);
 }
 
-async function loadReconTxns(shiftId, machine){
+async function loadReconTxns(shiftId, machine, mtype){
   const tr=document.getElementById('rtx-'+shiftId+'-'+machine);
   if(!tr)return;
   const cell=tr.firstElementChild;
@@ -616,52 +607,80 @@ async function loadReconTxns(shiftId, machine){
   try{
     const txns=await api('rpc/get_closure_machine_txns',{method:'POST',body:JSON.stringify({p_shift:shiftId,p_machine:machine})});
     cell.dataset.loaded='1';
-    if(!txns.length){ cell.innerHTML='<div style="padding:10px;color:var(--muted);font-size:0.78rem;text-align:center;">لا توجد معاملات في هذه الفترة</div>'; return; }
-    const isWal=txns[0].source==='wallet';
+    const isWal = mtype ? (mtype==='wallet') : (txns[0]&&txns[0].source==='wallet');
+    const source = isWal?'wallet':'machine';
+    const addBtn = CAN_EDIT_TXN ? `<div style="padding:6px 10px 2px"><button onclick="addTxnModal(${shiftId},'${esc(machine)}','${source}')" style="background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:700;font-size:.75rem"><i class="fas fa-plus"></i> إضافة معاملة</button></div>` : '';
+    if(!txns.length){ cell.innerHTML='<div style="padding:10px;color:var(--muted);font-size:0.78rem;text-align:center;">لا توجد معاملات في هذه الفترة</div>'+addBtn; return; }
     const tot=txns.reduce((s,t)=>s+(+t.ammount||0),0);
     cell.innerHTML=`<div style="padding:6px 10px 10px"><table style="font-size:0.78rem">
-      <thead><tr><th>#</th><th>الوقت</th><th>${isWal?'المُرسِل':'رقم الطلب'}</th><th class="num">القيمة</th>${CAN_EDIT_TXN?'<th></th>':''}</tr></thead>
+      <thead><tr><th>#</th><th>الوقت</th><th>${isWal?'المُرسِل':'رقم الطلب'}</th><th class="num">القيمة</th>${CAN_EDIT_TXN?'<th class="num">نقل</th>':''}</tr></thead>
       <tbody>${txns.map((t,i)=>`<tr>
         <td style="color:#94a3b8">${i+1}</td>
         <td style="color:var(--muted);white-space:nowrap">${dtsec(t.txn_time)}</td>
         <td style="color:var(--muted)">${t.source==='wallet'?`<span style="display:inline-block;font-size:.62rem;font-weight:700;padding:1px 6px;border-radius:6px;margin-inline-end:5px;${t.type==='ارسال'?'background:#fee2e2;color:#b91c1c':'background:#dcfce7;color:#15803d'}">${esc(t.type)}</span>`:''}${esc((t.source==='wallet'?t.counterparty:t.order_id)||'—')}</td>
         <td class="num" style="font-weight:700;color:${(+t.ammount)<0?'#b91c1c':'inherit'}">${fmt(t.ammount)}</td>
-        ${CAN_EDIT_TXN?`<td class="num"><button title="تعديل وقت المعاملة" onclick="editTxnTime('${t.source}',${t.id},'${t.txn_time}',${shiftId},'${esc(machine)}')" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.82rem"><i class="fas fa-pen"></i></button></td>`:''}
+        ${CAN_EDIT_TXN?`<td class="num" style="white-space:nowrap">
+          <button title="نقل للشيفت الأحدث (فوق)" onclick="moveTxn('${t.source}',${t.id},${shiftId},'up','${esc(machine)}','${source}')" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.82rem"><i class="fas fa-arrow-up"></i></button>
+          <button title="نقل للشيفت الأقدم (تحت)" onclick="moveTxn('${t.source}',${t.id},${shiftId},'down','${esc(machine)}','${source}')" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.82rem"><i class="fas fa-arrow-down"></i></button>
+        </td>`:''}
       </tr>`).join('')}
       <tr style="border-top:2px solid var(--border)"><td colspan="3" style="text-align:left;font-weight:800">إجمالي المعاملات</td><td class="num" style="font-weight:900">${fmt(tot)}</td>${CAN_EDIT_TXN?'<td></td>':''}</tr>
-      </tbody></table></div>`;
+      </tbody></table></div>`+addBtn;
   }catch(e){ cell.innerHTML='<div style="padding:10px;color:var(--danger);font-size:0.78rem;text-align:center;">فشل تحميل المعاملات</div>'; }
 }
 
-function editTxnTime(source,id,iso,shiftId,machine){
-  const old=document.getElementById('txnEditModal'); if(old) old.remove();
-  const val=toCairoInput(iso);
+// نقل معاملة للشيفت المجاور (up=أحدث/فوق ، down=أقدم/تحت) — بيغيّر ربط المعاملة بالشيفت
+async function moveTxn(source,id,shiftId,dir,machine,mtype){
+  try{
+    await api('rpc/move_recon_txn',{method:'POST',body:JSON.stringify({p_source:source,p_id:id,p_current_shift:shiftId,p_dir:dir})});
+    toast(dir==='up'?'اتنقلت للشيفت الأحدث':'اتنقلت للشيفت الأقدم');
+    const el=document.getElementById('rlines-'+shiftId);
+    if(el){ el.dataset.loaded=''; await loadReconLines(shiftId); }
+    const tr2=document.getElementById('rtx-'+shiftId+'-'+machine);
+    if(tr2){ tr2.style.display='table-row'; tr2.firstElementChild.dataset.loaded=''; await loadReconTxns(shiftId, machine, mtype); }
+  }catch(err){
+    const raw=''+((err&&err.message)||err);
+    toast(raw.includes('no_adjacent_shift')?'مفيش شيفت في الاتجاه ده فيه نفس الوسيلة':'فشل النقل','err');
+  }
+}
+
+// إضافة معاملة على نفس الشيفت (مربوطة بيه صراحةً)
+function addTxnModal(shiftId, machine, source){
+  const old=document.getElementById('txnAddModal'); if(old) old.remove();
+  const isWal=source==='wallet';
   const ov=document.createElement('div');
-  ov.id='txnEditModal';
+  ov.id='txnAddModal';
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:9999';
-  ov.innerHTML=`<div style="background:#fff;border-radius:12px;padding:18px 20px;width:300px;max-width:92vw;box-shadow:0 10px 40px rgba(0,0,0,.25)">
-    <div style="font-weight:800;margin-bottom:4px">تعديل وقت المعاملة</div>
-    <div style="font-size:.72rem;color:var(--muted);margin-bottom:10px">التوقيت بتوقيت القاهرة — عدّل الثواني لو فيه فرق بسيط بيطلع فرق فى المطابقة</div>
-    <input type="datetime-local" id="txnEditInput" step="1" value="${val}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin-bottom:14px">
+  ov.innerHTML=`<div style="background:#fff;border-radius:12px;padding:18px 20px;width:320px;max-width:92vw;box-shadow:0 10px 40px rgba(0,0,0,.25)">
+    <div style="font-weight:800;margin-bottom:2px">إضافة معاملة — ${esc(machine)}</div>
+    <div style="font-size:.72rem;color:var(--muted);margin-bottom:12px">هتتسجّل على نفس الشيفت ده</div>
+    <label style="font-size:.75rem;font-weight:700;color:var(--muted)">القيمة</label>
+    <input type="number" id="atAmount" step="0.01" placeholder="0.00" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 10px">
+    ${isWal?`<label style="font-size:.75rem;font-weight:700;color:var(--muted)">النوع</label>
+    <select id="atType" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 10px">
+      <option value="استلام">استلام (+)</option><option value="ارسال">ارسال (−)</option></select>`:''}
+    <label style="font-size:.75rem;font-weight:700;color:var(--muted)">${isWal?'المُرسِل (اختياري)':'رقم الطلب (اختياري)'}</label>
+    <input type="text" id="atRef" placeholder="${isWal?'رقم المحفظة':'رقم الطلب'}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 14px">
     <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button onclick="document.getElementById('txnEditModal').remove()" style="padding:7px 14px;border:1px solid var(--border);background:#fff;border-radius:8px;cursor:pointer">إلغاء</button>
-      <button id="txnEditSave" style="padding:7px 14px;border:none;background:#2563eb;color:#fff;border-radius:8px;cursor:pointer;font-weight:700">حفظ</button>
+      <button onclick="document.getElementById('txnAddModal').remove()" style="padding:7px 14px;border:1px solid var(--border);background:#fff;border-radius:8px;cursor:pointer">إلغاء</button>
+      <button id="atSave" style="padding:7px 14px;border:none;background:#16a34a;color:#fff;border-radius:8px;cursor:pointer;font-weight:700">إضافة</button>
     </div></div>`;
   document.body.appendChild(ov);
   ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
-  document.getElementById('txnEditSave').onclick=async()=>{
-    let v=document.getElementById('txnEditInput').value;
-    if(!v){toast('اكتب وقت صحيح','err');return;}
-    if(v.length===16) v+=':00';
-    const btn=document.getElementById('txnEditSave'); btn.disabled=true; btn.textContent='جاري الحفظ...';
+  document.getElementById('atSave').onclick=async()=>{
+    const amt=parseFloat(document.getElementById('atAmount').value);
+    if(isNaN(amt)||amt===0){toast('اكتب قيمة صحيحة','err');return;}
+    const ref=document.getElementById('atRef').value.trim();
+    const type=isWal?document.getElementById('atType').value:null;
+    const btn=document.getElementById('atSave'); btn.disabled=true; btn.textContent='جاري الإضافة...';
     try{
-      await api('rpc/update_txn_time',{method:'POST',body:JSON.stringify({p_source:source,p_id:id,p_time:v})});
-      ov.remove();
-      toast('تم تعديل وقت المعاملة');
-      await loadReconLines(shiftId);
+      await api('rpc/add_recon_txn',{method:'POST',body:JSON.stringify({p_shift:shiftId,p_method_key:machine,p_source:source,p_amount:amt,p_ref:ref||null,p_type:type})});
+      ov.remove(); toast('اتضافت المعاملة');
+      const el=document.getElementById('rlines-'+shiftId);
+      if(el){ el.dataset.loaded=''; await loadReconLines(shiftId); }
       const tr2=document.getElementById('rtx-'+shiftId+'-'+machine);
-      if(tr2){ tr2.style.display='table-row'; tr2.firstElementChild.dataset.loaded=''; await loadReconTxns(shiftId, machine); }
-    }catch(err){ toast('فشل الحفظ','err'); btn.disabled=false; btn.textContent='حفظ'; }
+      if(tr2){ tr2.style.display='table-row'; tr2.firstElementChild.dataset.loaded=''; await loadReconTxns(shiftId, machine, source); }
+    }catch(err){ toast('فشل الإضافة','err'); btn.disabled=false; btn.textContent='إضافة'; }
   };
 }
 
