@@ -701,27 +701,33 @@ async function loadBalance(){
   const area=document.getElementById('balance-area');
   area.innerHTML='<div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>';
   try{
-    // كل الفروع (أدمن/محاسب بدون اختيار فرع): ملخص رصيد لكل فرع
+    // كل الفروع (أدمن/محاسب بدون اختيار فرع): ملخص رصيد لكل فرع — قابل للفتح لعرض تفاصيل الوارد/المنصرف
     if(!effBranch){
       const branches=await api('branches?select=name&order=name');
-      const rows=await Promise.all(branches.filter(b=>b.name!=='كل الفروع').map(async b=>{
+      const list=branches.map(b=>b.name).filter(n=>n && n!=='كل الفروع');
+      BAL_SUMMARY = await Promise.all(list.map(async name=>{
         const [cl,wt,mt]=await Promise.all([
-          api(`pos_shifts?select=grand_total&branch=eq.${encodeURIComponent(b.name)}&limit=5000`),
-          api(`pos_wallet_transfers?select=amount&branch=eq.${encodeURIComponent(b.name)}&limit=5000`),
-          api(`pos_manual_transfers?select=amount&branch=eq.${encodeURIComponent(b.name)}&limit=5000`)
+          api(`pos_shifts?select=grand_total&branch=eq.${encodeURIComponent(name)}&limit=5000`),
+          api(`pos_wallet_transfers?select=amount&branch=eq.${encodeURIComponent(name)}&limit=5000`),
+          api(`pos_manual_transfers?select=amount&branch=eq.${encodeURIComponent(name)}&limit=5000`)
         ]);
         const credit=cl.reduce((s,x)=>s+(+x.grand_total||0),0);
         const debit=wt.reduce((s,x)=>s+(+x.amount||0),0)+mt.reduce((s,x)=>s+(+x.amount||0),0);
-        return {branch:b.name,credit,debit,balance:credit-debit};
+        return {branch:name,credit,debit,balance:credit-debit};
       }));
-      area.innerHTML=`<div class="tbl-wrap"><table>
-        <thead><tr><th>الفرع</th><th class="num">توريد (إغلاقات)</th><th class="num">صرف (تحويلات)</th><th class="num">الرصيد الحالي</th></tr></thead>
-        <tbody>${rows.map(r=>`<tr>
-          <td><b>${esc(r.branch)}</b></td>
-          <td class="num" style="color:var(--success);font-weight:800">${fmt(r.credit)}</td>
-          <td class="num" style="color:var(--wal-c);font-weight:800">${fmt(r.debit)}</td>
-          <td class="num" style="font-weight:900;color:${r.balance<0?'var(--danger)':'var(--accent)'}">${fmt(r.balance)} ج</td>
-        </tr>`).join('')}</tbody>
+      area.innerHTML=`<div style="font-size:.75rem;color:var(--muted);margin-bottom:8px"><i class="fas fa-hand-pointer"></i> اضغط على أي فرع تشوف تفاصيل الوارد (الإغلاقات) والمنصرف (التحويلات) بتواريخها.</div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th></th><th>الفرع</th><th class="num">توريد (إغلاقات)</th><th class="num">صرف (تحويلات)</th><th class="num">الرصيد الحالي</th></tr></thead>
+        <tbody>${BAL_SUMMARY.map((r,i)=>`
+          <tr style="cursor:pointer" onclick="toggleBalRow(${i})">
+            <td style="width:22px"><i class="fas fa-chevron-down" id="balchev-${i}" style="color:#94a3b8;font-size:.72rem;transition:.2s"></i></td>
+            <td><b>${esc(r.branch)}</b></td>
+            <td class="num" style="color:var(--success);font-weight:800">${fmt(r.credit)}</td>
+            <td class="num" style="color:var(--wal-c);font-weight:800">${fmt(r.debit)}</td>
+            <td class="num" style="font-weight:900;color:${r.balance<0?'var(--danger)':'var(--accent)'}">${fmt(r.balance)} ج</td>
+          </tr>
+          <tr id="baldet-${i}" style="display:none"><td colspan="5" style="background:var(--light);padding:0"><div id="baldetc-${i}" style="padding:8px 10px"></div></td></tr>
+        `).join('')}</tbody>
       </table></div>`;
       return;
     }
@@ -769,6 +775,54 @@ async function loadBalance(){
         </table></div>
       </div>`;
   }catch(e){ area.innerHTML='<div class="empty" style="color:var(--danger)">فشل التحميل</div>'; }
+}
+
+let BAL_SUMMARY=[];
+// فتح/غلق تفاصيل فرع في ملخص «كل الفروع»
+async function toggleBalRow(i){
+  const det=document.getElementById('baldet-'+i), chev=document.getElementById('balchev-'+i);
+  if(!det) return;
+  const open=det.style.display!=='none';
+  det.style.display=open?'none':'table-row';
+  if(chev) chev.style.transform=open?'':'rotate(180deg)';
+  if(open) return;
+  const cell=document.getElementById('baldetc-'+i);
+  if(cell.dataset.loaded) return;
+  const branch=(BAL_SUMMARY[i]||{}).branch; if(!branch) return;
+  cell.innerHTML='<div style="text-align:center;color:var(--muted);font-size:.8rem;padding:8px"><i class="fas fa-spinner fa-spin"></i></div>';
+  try{ cell.innerHTML=await renderBranchDetail(branch); cell.dataset.loaded='1'; }
+  catch(e){ cell.innerHTML='<div style="color:var(--danger);font-size:.8rem;padding:8px;text-align:center">فشل تحميل التفاصيل</div>'; }
+}
+
+// تفاصيل فرع: قائمتين — الوارد (الإغلاقات) والمنصرف (التحويلات) بتواريخها
+async function renderBranchDetail(branch){
+  const [closures,wtrans,mtrans]=await Promise.all([
+    api(`pos_shifts?select=shift_date,closed_at,employee_name,grand_total&branch=eq.${encodeURIComponent(branch)}&order=closed_at.desc&limit=3000`),
+    api(`pos_wallet_transfers?select=amount,reason,display_name,created_at&branch=eq.${encodeURIComponent(branch)}&order=created_at.desc&limit=3000`),
+    api(`pos_manual_transfers?select=*&branch=eq.${encodeURIComponent(branch)}&order=txn_date.desc&limit=3000`)
+  ]);
+  const outRows=[];
+  wtrans.forEach(t=>outRows.push({date:t.created_at, what:'محفظة — '+esc(t.display_name||'')+(t.reason?(' ('+(REASON_LABEL[t.reason]||esc(t.reason))+')'):''), amount:+t.amount||0}));
+  mtrans.forEach(t=>outRows.push({date:t.txn_date, what:(t.channel==='paymob'?'باي موب':'انستاباي')+(t.reason?(' — '+esc(t.reason)):''), amount:+t.amount||0}));
+  outRows.sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const inTot=closures.reduce((s,c)=>s+(+c.grand_total||0),0);
+  const outTot=outRows.reduce((s,r)=>s+r.amount,0);
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px">
+    <div>
+      <div style="font-weight:800;font-size:.8rem;color:var(--success);margin:2px 0 6px"><i class="fas fa-arrow-down"></i> الوارد (الإغلاقات) — ${fmt(inTot)} ج</div>
+      <div class="tbl-wrap"><table style="font-size:.75rem">
+        <thead><tr><th>التاريخ</th><th>الموظف</th><th class="num">القيمة</th></tr></thead>
+        <tbody>${closures.length?closures.map(c=>`<tr><td style="color:var(--muted);white-space:nowrap">${dt(c.closed_at||c.shift_date)}</td><td>${esc(c.employee_name||'—')}</td><td class="num" style="font-weight:700;color:var(--success)">${fmt(c.grand_total)}</td></tr>`).join(''):'<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:10px">لا يوجد</td></tr>'}</tbody>
+      </table></div>
+    </div>
+    <div>
+      <div style="font-weight:800;font-size:.8rem;color:var(--wal-c);margin:2px 0 6px"><i class="fas fa-arrow-up"></i> المنصرف (التحويلات) — ${fmt(outTot)} ج</div>
+      <div class="tbl-wrap"><table style="font-size:.75rem">
+        <thead><tr><th>التاريخ</th><th>البيان</th><th class="num">القيمة</th></tr></thead>
+        <tbody>${outRows.length?outRows.map(r=>`<tr><td style="color:var(--muted);white-space:nowrap">${dt(r.date)}</td><td>${r.what}</td><td class="num" style="font-weight:700;color:var(--wal-c)">${fmt(r.amount)}</td></tr>`).join(''):'<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:10px">لا يوجد</td></tr>'}</tbody>
+      </table></div>
+    </div>
+  </div>`;
 }
 
 function addManualTransfer(branch){
