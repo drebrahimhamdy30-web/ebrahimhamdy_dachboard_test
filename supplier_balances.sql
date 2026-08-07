@@ -87,6 +87,27 @@ grant select, insert on public.supplier_balance_runs       to anon, authenticate
 grant select, insert, delete on public.supplier_balance_exclusions to anon, authenticated;
 grant select, insert, update on public.supplier_balance_settings   to anon, authenticated;
 
+-- ===== سلامة اسم الفرع: FK على جدول branches (يمنع أي فرع وهمي من نص حر غلط) =====
+-- عمود branch نص، فالقيد ده بيضمن إنه لازم يساوي اسم فرع موجود فعلًا (بالحرف والمسافة).
+-- ON UPDATE CASCADE: لو الفرع اتعاد تسميته، الصفوف تتحدّث. الحذف RESTRICT (مينفعش تمسح فرع ليه تاريخ).
+do $$ begin
+  if not exists (select 1 from pg_constraint where conrelid='public.branches'::regclass and conname='branches_name_key') then
+    alter table public.branches add constraint branches_name_key unique (name);
+  end if;
+end $$;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conrelid='public.supplier_balance_snapshots'::regclass and conname='supbal_snap_branch_fk') then
+    alter table public.supplier_balance_snapshots
+      add constraint supbal_snap_branch_fk foreign key (branch) references public.branches(name) on update cascade;
+  end if;
+end $$;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conrelid='public.supplier_balance_runs'::regclass and conname='supbal_runs_branch_fk') then
+    alter table public.supplier_balance_runs
+      add constraint supbal_runs_branch_fk foreign key (branch) references public.branches(name) on update cascade;
+  end if;
+end $$;
+
 -- ===== تسجيل الصفحة في الصلاحيات — للأدمن فقط افتراضيًا (view + edit) =====
 insert into public.page_permissions (role, page, can_view, can_edit, sort_order)
 values ('admin', 'supplier_balances.html', true, true, 145)
