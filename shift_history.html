@@ -738,18 +738,10 @@ async function loadBalance(){
       api(`pos_manual_transfers?select=*&branch=eq.${encodeURIComponent(effBranch)}&order=txn_date.desc&limit=3000`)
     ]);
 
-    const entries=[];
-    closures.forEach(c=>entries.push({date:c.closed_at||c.shift_date, kind:'closure', label:'إغلاق شيفت '+(c.shift_date||''), credit:+c.grand_total||0, debit:0}));
-    wtrans.forEach(t=>entries.push({date:t.created_at, kind:'wallet', label:'تحويل محفظة — '+esc(t.display_name||'')+(t.reason?(' ('+(REASON_LABEL[t.reason]||esc(t.reason))+')'):''), credit:0, debit:+t.amount||0}));
-    mtrans.forEach(t=>entries.push({date:t.txn_date, kind:'manual', mid:t.id, label:'تحويل '+(t.channel==='paymob'?'باي موب':'انستاباي')+(t.reason?(' — '+esc(t.reason)):'')+(t.note?(' · '+esc(t.note)):''), credit:0, debit:+t.amount||0}));
-
-    // ترتيب تصاعدي بالوقت لحساب الرصيد الجاري، ثم عرض الأحدث فوق
-    entries.sort((a,b)=>new Date(a.date)-new Date(b.date));
-    let run=0; entries.forEach(e=>{ run += e.credit - e.debit; e.balance=run; });
-    const totCredit=entries.reduce((s,e)=>s+e.credit,0);
-    const totDebit=entries.reduce((s,e)=>s+e.debit,0);
+    const entries=balEntries(closures,wtrans,mtrans);
+    const totCredit=entries.filter(e=>e.dir==='in').reduce((s,e)=>s+e.amount,0);
+    const totDebit=entries.filter(e=>e.dir==='out').reduce((s,e)=>s+e.amount,0);
     const bal=totCredit-totDebit;
-    const view=entries.slice().reverse();
 
     area.innerHTML=`
       <div class="stat-row">
@@ -762,19 +754,36 @@ async function loadBalance(){
           <div style="font-weight:900;font-size:0.9rem;color:var(--accent);display:flex;align-items:center;gap:7px;"><i class="fas fa-file-lines"></i> كشف حساب — ${esc(effBranch)}</div>
           ${canConfirm?`<button class="btn btn-primary" style="padding:6px 14px;font-size:0.78rem" onclick="addManualTransfer('${esc(effBranch)}')"><i class="fas fa-plus"></i> إضافة تحويل (باي موب/انستاباي)</button>`:''}
         </div>
-        <div class="tbl-wrap"><table>
-          <thead><tr><th>التاريخ</th><th>البيان</th><th class="num">توريد</th><th class="num">صرف</th><th class="num">الرصيد</th>${canConfirm?'<th></th>':''}</tr></thead>
-          <tbody>${view.length?view.map(e=>`<tr>
-            <td style="color:var(--muted);font-size:0.75rem;white-space:nowrap">${dt(e.date)}</td>
-            <td>${e.kind==='closure'?'<i class="fas fa-cash-register" style="color:var(--success);font-size:.7rem;margin-inline-end:5px"></i>':e.kind==='wallet'?'<i class="fas fa-wallet" style="color:var(--wal-c);font-size:.7rem;margin-inline-end:5px"></i>':'<i class="fas fa-right-left" style="color:#1d4ed8;font-size:.7rem;margin-inline-end:5px"></i>'}${e.label}</td>
-            <td class="num" style="color:var(--success);font-weight:700">${e.credit?fmt(e.credit):'—'}</td>
-            <td class="num" style="color:var(--wal-c);font-weight:700">${e.debit?fmt(e.debit):'—'}</td>
-            <td class="num" style="font-weight:800;color:${e.balance<0?'var(--danger)':'inherit'}">${fmt(e.balance)}</td>
-            ${canConfirm?`<td class="num">${e.kind==='manual'?`<button title="حذف التحويل" onclick="deleteManualTransfer(${e.mid},'${esc(effBranch)}')" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:.8rem"><i class="fas fa-trash"></i></button>`:''}</td>`:''}
-          </tr>`).join(''):`<tr><td colspan="${canConfirm?6:5}" class="empty" style="padding:24px">لا توجد حركات</td></tr>`}</tbody>
-        </table></div>
+        ${balLedgerTable(entries,{canDelete:canConfirm,branch:effBranch})}
       </div>`;
   }catch(e){ area.innerHTML='<div class="empty" style="color:var(--danger)">فشل التحميل</div>'; }
+}
+
+// يبني حركات كشف الحساب (توريد=إغلاق، صرف=تحويلات) مرتّبة بالتاريخ مع رصيد جارٍ
+function balEntries(closures,wtrans,mtrans){
+  const e=[];
+  (closures||[]).forEach(c=>e.push({date:c.closed_at||c.shift_date, dir:'in', kind:'closure', label:'إغلاق شيفت '+(c.shift_date||'')+(c.employee_name?(' — '+esc(c.employee_name)):''), amount:+c.grand_total||0}));
+  (wtrans||[]).forEach(t=>e.push({date:t.created_at, dir:'out', kind:'wallet', label:'تحويل محفظة — '+esc(t.display_name||'')+(t.reason?(' ('+(REASON_LABEL[t.reason]||esc(t.reason))+')'):''), amount:+t.amount||0}));
+  (mtrans||[]).forEach(t=>e.push({date:t.txn_date, dir:'out', kind:'manual', mid:t.id, label:'تحويل '+(t.channel==='paymob'?'باي موب':'انستاباي')+(t.reason?(' — '+esc(t.reason)):'')+(t.note?(' · '+esc(t.note)):''), amount:+t.amount||0}));
+  e.sort((a,b)=>new Date(a.date)-new Date(b.date));
+  let run=0; e.forEach(x=>{ run += (x.dir==='in'?x.amount:-x.amount); x.balance=run; });
+  return e;
+}
+// كشف حساب موحّد: التاريخ | النوع | البيان | القيمة | الرصيد (الأحدث فوق)
+function balLedgerTable(entries, opts){
+  opts=opts||{}; const del=opts.canDelete; const view=entries.slice().reverse();
+  const ic=k=>k==='closure'?'<i class="fas fa-cash-register" style="color:var(--success);font-size:.7rem;margin-inline-end:5px"></i>':k==='wallet'?'<i class="fas fa-wallet" style="color:var(--wal-c);font-size:.7rem;margin-inline-end:5px"></i>':'<i class="fas fa-right-left" style="color:#1d4ed8;font-size:.7rem;margin-inline-end:5px"></i>';
+  return `<div class="tbl-wrap"><table>
+    <thead><tr><th>التاريخ</th><th>النوع</th><th>البيان</th><th class="num">القيمة</th><th class="num">الرصيد</th>${del?'<th></th>':''}</tr></thead>
+    <tbody>${view.length?view.map(e=>`<tr>
+      <td style="color:var(--muted);font-size:0.75rem;white-space:nowrap">${dt(e.date)}</td>
+      <td>${e.dir==='in'?'<span class="badge" style="background:#dcfce7;color:#15803d">توريد</span>':'<span class="badge" style="background:#fee2e2;color:#b91c1c">صرف</span>'}</td>
+      <td>${ic(e.kind)}${e.label}</td>
+      <td class="num" style="font-weight:800;color:${e.dir==='in'?'var(--success)':'var(--wal-c)'}">${e.dir==='in'?'+':'−'}${fmt(e.amount)}</td>
+      <td class="num" style="font-weight:800;color:${e.balance<0?'var(--danger)':'inherit'}">${fmt(e.balance)}</td>
+      ${del?`<td class="num">${e.kind==='manual'?`<button title="حذف التحويل" onclick="deleteManualTransfer(${e.mid},'${esc(opts.branch)}')" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:.8rem"><i class="fas fa-trash"></i></button>`:''}</td>`:''}
+    </tr>`).join(''):`<tr><td colspan="${del?6:5}" class="empty" style="padding:24px">لا توجد حركات</td></tr>`}</tbody>
+  </table></div>`;
 }
 
 let BAL_SUMMARY=[];
@@ -794,35 +803,15 @@ async function toggleBalRow(i){
   catch(e){ cell.innerHTML='<div style="color:var(--danger);font-size:.8rem;padding:8px;text-align:center">فشل تحميل التفاصيل</div>'; }
 }
 
-// تفاصيل فرع: قائمتين — الوارد (الإغلاقات) والمنصرف (التحويلات) بتواريخها
+// تفاصيل فرع: كشف حساب موحّد بالترتيب حسب التاريخ (النوع/البيان/القيمة/الرصيد)
 async function renderBranchDetail(branch){
   const [closures,wtrans,mtrans]=await Promise.all([
     api(`pos_shifts?select=shift_date,closed_at,employee_name,grand_total&branch=eq.${encodeURIComponent(branch)}&order=closed_at.desc&limit=3000`),
     api(`pos_wallet_transfers?select=amount,reason,display_name,created_at&branch=eq.${encodeURIComponent(branch)}&order=created_at.desc&limit=3000`),
     api(`pos_manual_transfers?select=*&branch=eq.${encodeURIComponent(branch)}&order=txn_date.desc&limit=3000`)
   ]);
-  const outRows=[];
-  wtrans.forEach(t=>outRows.push({date:t.created_at, what:'محفظة — '+esc(t.display_name||'')+(t.reason?(' ('+(REASON_LABEL[t.reason]||esc(t.reason))+')'):''), amount:+t.amount||0}));
-  mtrans.forEach(t=>outRows.push({date:t.txn_date, what:(t.channel==='paymob'?'باي موب':'انستاباي')+(t.reason?(' — '+esc(t.reason)):''), amount:+t.amount||0}));
-  outRows.sort((a,b)=>new Date(b.date)-new Date(a.date));
-  const inTot=closures.reduce((s,c)=>s+(+c.grand_total||0),0);
-  const outTot=outRows.reduce((s,r)=>s+r.amount,0);
-  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px">
-    <div>
-      <div style="font-weight:800;font-size:.8rem;color:var(--success);margin:2px 0 6px"><i class="fas fa-arrow-down"></i> الوارد (الإغلاقات) — ${fmt(inTot)} ج</div>
-      <div class="tbl-wrap"><table style="font-size:.75rem">
-        <thead><tr><th>التاريخ</th><th>الموظف</th><th class="num">القيمة</th></tr></thead>
-        <tbody>${closures.length?closures.map(c=>`<tr><td style="color:var(--muted);white-space:nowrap">${dt(c.closed_at||c.shift_date)}</td><td>${esc(c.employee_name||'—')}</td><td class="num" style="font-weight:700;color:var(--success)">${fmt(c.grand_total)}</td></tr>`).join(''):'<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:10px">لا يوجد</td></tr>'}</tbody>
-      </table></div>
-    </div>
-    <div>
-      <div style="font-weight:800;font-size:.8rem;color:var(--wal-c);margin:2px 0 6px"><i class="fas fa-arrow-up"></i> المنصرف (التحويلات) — ${fmt(outTot)} ج</div>
-      <div class="tbl-wrap"><table style="font-size:.75rem">
-        <thead><tr><th>التاريخ</th><th>البيان</th><th class="num">القيمة</th></tr></thead>
-        <tbody>${outRows.length?outRows.map(r=>`<tr><td style="color:var(--muted);white-space:nowrap">${dt(r.date)}</td><td>${r.what}</td><td class="num" style="font-weight:700;color:var(--wal-c)">${fmt(r.amount)}</td></tr>`).join(''):'<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:10px">لا يوجد</td></tr>'}</tbody>
-      </table></div>
-    </div>
-  </div>`;
+  const entries=balEntries(closures,wtrans,mtrans);
+  return balLedgerTable(entries,{canDelete:canConfirm,branch});
 }
 
 function addManualTransfer(branch){
