@@ -1016,3 +1016,134 @@ async function settlePosShift(shiftId, settledBy) {
     return false;
   }
 }
+
+// ===================== متابعة أرصدة الموردين (Supplier Balance Watch) =====================
+// نفس أسلوب باقي الأبلكيشن: PostgREST بمفتاح anon. snapshots/runs = append-only (إضافة فقط).
+// المرجع الحالي لأي فرع = أحدث صف في snapshots (بـ taken_at). التحقق من الصلاحية client-side.
+const SB_SUPBAL_SNAP_URL = `${SB_URL_API}/rest/v1/supplier_balance_snapshots`;
+const SB_SUPBAL_RUNS_URL = `${SB_URL_API}/rest/v1/supplier_balance_runs`;
+const SB_SUPBAL_EXCL_URL = `${SB_URL_API}/rest/v1/supplier_balance_exclusions`;
+const SB_SUPBAL_SET_URL  = `${SB_URL_API}/rest/v1/supplier_balance_settings`;
+
+// صلاحيات الدور (نفس RPC اللي بيستخدمه الشل) — بترجّع [{page,can_view,can_edit}]
+async function sbGetRolePages(role) {
+  try {
+    const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_role_pages`, {
+      method: 'POST', headers: SB_TASK_HEADERS, body: JSON.stringify({ p_role: role || '' })
+    });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    return Array.isArray(rows) ? rows : [];
+  } catch (e) { console.error('sbGetRolePages error:', e); return []; }
+}
+
+// قائمة الفروع من جدول branches
+async function sbBranches() {
+  try {
+    const r = await fetch(`${SB_URL_API}/rest/v1/branches?select=name&order=name.asc`, { headers: SB_TASK_HEADERS });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    return Array.isArray(rows) ? rows.map(x => x.name).filter(Boolean) : [];
+  } catch (e) { console.error('sbBranches error:', e); return []; }
+}
+
+// أحدث سناب شوتس لفرع (limit=2 يكفي: المرجع الحالي + اللي قبله للتراجع)
+async function sbSupBalSnapshots(branch, limit) {
+  try {
+    const url = `${SB_SUPBAL_SNAP_URL}?select=id,branch,taken_at,taken_by,rows,rows_count,kind,restored_from`
+      + `&branch=eq.${encodeURIComponent(branch)}&order=taken_at.desc,id.desc&limit=${limit || 2}`;
+    const r = await fetch(url, { headers: SB_TASK_HEADERS });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    return Array.isArray(rows) ? rows : [];
+  } catch (e) { console.error('sbSupBalSnapshots error:', e); return []; }
+}
+
+// أحدث مقارنة محفوظة لفرع (لعرض آخر نتيجة عند الفتح)
+async function sbSupBalLatestRun(branch) {
+  try {
+    const url = `${SB_SUPBAL_RUNS_URL}?select=*&branch=eq.${encodeURIComponent(branch)}&order=run_at.desc,id.desc&limit=1`;
+    const r = await fetch(url, { headers: SB_TASK_HEADERS });
+    if (!r.ok) return null;
+    const rows = await r.json();
+    return Array.isArray(rows) && rows.length ? rows[0] : null;
+  } catch (e) { console.error('sbSupBalLatestRun error:', e); return null; }
+}
+
+// إضافة سناب شوت (كشف جديد كمرجع، أو صف تراجع) — بيرجّع الصف المُدرَج
+async function sbSupBalInsertSnapshot({ branch, rows, rows_count, taken_by, kind, restored_from }) {
+  try {
+    const r = await fetch(SB_SUPBAL_SNAP_URL, {
+      method: 'POST', headers: { ...SB_TASK_HEADERS, 'Prefer': 'return=representation' },
+      body: JSON.stringify({
+        branch, rows: rows || {}, rows_count: rows_count || 0,
+        taken_by: taken_by || null, kind: kind || 'import',
+        restored_from: (restored_from != null ? restored_from : null)
+      })
+    });
+    if (!r.ok) return null;
+    const raw = await r.json();
+    return Array.isArray(raw) ? (raw[0] || null) : raw;
+  } catch (e) { console.error('sbSupBalInsertSnapshot error:', e); return null; }
+}
+
+// إضافة سجل مقارنة
+async function sbSupBalInsertRun({ branch, run_by, changed_count, added_count, removed_count, result, snapshot_id }) {
+  try {
+    const r = await fetch(SB_SUPBAL_RUNS_URL, {
+      method: 'POST', headers: { ...SB_TASK_HEADERS, 'Prefer': 'return=minimal' },
+      body: JSON.stringify({
+        branch, run_by: run_by || null,
+        changed_count: changed_count || 0, added_count: added_count || 0, removed_count: removed_count || 0,
+        result: result || {}, snapshot_id: (snapshot_id != null ? snapshot_id : null)
+      })
+    });
+    return r.ok;
+  } catch (e) { console.error('sbSupBalInsertRun error:', e); return false; }
+}
+
+// الاستثناءات (قائمة عامة لكل الفروع)
+async function sbSupBalExclusions() {
+  try {
+    const r = await fetch(`${SB_SUPBAL_EXCL_URL}?select=*&order=created_at.desc`, { headers: SB_TASK_HEADERS });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    return Array.isArray(rows) ? rows : [];
+  } catch (e) { console.error('sbSupBalExclusions error:', e); return []; }
+}
+async function sbSupBalAddExclusion({ supplier_code, note, created_by }) {
+  try {
+    const r = await fetch(SB_SUPBAL_EXCL_URL, {
+      method: 'POST', headers: { ...SB_TASK_HEADERS, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ supplier_code: String(supplier_code), note: note || null, created_by: created_by || null })
+    });
+    return r.ok;
+  } catch (e) { console.error('sbSupBalAddExclusion error:', e); return false; }
+}
+async function sbSupBalRemoveExclusion(supplier_code) {
+  try {
+    const r = await fetch(`${SB_SUPBAL_EXCL_URL}?supplier_code=eq.${encodeURIComponent(supplier_code)}`, {
+      method: 'DELETE', headers: { ...SB_TASK_HEADERS, 'Prefer': 'return=minimal' }
+    });
+    return r.ok;
+  } catch (e) { console.error('sbSupBalRemoveExclusion error:', e); return false; }
+}
+
+// الإعدادات المشتركة (حد تجاهل الفروق) — صف واحد id=1
+async function sbSupBalSettings() {
+  try {
+    const r = await fetch(`${SB_SUPBAL_SET_URL}?select=*&id=eq.1`, { headers: SB_TASK_HEADERS });
+    if (!r.ok) return { threshold: 0.01 };
+    const rows = await r.json();
+    return (Array.isArray(rows) && rows[0]) ? rows[0] : { threshold: 0.01 };
+  } catch (e) { console.error('sbSupBalSettings error:', e); return { threshold: 0.01 }; }
+}
+async function sbSupBalSaveSettings({ threshold, updated_by }) {
+  try {
+    const r = await fetch(SB_SUPBAL_SET_URL, {
+      method: 'POST', headers: { ...SB_TASK_HEADERS, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ id: 1, threshold: Number(threshold) || 0, updated_by: updated_by || null, updated_at: new Date().toISOString() })
+    });
+    return r.ok;
+  } catch (e) { console.error('sbSupBalSaveSettings error:', e); return false; }
+}
