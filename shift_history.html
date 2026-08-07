@@ -107,6 +107,9 @@ tr:last-child td{border-bottom:none;}
     <button class="tab" id="tab-recon" onclick="switchTab('recon')">
       <i class="fas fa-scale-balanced"></i> مطابقة ماكينات ومحافظ
     </button>
+    <button class="tab" id="tab-balance" onclick="switchTab('balance')">
+      <i class="fas fa-wallet"></i> الرصيد الحالي
+    </button>
   </div>
 
   <div class="pane active" id="pane-shifts">
@@ -123,6 +126,13 @@ tr:last-child td{border-bottom:none;}
       <i class="fas fa-circle-info"></i> كل إغلاق فيه ماكينات باي موب ومحافظ إلكترونية — اضغط عليه تشوف كل وسيلة بقيمة إغلاقها ومجموع معاملاتها (بين الإغلاق السابق وده)، والفرق لو موجود. اضغط على الوسيلة تشوف معاملاتها، وتقدر تنقل أي معاملة لشيفت أعلى (أحدث) أو أسفل (أقدم)، أو تضيف معاملة على نفس الشيفت.
     </div>
     <div id="recon-area"><div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div></div>
+  </div>
+
+  <div class="pane" id="pane-balance">
+    <div style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 12px;">
+      <i class="fas fa-circle-info"></i> كشف حساب لكل فرع: <b>توريد</b> = إجمالي الإغلاقات · <b>صرف</b> = التحويلات (محافظ + باي موب/انستاباي) · <b>الرصيد الحالي</b> = توريد − صرف. اختار فرع من فوق للتفصيل وإضافة تحويلات.
+    </div>
+    <div id="balance-area"><div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div></div>
   </div>
 </div>
 
@@ -168,7 +178,7 @@ document.getElementById('f-from').value=weekAgo;
 document.getElementById('f-to').value=today;
 
 function switchTab(t){
-  ['shifts','transfers','recon'].forEach(x=>{
+  ['shifts','transfers','recon','balance'].forEach(x=>{
     document.getElementById('tab-'+x).classList.toggle('active',x===t);
     document.getElementById('pane-'+x).classList.toggle('active',x===t);
   });
@@ -190,7 +200,7 @@ async function init(){
 }
 
 async function reloadAll(){
-  await Promise.all([loadShifts(), loadTransfers(), loadUnreviewed(), loadRecon()]);
+  await Promise.all([loadShifts(), loadTransfers(), loadUnreviewed(), loadRecon(), loadBalance()]);
 }
 
 /* ===== إجمالي غير المراجَع (يتبع فلتر الفرع فوق، لكن مستقل عن التاريخ) ===== */
@@ -682,6 +692,135 @@ function addTxnModal(shiftId, machine, source){
       if(tr2){ tr2.style.display='table-row'; tr2.firstElementChild.dataset.loaded=''; await loadReconTxns(shiftId, machine, source); }
     }catch(err){ toast('فشل الإضافة','err'); btn.disabled=false; btn.textContent='إضافة'; }
   };
+}
+
+/* ================= الرصيد الحالي (كشف حساب) ================= */
+async function loadBalance(){
+  const {branch}=filters();
+  const effBranch = isAdminView ? branch : (MY_BRANCH||branch);
+  const area=document.getElementById('balance-area');
+  area.innerHTML='<div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>';
+  try{
+    // كل الفروع (أدمن/محاسب بدون اختيار فرع): ملخص رصيد لكل فرع
+    if(!effBranch){
+      const branches=await api('branches?select=name&order=name');
+      const rows=await Promise.all(branches.filter(b=>b.name!=='كل الفروع').map(async b=>{
+        const [cl,wt,mt]=await Promise.all([
+          api(`pos_shifts?select=grand_total&branch=eq.${encodeURIComponent(b.name)}&limit=5000`),
+          api(`pos_wallet_transfers?select=amount&branch=eq.${encodeURIComponent(b.name)}&limit=5000`),
+          api(`pos_manual_transfers?select=amount&branch=eq.${encodeURIComponent(b.name)}&limit=5000`)
+        ]);
+        const credit=cl.reduce((s,x)=>s+(+x.grand_total||0),0);
+        const debit=wt.reduce((s,x)=>s+(+x.amount||0),0)+mt.reduce((s,x)=>s+(+x.amount||0),0);
+        return {branch:b.name,credit,debit,balance:credit-debit};
+      }));
+      area.innerHTML=`<div class="tbl-wrap"><table>
+        <thead><tr><th>الفرع</th><th class="num">توريد (إغلاقات)</th><th class="num">صرف (تحويلات)</th><th class="num">الرصيد الحالي</th></tr></thead>
+        <tbody>${rows.map(r=>`<tr>
+          <td><b>${esc(r.branch)}</b></td>
+          <td class="num" style="color:var(--success);font-weight:800">${fmt(r.credit)}</td>
+          <td class="num" style="color:var(--wal-c);font-weight:800">${fmt(r.debit)}</td>
+          <td class="num" style="font-weight:900;color:${r.balance<0?'var(--danger)':'var(--accent)'}">${fmt(r.balance)} ج</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+      return;
+    }
+
+    const [closures,wtrans,mtrans]=await Promise.all([
+      api(`pos_shifts?select=id,shift_date,closed_at,grand_total&branch=eq.${encodeURIComponent(effBranch)}&order=closed_at.desc&limit=3000`),
+      api(`pos_wallet_transfers?select=id,amount,reason,note,display_name,created_at&branch=eq.${encodeURIComponent(effBranch)}&order=created_at.desc&limit=3000`),
+      api(`pos_manual_transfers?select=*&branch=eq.${encodeURIComponent(effBranch)}&order=txn_date.desc&limit=3000`)
+    ]);
+
+    const entries=[];
+    closures.forEach(c=>entries.push({date:c.closed_at||c.shift_date, kind:'closure', label:'إغلاق شيفت '+(c.shift_date||''), credit:+c.grand_total||0, debit:0}));
+    wtrans.forEach(t=>entries.push({date:t.created_at, kind:'wallet', label:'تحويل محفظة — '+esc(t.display_name||'')+(t.reason?(' ('+(REASON_LABEL[t.reason]||esc(t.reason))+')'):''), credit:0, debit:+t.amount||0}));
+    mtrans.forEach(t=>entries.push({date:t.txn_date, kind:'manual', mid:t.id, label:'تحويل '+(t.channel==='paymob'?'باي موب':'انستاباي')+(t.reason?(' — '+esc(t.reason)):'')+(t.note?(' · '+esc(t.note)):''), credit:0, debit:+t.amount||0}));
+
+    // ترتيب تصاعدي بالوقت لحساب الرصيد الجاري، ثم عرض الأحدث فوق
+    entries.sort((a,b)=>new Date(a.date)-new Date(b.date));
+    let run=0; entries.forEach(e=>{ run += e.credit - e.debit; e.balance=run; });
+    const totCredit=entries.reduce((s,e)=>s+e.credit,0);
+    const totDebit=entries.reduce((s,e)=>s+e.debit,0);
+    const bal=totCredit-totDebit;
+    const view=entries.slice().reverse();
+
+    area.innerHTML=`
+      <div class="stat-row">
+        <div class="stat"><div class="stat-label" style="color:var(--muted)"><i class="fas fa-arrow-down"></i> توريد (إجمالي الإغلاقات)</div><div class="stat-val" style="color:var(--success)">${fmt(totCredit)} ج</div></div>
+        <div class="stat"><div class="stat-label" style="color:var(--muted)"><i class="fas fa-arrow-up"></i> صرف (إجمالي التحويلات)</div><div class="stat-val" style="color:var(--wal-c)">${fmt(totDebit)} ج</div></div>
+        <div class="stat hl"><div class="stat-label"><i class="fas fa-wallet"></i> الرصيد الحالي — ${esc(effBranch)}</div><div class="stat-val">${fmt(bal)} ج</div></div>
+      </div>
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+          <div style="font-weight:900;font-size:0.9rem;color:var(--accent);display:flex;align-items:center;gap:7px;"><i class="fas fa-file-lines"></i> كشف حساب — ${esc(effBranch)}</div>
+          ${canConfirm?`<button class="btn btn-primary" style="padding:6px 14px;font-size:0.78rem" onclick="addManualTransfer('${esc(effBranch)}')"><i class="fas fa-plus"></i> إضافة تحويل (باي موب/انستاباي)</button>`:''}
+        </div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>التاريخ</th><th>البيان</th><th class="num">توريد</th><th class="num">صرف</th><th class="num">الرصيد</th>${canConfirm?'<th></th>':''}</tr></thead>
+          <tbody>${view.length?view.map(e=>`<tr>
+            <td style="color:var(--muted);font-size:0.75rem;white-space:nowrap">${dt(e.date)}</td>
+            <td>${e.kind==='closure'?'<i class="fas fa-cash-register" style="color:var(--success);font-size:.7rem;margin-inline-end:5px"></i>':e.kind==='wallet'?'<i class="fas fa-wallet" style="color:var(--wal-c);font-size:.7rem;margin-inline-end:5px"></i>':'<i class="fas fa-right-left" style="color:#1d4ed8;font-size:.7rem;margin-inline-end:5px"></i>'}${e.label}</td>
+            <td class="num" style="color:var(--success);font-weight:700">${e.credit?fmt(e.credit):'—'}</td>
+            <td class="num" style="color:var(--wal-c);font-weight:700">${e.debit?fmt(e.debit):'—'}</td>
+            <td class="num" style="font-weight:800;color:${e.balance<0?'var(--danger)':'inherit'}">${fmt(e.balance)}</td>
+            ${canConfirm?`<td class="num">${e.kind==='manual'?`<button title="حذف التحويل" onclick="deleteManualTransfer(${e.mid},'${esc(effBranch)}')" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:.8rem"><i class="fas fa-trash"></i></button>`:''}</td>`:''}
+          </tr>`).join(''):`<tr><td colspan="${canConfirm?6:5}" class="empty" style="padding:24px">لا توجد حركات</td></tr>`}</tbody>
+        </table></div>
+      </div>`;
+  }catch(e){ area.innerHTML='<div class="empty" style="color:var(--danger)">فشل التحميل</div>'; }
+}
+
+function addManualTransfer(branch){
+  const old=document.getElementById('mtAddModal'); if(old) old.remove();
+  const ov=document.createElement('div');
+  ov.id='mtAddModal';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:9999';
+  ov.innerHTML=`<div style="background:#fff;border-radius:12px;padding:18px 20px;width:340px;max-width:92vw;box-shadow:0 10px 40px rgba(0,0,0,.25)">
+    <div style="font-weight:800;margin-bottom:2px">إضافة تحويل — ${esc(branch)}</div>
+    <div style="font-size:.72rem;color:var(--muted);margin-bottom:12px">هيتحسب «صرف» في كشف الحساب</div>
+    <label style="font-size:.75rem;font-weight:700;color:var(--muted)">القناة</label>
+    <select id="mtChannel" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 10px">
+      <option value="paymob">باي موب</option><option value="instapay">انستاباي</option></select>
+    <label style="font-size:.75rem;font-weight:700;color:var(--muted)">القيمة</label>
+    <input type="number" id="mtAmount" step="0.01" placeholder="0.00" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 10px">
+    <label style="font-size:.75rem;font-weight:700;color:var(--muted)">السبب (اختياري)</label>
+    <input type="text" id="mtReason" placeholder="سبب التحويل" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 10px">
+    <label style="font-size:.75rem;font-weight:700;color:var(--muted)">التاريخ</label>
+    <input type="date" id="mtDate" value="${today}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 14px">
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="document.getElementById('mtAddModal').remove()" style="padding:7px 14px;border:1px solid var(--border);background:#fff;border-radius:8px;cursor:pointer">إلغاء</button>
+      <button id="mtSave" style="padding:7px 14px;border:none;background:#16a34a;color:#fff;border-radius:8px;cursor:pointer;font-weight:700">إضافة</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
+  document.getElementById('mtSave').onclick=async()=>{
+    const amt=parseFloat(document.getElementById('mtAmount').value);
+    if(isNaN(amt)||amt<=0){toast('اكتب قيمة صحيحة','err');return;}
+    const channel=document.getElementById('mtChannel').value;
+    const reason=document.getElementById('mtReason').value.trim();
+    const d=document.getElementById('mtDate').value;
+    const btn=document.getElementById('mtSave'); btn.disabled=true; btn.textContent='جاري الإضافة...';
+    try{
+      await api('pos_manual_transfers',{method:'POST',body:JSON.stringify({
+        branch, channel, amount:amt, reason:reason||null,
+        txn_date: d?new Date(d+'T12:00:00').toISOString():new Date().toISOString(),
+        created_by:settler
+      })});
+      ov.remove(); toast('اتضاف التحويل ✓');
+      await loadBalance();
+    }catch(err){ toast('فشل الإضافة','err'); btn.disabled=false; btn.textContent='إضافة'; }
+  };
+}
+
+async function deleteManualTransfer(id,branch){
+  if(!canConfirm){toast('لا تملك صلاحية','err');return;}
+  if(!confirm('تأكيد حذف التحويل ده؟'))return;
+  try{
+    await api(`pos_manual_transfers?id=eq.${id}`,{method:'DELETE'});
+    toast('اتحذف ✓');
+    await loadBalance();
+  }catch(e){toast('فشل الحذف','err');}
 }
 
 init();
