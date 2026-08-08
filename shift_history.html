@@ -881,17 +881,20 @@ async function renderBranchDetail(branch){
 async function addManualTransfer(branch){
   if(!isAdmin){toast('للأدمن فقط','err');return;}
   const old=document.getElementById('mtAddModal'); if(old) old.remove();
-  // وسائل الفرع (باي موب + انستاباي) من pos_methods
+  // وسائل الفرع كلها (ماكينات باي موب/انستاباي + محافظ) من pos_methods
   let methods=[];
-  try{ methods=await api(`pos_methods?branch=eq.${encodeURIComponent(branch)}&method_type=eq.machine&is_active=eq.true&select=method_key,display_name&order=sort_order`); }catch(e){ methods=[]; }
-  if(!methods.some(m=>m.method_key==='instapay')) methods.push({method_key:'instapay',display_name:'إنستاباي'});
-  const opts=methods.map(m=>`<option value="${esc(m.method_key)}" data-name="${esc(m.display_name||m.method_key)}">${esc(m.display_name||m.method_key)}</option>`).join('');
+  try{ methods=await api(`pos_methods?branch=eq.${encodeURIComponent(branch)}&is_active=eq.true&select=method_key,display_name,method_type&order=method_type,sort_order`); }catch(e){ methods=[]; }
+  if(!methods.some(m=>m.method_key==='instapay')) methods.push({method_key:'instapay',display_name:'إنستاباي',method_type:'machine'});
+  const optRow=m=>`<option value="${esc(m.method_key)}" data-name="${esc(m.display_name||m.method_key)}" data-type="${esc(m.method_type||'')}">${esc(m.display_name||m.method_key)}</option>`;
+  const mMach=methods.filter(m=>m.method_type!=='wallet'), mWal=methods.filter(m=>m.method_type==='wallet');
+  const opts=(mMach.length?`<optgroup label="ماكينات / باي موب / انستاباي">${mMach.map(optRow).join('')}</optgroup>`:'')
+           +(mWal.length?`<optgroup label="محافظ">${mWal.map(optRow).join('')}</optgroup>`:'');
   const ov=document.createElement('div'); ov.id='mtAddModal';
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:9999';
   ov.innerHTML=`<div style="background:#fff;border-radius:12px;padding:18px 20px;width:340px;max-width:92vw;box-shadow:0 10px 40px rgba(0,0,0,.25)">
     <div style="font-weight:800;margin-bottom:2px">إضافة صرف — ${esc(branch)}</div>
     <div style="font-size:.72rem;color:var(--muted);margin-bottom:12px">هيتحسب «صرف» في كشف الحساب</div>
-    <label style="font-size:.75rem;font-weight:700;color:var(--muted)">الماكينة / الوسيلة</label>
+    <label style="font-size:.75rem;font-weight:700;color:var(--muted)">الوسيلة (ماكينة / محفظة)</label>
     <select id="mtMethod" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 10px">${opts}</select>
     <label style="font-size:.75rem;font-weight:700;color:var(--muted)">القيمة</label>
     <input type="number" id="mtAmount" step="0.01" placeholder="0.00" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 10px">
@@ -910,8 +913,10 @@ async function addManualTransfer(branch){
     if(isNaN(amt)||amt<=0){toast('اكتب قيمة صحيحة','err');return;}
     const sel=document.getElementById('mtMethod');
     const method_key=sel.value;
-    const display_name=(sel.options[sel.selectedIndex]||{}).dataset?.name||method_key;
-    const channel=/^paymob/i.test(method_key)?'paymob':(method_key==='instapay'?'instapay':'other');
+    const selOpt=sel.options[sel.selectedIndex]||{};
+    const display_name=selOpt.dataset?.name||method_key;
+    const mtype=selOpt.dataset?.type||'';
+    const channel=mtype==='wallet'?'wallet':(/^paymob/i.test(method_key)?'paymob':(method_key==='instapay'?'instapay':'other'));
     const reason=document.getElementById('mtReason').value.trim();
     const d=document.getElementById('mtDate').value;
     const btn=document.getElementById('mtSave'); btn.disabled=true; btn.textContent='جاري الإضافة...';
