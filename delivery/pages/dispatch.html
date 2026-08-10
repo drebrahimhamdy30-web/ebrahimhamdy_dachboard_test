@@ -798,7 +798,8 @@ function driverOptions(excludeId){
   const avail = allDrivers.filter(d=>{
     if(!d.is_active) return false;
     if(excludeId && d.id===excludeId) return false;
-    return getDriverAttStatus(d.id)==='online' && isDriverApproved(d.id);
+    const s=getDriverAttStatus(d.id);
+    return (s==='online'||s==='break_request') && isDriverApproved(d.id);
   });
 
   if(!avail.length) return '<option value="">— لا يوجد طيارين حاضرين —</option>';
@@ -1295,7 +1296,7 @@ async function openHardTripsModal(){
   const branchId=currentUser?.role==='admin'?activeBranchId:(currentUser?.branch_id||null);
   if(!branchId){ body.innerHTML='<div style="text-align:center;padding:2rem;color:#64748b">اختر فرعًا أولًا</div>'; return; }
   // سناب شوت للحاضرين وقت الفتح (أونلاين أو استراحة)
-  const present=allDrivers.filter(d=>{ const s=getDriverAttStatus(d.id); return s==='online'||s==='break'; });
+  const present=allDrivers.filter(d=>{ const s=getDriverAttStatus(d.id); return s==='online'||s==='break'||s==='break_request'; });
   if(!present.length){ body.innerHTML='<div style="text-align:center;padding:2rem;color:#64748b">لا يوجد طيارين حاضرين الآن</div>'; return; }
   const presentSet=new Set(present.map(d=>d.id));
   body.innerHTML='<div style="text-align:center;padding:2rem;color:#64748b">جاري التحميل…</div>';
@@ -1350,7 +1351,7 @@ function renderDrivers(){
   // فقط الطيارين الحاضرين (online أو break)
   const presentDrivers=allDrivers.filter(d=>{
     const s=getDriverAttStatus(d.id);
-    return s==='online'||s==='break'||s==='online_request';
+    return s==='online'||s==='break'||s==='online_request'||s==='break_request';
   });
   // لو مفيش attendance data → اعرض كل الأونلاين زي الأول
   const displayDrivers=attendanceToday.length>0?presentDrivers:allDrivers.filter(d=>d.is_online);
@@ -2316,7 +2317,7 @@ function toggleTrOther(){
 async function confirmTransfer(){
   const toDriver = document.getElementById('tr-driver').value;
   if(!toDriver){
-    const hasAny=allDrivers.some(d=>d.is_active&&getDriverAttStatus(d.id)==='online'&&isDriverApproved(d.id));
+    const hasAny=allDrivers.some(d=>{const s=getDriverAttStatus(d.id);return d.is_active&&(s==='online'||s==='break_request')&&isDriverApproved(d.id);});
     showToast(hasAny?'اختر الطيار المستلم':'⚠️ لا يوجد طيارين حاضرين لاستلام الطلبات');
     return;
   }
@@ -2371,7 +2372,7 @@ function openAssignModal(){
 async function confirmAssign(){
   const driverId=document.getElementById('assignDrv').value;
   if(!driverId){
-    const hasAny=allDrivers.some(d=>d.is_active&&getDriverAttStatus(d.id)==='online'&&isDriverApproved(d.id));
+    const hasAny=allDrivers.some(d=>{const s=getDriverAttStatus(d.id);return d.is_active&&(s==='online'||s==='break_request')&&isDriverApproved(d.id);});
     showToast(hasAny?'اختر الطيار':'⚠️ لا يوجد طيارين حاضرين — اعتمد حضور طيار أولاً');
     return;
   }
