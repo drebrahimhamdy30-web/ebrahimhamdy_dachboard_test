@@ -198,9 +198,12 @@ textarea.form-ctrl{height:80px;padding:.75rem;resize:none}
 </div>
 
 <div class="header">
-  <div>
-    <div class="h-name" id="driverName">بورتال الطيار</div>
-    <div class="h-sub" id="driverBranch">جاري التحميل...</div>
+  <div style="display:flex;align-items:center;gap:.6rem">
+    <div id="hdrAvatar" onclick="openAvatar()" title="غيّر صورتك" style="width:42px;height:42px;border-radius:50%;background:#64748b;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.95rem;overflow:hidden;background-size:cover;background-position:center;cursor:pointer;flex-shrink:0"></div>
+    <div>
+      <div class="h-name" id="driverName">بورتال الطيار</div>
+      <div class="h-sub" id="driverBranch">جاري التحميل...</div>
+    </div>
   </div>
 <div class="h-actions">
     <button class="h-btn" id="muteBtn" onclick="toggleMute()" title="كتم صوت التنبيهات">🔊</button>
@@ -343,6 +346,28 @@ textarea.form-ctrl{height:80px;padding:.75rem;resize:none}
     </div>
     <button class="btn-full btn-green" onclick="submitChangePassword()">✓ حفظ كلمة المرور</button>
     <button class="btn-full btn-gray" onclick="closeModal('pwdModal')">إلغاء</button>
+  </div>
+</div>
+
+  <!-- Modal: Avatar -->
+<div class="modal-overlay" id="avatarModal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">🖼️ صورتك في شاشة التوزيع</div>
+    <div style="display:flex;justify-content:center;margin-bottom:1rem">
+      <div id="av-preview" style="width:92px;height:92px;border-radius:50%;background:#64748b;color:#fff;display:flex;align-items:center;justify-content:center;font-size:2rem;font-weight:800;overflow:hidden;background-size:cover;background-position:center"></div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">ارفع صورتك</label>
+      <input type="file" accept="image/*" class="form-ctrl" id="av-file" onchange="onAvatarFile(event)">
+    </div>
+    <div class="form-group">
+      <label class="form-label">أو اختر رمز</label>
+      <div id="av-emojis" style="display:flex;flex-wrap:wrap;gap:.4rem"></div>
+    </div>
+    <button class="btn-full btn-green" onclick="saveAvatar()">✓ حفظ</button>
+    <button class="btn-full btn-gray" onclick="clearAvatar()">مسح الصورة (رجوع للحروف)</button>
+    <button class="btn-full btn-gray" onclick="closeModal('avatarModal')">إلغاء</button>
   </div>
 </div>
 
@@ -574,6 +599,12 @@ function subscribeToOrders(){
         playSound('order_removed');
         showBanner('طلب تم إزالته من رحلتك', '#6b7280');
       }
+      // رسالة جديدة من الإدارة على الطلب
+      else if(payload.eventType === 'UPDATE' && payload.new?.driver_message && payload.new.driver_message !== payload.old?.driver_message){
+        await loadAll();
+        startContinuousSound('new_order');
+        showBanner('✉️ رسالة جديدة من الإدارة على أحد طلباتك', '#1a56db', true);
+      }
       // أي تغيير تاني
       else {
         await loadAll();
@@ -598,6 +629,24 @@ function subscribeToCallNotifications(){
 function dismissCall(){
   stopContinuousSound();
   document.getElementById('callNotice').style.display = 'none';
+}
+
+// Realtime: رد على طلب «الموقع الحالي» من شاشة التوزيع
+let locChannel = null;
+function subscribeToLocationRequests(){
+  if(!driverRecord) return;
+  if(locChannel){ db.removeChannel(locChannel); locChannel=null; }
+  locChannel = db.channel(`driver-loc-${driverRecord.id}`)
+    .on('broadcast', {event: 'request'}, async () => {
+      const loc = await getMyLocation();
+      if(loc){
+        try{ await db.rpc('report_driver_location', {p_driver_id:driverRecord.id, p_lat:loc.lat, p_lng:loc.lng, p_acc:loc.acc||null}); }catch(e){}
+        locChannel.send({type:'broadcast', event:'response', payload:{ok:true, lat:loc.lat, lng:loc.lng, acc:loc.acc}});
+      } else {
+        locChannel.send({type:'broadcast', event:'response', payload:{ok:false}});
+      }
+    })
+    .subscribe();
 }
 
 function showBanner(msg, color, persistent=false){
@@ -638,6 +687,7 @@ window.addEventListener('DOMContentLoaded', async()=>{
   load(false);
   subscribeToOrders();
   subscribeToCallNotifications();
+  subscribeToLocationRequests();
   setInterval(loadAttendance, 30000);
   setInterval(updateAllTimers, 60000);
   // Realtime subscription للطلبات
@@ -648,6 +698,7 @@ async function loadDriver(){
   try{
 const {data}=await db.from('drivers').select('*,branches(name)').eq('branch_user_id',currentUser.id);    driverRecord=data&&data.length>0?data[0]:null;
     if(driverRecord) document.getElementById('driverBranch').textContent=driverRecord.branches?.name||'—';
+    renderHeaderAvatar();
   }catch(e){console.error(e);}
 }
 
@@ -957,101 +1008,23 @@ async function loadHistory(){
 async function renderDriverRank(){
   const badge=document.getElementById('driverRankBadge');
   if(!badge||!driverRecord)return;
-try{
-    const priority=settings?.driver_priority||'least_orders';
-
-    // طيارين نفس الفرع بس
-    const {data:branchDrivers}=await db.from('drivers')
-      .select('id').eq('branch_id',driverRecord.branch_id).eq('is_active',true);
-    const branchDriverIds=(branchDrivers||[]).map(d=>d.id);
-
-    // آخر 500 سجل حضور لطيارين الفرع (كل الأيام) — آخر حالة لكل طيار
-    const {data:attData}=await db.from('driver_attendance')
-      .select('driver_id,status,approved_at,created_at')
-      .in('driver_id',branchDriverIds)
-      .order('created_at',{ascending:false})
-      .limit(500);
-
-    // آخر حالة لكل طيار (الأحدث أولاً)
-    const attStatus={};
-    (attData||[]).forEach(r=>{if(!attStatus[r.driver_id])attStatus[r.driver_id]=r;});
-
-    // فقط الحاضرين (آخر حالتهم online)
-    const onlineDriverIds=Object.entries(attStatus)
-      .filter(([,r])=>r.status==='online')
-      .map(([id])=>id);
-
-    if(!onlineDriverIds.includes(driverRecord.id)){
-      badge.style.display='none';
-      return;
-    }
-
-    const total=onlineDriverIds.length;
-    let rank=1;
-
-    if(priority==='least_orders'){
-      // الأقل طلبات أولاً — لو تساوى → الأقدم حضوراً
-      const {data:orders}=await db.from('orders')
-        .select('driver_id')
-        .in('status',['assigned','picked'])
-        .in('driver_id',onlineDriverIds);
-
-      const orderCount={};
-      onlineDriverIds.forEach(id=>orderCount[id]=0);
-      (orders||[]).forEach(o=>{if(o.driver_id)orderCount[o.driver_id]=(orderCount[o.driver_id]||0)+1;});
-
-      const myCount=orderCount[driverRecord.id]||0;
-      const myArrival=new Date(attStatus[driverRecord.id]?.approved_at||0);
-
-      rank=onlineDriverIds.filter(id=>{
-        const theirCount=orderCount[id]||0;
-        if(theirCount<myCount) return true; // عنده أقل → هو قبلي
-        if(theirCount===myCount){
-          // تساوى → الأقدم حضوراً أولاً
-          const theirArrival=new Date(attStatus[id]?.approved_at||0);
-          return theirArrival < myArrival;
-        }
-        return false;
-      }).length + 1;
-
-    } else {
-      // longest_idle — الأطول فراغاً أولاً
-      const {data:lastOrders}=await db.from('orders')
-        .select('driver_id,assigned_at')
-        .in('driver_id',onlineDriverIds)
-        .not('assigned_at','is',null)
-        .order('assigned_at',{ascending:false});
-
-      // آخر تعيين لكل طيار
-      const lastAssigned={};
-      (lastOrders||[]).forEach(o=>{
-        if(!lastAssigned[o.driver_id]) lastAssigned[o.driver_id]=new Date(o.assigned_at);
-      });
-
-      // لو ما اتوزعلوش أي طلب → وقت الحضور
-      onlineDriverIds.forEach(id=>{
-        if(!lastAssigned[id]) lastAssigned[id]=new Date(attStatus[id]?.approved_at||0);
-      });
-
-      const myLastAssigned=lastAssigned[driverRecord.id]||new Date(0);
-
-      rank=onlineDriverIds.filter(id=>{
-        const theirLast=lastAssigned[id]||new Date(0);
-        return theirLast < myLastAssigned;
-      }).length + 1;
-    }
-
+  try{
+    // نفس منطق شاشة التوزيع بالظبط (أونلاين معتمد + مش مشغول، مرتّب بآخر إنهاء)
+    const {data,error}=await db.rpc('get_driver_rank',{p_driver:driverRecord.id,p_branch:driverRecord.branch_id});
+    const row=Array.isArray(data)?data[0]:data;
+    if(error||!row||row.rank==null){ badge.style.display='none'; return; }
+    const rank=row.rank;
     badge.style.display='inline';
     if(rank===1){
       badge.textContent='دورك #1 — التالي في التوزيع';
       badge.style.background='rgba(22,163,74,.15)';
       badge.style.color='var(--green)';
     } else if(rank===2){
-      badge.textContent=`دورك #2 من ${total}`;
+      badge.textContent='دورك #2';
       badge.style.background='rgba(234,88,12,.1)';
       badge.style.color='var(--orange)';
     } else {
-      badge.textContent=`دورك #${rank} من ${total}`;
+      badge.textContent=`دورك #${rank}`;
       badge.style.background='rgba(26,86,219,.1)';
       badge.style.color='var(--primary)';
     }
@@ -1402,6 +1375,7 @@ let actions='';
         ${o.collected_amount!=null?`<div style="font-size:.72rem;color:var(--green);font-weight:600;margin-bottom:.3rem">✓ محصل: ${Number(o.collected_amount).toLocaleString()} ج</div>${collectedNote(o)}`:''}
         ${(o.notes||'').includes('🚨')?`<div class="or-note note-urgent">🚨 طلب عاجل</div>`:''}
 ${o.staff_notes?`<div class="or-note note-staff">💼 ${o.staff_notes}</div>`:''}
+        ${o.driver_message?`<div class="or-note" style="background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;font-weight:700">✉️ رسالة من الإدارة: ${o.driver_message}</div>`:''}
         ${o.status==='failed'&&o.postpone_reason?`<div class="or-note note-urgent">⚠️ تعذر: ${o.postpone_reason}</div>`:''}
         ${actions?`<div class="or-actions">${actions}</div>`:''}
       </div>
@@ -1520,6 +1494,13 @@ function showBalanceNotice(orders){
 let _dlvBill=0;
 function openDeliver(id){
   const o=Object.values(tripOrders).flat().find(x=>x.id===id);if(!o)return;
+  // رسالة الإدارة المربوطة بالطلب — تظهر إجبارياً هنا لو الطيار مشافهاش
+  if(o.driver_message && !o.driver_message_seen_at){
+    alert('✉️ رسالة من الإدارة على هذا الطلب:\n\n'+o.driver_message);
+    const seenAt=new Date().toISOString();
+    o.driver_message_seen_at=seenAt;
+    db.from('orders').update({driver_message_seen_at:seenAt}).eq('id',id).then(()=>{}).catch(()=>{});
+  }
   _dlvBill=Number(o.total_bill_net||0);
   document.getElementById('dlv-billnote').textContent='قيمة الفاتورة: '+_dlvBill.toLocaleString('ar-EG')+' ج';
   document.getElementById('dlv-id').value=id;
@@ -1728,6 +1709,60 @@ async function submitChangePassword(){
     console.error('changePassword:',e);
     alert('❌ حدث خطأ: '+(e.message||'فشل تغيير كلمة المرور'));
   }
+  load(false);
+}
+
+// ===== صورة/رمز الطيار =====
+const AV_EMOJIS=['🛵','🏍️','🚗','🚴','🧑','👨','👩','🧔','😎','🧢','⭐','🔥','🚀','🐎','⚡','🦅','🏆','👍'];
+let _avatarVal='';
+function isAvImg(v){ return typeof v==='string' && (v.startsWith('data:')||v.startsWith('http')); }
+function driverInitials(){ return (currentUser?.full_name||driverRecord?.full_name||'?').split(' ').slice(0,2).map(w=>w[0]).join(''); }
+function applyAvatarTo(el, val){
+  if(!el) return;
+  const ini=driverInitials();
+  if(isAvImg(val)){ el.style.backgroundImage=`url('${val}')`; el.textContent=''; }
+  else if(val){ el.style.backgroundImage='none'; el.textContent=val; }
+  else { el.style.backgroundImage='none'; el.textContent=ini; }
+}
+function renderHeaderAvatar(){ applyAvatarTo(document.getElementById('hdrAvatar'), driverRecord?.avatar||''); }
+function renderAvatarPreview(){ applyAvatarTo(document.getElementById('av-preview'), _avatarVal); }
+function openAvatar(){
+  if(!driverRecord){ alert('جاري تحميل بياناتك، حاول بعد لحظات'); return; }
+  _avatarVal=driverRecord.avatar||'';
+  document.getElementById('av-file').value='';
+  document.getElementById('av-emojis').innerHTML=AV_EMOJIS.map(e=>`<button type="button" onclick="pickEmoji('${e}')" style="font-size:1.4rem;width:46px;height:46px;border:1px solid var(--border);border-radius:10px;background:#fff;cursor:pointer">${e}</button>`).join('');
+  renderAvatarPreview();
+  document.getElementById('avatarModal').classList.add('open');
+}
+function pickEmoji(e){ _avatarVal=e; document.getElementById('av-file').value=''; renderAvatarPreview(); }
+function clearAvatar(){ _avatarVal=''; renderAvatarPreview(); }
+function onAvatarFile(ev){
+  const f=ev.target.files&&ev.target.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>{
+    const img=new Image();
+    img.onload=()=>{
+      const size=96, c=document.createElement('canvas'); c.width=size; c.height=size;
+      const ctx=c.getContext('2d');
+      const m=Math.min(img.width,img.height), sx=(img.width-m)/2, sy=(img.height-m)/2;
+      ctx.drawImage(img, sx,sy,m,m, 0,0,size,size);
+      _avatarVal=c.toDataURL('image/jpeg',0.7);
+      renderAvatarPreview();
+    };
+    img.src=rd.result;
+  };
+  rd.readAsDataURL(f);
+}
+async function saveAvatar(){
+  if(!driverRecord) return;
+  load(true);
+  try{
+    const {data,error}=await db.rpc('set_driver_avatar',{p_driver_id:driverRecord.id, p_avatar:_avatarVal||null});
+    if(error||(data&&data.success===false)) throw new Error(error?.message||data?.error||'فشل الحفظ');
+    driverRecord.avatar=_avatarVal||null;
+    renderHeaderAvatar();
+    closeModal('avatarModal');
+  }catch(e){ alert('❌ تعذّر حفظ الصورة: '+(e.message||'')); }
   load(false);
 }
 

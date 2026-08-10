@@ -1422,12 +1422,45 @@ const pickedMap={};allOrders.filter(o=>['picked','failed'].includes(o.status)&&o
     const avatarTitle=isLeastHard?'من أقل الطيارين ذهابًا للمناطق الصعبة هذا الشهر (محسوبة بالنسبة لساعات العمل) — الأولوية له في المناطق الصعبة':'';
     return `<div class="driver-chip ${sc} ${filterDriver===d.id?'selected':''}" onclick="openDriverPopup('${d.id}')" style="position:relative">
       ${leastTripsSet.has(d.id)?`<div title="أقل طيار في إجمالي عدد الرحلات هذا الشهر" style="position:absolute;top:-5px;left:-3px;background:#f59e0b;color:#fff;font-size:.5rem;font-weight:800;padding:.05rem .3rem;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.25);z-index:2">⬇ الأقل</div>`:''}
-      <div class="driver-avatar" title="${avatarTitle}" style="background:${avatarBg}">${ini}</div>
+      ${avatarChipHTML(d, avatarBg, avatarTitle)}
       <div class="dc-name">${(d.full_name||'').split(' ').slice(0,2).join(' ')}</div>
       <div class="dc-st ${st}">${sl}</div>
       ${workLabel?`<div style="font-size:.52rem;color:#94a3b8">${workLabel}</div>`:''}
     </div>`;
   }).join('');
+}
+
+// صورة/رمز الطيار: صورة مرفوعة → <img>، رمز → إيموجي، غير ذلك → الحروف
+function _avIsImg(v){ return typeof v==='string' && (v.startsWith('data:')||v.startsWith('http')); }
+function avatarChipHTML(d, bg, titleAttr){
+  const ini=(d.full_name||'?').split(' ').slice(0,2).map(w=>w[0]).join('');
+  const av=d.avatar;
+  if(_avIsImg(av)) return `<div class="driver-avatar" title="${titleAttr||''}" style="background-image:url('${av}');background-size:cover;background-position:center"></div>`;
+  return `<div class="driver-avatar" title="${titleAttr||''}" style="background:${bg}">${(av&&av.length)?av:ini}</div>`;
+}
+function applyAvatarEl(el, d, bg){
+  if(!el) return;
+  const ini=(d.full_name||'?').split(' ').slice(0,2).map(w=>w[0]).join('');
+  const av=d.avatar;
+  if(_avIsImg(av)){ el.style.backgroundImage=`url('${av}')`; el.style.backgroundSize='cover'; el.style.backgroundPosition='center'; el.textContent=''; }
+  else { el.style.backgroundImage='none'; el.style.background=bg; el.textContent=(av&&av.length)?av:ini; }
+}
+
+// إرسال/تعديل رسالة مربوطة بالطلب — تظهر للطيار فوراً وتفضل معاه لحد ما يعمل «تم التوصيل»
+async function sendDriverMessage(orderId){
+  const o=allOrders.find(x=>x.id===orderId); if(!o){ alert('الطلب غير موجود'); return; }
+  const cur=o.driver_message||'';
+  const msg=prompt(`رسالة للطيار على الطلب #${o.bill_no||orderId.slice(0,6)}\n(مثال: العميل محتاج فيزا / الحساب خالص)\n\nاتركها فاضية لمسح الرسالة.`, cur);
+  if(msg===null) return;
+  const txt=msg.trim();
+  const now=new Date().toISOString();
+  const upd = txt ? {driver_message:txt, driver_message_at:now, driver_message_seen_at:null}
+                  : {driver_message:null, driver_message_at:null, driver_message_seen_at:null};
+  const {error}=await db.from('orders').update(upd).eq('id',orderId);
+  if(error){ alert('تعذّر الإرسال: '+error.message); return; }
+  o.driver_message=upd.driver_message; o.driver_message_at=upd.driver_message_at; o.driver_message_seen_at=null;
+  closeModal('detailModal');
+  alert(txt?'✓ اتبعتت للطيار — هتظهرله على الطلب وكإشعار':'تم مسح الرسالة');
 }
 
 async function openDriverPopup(driverId){
@@ -1438,8 +1471,7 @@ async function openDriverPopup(driverId){
   const workMins=getDriverWorkMins(driverId);
   const ini=(d.full_name||'?').split(' ').slice(0,2).map(w=>w[0]).join('');
 
-  document.getElementById('dp-avatar').textContent=ini;
-  document.getElementById('dp-avatar').style.background=c;
+  applyAvatarEl(document.getElementById('dp-avatar'), d, c);
   document.getElementById('dp-name').textContent=d.full_name||'—';
   document.getElementById('dp-phone').textContent=d.phone||'لا يوجد رقم';
 
@@ -2887,12 +2919,14 @@ function openDetail(id){
     ${billItemsRow(o)}
     ${o.driver_notes?`<div class="d-row"><span class="d-lbl">ملاحظة الطيار</span><span class="d-val">${o.driver_notes}</span></div>`:''}
     ${o.staff_notes?`<div class="d-row"><span class="d-lbl">ملاحظة الموظف</span><span class="d-val">${o.staff_notes}</span></div>`:''}
+    ${o.driver_message?`<div class="d-row"><span class="d-lbl">رسالة للطيار</span><span class="d-val" style="color:#1e40af">✉️ ${o.driver_message} ${o.driver_message_seen_at?'· ✓ شافها':'· (لسه ما شافهاش)'}</span></div>`:''}
     ${o.postpone_reason?`<div class="d-row"><span class="d-lbl">سبب التأجيل</span><span class="d-val">${o.postpone_reason}</span></div>`:''}
     ${o.cancelled_reason?`<div class="d-row"><span class="d-lbl">سبب الإلغاء</span><span class="d-val" style="color:var(--red)">${o.cancelled_reason}</span></div>`:''}
     ${o.notes?`<div class="d-row"><span class="d-lbl">ملاحظات</span><span class="d-val">${o.notes}</span></div>`:''}`;
   document.getElementById('detailFooter').innerHTML=`
     <button class="btn btn-outline" onclick="closeModal('detailModal')">إغلاق</button>
     <button class="btn btn-outline" onclick="closeModal('detailModal');openLog('${id}',null)">📋 السجل</button>
+    ${(o.driver_id && ['assigned','picked'].includes(o.status))?`<button class="btn btn-outline" onclick="sendDriverMessage('${id}')">✉️ رسالة للطيار</button>`:''}
     ${['pending','postponed'].includes(o.status)?`<button class="btn btn-green" onclick="closeModal('detailModal');quickAssign('${id}',null)">تعيين طيار</button>`:''}
     ${o.status==='picked'&&currentUser?.role!=='cashier'?`<button class="btn btn-yellow" onclick="closeModal('detailModal');openDeliver('${id}',null)">تأكيد التوصيل</button>`:''}`;
   document.getElementById('detailModal').classList.add('open');
@@ -3016,11 +3050,14 @@ if(o.delivered_at){
     <div class="d-row"><span class="d-lbl">الأصناف</span><span class="d-val">${o.count_of_items||0}</span></div>
     ${billItemsRow(o)}
     ${o.staff_notes?`<div class="d-row"><span class="d-lbl">ملاحظة الموظف</span><span class="d-val">${o.staff_notes}</span></div>`:''}
-    ${o.driver_notes?`<div class="d-row"><span class="d-lbl">ملاحظة الطيار</span><span class="d-val">${o.driver_notes}</span></div>`:''}`;
+    ${o.driver_notes?`<div class="d-row"><span class="d-lbl">ملاحظة الطيار</span><span class="d-val">${o.driver_notes}</span></div>`:''}
+    ${o.driver_message?`<div class="d-row"><span class="d-lbl">رسالة للطيار</span><span class="d-val" style="color:#1e40af">✉️ ${o.driver_message} ${o.driver_message_seen_at?'· ✓ شافها':'· (لسه ما شافهاش)'}</span></div>`:''}`;
 
   // Actions based on status
   let footerBtns=`<button class="btn btn-outline" onclick="closeModal('detailModal')">إغلاق</button>`;
   footerBtns+=`<button class="btn btn-outline" onclick="closeModal('detailModal');openLog('${orderId}',null)">📋 سجل</button>`;
+  if(o.driver_id && ['assigned','picked'].includes(o.status))
+    footerBtns+=`<button class="btn btn-outline" onclick="sendDriverMessage('${orderId}')">✉️ رسالة للطيار</button>`;
 
   // الطيار خرج بالرحلة؟ → الأدوية معاه، فإعادة التعيين خطر (النقل هو الصح)
   const driverIsOut = tripId ? tripHasPicked(tripId) : false;
