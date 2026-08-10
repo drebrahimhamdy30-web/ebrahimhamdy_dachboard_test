@@ -269,15 +269,36 @@
 
   <div class="card" id="forgotCard" style="display:none">
     <div style="font-weight:700;font-size:1rem;margin-bottom:.4rem">استعادة كلمة السر</div>
-    <div style="font-size:.82rem;color:var(--text-muted);margin-bottom:1rem">اكتب اسم المستخدم أو الإيميل المسجّل، وهنبعتلك رابط لإعادة تعيين كلمة السر على إيميلك.</div>
-    <div class="form-group">
-      <label for="forgotLogin">اسم المستخدم أو الإيميل</label>
-      <div class="input-wrap">
-        <svg class="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 6L2 7"/></svg>
-        <input type="text" id="forgotLogin" placeholder="اسم المستخدم أو الإيميل" dir="ltr">
+
+    <div id="fpStep1">
+      <div style="font-size:.82rem;color:var(--text-muted);margin-bottom:1rem">اكتب اسم المستخدم أو الإيميل المسجّل، وهنبعتلك كود على إيميلك.</div>
+      <div class="form-group">
+        <label for="forgotLogin">اسم المستخدم أو الإيميل</label>
+        <div class="input-wrap">
+          <svg class="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 6L2 7"/></svg>
+          <input type="text" id="forgotLogin" placeholder="اسم المستخدم أو الإيميل" dir="ltr">
+        </div>
       </div>
+      <button class="btn" id="forgotBtn" onclick="sendForgot()"><div class="spinner"></div><span class="btn-text">إرسال الكود</span></button>
     </div>
-    <button class="btn" id="forgotBtn" onclick="sendForgot()"><div class="spinner"></div><span class="btn-text">إرسال رابط الاستعادة</span></button>
+
+    <div id="fpStep2" style="display:none">
+      <div style="font-size:.82rem;color:var(--text-muted);margin-bottom:1rem">لو الحساب موجود، وصلك كود من 6 أرقام على إيميلك — اكتبه مع كلمة السر الجديدة (صالح 15 دقيقة).</div>
+      <div class="form-group">
+        <label for="fpCode">الكود</label>
+        <input type="text" id="fpCode" inputmode="numeric" maxlength="6" placeholder="••••••" dir="ltr" style="text-align:center;letter-spacing:.35em;font-size:1.15rem">
+      </div>
+      <div class="form-group">
+        <label for="fpNew1">كلمة السر الجديدة</label>
+        <input type="password" id="fpNew1" placeholder="6 أحرف على الأقل" dir="ltr" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label for="fpNew2">تأكيد كلمة السر</label>
+        <input type="password" id="fpNew2" placeholder="أعد كتابتها" dir="ltr" autocomplete="new-password">
+      </div>
+      <button class="btn" id="fpResetBtn" onclick="doReset()"><div class="spinner"></div><span class="btn-text">تعيين كلمة السر</span></button>
+    </div>
+
     <div class="error-msg" id="forgotMsg"><span id="forgotText"></span></div>
     <div style="text-align:center;margin-top:1.25rem">
       <a href="#" onclick="backToLogin();return false" style="color:var(--text-muted);font-size:.85rem;font-weight:600;text-decoration:none">‹ رجوع لتسجيل الدخول</a>
@@ -418,10 +439,23 @@ if (result && result.status === 'success') {
     document.getElementById('errorMsg').classList.add('show');
   }
 
-  // ===== نسيت كلمة السر (استعادة بالإيميل عبر n8n) =====
+  // ===== نسيت كلمة السر (كود مؤقت بالإيميل عبر n8n) =====
   const FORGOT_URL = 'https://agent.ebrahimhamdy.com/webhook/forgot_password';
-  function showForgot(){ document.getElementById('loginCard').style.display='none'; document.getElementById('forgotCard').style.display='block'; }
-  function backToLogin(){ document.getElementById('forgotCard').style.display='none'; document.getElementById('loginCard').style.display='block'; document.getElementById('forgotMsg').classList.remove('show'); }
+  let fpLogin = '';
+  function showForgot(){
+    document.getElementById('loginCard').style.display='none';
+    document.getElementById('forgotCard').style.display='block';
+    document.getElementById('fpStep1').style.display='block';
+    document.getElementById('fpStep2').style.display='none';
+    document.getElementById('forgotMsg').classList.remove('show');
+  }
+  function backToLogin(){
+    document.getElementById('forgotCard').style.display='none';
+    document.getElementById('loginCard').style.display='block';
+    document.getElementById('forgotMsg').classList.remove('show');
+    document.getElementById('fpStep1').style.display='block';
+    document.getElementById('fpStep2').style.display='none';
+  }
   function showForgotMsg(t, ok){
     const m=document.getElementById('forgotMsg');
     document.getElementById('forgotText').textContent=t;
@@ -432,11 +466,37 @@ if (result && result.status === 'success') {
     const login=document.getElementById('forgotLogin').value.trim();
     const btn=document.getElementById('forgotBtn');
     if(!login){ showForgotMsg('اكتب اسم المستخدم أو الإيميل', false); return; }
+    fpLogin = login;
     btn.classList.add('loading'); btn.disabled=true; document.getElementById('forgotMsg').classList.remove('show');
     try{ await fetch(FORGOT_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({login})}); }catch(e){}
-    // رسالة عامة دايمًا (ما نكشفش وجود الحساب)
-    showForgotMsg('لو الحساب موجود وله إيميل مسجّل، هيوصلك رابط لإعادة تعيين كلمة السر خلال دقائق (راجع الـ Spam كمان).', true);
+    // نظهر خطوة الكود دايمًا (ما نكشفش وجود الحساب)
+    document.getElementById('fpStep1').style.display='none';
+    document.getElementById('fpStep2').style.display='block';
+    showForgotMsg('لو الحساب موجود وله إيميل مسجّل، وصلك كود من 6 أرقام دلوقتي (راجع الـ Spam كمان). اكتبه تحت.', true);
     btn.classList.remove('loading'); btn.disabled=false;
+  }
+  async function doReset(){
+    const code=document.getElementById('fpCode').value.trim();
+    const n1=document.getElementById('fpNew1').value, n2=document.getElementById('fpNew2').value;
+    const btn=document.getElementById('fpResetBtn');
+    if(!/^\d{6}$/.test(code)){ showForgotMsg('اكتب الكود المكوّن من 6 أرقام', false); return; }
+    if(!n1 || n1.length<6){ showForgotMsg('كلمة السر لازم تكون 6 أحرف على الأقل', false); return; }
+    if(n1!==n2){ showForgotMsg('كلمتا السر غير متطابقتين', false); return; }
+    btn.classList.add('loading'); btn.disabled=true; document.getElementById('forgotMsg').classList.remove('show');
+    try{
+      const { data, error } = await db.rpc('reset_password_with_code', { p_login: fpLogin, p_code: code, p_new_password: n1 });
+      if(error){ showForgotMsg('تعذّر تغيير كلمة السر، حاول تاني', false); btn.classList.remove('loading'); btn.disabled=false; return; }
+      if(data && data.success){
+        document.getElementById('fpStep2').style.display='none';
+        showForgotMsg('✓ اتغيّرت كلمة السر بنجاح. ارجع وسجّل دخول بيها دلوقتي.', true);
+      }else{
+        showForgotMsg((data && data.error) || 'تعذّر تغيير كلمة السر', false);
+        btn.classList.remove('loading'); btn.disabled=false;
+      }
+    }catch(e){
+      showForgotMsg('فشل الاتصال، حاول تاني', false);
+      btn.classList.remove('loading'); btn.disabled=false;
+    }
   }
 </script>
 </body>
