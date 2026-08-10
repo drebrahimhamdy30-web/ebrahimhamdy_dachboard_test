@@ -21,6 +21,7 @@ table.matrix td:first-child,table.matrix th:first-child{
 table.matrix th:first-child{background:var(--gray-light);z-index:3}
 .group-row td{background:var(--primary-light);color:var(--primary);font-weight:700;text-align:right !important;padding:.5rem .75rem}
 .chk{width:16px;height:16px;cursor:pointer}
+.perm-sel{font-family:'Cairo',sans-serif;font-size:.72rem;padding:2px 5px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer}
 .chk:disabled{cursor:not-allowed;opacity:.5}
 .btn-edit{background:var(--primary,#1a56db);color:white;border:none;border-radius:8px;padding:.5rem 1.1rem;font-family:'Cairo',sans-serif;font-size:.8rem;font-weight:700;cursor:pointer}
 .btn-save{background:#16a34a;color:white;border:none;border-radius:8px;padding:.5rem 1.1rem;font-family:'Cairo',sans-serif;font-size:.8rem;font-weight:700;cursor:pointer}
@@ -35,7 +36,7 @@ table.matrix th:first-child{background:var(--gray-light);z-index:3}
 <div class="perm-head">
   <div>
     <div style="font-size:.9rem;font-weight:700;margin-bottom:.2rem">الصلاحيات — كل النظام</div>
-    <div style="font-size:.78rem;color:var(--text-muted)" id="permSubtitle">مين يشوف إيه من صفحات الصيدلية والتوصيل</div>
+    <div style="font-size:.78rem;color:var(--text-muted)" id="permSubtitle">مين يشوف / يعدّل إيه من صفحات النظام — لكل دور: عرض أو عرض وتعديل</div>
   </div>
   <div id="permActions"></div>
 </div>
@@ -176,11 +177,16 @@ function render(){
     pages.forEach(([page, meta]) => {
       html += `<tr><td>${meta.title}</td>`;
       ROLES.forEach(role => {
-        const has = permData[role.key]?.[page]?.can_view === true;
+        const pp = permData[role.key]?.[page] || {};
+        const cur = pp.can_edit ? 'edit' : (pp.can_view ? 'view' : '');
         if(editMode){
-          html += `<td><input type="checkbox" class="chk" data-role="${role.key}" data-page="${page}" ${has?'checked':''}></td>`;
+          html += `<td><select class="perm-sel" data-role="${role.key}" data-page="${page}">
+            <option value=""${cur===''?' selected':''}>—</option>
+            <option value="view"${cur==='view'?' selected':''}>عرض</option>
+            <option value="edit"${cur==='edit'?' selected':''}>عرض وتعديل</option>
+          </select></td>`;
         } else {
-          html += `<td>${has?'✅':'—'}</td>`;
+          html += `<td>${cur==='edit'?'✏️ عرض وتعديل':(cur==='view'?'👁 عرض':'—')}</td>`;
         }
       });
       html += `</tr>`;
@@ -198,11 +204,12 @@ function cancelEdit(){ editMode=false; loadPermissions(); }
 
 async function savePermissions(){
   if(!loadOk){ showToast('⚠️ مش هينفع تحفظ: الصلاحيات لم تُحمّل بشكل صحيح'); return; }
-  const checkboxes = document.querySelectorAll('#permBody input[type=checkbox]');
-  if(!checkboxes.length){ showToast('لا توجد بيانات للحفظ'); return; }
+  const sels = document.querySelectorAll('#permBody select.perm-sel');
+  if(!sels.length){ showToast('لا توجد بيانات للحفظ'); return; }
   const updates = [];
-  checkboxes.forEach(cb=>{
-    updates.push({ role: cb.dataset.role, page: cb.dataset.page, can_view: cb.checked });
+  sels.forEach(s=>{
+    const v = s.value;
+    updates.push({ role: s.dataset.role, page: s.dataset.page, can_view: v!=='', can_edit: v==='edit' });
   });
   try{
     const { error } = await db.rpc('save_page_permissions_bulk', { p_updates: updates });
