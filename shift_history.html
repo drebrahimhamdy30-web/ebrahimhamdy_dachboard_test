@@ -759,29 +759,41 @@ async function getOpening(branch){
   return {opening_balance:0, as_of:'2000-01-01'};
 }
 
-// حركات خام مرتّبة بالتاريخ (توريد=إغلاق، صرف=تحويلات محافظ/يدوية) — بدون رصيد
+// اليوم المحاسبي بتوقيت القاهرة (YYYY-MM-DD) — ثابت لكل المستخدمين مهما كان توقيت الجهاز
+function cairoDay(ts){ try{ return new Date(ts).toLocaleDateString('en-CA',{timeZone:'Africa/Cairo'}); }catch(_){ return (''+ts).slice(0,10); } }
+
+// حركات خام: توريد=إغلاق موجب، صرف=تحويلات + إغلاق سالب. date=الوقت الفعلي (للترتيب)، day=يوم الشيفت (للفلترة)
 function balRawEntries(closures,wtrans,mtrans){
   const e=[];
-  (closures||[]).forEach(c=>e.push({date:c.closed_at||c.shift_date, dir:'in', kind:'closure', label:'إغلاق شيفت '+(c.shift_date||'')+(c.employee_name?(' — '+esc(c.employee_name)):''), amount:+c.grand_total||0}));
-  (wtrans||[]).forEach(t=>e.push({date:t.created_at, dir:'out', kind:'wallet', label:'تحويل محفظة — '+esc(t.display_name||'')+(t.reason?(' ('+(REASON_LABEL[t.reason]||esc(t.reason))+')'):''), amount:+t.amount||0}));
-  (mtrans||[]).forEach(t=>e.push({date:t.txn_date, dir:'out', kind:'manual', mid:t.id, label:'صرف — '+esc(t.display_name||t.channel||'')+(t.reason?(' ('+esc(t.reason)+')'):'')+(t.note?(' · '+esc(t.note)):''), amount:+t.amount||0}));
-  e.sort((a,b)=>new Date(a.date)-new Date(b.date));
+  (closures||[]).forEach(c=>{
+    const gt=+c.grand_total||0; const neg=gt<0;
+    e.push({
+      date:c.closed_at||c.shift_date,
+      day:(c.shift_date||(c.closed_at?cairoDay(c.closed_at):'')),   // اليوم المحاسبي = يوم الشيفت
+      dir:neg?'out':'in',
+      kind:neg?'closure_neg':'closure',
+      label:(neg?'صرف — شيفت سالب ':'إغلاق شيفت ')+(c.shift_date||'')+(c.employee_name?(' — '+esc(c.employee_name)):''),
+      amount:Math.abs(gt)
+    });
+  });
+  (wtrans||[]).forEach(t=>e.push({date:t.created_at, day:cairoDay(t.created_at), dir:'out', kind:'wallet', label:'تحويل محفظة — '+esc(t.display_name||'')+(t.reason?(' ('+(REASON_LABEL[t.reason]||esc(t.reason))+')'):''), amount:+t.amount||0}));
+  (mtrans||[]).forEach(t=>e.push({date:t.txn_date, day:cairoDay(t.txn_date), dir:'out', kind:'manual', mid:t.id, label:'صرف — '+esc(t.display_name||t.channel||'')+(t.reason?(' ('+esc(t.reason)+')'):'')+(t.note?(' · '+esc(t.note)):''), amount:+t.amount||0}));
+  e.sort((a,b)=> (new Date(a.date)-new Date(b.date)) || (a.day<b.day?-1:a.day>b.day?1:0) );
   return e;
 }
 
 // يحسب كشف فرع لمدة: رصيد بداية المدة + حركات المدة برصيد جارٍ (الحركات قبل تاريخ رصيد البداية متضمّنة فيه)
 function computeLedger(raw, opening, from, to){
-  const asOf=new Date((opening.as_of||'2000-01-01')+'T00:00:00');
-  const fromD=from?new Date(from+'T00:00:00'):null;
-  const toD=to?new Date(to+'T23:59:59'):null;
+  // المقارنة باليوم المحاسبي (نص YYYY-MM-DD) — مستقلة عن توقيت الجهاز
+  const asOf=(opening.as_of||'2000-01-01');
   let openPeriod=+opening.opening_balance||0;
   const period=[];
   raw.forEach(e=>{
-    const d=new Date(e.date);
-    if(d<asOf) return;                                  // قبل تاريخ رصيد البداية → متضمّن فيه
+    const day=e.day||(''+e.date).slice(0,10);
+    if(day<asOf) return;                                // قبل تاريخ رصيد البداية → متضمّن فيه
     const net=e.dir==='in'?e.amount:-e.amount;
-    if(fromD && d<fromD){ openPeriod+=net; return; }    // قبل المدة → يدخل رصيد بداية المدة
-    if(toD && d>toD) return;                            // بعد المدة → يتجاهل
+    if(from && day<from){ openPeriod+=net; return; }    // قبل المدة → يدخل رصيد بداية المدة
+    if(to && day>to) return;                            // بعد المدة → يتجاهل
     period.push(e);
   });
   let run=openPeriod; period.forEach(e=>{ run += (e.dir==='in'?e.amount:-e.amount); e.balance=run; });
@@ -838,7 +850,7 @@ function openingModal(branch, cur, asOf){
 // كشف حساب موحّد: التاريخ | النوع | البيان | القيمة | الرصيد (الأحدث فوق)
 function balLedgerTable(entries, opts){
   opts=opts||{}; const del=opts.canDelete; const view=entries.slice().reverse();
-  const ic=k=>k==='closure'?'<i class="fas fa-cash-register" style="color:var(--success);font-size:.7rem;margin-inline-end:5px"></i>':k==='wallet'?'<i class="fas fa-wallet" style="color:var(--wal-c);font-size:.7rem;margin-inline-end:5px"></i>':'<i class="fas fa-right-left" style="color:#1d4ed8;font-size:.7rem;margin-inline-end:5px"></i>';
+  const ic=k=>k==='closure'?'<i class="fas fa-cash-register" style="color:var(--success);font-size:.7rem;margin-inline-end:5px"></i>':k==='closure_neg'?'<i class="fas fa-cash-register" style="color:var(--danger);font-size:.7rem;margin-inline-end:5px"></i>':k==='wallet'?'<i class="fas fa-wallet" style="color:var(--wal-c);font-size:.7rem;margin-inline-end:5px"></i>':'<i class="fas fa-right-left" style="color:#1d4ed8;font-size:.7rem;margin-inline-end:5px"></i>';
   return `<div class="tbl-wrap"><table>
     <thead><tr><th>التاريخ</th><th>النوع</th><th>البيان</th><th class="num">القيمة</th><th class="num">الرصيد</th>${del?'<th></th>':''}</tr></thead>
     <tbody>${view.length?view.map(e=>`<tr>
