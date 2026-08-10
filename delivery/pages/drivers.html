@@ -174,6 +174,10 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
           <input type="text" class="form-control" id="d-password" placeholder="كلمة المرور" dir="ltr">
         </div>
       </div>
+      <div class="form-group">
+        <label>الإيميل (لاستعادة كلمة السر)</label>
+        <input type="email" class="form-control" id="d-email" placeholder="example@mail.com" dir="ltr">
+      </div>
 
       <div class="section-label-sm" style="margin-top:.75rem">الحالة</div>
       <div style="display:flex;gap:1.5rem;flex-wrap:wrap">
@@ -241,12 +245,16 @@ async function init(){
     let driversQuery = db.from('drivers').select('*,branches(name)').order('full_name');
     if(!isAdmin && userBranchId) driversQuery = driversQuery.eq('branch_id', userBranchId);
 
-    const [dR,bR,rR]=await Promise.all([
+    const [dR,bR,rR,eR]=await Promise.all([
       driversQuery,
       db.from('branches').select('*').order('name'),
-      db.from('regions').select('*').eq('is_active',true).order('name')
+      db.from('regions').select('*').eq('is_active',true).order('name'),
+      db.rpc('get_driver_emails')
     ]);
     allDrivers=dR.data||[];
+    // إلحاق إيميل حساب كل طيار (من branch_users عبر RPC)
+    const emailMap={}; (eR.data||[]).forEach(x=>{ emailMap[x.driver_id]=x.email; });
+    allDrivers.forEach(d=>{ d.account_email = emailMap[d.id] || ''; });
     allBranches=bR.data||[];
     allRegions=rR.data||[];
     renderBranchSelect();
@@ -343,7 +351,7 @@ function renderDrivers(){
 function openAddModal(){
   document.getElementById('modalTitle').textContent='إضافة طيار جديد';
   document.getElementById('d-id').value='';
-  ['d-name','d-phone','d-national','d-username','d-password','d-vplate'].forEach(id=>document.getElementById(id).value='');
+  ['d-name','d-phone','d-national','d-username','d-password','d-vplate','d-email'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('d-branch').value='';
   document.getElementById('d-vtype').value='';
   document.getElementById('d-active').checked=true;
@@ -372,6 +380,7 @@ async function openEdit(id){
   document.getElementById('d-lic-drive').checked=d.has_drive_license||false;
   document.getElementById('d-username').value='';
   document.getElementById('d-password').value='';
+  document.getElementById('d-email').value=d.account_email||'';
   // الطيار اللي مالوش حساب (branch_user_id فاضي) → أظهر الحقول عشان ننشئ له حساب
   const hasAccount = d.branch_user_id != null;
   document.getElementById('usernameGroup').style.display = hasAccount ? 'none' : '';
@@ -418,7 +427,8 @@ async function saveDriver(){
       p_is_online: document.getElementById('d-online').checked,
       p_has_vehicle_license: document.getElementById('d-lic-vehicle').checked,
       p_has_drive_license: document.getElementById('d-lic-drive').checked,
-      p_covered_types: coveredTypes
+      p_covered_types: coveredTypes,
+      p_email: document.getElementById('d-email').value.trim() || null
     });
 
     if (error || (data && data.success === false)) {
