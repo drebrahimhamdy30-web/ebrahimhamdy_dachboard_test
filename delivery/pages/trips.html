@@ -457,10 +457,32 @@ async function renderTripOrders(tripId){
       </tbody>
     </table>
     <div style="margin-top:.5rem">
-      <div style="font-size:.68rem;font-weight:700;color:var(--text-muted);margin-bottom:.3rem">🗺️ مواقع تسليم الطلبات</div>
-      <div id="tripMap-${tripId}" style="height:300px;border:1px solid var(--border);border-radius:10px;overflow:hidden"></div>
+      <button type="button" id="tripMapBtn-${tripId}" onclick="showTripMap('${tripId}')" style="font-size:.7rem;font-weight:700;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:8px;padding:.4rem .8rem;cursor:pointer">🗺️ عرض مواقع التسليم على الخريطة</button>
+      <div id="tripMap-${tripId}" style="display:none;height:300px;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-top:.4rem"></div>
     </div>`;
-  initTripMap(tripId, orders, trip.branch_id);
+  // الخريطة تترسم عند الضغط فقط (مش أوتوماتيك) — توفير للنت والأداء
+  window._tripMapData = window._tripMapData || {};
+  window._tripMapData[tripId] = { orders: orders, branchId: trip.branch_id };
+}
+
+// عرض/إخفاء خريطة الرحلة عند الضغط (ترسم مرة واحدة)
+function showTripMap(tripId){
+  const el=document.getElementById('tripMap-'+tripId);
+  const btn=document.getElementById('tripMapBtn-'+tripId);
+  if(!el) return;
+  if(el.style.display!=='none'){
+    el.style.display='none';
+    if(btn) btn.textContent='🗺️ عرض مواقع التسليم على الخريطة';
+    return;
+  }
+  el.style.display='block';
+  if(btn) btn.textContent='🙈 إخفاء الخريطة';
+  if(el.dataset.drawn){
+    if(el._leafletMap) setTimeout(()=>el._leafletMap.invalidateSize(),120);
+    return;
+  }
+  const d=(window._tripMapData||{})[tripId];
+  if(d){ initTripMap(tripId, d.orders, d.branchId); el.dataset.drawn='1'; }
 }
 
 let _pharmCache={};
@@ -503,6 +525,7 @@ async function initTripMap(tripId, orders, branchId){
   let retPoly=null;
   try{ const {data:trow}=await db.from('trips').select('return_polyline').eq('id',tripId).maybeSingle(); retPoly=trow?trow.return_polyline:null; }catch(e){}
   const map=L.map(el,{scrollWheelZoom:true});
+  el._leafletMap=map;
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
   const bounds=[];
   if(ph&&ph.pharmacy_lat){
