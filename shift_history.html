@@ -327,6 +327,7 @@ async function loadShifts(){
           </div>
           <div style="display:flex;align-items:center;gap:12px;">
             <span class="grand-num">${fmt(s.grand_total)} ج</span>
+            ${isAdmin?`<button title="تعديل قيمة الإغلاق" onclick="event.stopPropagation();editShiftValue(${s.id},${+s.grand_total||0})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:0.85rem"><i class="fas fa-pen-to-square"></i></button>`:''}
             <i class="fas fa-chevron-down" style="color:var(--muted);font-size:0.8rem;transition:.2s;" id="chev-${s.id}"></i>
           </div>
         </div>
@@ -418,6 +419,46 @@ async function confirmShift(id){
     toast('تم الاعتماد بنجاح ✓');
     await Promise.all([loadShifts(), loadUnreviewed()]);
   }catch(e){toast('فشل الاعتماد','err');}
+}
+
+// تعديل قيمة إغلاق الشيفت (الإجمالي الكلي) — أدمن فقط، مع سجل تدقيق في الملاحظات
+function editShiftValue(id, cur){
+  if(!isAdmin){toast('للأدمن فقط','err');return;}
+  const old=document.getElementById('esvModal'); if(old) old.remove();
+  const ov=document.createElement('div'); ov.id='esvModal';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:9999';
+  ov.innerHTML=`<div style="background:#fff;border-radius:12px;padding:18px 20px;width:330px;max-width:92vw;box-shadow:0 10px 40px rgba(0,0,0,.25)">
+    <div style="font-weight:800;margin-bottom:2px">تعديل قيمة الإغلاق</div>
+    <div style="font-size:.72rem;color:var(--muted);margin-bottom:12px">بيعدّل «الإجمالي الكلي» للشيفت بس. القيمة السالبة بتتحسب صرف في كشف الحساب.</div>
+    <label style="font-size:.75rem;font-weight:700;color:var(--muted)">القيمة الجديدة</label>
+    <input type="number" id="esvAmount" step="0.01" value="${cur}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 10px">
+    <label style="font-size:.75rem;font-weight:700;color:var(--muted)">سبب التعديل (اختياري)</label>
+    <input type="text" id="esvReason" placeholder="سبب التعديل" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 14px">
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="document.getElementById('esvModal').remove()" style="padding:7px 14px;border:1px solid var(--border);background:#fff;border-radius:8px;cursor:pointer">إلغاء</button>
+      <button id="esvSave" style="padding:7px 14px;border:none;background:#16a34a;color:#fff;border-radius:8px;cursor:pointer;font-weight:700">حفظ</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
+  document.getElementById('esvSave').onclick=async()=>{
+    const v=parseFloat(document.getElementById('esvAmount').value);
+    if(isNaN(v)){toast('اكتب قيمة صحيحة','err');return;}
+    if(v===+cur){ ov.remove(); return; }
+    const reason=document.getElementById('esvReason').value.trim();
+    const btn=document.getElementById('esvSave'); btn.disabled=true; btn.textContent='جاري الحفظ...';
+    try{
+      // نجيب الملاحظات الحالية ونضيف سطر تدقيق (بدون ما نمسح القديم)
+      let prev=''; try{ const r=await api(`pos_shifts?id=eq.${id}&select=notes&limit=1`); if(r&&r[0]) prev=r[0].notes||''; }catch(e){}
+      const stamp=new Date().toLocaleString('ar-EG');
+      const audit=`✏️ عُدّلت قيمة الإغلاق من ${fmt(cur)} إلى ${fmt(v)} بواسطة ${settler} (${stamp})`+(reason?` — ${reason}`:'');
+      const notes=prev?(prev+'\n'+audit):audit;
+      await api(`pos_shifts?id=eq.${id}`,{method:'PATCH',body:JSON.stringify({grand_total:v, notes})});
+      ov.remove(); toast('اتعدّلت قيمة الإغلاق ✓');
+      await loadShifts();
+      const bp=document.getElementById('pane-balance');
+      if(bp && bp.classList.contains('active')) await loadBalance();
+    }catch(err){ toast('فشل الحفظ','err'); btn.disabled=false; btn.textContent='حفظ'; }
+  };
 }
 
 /* ================= تحويلات المحافظ ================= */
