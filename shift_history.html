@@ -907,7 +907,7 @@ function balLedgerTable(entries, opts){
       <td>${ic(e.kind)}${e.label}</td>
       <td class="num" style="font-weight:800;color:${e.dir==='in'?'var(--success)':'var(--wal-c)'}">${e.dir==='in'?'+':'−'}${fmt(e.amount)}</td>
       <td class="num" style="font-weight:800;color:${e.balance<0?'var(--danger)':'inherit'}">${fmt(e.balance)}</td>
-      ${del?`<td class="num">${e.kind==='manual'?`<button title="حذف التحويل" onclick="deleteManualTransfer(${e.mid},'${esc(opts.branch)}')" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:.8rem"><i class="fas fa-trash"></i></button>`:(e.sid!=null?`<button title="تعديل قيمة الإغلاق" onclick="editShiftValue(${e.sid},${e.raw})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.8rem"><i class="fas fa-pen-to-square"></i></button>`:'')}</td>`:''}
+      ${del?`<td class="num" style="white-space:nowrap">${e.kind==='manual'?`<button title="تعديل الصرف" onclick="editManualTransfer(${e.mid},${e.amount})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.8rem"><i class="fas fa-pen-to-square"></i></button> <button title="حذف الصرف" onclick="deleteManualTransfer(${e.mid},'${esc(opts.branch)}')" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:.8rem"><i class="fas fa-trash"></i></button>`:(e.sid!=null?`<button title="تعديل قيمة الإغلاق" onclick="editShiftValue(${e.sid},${e.raw})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.8rem"><i class="fas fa-pen-to-square"></i></button>`:'')}</td>`:''}
     </tr>`).join(''):`<tr><td colspan="${del?6:5}" class="empty" style="padding:24px">لا توجد حركات</td></tr>`}</tbody>
   </table></div>`;
 }
@@ -1000,6 +1000,38 @@ async function deleteManualTransfer(id,branch){
     toast('اتحذف ✓');
     await loadBalance();
   }catch(e){toast('فشل الحذف','err');}
+}
+
+// تعديل قيمة/سبب الصرف اليدوي — أدمن فقط
+async function editManualTransfer(id, cur){
+  if(!isAdmin){toast('للأدمن فقط','err');return;}
+  let curReason=''; try{ const r=await api(`pos_manual_transfers?id=eq.${id}&select=reason&limit=1`); if(r&&r[0]) curReason=r[0].reason||''; }catch(e){}
+  const old=document.getElementById('emtModal'); if(old) old.remove();
+  const ov=document.createElement('div'); ov.id='emtModal';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:9999';
+  ov.innerHTML=`<div style="background:#fff;border-radius:12px;padding:18px 20px;width:330px;max-width:92vw;box-shadow:0 10px 40px rgba(0,0,0,.25)">
+    <div style="font-weight:800;margin-bottom:12px">تعديل الصرف</div>
+    <label style="font-size:.75rem;font-weight:700;color:var(--muted)">القيمة</label>
+    <input type="number" id="emtAmount" step="0.01" value="${cur}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 10px">
+    <label style="font-size:.75rem;font-weight:700;color:var(--muted)">السبب (اختياري)</label>
+    <input type="text" id="emtReason" value="${esc(curReason)}" placeholder="سبب الصرف" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 14px">
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="document.getElementById('emtModal').remove()" style="padding:7px 14px;border:1px solid var(--border);background:#fff;border-radius:8px;cursor:pointer">إلغاء</button>
+      <button id="emtSave" style="padding:7px 14px;border:none;background:#16a34a;color:#fff;border-radius:8px;cursor:pointer;font-weight:700">حفظ</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
+  document.getElementById('emtSave').onclick=async()=>{
+    const v=parseFloat(document.getElementById('emtAmount').value);
+    if(isNaN(v)||v<=0){toast('اكتب قيمة صحيحة','err');return;}
+    const reason=document.getElementById('emtReason').value.trim();
+    const btn=document.getElementById('emtSave'); btn.disabled=true; btn.textContent='جاري الحفظ...';
+    try{
+      await api(`pos_manual_transfers?id=eq.${id}`,{method:'PATCH',body:JSON.stringify({amount:v, reason:reason||null})});
+      ov.remove(); toast('اتعدّل الصرف ✓');
+      await loadBalance();
+    }catch(err){ toast('فشل الحفظ','err'); btn.disabled=false; btn.textContent='حفظ'; }
+  };
 }
 
 init();
