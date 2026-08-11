@@ -814,7 +814,8 @@ function balRawEntries(closures,wtrans,mtrans){
       dir:neg?'out':'in',
       kind:neg?'closure_neg':'closure',
       label:(neg?'صرف — شيفت سالب ':'إغلاق شيفت ')+(c.shift_date||'')+(c.employee_name?(' — '+esc(c.employee_name)):''),
-      amount:Math.abs(gt)
+      amount:Math.abs(gt),
+      sid:c.id, raw:gt                                              // معرّف الشيفت + القيمة الموقّعة (للتعديل)
     });
   });
   (wtrans||[]).forEach(t=>e.push({date:t.created_at, day:cairoDay(t.created_at), dir:'out', kind:'wallet', label:'تحويل محفظة — '+esc(t.display_name||'')+(t.reason?(' ('+(REASON_LABEL[t.reason]||esc(t.reason))+')'):''), amount:+t.amount||0}));
@@ -846,7 +847,7 @@ function computeLedger(raw, opening, from, to){
 // يجمع بيانات فرع ويحسب كشفه لمدة
 async function computeBranchLedger(branch, from, to){
   const [closures,wtrans,mtrans,opening]=await Promise.all([
-    api(`pos_shifts?select=shift_date,closed_at,employee_name,grand_total&branch=eq.${encodeURIComponent(branch)}&limit=5000`),
+    api(`pos_shifts?select=id,shift_date,closed_at,employee_name,grand_total&branch=eq.${encodeURIComponent(branch)}&limit=5000`),
     api(`pos_wallet_transfers?select=id,amount,reason,note,display_name,created_at&branch=eq.${encodeURIComponent(branch)}&limit=5000`),
     api(`pos_manual_transfers?select=*&branch=eq.${encodeURIComponent(branch)}&limit=5000`),
     getOpening(branch)
@@ -900,7 +901,7 @@ function balLedgerTable(entries, opts){
       <td>${ic(e.kind)}${e.label}</td>
       <td class="num" style="font-weight:800;color:${e.dir==='in'?'var(--success)':'var(--wal-c)'}">${e.dir==='in'?'+':'−'}${fmt(e.amount)}</td>
       <td class="num" style="font-weight:800;color:${e.balance<0?'var(--danger)':'inherit'}">${fmt(e.balance)}</td>
-      ${del?`<td class="num">${e.kind==='manual'?`<button title="حذف التحويل" onclick="deleteManualTransfer(${e.mid},'${esc(opts.branch)}')" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:.8rem"><i class="fas fa-trash"></i></button>`:''}</td>`:''}
+      ${del?`<td class="num">${e.kind==='manual'?`<button title="حذف التحويل" onclick="deleteManualTransfer(${e.mid},'${esc(opts.branch)}')" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:.8rem"><i class="fas fa-trash"></i></button>`:(e.sid!=null?`<button title="تعديل قيمة الإغلاق" onclick="editShiftValue(${e.sid},${e.raw})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.8rem"><i class="fas fa-pen-to-square"></i></button>`:'')}</td>`:''}
     </tr>`).join(''):`<tr><td colspan="${del?6:5}" class="empty" style="padding:24px">لا توجد حركات</td></tr>`}</tbody>
   </table></div>`;
 }
