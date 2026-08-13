@@ -364,7 +364,7 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
     </div>
     <div class="search-wrap">
       <svg class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input type="text" class="toolbar-search" id="searchCode" placeholder="كود العميل" oninput="renderOrders()">
+      <input type="text" class="toolbar-search" id="searchCode" placeholder="كود العميل (بالضبط) أو الاسم" oninput="renderOrders()">
     </div>
     <button class="ftab active" onclick="setFilter('all',this)">الكل <span id="f-all">0</span></button>
     <button class="ftab" onclick="setFilter('pending',this)">جاهز <span id="f-pending">0</span></button>
@@ -1746,7 +1746,7 @@ function renderUnclosedFlags(){
   const codeQ=(document.getElementById('searchCode')?.value||'').trim().toLowerCase();
   let rows=[...unclosedFlags];
   if(billQ.length>=3) rows=rows.filter(f=>String(f.bill_no||'').toLowerCase().includes(billQ));
-  if(codeQ.length>=1) rows=rows.filter(f=>String(f.cust_code||'').toLowerCase().includes(codeQ));
+  if(codeQ.length>=1) rows=rows.filter(f=>matchCodeName(f.cust_code, f.customer_name, codeQ));
   if(!rows.length){ grid.innerHTML='<div class="empty-msg">✅ لا توجد طلبات غير مغلقة</div>'; return; }
   const total=rows.reduce((s,f)=>s+Number(f.amount||0),0);
   const head=`<div style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem;background:#fff;border:1px solid #fecaca;border-right:4px solid #b91c1c;border-radius:12px;padding:.6rem .9rem;margin-bottom:.2rem">
@@ -1775,8 +1775,44 @@ function renderUnclosedFlags(){
   grid.innerHTML=head+cards;
 }
 
+// ===== بحث: كود بالضبط / اسم بتقارب (fuzzy) =====
+function _norm(s){
+  return String(s==null?'':s).toLowerCase()
+    .replace(/[ً-ْٰـ]/g,'')                 // تشكيل + تطويل
+    .replace(/[أإآ]/g,'ا').replace(/ى/g,'ي').replace(/ؤ/g,'و').replace(/ئ/g,'ي').replace(/ة/g,'ه')
+    .replace(/\s+/g,' ').trim();
+}
+function _lev(a,b){
+  const m=a.length,n=b.length; if(!m)return n; if(!n)return m;
+  let prev=Array.from({length:n+1},(_,i)=>i),cur=new Array(n+1);
+  for(let i=1;i<=m;i++){ cur[0]=i;
+    for(let j=1;j<=n;j++){ const c=a[i-1]===b[j-1]?0:1; cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+c); }
+    [prev,cur]=[cur,prev];
+  }
+  return prev[n];
+}
+function _sim(a,b){ if(!a||!b)return 0; return 1-_lev(a,b)/Math.max(a.length,b.length); }
+// تطابق اسم بتقارب عالٍ: احتواء مباشر أو كل كلمة بحث لها كلمة قريبة في الاسم
+function nameMatch(query,name){
+  const q=_norm(query),n=_norm(name); if(!q||!n) return false;
+  if(n.includes(q)) return true;
+  const nw=n.split(' ').filter(Boolean),qw=q.split(' ').filter(Boolean);
+  return qw.every(w=>nw.some(x=>x.includes(w)||_sim(w,x)>=0.75));
+}
+// خانة "كود/اسم العميل": الكود بالضبط، الاسم fuzzy (٢ حروف فأكثر)
+function matchCodeName(codeStr,nameStr,q){
+  const code=String(codeStr||'').trim().toLowerCase();
+  if(code && code===q) return true;
+  if(q.length>=2 && nameMatch(q,nameStr)) return true;
+  return false;
+}
+function orderDT(o){
+  const d=o.bill_date||o.created_at; if(!d) return '';
+  try{ return new Date(d).toLocaleString('ar-EG',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}); }catch(_){ return ''; }
+}
+
 function renderOrders(){
-  // خانتان: رقم الفاتورة (تبحث بعد ٣ أرقام) + كود العميل — تبحثان في كل الطلبات مهما كانت حالتها
+  // خانتان: رقم الفاتورة (تبحث بعد ٣ أرقام) + كود/اسم العميل — تبحثان في كل الطلبات مهما كانت حالتها
   const billQ=(document.getElementById('searchBill')?.value||'').trim().toLowerCase();
   const codeQ=(document.getElementById('searchCode')?.value||'').trim().toLowerCase();
   const billActive=billQ.length>=3;
@@ -1785,7 +1821,7 @@ function renderOrders(){
   if(billActive||codeActive){
     orders=allOrders.filter(o=>
       (!billActive || (o.bill_no||'').toLowerCase().includes(billQ)) &&
-      (!codeActive || (o.cust_code||'').toLowerCase().includes(codeQ))
+      (!codeActive || matchCodeName(o.cust_code, o.customer_name||o.cust_name, codeQ))
     );
   } else {
     orders=[...allOrders];
@@ -1868,6 +1904,7 @@ function renderOrders(){
       ${postponeInfo(o)}
       <div class="oc-customer">${cn}</div>
       ${(o.cust_code&&String(o.cust_code).trim()&&String(o.cust_code)!=='null')?`<div style="font-size:.62rem;color:#475569;font-weight:700;margin-bottom:.2rem">🆔 كود العميل: ${o.cust_code}</div>`:''}
+      ${(billActive||codeActive)?`<div style="font-size:.62rem;color:#64748b;font-weight:600;margin-bottom:.2rem">🕒 ${orderDT(o)}</div>`:''}
       <div class="oc-address">📍 ${o.customer_address||o.cust_address||'—'}</div>
       ${o.cust_region?`<span class="oc-region" style="${!knownRegions.has(o.cust_region)?'background:#fee2e2;color:#b91c1c;border:1px solid #fecaca':''}">${o.cust_region}${!knownRegions.has(o.cust_region)?' ⚠️':''}</span>`:''}
       <div class="oc-bottom">
