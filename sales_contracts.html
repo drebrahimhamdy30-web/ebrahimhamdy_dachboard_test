@@ -228,6 +228,37 @@
     let userBranch = '';
     let allData    = [];
 
+    // ===== مصدر البيانات: جدول contract_invoices في Supabase (بدل n8n) =====
+    const SB_URL_CI = 'https://rxtjoqulmgkkcohmgzgi.supabase.co';
+    const SB_KEY_CI = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
+    const CI_URL = SB_URL_CI + '/rest/v1/contract_invoices';
+    const CI_H   = { apikey: SB_KEY_CI, Authorization: 'Bearer ' + SB_KEY_CI, 'Content-Type': 'application/json' };
+    const CI_HW  = { ...CI_H, Prefer: 'return=minimal' };
+    function ciReviewer(){ return (activeUser && (activeUser.full_name || activeUser.username)) || localStorage.getItem('fullName') || 'مراجع'; }
+    function ciNum(v){ v=(v==null?'':(''+v)).trim(); return v===''?null:(isNaN(+v)?null:+v); }
+
+    // كتابة المراجعة على contract_invoices — بديل updateData بتاع n8n (نفس الاستدعاءات في الشاشة)
+    async function updateData(p){
+      try{
+        const stamp = new Date().toISOString(), by = ciReviewer();
+        if(p.type === 'contract_merge'){
+          const r1 = await fetch(CI_URL+'?id=eq.'+encodeURIComponent(p.bill_a_id), {method:'PATCH', headers:CI_HW, body:JSON.stringify({total_bill:ciNum(p.new_total), reviewed_at:stamp, reviewed_by:by})});
+          const r2 = await fetch(CI_URL+'?id=eq.'+encodeURIComponent(p.bill_b_id), {method:'PATCH', headers:CI_HW, body:JSON.stringify({bill_state:'مدموجة', merged_into:(p.bill_a_no||null), reviewed_at:stamp, reviewed_by:by})});
+          return r1.ok && r2.ok;
+        }
+        if(p.type === 'contract_new'){
+          const row = {bill_no:p.bill_no||null, bill_date:p.bill_date||null, cust_code:p.cust_code||null, cust_name_ar:p.cust_name_ar||null, total_bill:ciNum(p.total_bill), employee_name:p.employee_name||null, bill_type:p.bill_type||null, payment_type:p.payment_type||null, bill_state:p.bill_state||null, branch:p.branch||null, serial_no:p.serial_no||null, reviewed_at:stamp, reviewed_by:by};
+          const r = await fetch(CI_URL, {method:'POST', headers:CI_HW, body:JSON.stringify(row)});
+          return r.ok;
+        }
+        // contract_update — تحديث حقول المراجعة على الصف بالـid
+        const patch = {reviewed_at:stamp, reviewed_by:by};
+        ['bill_state','bill_type','payment_type','serial_no','cust_name_ar','claim_id','claim_date','merged_into'].forEach(k=>{ if(k in p) patch[k] = (p[k]===''?null:p[k]); });
+        const r = await fetch(CI_URL+'?id=eq.'+encodeURIComponent(p.id), {method:'PATCH', headers:CI_HW, body:JSON.stringify(patch)});
+        return r.ok;
+      }catch(e){ return false; }
+    }
+
     checkAuth().then(user => {
       activeUser = user;
       if (user) {
@@ -240,8 +271,17 @@
       const tbody = document.getElementById('table-body');
       tbody.innerHTML = '<tr class="loading-row"><td colspan="11">⏳ جاري جلب البيانات...</td></tr>';
       try {
-        const response = await fetchFromN8N('sales_contract');
-        allData = Array.isArray(response) ? response : (response.data || []);
+        // pagination: سقف Supabase 1000 صف/طلب — بنجيب على صفحات لحد ما يخلص
+        let all = [], from = 0; const PAGE = 1000;
+        while (true) {
+          const r = await fetch(CI_URL + `?select=*&order=bill_date.desc.nullslast&limit=${PAGE}&offset=${from}`, { headers: CI_H });
+          if (!r.ok) break;
+          const chunk = await r.json();
+          all = all.concat(chunk);
+          if (!Array.isArray(chunk) || chunk.length < PAGE) break;
+          from += PAGE;
+        }
+        allData = all;
         applyFilter();
       } catch(e) {
         tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
