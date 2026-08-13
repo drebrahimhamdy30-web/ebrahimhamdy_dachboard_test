@@ -425,6 +425,18 @@
       </div>
 
       <div class="report-section">
+        <div class="report-section-title">🏢 معدل كل فرع في اليوم</div>
+        <div class="table-wrap">
+          <table class="report-table">
+            <thead><tr><th>الفرع</th><th>إجمالي الأصناف</th><th>أيام الشغل</th><th>المعدل / يوم</th></tr></thead>
+            <tbody id="daily-stats-by-branch-body">
+              <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="report-section">
         <div class="report-section-title">👤 إجمالي كل موظف خلال المدة</div>
         <div class="table-wrap">
           <table class="report-table">
@@ -1454,9 +1466,11 @@
       const summary  = document.getElementById('daily-stats-summary');
       const byDateBody = document.getElementById('daily-stats-by-date-body');
       const byEmpBody   = document.getElementById('daily-stats-by-employee-body');
+      const byBranchBody = document.getElementById('daily-stats-by-branch-body');
 
       byDateBody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>';
       byEmpBody.innerHTML  = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>';
+      if (byBranchBody) byBranchBody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>';
       summary.textContent = '';
 
       try {
@@ -1466,6 +1480,7 @@
           summary.textContent = 'لا توجد عمليات جرد مسجلة خلال هذه المدة';
           byDateBody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--text-muted);padding:20px;">لا توجد بيانات</td></tr>';
           byEmpBody.innerHTML  = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:20px;">لا توجد بيانات</td></tr>';
+          if (byBranchBody) byBranchBody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:20px;">لا توجد بيانات</td></tr>';
           return;
         }
 
@@ -1473,6 +1488,8 @@
         const byDate = {};
         // إجمالي كل موظف خلال المدة كلها
         const byEmployee = {};
+        // إجمالي كل فرع + أيام شغله الفعلية (لحساب المعدل اليومي للفرع)
+        const byBranch = {};
 
         rows.forEach(r => {
           const count = parseInt(r.audits_count) || 0;
@@ -1482,6 +1499,11 @@
           const key = `${r.audited_by}|${r.branch}`;
           if (!byEmployee[key]) byEmployee[key] = { audited_by: r.audited_by, branch: r.branch, total: 0 };
           byEmployee[key].total += count;
+
+          const b = r.branch || '---';
+          if (!byBranch[b]) byBranch[b] = { branch: b, total: 0, days: new Set() };
+          byBranch[b].total += count;
+          if (count > 0) byBranch[b].days.add(date);
         });
 
         const totalAll  = Object.values(byDate).reduce((s, c) => s + c, 0);
@@ -1505,6 +1527,19 @@
           return `<tr><td data-label="التاريخ">${dStr}</td><td data-label="عدد الأصناف" style="font-weight:700;">${byDate[d]}</td></tr>`;
         }).join('');
 
+        // جدول: معدل كل فرع (الإجمالي / أيام الشغل الفعلية / المتوسط اليومي)
+        const branchRows = Object.values(byBranch).sort((a, b) => b.total - a.total);
+        if (byBranchBody) byBranchBody.innerHTML = branchRows.map(x => {
+          const wd = x.days.size;
+          const avg = wd > 0 ? (x.total / wd).toFixed(1) : '0';
+          return `<tr>
+            <td data-label="الفرع" style="font-weight:800;color:var(--primary);">${x.branch}</td>
+            <td data-label="إجمالي الأصناف" style="font-weight:700;">${x.total}</td>
+            <td data-label="أيام الشغل">${wd}</td>
+            <td data-label="المعدل / يوم" style="font-weight:800;color:var(--success);">${avg}</td>
+          </tr>`;
+        }).join('');
+
         // جدول: إجمالي كل موظف (مرتب تنازليًا حسب العدد)
         const employeeRows = Object.values(byEmployee).sort((a, b) => b.total - a.total);
         byEmpBody.innerHTML = employeeRows.map(e => {
@@ -1518,6 +1553,7 @@
       } catch(e) {
         byDateBody.innerHTML = '<tr><td colspan="2" style="text-align:center;color:var(--danger);padding:20px;">❌ فشل تحميل البيانات</td></tr>';
         byEmpBody.innerHTML  = '<tr><td colspan="3" style="text-align:center;color:var(--danger);padding:20px;">❌ فشل تحميل البيانات</td></tr>';
+        if (byBranchBody) byBranchBody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--danger);padding:20px;">❌ فشل تحميل البيانات</td></tr>';
       }
     }
 
