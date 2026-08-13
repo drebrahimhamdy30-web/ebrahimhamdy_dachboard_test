@@ -21,10 +21,10 @@
             <i class="fas fa-search field-icon"></i>
             <input type="text" id="searchInput" class="form-input"
               placeholder="بحث بالاسم أو الكود أو الفاتورة..."
-              oninput="applyFilter()"
+              oninput="currentPage=1; applyFilter()"
               style="padding-right:34px;">
           </div>
-          <select id="stateFilter" class="form-select" style="width:auto;" onchange="applyFilter()">
+          <select id="stateFilter" class="form-select" style="width:auto;" onchange="currentPage=1; applyFilter()">
             <option value="default">قيد المتابعة</option>
             <option value="all">الكل</option>
             <option value="فاتورة">فاتورة ✅</option>
@@ -64,6 +64,7 @@
           </tbody>
         </table>
       </div>
+      <div id="pager" style="margin-top:14px"></div>
     </div>
   </div>
 
@@ -234,6 +235,8 @@
     const CI_URL = SB_URL_CI + '/rest/v1/contract_invoices';
     const CI_H   = { apikey: SB_KEY_CI, Authorization: 'Bearer ' + SB_KEY_CI, 'Content-Type': 'application/json' };
     const CI_HW  = { ...CI_H, Prefer: 'return=minimal' };
+    // تقسيم صفحات العرض (30/صفحة)
+    let currentPage = 1; const PAGE_SIZE = 30; let filteredData = [];
     function ciReviewer(){ return (activeUser && (activeUser.full_name || activeUser.username)) || localStorage.getItem('fullName') || 'مراجع'; }
     function ciNum(v){ v=(v==null?'':(''+v)).trim(); return v===''?null:(isNaN(+v)?null:+v); }
 
@@ -282,6 +285,7 @@
           from += PAGE;
         }
         allData = all;
+        currentPage = 1;
         applyFilter();
       } catch(e) {
         tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
@@ -320,7 +324,8 @@
         return stateMatch && searchMatch;
       });
 
-      renderTable(filtered);
+      filteredData = filtered;
+      renderTable(filteredData);
     }
 
     function calcAmount(total, paymentType) {
@@ -360,12 +365,18 @@ function getNextSerial(billType) {
       const tbody = document.getElementById('table-body');
       if (items.length === 0) {
         tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج</td></tr>';
+        renderPager(0, 0, 0);
         return;
       }
 
       items.sort((a, b) => new Date(b.bill_date || 0) - new Date(a.bill_date || 0));
 
-      tbody.innerHTML = items.map(item => {
+      const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+      if (currentPage > totalPages) currentPage = totalPages;
+      if (currentPage < 1) currentPage = 1;
+      const pageItems = items.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+      tbody.innerHTML = pageItems.map(item => {
         const dateObj = item.bill_date ? new Date(item.bill_date) : null;
         const dateStr = dateObj
           ? dateObj.toLocaleDateString('ar-EG', {year:'numeric', month:'numeric', day:'numeric'})
@@ -439,7 +450,26 @@ function getNextSerial(billType) {
             </td>
           </tr>`;
       }).join('');
+      renderPager(currentPage, totalPages, items.length);
     }
+
+    // شريط التنقّل بين الصفحات
+    function renderPager(page, totalPages, totalItems) {
+      const el = document.getElementById('pager');
+      if (!el) return;
+      if (!totalItems) { el.innerHTML = ''; return; }
+      const b = (label, to, disabled, active) =>
+        `<button ${disabled ? 'disabled' : ''} onclick="gotoPage(${to})" style="min-width:34px;padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:${active ? 'var(--accent)' : 'var(--surface)'};color:${active ? '#fff' : 'var(--text-primary)'};font-weight:700;cursor:${disabled ? 'not-allowed' : 'pointer'};opacity:${disabled ? .45 : 1};font-family:var(--font)">${label}</button>`;
+      let nums = '';
+      for (let p = Math.max(1, page - 2); p <= Math.min(totalPages, page + 2); p++) nums += b(p, p, false, p === page);
+      el.innerHTML = `<div style="display:flex;gap:6px;align-items:center;justify-content:center;flex-wrap:wrap">
+        ${b('«', 1, page <= 1)} ${b('‹', page - 1, page <= 1)}
+        ${nums}
+        ${b('›', page + 1, page >= totalPages)} ${b('»', totalPages, page >= totalPages)}
+        <span style="margin-inline-start:8px;color:var(--text-muted);font-size:0.8rem">صفحة ${page} من ${totalPages} · ${totalItems} فاتورة</span>
+      </div>`;
+    }
+    function gotoPage(p) { currentPage = p; renderTable(filteredData); window.scrollTo({top:0,behavior:'smooth'}); }
 
     // ===== Quick Updates =====
     async function quickUpdateState(id, newState) {
