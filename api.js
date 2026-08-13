@@ -900,18 +900,16 @@ async function fetchStaleItems(branch, months) {
 }
 
 // ---- معدل الجرد اليومي لكل موظف (يدعم نطاق تاريخ من - إلى) ----
-const JARD_DAILY_STATS_URL = "https://agent.ebrahimhamdy.com/webhook/jard_daily_stats";
+// معدل الجرد اليومي — يُحسب مباشرة من jard_audit_log عبر RPC في Supabase (بدل webhook n8n)
 async function fetchDailyJardStats(dateFrom, dateTo, branch) {
   try {
-    const params = new URLSearchParams();
-    if (dateFrom) params.set('date_from', dateFrom);
-    if (dateTo)   params.set('date_to', dateTo || dateFrom);
-    if (branch)   params.set('branch', branch);
-    const response = await fetch(`${JARD_DAILY_STATS_URL}?${params.toString()}`);
-    if (!response.ok) return [];
-    const text = await response.text();
-    if (!text || text.trim() === '') return [];
-    const data = JSON.parse(text);
+    const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_jard_daily_stats`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + SB_ANON_API },
+      body: JSON.stringify({ p_from: dateFrom || null, p_to: (dateTo || dateFrom) || null, p_branch: branch || null })
+    });
+    if (!r.ok) return [];
+    const data = await r.json();
     return Array.isArray(data) ? data : [];
   } catch (e) {
     console.error('fetchDailyJardStats error:', e);
