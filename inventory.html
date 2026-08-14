@@ -980,11 +980,29 @@
       }
     }
 
+    // حارس تسجيل الجرد: يسمح فقط لموظف الجرد (دور inventory) أو الأدمن، ويمنع «الدخول العام للفرع»
+    // (الحساب اللي اسمه الكامل = اسم الفرع) — عشان الجرد يتسجّل باسم الموظف الحقيقي دايمًا.
+    async function jardGuardedSubmit(payload) {
+      const role = (userRole || '').trim();
+      const name = (employeeName || '').trim();
+      const br   = (userBranch || '').trim();
+      const payBr = (payload && payload.branch != null) ? String(payload.branch).trim() : '';
+      if (role !== 'inventory' && role !== 'admin') {
+        alert('🚫 تسجيل الجرد متاح فقط لموظف الجرد.\nمن فضلك سجّل الدخول بحساب موظف الجرد الخاص بك.');
+        return false;
+      }
+      if (!name || name === br || (payBr && name === payBr)) {
+        alert('🚫 لا يمكن تسجيل الجرد من «دخول عام للفرع».\nسجّل الدخول باسمك (حساب موظف الجرد) عشان يتسجّل الجرد باسمك.');
+        return false;
+      }
+      return await submitJardAudit(payload);
+    }
+
     async function submitLiveMatched(id) {
       const item = findLiveItemById(id);
       if (!item || !item._balanceFetched) return;
 
-      const ok = await submitJardAudit({
+      const ok = await jardGuardedSubmit({
         branch:      item.branch || userBranch,
         category:    currentTab,
         code:        item.code,
@@ -1013,7 +1031,7 @@
       const item = findLiveItemById(id);
       if (!item) return;
 
-      const ok = await submitJardAudit({
+      const ok = await jardGuardedSubmit({
         branch:      item.branch || userBranch,
         category:    currentTab,
         code:        item.code,
@@ -1238,7 +1256,7 @@
       // تسجيل موحّد في jard_audit_log كمان (عشان يدخل في التقرير الشامل ومعدل الفريق)
       // بس لو الإجراء فعلي (مطابق أو غير مطابق)، مش تجاهل
       if (success && (isDone || isMismatch)) {
-        await submitJardAudit({
+        await jardGuardedSubmit({
           branch:      clicked?.branch || userBranch,
           category:    currentTab,
           code:        clicked?.code,
@@ -1707,7 +1725,7 @@
       const item = currentStaleData.find(x => x.code === code);
       if (!item || !item._balanceFetched) return;
 
-      const ok = await submitJardAudit({
+      const ok = await jardGuardedSubmit({
         branch:      userBranch,
         category:    STALE_AUDIT_CATEGORY,
         code:        item.code,
@@ -1732,7 +1750,7 @@
       const item = currentStaleData.find(x => x.code === code);
       if (!item) return;
 
-      const ok = await submitJardAudit({
+      const ok = await jardGuardedSubmit({
         branch:      userBranch,
         category:    STALE_AUDIT_CATEGORY,
         code:        item.code,
