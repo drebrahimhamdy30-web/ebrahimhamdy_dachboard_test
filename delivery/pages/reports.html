@@ -180,28 +180,18 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
 
   <div class="card" style="margin-bottom:1.25rem">
     <div class="card-header"><span class="card-title">كل الطلبات المتأخرة</span>
-      <span style="font-size:.68rem;color:var(--text-muted)" id="lateCount"></span></div>
+      <span style="font-size:.68rem;color:var(--text-muted)">تعدّت وقت المنطقة (أداء الفرع) · <span id="lateCount"></span></span></div>
     <div class="card-body" id="lateList" style="max-height:340px;overflow-y:auto"></div>
   </div>
 
-  <!-- أداء الصيدلية: الزمن الفعلي (تشغيل→تسليم) مقابل وقت المنطقة (SLA) -->
+  <!-- أداء الفرع: الزمن الفعلي (تشغيل→تسليم) مقابل وقت المنطقة (SLA) -->
   <div class="card" style="margin-bottom:1.25rem">
-    <div class="card-header"><span class="card-title">أداء الصيدلية — الوقت الفعلي مقابل وقت المنطقة (SLA)</span>
+    <div class="card-header"><span class="card-title">أداء الفرع — الوقت الفعلي مقابل وقت المنطقة (SLA)</span>
       <span style="font-size:.68rem;color:var(--text-muted)" id="slaCount"></span></div>
     <div class="card-body">
       <div id="slaSummary" style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:.9rem"></div>
       <div id="slaCause" style="margin-bottom:1rem"></div>
       <div id="slaByRegion"></div>
-    </div>
-  </div>
-
-  <!-- أداء التوصيل: الوقت الفعلي مقابل المتوقع (Google Routes) -->
-  <div class="card" style="margin-bottom:1.25rem">
-    <div class="card-header"><span class="card-title">أداء الطيار — الوقت الفعلي مقابل المتوقع (Google)</span>
-      <span style="font-size:.68rem;color:var(--text-muted)" id="perfCount"></span></div>
-    <div class="card-body">
-      <div id="perfSummary" style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:.75rem"></div>
-      <div id="perfList" style="max-height:360px;overflow-y:auto"></div>
     </div>
   </div>
 
@@ -576,18 +566,10 @@ async function loadOrdersTab(from, to) {
 
   // الملغية
   const cancelled = reportOrders.filter(o => o.status === 'cancelled');
-  // المتأخرة: عندها picked_at، والوقت من الاستلام للتسليم (أو للآن لو مفتوح) عدّى الحد
-  const now = Date.now();
-  const late = reportOrders.filter(o => {
-    if (o.status === 'cancelled' || !o.picked_at) return false;
-    const start = new Date(o.picked_at).getTime();
-    const end = o.delivered_at ? new Date(o.delivered_at).getTime() : now;
-    return (end - start) / 60000 > thr(o);
-  }).map(o => {
-    const start = new Date(o.picked_at).getTime();
-    const end = o.delivered_at ? new Date(o.delivered_at).getTime() : now;
-    return { ...o, _lateMin: Math.round((end - start)/60000) };
-  });
+  // المتأخرة (أداء الفرع): تقييم الصيدلية «متأخر» — تعدّت وقت المنطقة (SLA)
+  // _lateMin = عدد الدقائق الزيادة عن وقت المنطقة
+  const late = reportOrders.filter(o => o.sla_rating === 'متأخر')
+    .map(o => ({ ...o, _lateMin: Math.max(0, Math.round((Number(o.sla_actual_minutes)||0) - (Number(o.sla_minutes)||0))) }));
 
   // أكثر الطيارين تعذّرًا: من order_logs (order_postponed) لأن الطلب المتعذّر بيرجع للتوزيع ويفقد الطيار
   const branchId = effectiveBranch();
@@ -630,7 +612,6 @@ async function loadOrdersTab(from, to) {
   renderRankList('topFailDrivers', failByDriver, 'مرة');
   renderOrderList('cancelledList', cancelled, 'cancelledCount', false);
   renderOrderList('lateList', late, 'lateCount', true);
-  renderPerf();
 }
 
 // أداء التوصيل لكل طلب (بعد ما الـ trigger + Google يحسبوه)
