@@ -78,6 +78,7 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
   <button id="tabBtn-drivers" onclick="switchTab('drivers')" style="background:none;border:none;border-bottom:3px solid var(--primary);color:var(--primary);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تقارير الطيارين</button>
   <button id="tabBtn-orders" onclick="switchTab('orders')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تقارير الطلبات</button>
   <button id="tabBtn-incentives" onclick="switchTab('incentives')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">حوافز الطيارين</button>
+  <button id="tabBtn-jard" onclick="switchTab('jard')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تقارير الجرد</button>
 </div>
 
 <!-- ========== TAB: تقارير الطيارين ========== -->
@@ -220,6 +221,50 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
 
 </div><!-- /tab-incentives -->
 
+<!-- ========== TAB: تقارير الجرد ========== -->
+<div id="tab-jard" style="display:none">
+
+  <!-- شرح مختصر -->
+  <div class="card" style="margin-bottom:1rem;background:#eff6ff;border-color:#bfdbfe">
+    <div class="card-body" style="font-size:.74rem;color:#1e3a8a;line-height:1.7">
+      📋 <strong>كفاءة موظف الجرد</strong> — يُحسب مباشرة من سجل الجرد (<code>jard_audit_log</code>) خلال الفترة المختارة.
+      <strong>معدل/يوم</strong> = إجمالي الأصناف ÷ أيام العمل الفعلية. <strong>معدل/ساعة نشطة</strong> = الإنتاجية أثناء الشغل فعلاً
+      (من أول صنف لآخر صنف في اليوم) — أدق مقياس للسرعة. <strong>نسبة المطابقة</strong> = نسبة الأصناف اللي جرده طابق النظام
+      (جودة العدّ). <span style="color:#9a3412">الصفوف اللي اسم الموظف فيها = اسم الفرع معناها «دخول عام للفرع» مش موظف باسمه.</span>
+    </div>
+  </div>
+
+  <!-- فلاتر التاب -->
+  <div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem">
+    <select class="filter-input" id="jardBranchFilter" onchange="renderJard()" title="الفرع"><option value="">كل الفروع</option></select>
+    <label style="font-size:.75rem;color:var(--text-muted);display:flex;align-items:center;gap:.35rem;cursor:pointer">
+      <input type="checkbox" id="jardExcludeGeneric" onchange="renderJard()"> استبعاد الدخول العام للفرع
+    </label>
+    <button class="btn btn-outline btn-sm" onclick="exportJardCSV()" style="margin-inline-start:auto">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      تصدير CSV
+    </button>
+  </div>
+
+  <!-- KPIs -->
+  <div class="kpi-grid" id="jardKpiGrid"></div>
+
+  <!-- ملخص كل فرع -->
+  <div class="card" style="margin-bottom:1.25rem">
+    <div class="card-header"><span class="card-title">ملخص كل فرع</span>
+      <span style="font-size:.68rem;color:var(--text-muted)">الإجمالي · ساعات نشطة · معدل/ساعة · نسبة المطابقة · عدد المُدخِلين</span></div>
+    <div class="card-body" id="jardBranchSummary"></div>
+  </div>
+
+  <!-- جدول الموظفين -->
+  <div class="card" style="margin-bottom:1.25rem">
+    <div class="card-header"><span class="card-title">كفاءة موظفي الجرد</span>
+      <span style="font-size:.68rem;color:var(--text-muted)" id="jardEmpCount"></span></div>
+    <div class="card-body" id="jardEmpBody"><div class="empty-state"><p>اختر الفترة</p></div></div>
+  </div>
+
+</div><!-- /tab-jard -->
+
 <div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -298,7 +343,8 @@ function switchTab(tab) {
   document.getElementById('tab-drivers').style.display    = tab==='drivers'    ? '' : 'none';
   document.getElementById('tab-orders').style.display     = tab==='orders'     ? '' : 'none';
   document.getElementById('tab-incentives').style.display = tab==='incentives' ? '' : 'none';
-  for (const t of ['drivers','orders','incentives']) {
+  document.getElementById('tab-jard').style.display       = tab==='jard'       ? '' : 'none';
+  for (const t of ['drivers','orders','incentives','jard']) {
     const b = document.getElementById('tabBtn-'+t);
     const on = t===tab;
     b.style.borderBottomColor = on ? 'var(--primary)' : 'transparent';
@@ -328,6 +374,7 @@ async function loadReport() {
   await loadFairScores(from, to);
   await loadOrdersTab(from, to);
   await loadIncentivesTab(from, to);
+  await loadJardTab(from, to);
   showLoading(false);
 }
 
@@ -794,6 +841,143 @@ function exportCSV() {
 }
 
 function showLoading(show) { document.getElementById('loadingOverlay').classList.toggle('show', show); }
+
+// ===== تاب تقارير الجرد (كفاءة موظف الجرد) =====
+// بياخد من jard_audit_log مباشرة عبر RPC get_jard_efficiency (يحسب لكل موظف/فرع:
+// الأصناف، أيام العمل، المعدل اليومي، الإنتاجية بالساعة النشطة، نسبة المطابقة، الفروق...)
+let jardRows = []; // آخر نتيجة من الـRPC (لكل الفروع) — نفلترها ونعرضها بدون إعادة جلب
+
+async function loadJardTab(from, to) {
+  const body = document.getElementById('jardEmpBody');
+  if (!from || !to) { jardRows = []; renderJard(); return; }
+  try {
+    const { data, error } = await db.rpc('get_jard_efficiency', { p_from: from, p_to: to, p_branch: null });
+    if (error) throw error;
+    jardRows = data || [];
+    // عمّر قايمة الفروع مرة واحدة من البيانات (لو مفيهاش عناصر غير الافتراضي)
+    const sel = document.getElementById('jardBranchFilter');
+    const prev = sel.value;
+    const branches = [...new Set(jardRows.map(r => r.branch))].filter(Boolean).sort();
+    sel.innerHTML = '<option value="">كل الفروع</option>' + branches.map(b => `<option value="${b}">${b}</option>`).join('');
+    if (branches.includes(prev)) sel.value = prev;
+    renderJard();
+  } catch (e) {
+    console.error('loadJardTab', e);
+    jardRows = [];
+    body.innerHTML = '<div class="empty-state"><p>تعذّر تحميل تقرير الجرد</p></div>';
+    document.getElementById('jardKpiGrid').innerHTML = '';
+    document.getElementById('jardBranchSummary').innerHTML = '';
+  }
+}
+
+function _isGeneric(r) { return (r.audited_by || '').trim() === (r.branch || '').trim(); }
+
+// الصفوف بعد الفلترة (فرع + استبعاد الدخول العام)
+function jardFiltered() {
+  const br = document.getElementById('jardBranchFilter').value;
+  const excl = document.getElementById('jardExcludeGeneric').checked;
+  return jardRows.filter(r => (!br || r.branch === br) && (!excl || !_isGeneric(r)));
+}
+
+function _matchColor(p) { return p == null ? 'var(--text-muted)' : p >= 90 ? '#16a34a' : p >= 80 ? '#ca8a04' : '#dc2626'; }
+function _fmtDT(ts) {
+  if (!ts) return '—';
+  try { return new Date(ts).toLocaleString('ar-EG', { day:'numeric', month:'numeric', hour:'2-digit', minute:'2-digit' }); }
+  catch(e) { return String(ts).slice(0,16); }
+}
+
+function renderJard() {
+  const rows = jardFiltered();
+  // --- KPIs ---
+  const items    = rows.reduce((s, r) => s + Number(r.items||0), 0);
+  const matched  = rows.reduce((s, r) => s + Number(r.matched_count||0), 0);
+  const mismatch = rows.reduce((s, r) => s + Number(r.mismatch_count||0), 0);
+  const actHours = rows.reduce((s, r) => s + Number(r.active_hours||0), 0);
+  const prodItems= rows.reduce((s, r) => s + Number(r.items_per_hour||0) * Number(r.active_hours||0), 0);
+  const emps     = new Set(rows.map(r => r.audited_by)).size;
+  const matchRate= items > 0 ? (100 * matched / items) : 0;
+  const teamOph  = actHours > 0 ? (prodItems / actHours) : 0;
+  document.getElementById('jardKpiGrid').innerHTML = `
+    <div class="stat-card"><div class="stat-label">إجمالي الأصناف المجرودة</div><div class="stat-value">${items.toLocaleString('ar-EG')}</div></div>
+    <div class="stat-card"><div class="stat-label">موظفون نشطون</div><div class="stat-value">${emps}</div></div>
+    <div class="stat-card"><div class="stat-label">متوسط أصناف/ساعة (فريق)</div><div class="stat-value">${teamOph.toFixed(1)}</div></div>
+    <div class="stat-card"><div class="stat-label">نسبة المطابقة العامة</div><div class="stat-value" style="color:${_matchColor(matchRate)}">${matchRate.toFixed(1)}%</div></div>
+    <div class="stat-card"><div class="stat-label">إجمالي الفروق</div><div class="stat-value" style="color:#dc2626">${mismatch.toLocaleString('ar-EG')}</div></div>`;
+
+  // --- ملخص كل فرع (نجمّع صفوف الموظفين حسب الفرع) ---
+  const bmap = {};
+  rows.forEach(r => {
+    const b = r.branch || '—';
+    if (!bmap[b]) bmap[b] = { branch: b, items:0, matched:0, mismatch:0, actHours:0, prodItems:0, emps:new Set() };
+    const x = bmap[b];
+    x.items += Number(r.items||0); x.matched += Number(r.matched_count||0); x.mismatch += Number(r.mismatch_count||0);
+    x.actHours += Number(r.active_hours||0); x.prodItems += Number(r.items_per_hour||0)*Number(r.active_hours||0);
+    x.emps.add(r.audited_by);
+  });
+  const brs = Object.values(bmap).sort((a,b)=>b.items-a.items);
+  const bs = document.getElementById('jardBranchSummary');
+  bs.innerHTML = brs.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.78rem">
+    <thead><tr style="text-align:right;color:var(--text-muted);border-bottom:2px solid var(--border)">
+      <th style="padding:.5rem">الفرع</th><th style="padding:.5rem">إجمالي الأصناف</th><th style="padding:.5rem">ساعات نشطة</th>
+      <th style="padding:.5rem">معدل/ساعة</th><th style="padding:.5rem">نسبة المطابقة</th><th style="padding:.5rem">الفروق</th><th style="padding:.5rem">مُدخِلون</th></tr></thead>
+    <tbody>${brs.map(x=>{
+      const mr = x.items>0 ? 100*x.matched/x.items : 0;
+      const oph= x.actHours>0 ? x.prodItems/x.actHours : 0;
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:.5rem;font-weight:800;color:var(--primary)">${x.branch}</td>
+        <td style="padding:.5rem;font-weight:700">${x.items.toLocaleString('ar-EG')}</td>
+        <td style="padding:.5rem">${x.actHours.toFixed(1)}</td>
+        <td style="padding:.5rem;font-weight:700">${oph.toFixed(1)}</td>
+        <td style="padding:.5rem;color:${_matchColor(mr)};font-weight:700">${mr.toFixed(1)}%</td>
+        <td style="padding:.5rem;color:#dc2626">${x.mismatch}</td>
+        <td style="padding:.5rem">${x.emps.size}</td></tr>`;
+    }).join('')}</tbody></table></div>` : '<div class="empty-state"><p>لا بيانات</p></div>';
+
+  // --- جدول الموظفين ---
+  const el = document.getElementById('jardEmpBody');
+  document.getElementById('jardEmpCount').textContent = `(${rows.length} صف)`;
+  const sorted = [...rows].sort((a,b)=>Number(b.items||0)-Number(a.items||0));
+  el.innerHTML = sorted.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.78rem">
+    <thead><tr style="text-align:right;color:var(--text-muted);border-bottom:2px solid var(--border)">
+      <th style="padding:.5rem">#</th><th style="padding:.5rem">الموظف</th><th style="padding:.5rem">الفرع</th>
+      <th style="padding:.5rem">الأصناف</th><th style="padding:.5rem" title="أيام فيها نشاط جرد فعلي">أيام العمل</th>
+      <th style="padding:.5rem" title="إجمالي الأصناف ÷ أيام العمل">معدل/يوم</th>
+      <th style="padding:.5rem" title="الإنتاجية أثناء الشغل فعلاً (من أول لآخر صنف في اليوم)">معدل/ساعة نشطة</th>
+      <th style="padding:.5rem" title="نسبة الأصناف اللي جرده طابق النظام">المطابقة</th>
+      <th style="padding:.5rem" title="عدد الأصناف اللي فيها فرق عن النظام">الفروق</th>
+      <th style="padding:.5rem">الفئات</th><th style="padding:.5rem">آخر نشاط</th></tr></thead>
+    <tbody>${sorted.map((r,i)=>{
+      const mr = r.match_rate == null ? null : Number(r.match_rate);
+      const gen = _isGeneric(r);
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:.5rem"><span class="rank-num ${i<3?'top3':''}" style="width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:.68rem;font-weight:700;background:${i<3?'#92400e':'#f3f4f6'};color:${i<3?'#fff':'#6b7280'}">${i+1}</span></td>
+        <td style="padding:.5rem;font-weight:700">${r.audited_by}${gen?' <span style="font-size:.62rem;color:#9a3412;background:#ffedd5;border-radius:5px;padding:.05rem .3rem;font-weight:700">دخول عام</span>':''}</td>
+        <td style="padding:.5rem;color:var(--text-muted)">${r.branch}</td>
+        <td style="padding:.5rem;font-weight:800">${Number(r.items||0).toLocaleString('ar-EG')}</td>
+        <td style="padding:.5rem">${r.days}</td>
+        <td style="padding:.5rem;font-weight:700">${r.avg_per_day ?? '—'}</td>
+        <td style="padding:.5rem;font-weight:800;color:var(--primary)">${r.items_per_hour ?? '—'}</td>
+        <td style="padding:.5rem;color:${_matchColor(mr)};font-weight:700">${mr==null?'—':mr.toFixed(1)+'%'}</td>
+        <td style="padding:.5rem;color:#dc2626;font-weight:700">${r.mismatch_count}</td>
+        <td style="padding:.5rem">${r.categories}</td>
+        <td style="padding:.5rem;color:var(--text-muted);white-space:nowrap">${_fmtDT(r.last_activity)}</td></tr>`;
+    }).join('')}</tbody></table></div>` : '<div class="empty-state"><p>لا توجد عمليات جرد في هذه الفترة</p></div>';
+}
+
+function exportJardCSV() {
+  const rows = jardFiltered().slice().sort((a,b)=>Number(b.items||0)-Number(a.items||0));
+  const headers = ['الموظف','الفرع','دخول عام','الأصناف','أيام العمل','معدل/يوم','ساعات نشطة','معدل/ساعة نشطة','نسبة المطابقة %','الفروق','الفئات','آخر نشاط'];
+  const body = rows.map(r => [
+    r.audited_by, r.branch, (_isGeneric(r)?'نعم':'لا'), r.items, r.days, (r.avg_per_day??''),
+    (r.active_hours??''), (r.items_per_hour??''), (r.match_rate??''), r.mismatch_count, r.categories,
+    (r.last_activity ? new Date(r.last_activity).toLocaleString('ar-EG') : '')
+  ]);
+  const csv = [headers, ...body].map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob(['﻿'+csv], { type:'text/csv;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `تقرير_كفاءة_الجرد_${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+}
 
 // Init: جهّز فلتر الفروع ثم حمّل تقرير اليوم
 initBranchFilter().then(setToday);
