@@ -54,6 +54,13 @@
     .warn-banner.show { display:flex; }
 
     .total-bar { display:flex; gap:16px; flex-wrap:wrap; padding:10px 0; font-size:0.88rem; font-weight:700; }
+    .wallet-pager { display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:center; margin:14px 0 4px; }
+    .wpg-btn { min-width:34px; height:34px; padding:0 10px; border-radius:8px; border:1.5px solid var(--border); background:var(--surface-3); color:var(--text-secondary); font-size:0.82rem; font-weight:700; cursor:pointer; font-family:var(--font); }
+    .wpg-btn.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+    .wpg-btn:not(:disabled):hover { border-color:var(--primary); }
+    .wpg-btn:disabled { opacity:0.4; cursor:not-allowed; }
+    .wpg-ellipsis { color:var(--text-muted); padding:0 2px; }
+    .wpg-info { font-size:0.75rem; color:var(--text-muted); margin-right:8px; }
 
     /* شريط تجميع المعاملات المحددة */
     .selection-bar { display:none; align-items:center; gap:16px; flex-wrap:wrap; background:#eff6ff; border:1.5px solid #bfdbfe; border-radius:10px; padding:10px 16px; margin-bottom:12px; font-size:0.85rem; font-weight:700; color:#1e3a8a; }
@@ -149,6 +156,7 @@
       </div>
 
       <div class="total-bar" id="total-bar"></div>
+      <div class="wallet-pager" id="wallet-pager"></div>
     </div>
   </div>
 
@@ -258,6 +266,8 @@
     let badIds = new Set();
     let showPosted = false;          // الافتراضي: عرض غير المرحّل بس
     let selected = new Set();        // ids المعاملات المحددة للترحيل
+    let walletPage = 1;              // الصفحة الحالية في العرض
+    const WALLET_PAGE_SIZE = 50;     // عدد المعاملات في الصفحة الواحدة
 
     // هل المعاملة مرحّلة؟ done === true
     function isPosted(item){ return item.done === true || item.done === 'true'; }
@@ -425,6 +435,7 @@
     }
 
     function applyFilter() {
+      walletPage = 1;              // أي تغيير في الفلتر/البحث/التبويب يرجّع لأول صفحة
       buildWalletTabs();
       renderWalletSummary();
       const items = getFiltered();
@@ -442,15 +453,24 @@
       }
       // عرض الأحدث أولاً (نسخة معكوسة — لا نغيّر ترتيب allData المستخدم في فحص الرصيد)
       const view = items.slice().sort((a,b) => (ts(b) - ts(a)) || (sortKey(b) - sortKey(a)));
+
+      // الإجماليات على كل المعاملات المفلترة (مش الصفحة المعروضة بس)
       let totalIn=0, totalOut=0, totalFees=0;
-      tbody.innerHTML = view.map(item => {
+      view.forEach(item => { const a=num(item.ammount); if (isSend(item)) totalOut+=a; else totalIn+=a; totalFees+=num(item.fees); });
+
+      // تقسيم الصفحات — نعرض شريحة واحدة بس عشان التحميل يبقى أسرع
+      const pageCount = Math.max(1, Math.ceil(view.length / WALLET_PAGE_SIZE));
+      if (walletPage > pageCount) walletPage = pageCount;
+      if (walletPage < 1) walletPage = 1;
+      const start = (walletPage-1) * WALLET_PAGE_SIZE;
+      const pageRows = view.slice(start, start + WALLET_PAGE_SIZE);
+
+      tbody.innerHTML = pageRows.map(item => {
         const w = walletOf(item), c = walletColor(w);
         const send = isSend(item), bad = badIds.has(String(item.id));
         const posted = isPosted(item);
         const amt = num(item.ammount);
         const fee = num(item.fees);
-        if (send) totalOut+=amt; else totalIn+=amt;
-        totalFees += fee;
         const party = item.from_no || item.to_no || '---';
         const checked = selected.has(String(item.id)) ? 'checked' : '';
         // المرحّل مايتحددش (اتراجع خلاص)
@@ -477,8 +497,38 @@
         `<span>إجمالي الوارد: <b style="color:#15803d;">${fmt(totalIn)}</b> ج</span>`+
         `<span>إجمالي الصادر: <b style="color:#b91c1c;">${fmt(totalOut)}</b> ج</span>`+
         `<span>إجمالي الرسوم: <b style="color:#b91c1c;">${fmt(totalFees)}</b> ج</span>`+
-        `<span style="color:var(--text-muted);">عدد المعاملات: <b>${view.length}</b></span>`;
+        `<span style="color:var(--text-muted);">عدد المعاملات: <b>${view.length}</b></span>`+
+        `<span style="color:var(--text-muted);">المعروض: <b>${start+1}–${start+pageRows.length}</b></span>`;
+      renderWalletPager(pageCount);
       syncSelectionUI();
+    }
+
+    // شريط تنقّل الصفحات (الأحدث في الصفحة 1)
+    function renderWalletPager(pageCount) {
+      const pager = document.getElementById('wallet-pager');
+      if (!pager) return;
+      if (pageCount <= 1) { pager.innerHTML = ''; return; }
+      const mk = (label, page, o) => o&&o.disabled
+        ? `<button class="wpg-btn" disabled>${label}</button>`
+        : `<button class="wpg-btn ${o&&o.active?'active':''}" onclick="gotoWalletPage(${page})">${label}</button>`;
+      const nums = []; const win = 2;
+      for (let p=1; p<=pageCount; p++) {
+        if (p===1 || p===pageCount || (p>=walletPage-win && p<=walletPage+win)) nums.push(p);
+        else if (nums[nums.length-1] !== '…') nums.push('…');
+      }
+      pager.innerHTML =
+        mk('«', 1, {disabled: walletPage===1}) +
+        mk('‹', walletPage-1, {disabled: walletPage===1}) +
+        nums.map(p => p==='…' ? '<span class="wpg-ellipsis">…</span>' : mk(p, p, {active: p===walletPage})).join('') +
+        mk('›', walletPage+1, {disabled: walletPage===pageCount}) +
+        mk('»', pageCount, {disabled: walletPage===pageCount}) +
+        `<span class="wpg-info">صفحة ${walletPage} من ${pageCount}</span>`;
+    }
+
+    function gotoWalletPage(p) {
+      walletPage = p;
+      renderTable(getFiltered());
+      try { document.getElementById('table-body').scrollIntoView({ block:'start', behavior:'smooth' }); } catch(e){}
     }
 
     // ===== التحديد والترحيل =====
