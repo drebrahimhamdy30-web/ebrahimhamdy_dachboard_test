@@ -141,6 +141,13 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
   <div class="card-body" id="fairScores"></div>
 </div>
 
+<!-- أداء الطيارين (Google) -->
+<div class="card" style="margin-bottom:1.25rem">
+  <div class="card-header"><span class="card-title">أداء الطيارين (Google — فعلي مقابل متوقع)</span>
+    <span style="font-size:.68rem;color:var(--text-muted)" id="driverPerfCount"></span></div>
+  <div class="card-body" id="driverPerf"></div>
+</div>
+
 </div><!-- /tab-drivers -->
 
 <!-- ========== TAB: تقارير الطلبات ========== -->
@@ -177,9 +184,20 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
     <div class="card-body" id="lateList" style="max-height:340px;overflow-y:auto"></div>
   </div>
 
+  <!-- أداء الصيدلية: الزمن الفعلي (تشغيل→تسليم) مقابل وقت المنطقة (SLA) -->
+  <div class="card" style="margin-bottom:1.25rem">
+    <div class="card-header"><span class="card-title">أداء الصيدلية — الوقت الفعلي مقابل وقت المنطقة (SLA)</span>
+      <span style="font-size:.68rem;color:var(--text-muted)" id="slaCount"></span></div>
+    <div class="card-body">
+      <div id="slaSummary" style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:.9rem"></div>
+      <div id="slaCause" style="margin-bottom:1rem"></div>
+      <div id="slaByRegion"></div>
+    </div>
+  </div>
+
   <!-- أداء التوصيل: الوقت الفعلي مقابل المتوقع (Google Routes) -->
   <div class="card" style="margin-bottom:1.25rem">
-    <div class="card-header"><span class="card-title">أداء التوصيل — الوقت الفعلي مقابل المتوقع</span>
+    <div class="card-header"><span class="card-title">أداء الطيار — الوقت الفعلي مقابل المتوقع (Google)</span>
       <span style="font-size:.68rem;color:var(--text-muted)" id="perfCount"></span></div>
     <div class="card-body">
       <div id="perfSummary" style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:.75rem"></div>
@@ -279,11 +297,13 @@ let reportOrders = [];
 // المستخدم والفرع (الأدمن يقدر يفلتر كل الفروع/فرع؛ غيره يتقيّد بفرعه)
 const RUSER = (typeof getCurrentUser==='function') ? getCurrentUser() : {role:'',branch_id:null};
 const RIS_ADMIN = RUSER.role === 'admin';
+let branchNameById = {};   // خريطة id→اسم الفرع (لجداول التقارير)
 async function initBranchFilter() {
+  const { data } = await db.from('branches').select('id,name').order('name');
+  (data||[]).forEach(b => { branchNameById[b.id] = b.name; });
   const sel = document.getElementById('branchFilter');
   if (!RIS_ADMIN) { sel.style.display = 'none'; return; }
   sel.style.display = '';
-  const { data } = await db.from('branches').select('id,name').order('name');
   sel.innerHTML = '<option value="">كل الفروع</option>' +
     (data||[]).map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
   sel.onchange = loadReport;
@@ -372,6 +392,8 @@ async function loadReport() {
   renderDriverRankings();
   await loadFairScores(from, to);
   await loadOrdersTab(from, to);
+  renderSlaAnalysis();
+  renderDriverPerf();
   await loadIncentivesTab(from, to);
   await loadJardTab(from, to);
   showLoading(false);
@@ -837,6 +859,90 @@ function exportCSV() {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = `تقرير_${new Date().toISOString().split('T')[0]}.csv`;
   a.click();
+}
+
+// ===== أداء الصيدلية (SLA المنطقة) — تاب الطلبات =====
+function renderSlaAnalysis() {
+  const rated = reportOrders.filter(o => o.sla_rating);
+  const C = { 'ممتاز':0, 'جيد':0, 'متأخر':0 };
+  rated.forEach(o => C[o.sla_rating] = (C[o.sla_rating]||0)+1);
+  const col = { 'ممتاز':'#16a34a', 'جيد':'#ca8a04', 'متأخر':'#dc2626' };
+  document.getElementById('slaCount').textContent = `(${rated.length} طلب مقيّم)`;
+  document.getElementById('slaSummary').innerHTML = ['ممتاز','جيد','متأخر'].map(k=>`
+    <div style="flex:1;min-width:90px;background:${col[k]}14;border:1px solid ${col[k]}44;border-radius:10px;padding:.6rem;text-align:center">
+      <div style="font-size:1.3rem;font-weight:800;color:${col[k]}">${C[k]||0}</div>
+      <div style="font-size:.72rem;color:${col[k]}">${k}</div></div>`).join('');
+
+  // سبب التأخير للطلبات المتأخرة (SLA=متأخر): صيدلية vs طيار
+  const late = rated.filter(o => o.sla_rating==='متأخر');
+  const byDriver   = late.filter(o => o.perf_rating==='متأخر').length;
+  const byPharmacy = late.filter(o => o.perf_rating && o.perf_rating!=='متأخر').length;
+  const unknown    = late.length - byDriver - byPharmacy;
+  document.getElementById('slaCause').innerHTML = late.length ? `
+    <div style="font-size:.8rem;font-weight:700;margin-bottom:.45rem">سبب التأخير (${late.length} طلب متأخر):</div>
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap">
+      <div style="flex:1;min-width:120px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:.6rem;text-align:center">
+        <div style="font-size:1.25rem;font-weight:800;color:#b91c1c">${byPharmacy}</div>
+        <div style="font-size:.72rem;color:#b91c1c">بسبب الصيدلية <span style="font-size:.62rem;color:var(--text-muted)">(الطيار كان كويس)</span></div></div>
+      <div style="flex:1;min-width:120px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:.6rem;text-align:center">
+        <div style="font-size:1.25rem;font-weight:800;color:#c2410c">${byDriver}</div>
+        <div style="font-size:.72rem;color:#c2410c">بسبب الطيار <span style="font-size:.62rem;color:var(--text-muted)">(Google متأخر)</span></div></div>
+      ${unknown>0?`<div style="flex:1;min-width:120px;background:var(--surface-3);border:1px solid var(--border);border-radius:10px;padding:.6rem;text-align:center"><div style="font-size:1.25rem;font-weight:800">${unknown}</div><div style="font-size:.72rem;color:var(--text-muted)">غير محدّد (لا تقييم طيار)</div></div>`:''}
+    </div>` : '';
+
+  // حسب المنطقة (+ الفرع)
+  const byReg = {};
+  rated.forEach(o => {
+    const key = (o.cust_region||'—') + '|' + (o.branch_id||'');
+    if (!byReg[key]) byReg[key] = { region:o.cust_region||'—', branch:branchNameById[o.branch_id]||'—', total:0, late:0, sla:o.sla_minutes, sumActual:0 };
+    const x = byReg[key]; x.total++; if (o.sla_rating==='متأخر') x.late++;
+    x.sumActual += Number(o.sla_actual_minutes)||0;
+    if (o.sla_minutes) x.sla = o.sla_minutes;
+  });
+  const rows = Object.values(byReg).sort((a,b)=>b.late-a.late).slice(0,30);
+  document.getElementById('slaByRegion').innerHTML = rows.length ? `
+    <div style="font-size:.8rem;font-weight:700;margin:.4rem 0">حسب المنطقة (الأكثر تأخيرًا):</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.76rem">
+      <thead><tr style="text-align:right;color:var(--text-muted);border-bottom:2px solid var(--border)">
+        <th style="padding:.4rem">المنطقة</th><th style="padding:.4rem">الفرع</th><th style="padding:.4rem">موصّل</th>
+        <th style="padding:.4rem">وقت المنطقة</th><th style="padding:.4rem">متوسط الفعلي</th><th style="padding:.4rem">متأخر</th><th style="padding:.4rem">% متأخر</th></tr></thead>
+      <tbody>${rows.map(x=>{ const pct=x.total?Math.round(x.late/x.total*100):0; const avg=x.total?x.sumActual/x.total:0;
+        const c = pct>=50?'#dc2626':pct>=25?'#ca8a04':'#16a34a';
+        return `<tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:.4rem;font-weight:700">${x.region}</td>
+          <td style="padding:.4rem;color:var(--text-muted)">${x.branch}</td>
+          <td style="padding:.4rem">${x.total}</td>
+          <td style="padding:.4rem">${x.sla??'—'} د</td>
+          <td style="padding:.4rem">${avg.toFixed(0)} د</td>
+          <td style="padding:.4rem;color:#dc2626;font-weight:700">${x.late}</td>
+          <td style="padding:.4rem;color:${c};font-weight:800">${pct}%</td></tr>`;}).join('')}
+      </tbody></table></div>` : '<div class="empty-state"><p>لا يوجد طلبات مقيّمة</p></div>';
+}
+
+// ===== أداء الطيارين (Google perf_rating) — تاب الطيارين =====
+function renderDriverPerf() {
+  const el = document.getElementById('driverPerf'); if (!el) return;
+  const rated = reportOrders.filter(o => o.perf_rating && o.deliveryman);
+  document.getElementById('driverPerfCount').textContent = `(${rated.length} توصيلة مقيّمة)`;
+  const m = {};
+  rated.forEach(o => { const d=o.deliveryman;
+    if (!m[d]) m[d] = { name:d, 'ممتاز':0, 'جيد':0, 'متأخر':0, total:0 };
+    m[d][o.perf_rating] = (m[d][o.perf_rating]||0)+1; m[d].total++; });
+  const rows = Object.values(m).sort((a,b)=> (b['متأخر']/b.total)-(a['متأخر']/a.total) || b.total-a.total);
+  if (!rows.length) { el.innerHTML = '<div class="empty-state"><p>لا بيانات</p></div>'; return; }
+  el.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.78rem">
+    <thead><tr style="text-align:right;color:var(--text-muted);border-bottom:2px solid var(--border)">
+      <th style="padding:.5rem">الطيار</th><th style="padding:.5rem">توصيلات</th><th style="padding:.5rem">ممتاز</th>
+      <th style="padding:.5rem">جيد</th><th style="padding:.5rem">متأخر</th><th style="padding:.5rem">% متأخر</th></tr></thead>
+    <tbody>${rows.map(r=>{ const pct=r.total?Math.round(r['متأخر']/r.total*100):0; const c=pct>=30?'#dc2626':pct>=15?'#ca8a04':'#16a34a';
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:.5rem;font-weight:700">${r.name}</td>
+        <td style="padding:.5rem">${r.total}</td>
+        <td style="padding:.5rem;color:#16a34a">${r['ممتاز']}</td>
+        <td style="padding:.5rem;color:#ca8a04">${r['جيد']}</td>
+        <td style="padding:.5rem;color:#dc2626;font-weight:700">${r['متأخر']}</td>
+        <td style="padding:.5rem;color:${c};font-weight:800">${pct}%</td></tr>`;}).join('')}
+    </tbody></table></div>`;
 }
 
 function showLoading(show) { document.getElementById('loadingOverlay').classList.toggle('show', show); }
