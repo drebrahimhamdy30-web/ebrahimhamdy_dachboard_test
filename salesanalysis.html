@@ -117,7 +117,7 @@
     </div>
   </div>
 
-  <script src="api.js?v=salesanalysis5"></script>
+  <script src="api.js?v=salesanalysis6"></script>
   <script>
     let ACTIVE = 'overview';
     let USER = '';
@@ -255,9 +255,53 @@
           <div class="hbar-fill" style="height:${Math.round(d.bills/maxB*100)}%;${isPeak?'background:#16a34a':''}"></div>
           <div class="hbar-lbl">${hrLabel(d.hr)}</div></div>`;
       }).join('');
+      // ===== تحليل الخصومات (لكل موظف/عميل + الإجمالي) =====
+      const dstats = await sbSalesDiscountStats(mr.from, mr.to, fltStore());
+      const dTotal = (dstats||[]).find(x=>x.grp==='total') || { bills:0, discount:0 };
+      const dEmps  = (dstats||[]).filter(x=>x.grp==='employee').sort((a,b)=>Number(b.discount)-Number(a.discount));
+      const dCusts = (dstats||[]).filter(x=>x.grp==='customer').sort((a,b)=>Number(b.discount)-Number(a.discount));
+      const totD   = Number(dTotal.discount)||0;
+      const custLabel = n => (!n || n==='—') ? 'عميل نقدي (بدون اسم)' : n;
+
+      // رسم بار أفقي مرتّب تنازليًا بقيمة الخصم (أعلى 15)
+      const discChart = (title, list, color, nameFn) => {
+        if(!list.length) return `<div class="sec-title">${title}</div><div class="empty-tab">لا توجد خصومات</div>`;
+        const top = list.slice(0,15);
+        const max = Math.max(1, ...top.map(r=>Number(r.discount)||0));
+        return `<div class="sec-title">${title}</div>
+          <div class="emp-sec"><div class="emp-chart">
+          ${top.map(r=>{ const v=Number(r.discount)||0; const p=totD>0?Math.round(v/totD*100):0; const nm=nameFn(r.name);
+            return `<div class="ec-row" title="${esc(nm)} — ${num(v)} ج · ${r.bills} فاتورة (${p}% من إجمالي الخصم)">
+              <div class="ec-name">${esc(nm)}</div>
+              <div class="ec-track"><div class="ec-fill" style="width:${Math.round(v/max*100)}%;background:${color}"></div></div>
+              <div class="ec-val"><b>${num(v)}</b> ج · ${r.bills} فات · ${p}%</div>
+            </div>`;}).join('')}
+          </div></div>
+          ${list.length>15?`<div style="font-size:0.72rem;color:var(--text-muted);margin:4px 2px">+ ${list.length-15} غيرهم…</div>`:''}`;
+      };
+
       wrap.innerHTML = `
         <div style="font-size:0.85rem;color:var(--text-secondary);font-weight:700;margin:0 2px 12px"><i class="fas fa-clock"></i> ${esc(mr.label)} · يوم العمل من 9ص إلى 8:59ص</div>
-        <div class="sec-title">ساعات الذروة (عدد الفواتير)</div>
+
+        <div class="sec-title"><i class="fas fa-tags"></i> الخصومات</div>
+        <div class="disc-kpis" style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 8px">
+          <div style="flex:1;min-width:150px;background:var(--bg-card);border:1.5px solid var(--border);border-radius:11px;padding:11px 14px">
+            <div style="font-size:0.72rem;color:var(--text-secondary);font-weight:700">إجمالي قيمة الخصم</div>
+            <div style="font-size:1.35rem;font-weight:800;color:#dc2626">${num(totD)} <span style="font-size:0.8rem;font-weight:700">ج</span></div>
+          </div>
+          <div style="flex:1;min-width:150px;background:var(--bg-card);border:1.5px solid var(--border);border-radius:11px;padding:11px 14px">
+            <div style="font-size:0.72rem;color:var(--text-secondary);font-weight:700">فواتير عليها خصم</div>
+            <div style="font-size:1.35rem;font-weight:800;color:var(--text-primary)">${Number(dTotal.bills)||0}</div>
+          </div>
+          <div style="flex:1;min-width:150px;background:var(--bg-card);border:1.5px solid var(--border);border-radius:11px;padding:11px 14px">
+            <div style="font-size:0.72rem;color:var(--text-secondary);font-weight:700">متوسط الخصم/فاتورة</div>
+            <div style="font-size:1.35rem;font-weight:800;color:var(--text-primary)">${num((Number(dTotal.bills)||0)>0 ? totD/Number(dTotal.bills) : 0)} <span style="font-size:0.8rem;font-weight:700">ج</span></div>
+          </div>
+        </div>
+        ${discChart('أكثر الموظفين عملاً للخصومات (بقيمة الخصم)', dEmps, '#dc2626', n=>n||'—')}
+        ${discChart('أكثر العملاء حصولاً على خصم (بقيمة الخصم)', dCusts, '#ea580c', custLabel)}
+
+        <div class="sec-title" style="margin-top:16px">ساعات الذروة (عدد الفواتير)</div>
         <div class="hours">${bars||'<div class="empty-tab">لا يوجد بيانات</div>'}</div>
       `;
     }

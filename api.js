@@ -241,6 +241,8 @@ function sbSalesByDay(from, to, store)         { return _sbRpc('sales_by_day', {
 // تحليل المبيعات — مراجعة الأسعار والخصومات
 function sbSalesPriceReview(from, to, store)  { return _sbRpc('sales_price_review',  { p_from: from||null, p_to: to||null, p_store: store||null }); }
 function sbSalesDiscountBills(from, to, store){ return _sbRpc('sales_discount_bills', { p_from: from||null, p_to: to||null, p_store: store||null }); }
+// تجميعات الخصومات (لكل موظف/عميل + الإجمالي) — تشمل كل الخصومات في المدة (مش المراجَع فقط)
+function sbSalesDiscountStats(from, to, store){ return _sbRpc('sales_discount_stats', { p_from: from||null, p_to: to||null, p_store: store||null }); }
 const SB_SALES_URL = `${SB_URL_API}/rest/v1/sales_items`;
 const SB_DISCREV_URL = `${SB_URL_API}/rest/v1/sales_discount_reviews`;
 async function sbMarkPriceReviewed(id, by) {
