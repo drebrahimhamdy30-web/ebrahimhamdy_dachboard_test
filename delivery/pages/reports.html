@@ -197,11 +197,11 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
   <div class="card" style="margin-bottom:1rem;background:#fefce8;border-color:#fde68a">
     <div class="card-body" style="font-size:.75rem;color:#78350f;line-height:1.7">
       💰 <strong>طريقة الحساب (نقاط مطلقة × جودة):</strong>
-      <strong>البول</strong> لكل فرع = عدد الطلبات المسلّمة × قيمة الطلب في البول (من إعدادات التوزيع، افتراضي 3 ج).
+      <strong>إجمالي الحافز</strong> لكل فرع = عدد الطلبات المسلّمة × قيمة الطلب في الحافز (من إعدادات التوزيع، افتراضي 3 ج).
       <strong>نقاط الطيار</strong> = وزن موزون على مجهوده الفعلي — طلبات (40%) + رحلات (25%) + مسافة (20%) + ساعات (15%) —
       <strong>× التقييم العادل</strong> (معامل جودة: فعلي ÷ نصيبه المفترض، مسقوف 200%، والغياب = محايد 100%).
-      <strong>نصيب الطيار = بول فرعه × (نقاطه ÷ إجمالي نقاط طياري الفرع)</strong> — فمجموع الحوافز = البول بالظبط.
-      <span style="color:#92400e">التقييم العادل من قسم "تقييم الطيارين العادل" · الأرقام من جدول "أداء الطيارين". بول كل فرع يتوزّع على طياريه فقط.</span>
+      <strong>نصيب الطيار = إجمالي حافز فرعه × (نقاطه ÷ إجمالي نقاط طياري الفرع)</strong> — فمجموع الحوافز = الإجمالي بالظبط.
+      <span style="color:#92400e">التقييم العادل من قسم "تقييم الطيارين العادل" · الأرقام من جدول "أداء الطيارين". إجمالي حافز كل فرع يتوزّع على طياريه فقط.</span>
     </div>
   </div>
 
@@ -431,7 +431,7 @@ async function loadIncentivesTab(from, to) {
   if (!from || !to) { el.innerHTML = '<div class="empty-state"><p>اختر الفترة</p></div>'; return; }
   if (!incSettingsMap) await loadIncentiveSettings();
 
-  // فرع كل طيار — عشان نحترم تفعيل الحوافز لكل فرع ونوزّع بول كل فرع على طياريه هو
+  // فرع كل طيار — عشان نحترم تفعيل الحوافز لكل فرع ونوزّع إجمالي حافز كل فرع على طياريه هو
   const { data: drvBr } = await db.from('drivers').select('id,branch_id');
   const branchByDrv = {}; (drvBr || []).forEach(d => branchByDrv[d.id] = d.branch_id);
 
@@ -439,7 +439,7 @@ async function loadIncentivesTab(from, to) {
   const fair = await computeFairScores(from, to, effectiveBranch() || null);
   const effById = {}; fair.rows.forEach(r => { effById[r.driver_id] = r.efficiency; });
 
-  // بول كل فرع مفعّل = عدد الطلبات المسلّمة × قيمة الطلب في البول (incentive_per_order)
+  // إجمالي حافز كل فرع مفعّل = عدد الطلبات المسلّمة × قيمة الطلب في الحافز (incentive_per_order)
   const branchPool = {};   // branch_id -> { rate, orders, pool }
   reportOrders.forEach(o => {
     if (!['delivered','completed'].includes(o.status)) return;
@@ -460,7 +460,7 @@ async function loadIncentivesTab(from, to) {
   });
 
   // لكل فرع: نقاط = وزن مطلق موزّع على (طلبات+رحلات+مسافة+ساعات) × التقييم العادل (مسقوف)،
-  // والنصيب = بول الفرع × (نقاطه ÷ إجمالي نقاط طياري الفرع)
+  // والنصيب = إجمالي حافز الفرع × (نقاطه ÷ إجمالي نقاط طياري الفرع)
   const rows = [];
   Object.entries(branchPool).forEach(([bid, bp]) => {
     const list = drvByBranch[bid] || [];
@@ -494,8 +494,8 @@ async function loadIncentivesTab(from, to) {
 function renderIncentiveKPIs(rows, totalPool, totalOrders) {
   const eligible = rows.filter(r => r.bonus > 0).length;
   document.getElementById('incKpiGrid').innerHTML = `
-    <div class="stat-card"><div class="stat-label">إجمالي البول</div><div class="stat-value" style="color:#ca8a04">${(totalPool||0).toLocaleString('ar-EG',{maximumFractionDigits:0})}</div><div class="stat-sub">جنيه (طلبات مسلّمة × القيمة)</div></div>
-    <div class="stat-card"><div class="stat-label">طلبات مسلّمة (البول)</div><div class="stat-value">${totalOrders||0}</div></div>
+    <div class="stat-card"><div class="stat-label">إجمالي الحافز</div><div class="stat-value" style="color:#ca8a04">${(totalPool||0).toLocaleString('ar-EG',{maximumFractionDigits:0})}</div><div class="stat-sub">جنيه (طلبات مسلّمة × القيمة)</div></div>
+    <div class="stat-card"><div class="stat-label">طلبات مسلّمة (للحافز)</div><div class="stat-value">${totalOrders||0}</div></div>
     <div class="stat-card"><div class="stat-label">طيارين لهم حافز</div><div class="stat-value">${eligible}</div></div>`;
 }
 
@@ -514,7 +514,7 @@ function renderIncentiveTable(rows) {
         <th style="padding:.5rem">مسافة (كم)</th>
         <th style="padding:.5rem">ساعات</th>
         <th style="padding:.5rem" title="معامل الجودة = فعلي ÷ نصيبه المفترض">التقييم العادل</th>
-        <th style="padding:.5rem" title="نصيبه من بول فرعه">نصيبه</th>
+        <th style="padding:.5rem" title="نصيبه من إجمالي حافز فرعه">نصيبه</th>
         <th style="padding:.5rem;text-align:left">الحافز</th>
       </tr></thead>
       <tbody>
