@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>أسعار وخصومات المخازن - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    .sp-filters { display:grid; grid-template-columns:1fr 200px auto; gap:10px; align-items:end; margin-bottom:14px; }
+    @media(max-width:760px){ .sp-filters{ grid-template-columns:1fr; } }
+    .sp-field label { font-size:0.72rem;font-weight:700;color:var(--text-secondary);margin-bottom:3px;display:block; }
+    .sp-table { width:100%;border-collapse:collapse;min-width:640px; }
+    .sp-wrap { overflow:auto; max-height:calc(100vh - 230px); }
+    .sp-table th { background:var(--primary);color:#fff;padding:9px 8px;font-size:0.72rem;font-weight:700;text-align:center;white-space:nowrap;position:sticky;top:0;z-index:5; }
+    .sp-table td { padding:7px 8px;font-size:0.8rem;border-bottom:1px solid var(--surface-3);text-align:center; }
+    .sp-table tr:hover td { background:var(--surface-2);cursor:pointer; }
+    .sp-disc { font-weight:800;color:#15803d; }
+    .sp-store { display:inline-block;padding:2px 8px;border-radius:20px;background:var(--surface-3);font-size:0.7rem;font-weight:700; }
+    .sp-code { color:var(--primary);font-weight:700; }
+    .sp-nocode { color:var(--text-muted);font-size:0.7rem; }
+    /* شريط الصفحات */
+    .sp-pager { display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:12px;padding-top:10px;border-top:1px solid var(--surface-3); }
+    .sp-pg-info { font-size:0.72rem;color:var(--text-muted);font-weight:600; }
+    .sp-pg-nav { display:flex;gap:4px;flex-wrap:wrap; }
+    .sp-pg { min-width:30px;height:30px;padding:0 8px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-secondary);border-radius:8px;font-family:inherit;font-size:0.78rem;font-weight:700;cursor:pointer; }
+    .sp-pg:hover:not(:disabled){ border-color:var(--primary);color:var(--primary); }
+    .sp-pg.act { background:var(--primary);color:#fff;border-color:var(--primary); }
+    .sp-pg:disabled { opacity:0.4;cursor:default; }
+    .sp-pg-dots { padding:0 2px;color:var(--text-muted); }
+    /* modal مقارنة */
+    .sp-modal-bg { display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:9999;align-items:center;justify-content:center;padding:16px; }
+    .sp-modal-bg.open { display:flex; }
+    .sp-modal { background:var(--surface);border-radius:var(--radius-lg);max-width:560px;width:100%;max-height:85vh;overflow:auto;box-shadow:var(--shadow-lg); }
+    .sp-modal-hd { padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;position:sticky;top:0;background:var(--surface); }
+    .sp-modal-bd { padding:12px 16px; }
+    .sp-close { background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--text-muted); }
+    .sp-best { background:#dcfce7 !important; }
+    .sp-best td { font-weight:800; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="page-header">
+        <div class="page-title"><i class="fas fa-tags"></i> أسعار وخصومات المخازن</div>
+        <div id="sp-count" style="font-size:0.8rem;color:var(--text-muted);"></div>
+      </div>
+
+      <div class="sp-filters">
+        <div class="sp-field">
+          <label>بحث (اسم الصنف أو الكود)</label>
+          <input type="text" id="sp-search" class="form-input" placeholder="اكتب اسم الصنف أو كوده...">
+        </div>
+        <div class="sp-field">
+          <label>المخزن</label>
+          <select id="sp-store" class="form-select">
+            <option value="">كل المخازن</option>
+            <option value="الابرار">الابرار</option>
+            <option value="نيوفارما">نيوفارما</option>
+            <option value="تارجت">تارجت</option>
+            <option value="هيلث">هيلث</option>
+            <option value="عابدين">عابدين</option>
+            <option value="ماك">ماك</option>
+          </select>
+        </div>
+        <div class="sp-field">
+          <label>&nbsp;</label>
+          <button class="btn" id="sp-refresh"><i class="fas fa-rotate"></i> تحديث</button>
+        </div>
+      </div>
+
+      <div class="sp-wrap">
+        <table class="sp-table">
+          <thead>
+            <tr>
+              <th style="text-align:right;">الصنف</th>
+              <th>الكود</th>
+              <th>المخزن</th>
+              <th>السعر</th>
+              <th>الخصم %</th>
+            </tr>
+          </thead>
+          <tbody id="sp-body">
+            <tr><td colspan="5" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="sp-pager"></div>
+    </div>
+  </div>
+
+  <!-- modal مقارنة أفضل خصم -->
+  <div class="sp-modal-bg" id="sp-modal-bg" onclick="if(event.target===this)closeCompare()">
+    <div class="sp-modal">
+      <div class="sp-modal-hd">
+        <div style="font-weight:800;font-size:0.9rem;" id="sp-modal-title">مقارنة المخازن</div>
+        <button class="sp-close" onclick="closeCompare()">✕</button>
+      </div>
+      <div class="sp-modal-bd" id="sp-modal-body"></div>
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script>
+    const SP_SIZE = 50;
+    let spPage = 1, spTotal = 0, spBusy = false, spTimer = null;
+
+    const H = { 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + SB_ANON_API };
+    const num = v => (v === null || v === undefined || v === '') ? '—' : (Math.round(Number(v) * 100) / 100);
+
+    function buildQuery(offset) {
+      const q = document.getElementById('sp-search').value.trim();
+      const store = document.getElementById('sp-store').value;
+      let url = SB_URL_API + '/rest/v1/store_item_prices?select=item_name,code,store,price,discount_perc'
+        + '&order=item_name.asc&limit=' + SP_SIZE + '&offset=' + offset;
+      if (q) { const e = encodeURIComponent(q); url += '&or=(item_name.ilike.*' + e + '*,code.ilike.*' + e + '*)'; }
+      if (store) url += '&store=eq.' + encodeURIComponent(store);
+      return url;
+    }
+
+    async function loadPage() {
+      if (spBusy) return; spBusy = true;
+      const body = document.getElementById('sp-body');
+      try {
+        const res = await fetch(buildQuery((spPage - 1) * SP_SIZE), { headers: { ...H, 'Prefer': 'count=exact' } });
+        const rows = await res.json();
+        const cr = res.headers.get('content-range'); // "0-49/12345"
+        spTotal = cr && cr.includes('/') ? parseInt(cr.split('/')[1]) : rows.length;
+        document.getElementById('sp-count').textContent = spTotal.toLocaleString('ar-EG') + ' صنف';
+        if (!rows.length) { body.innerHTML = '<tr><td colspan="5" style="padding:24px;color:var(--text-muted);">لا توجد نتائج</td></tr>'; renderPager(); return; }
+        body.innerHTML = rows.map(r => {
+          const codeCell = r.code ? '<span class="sp-code">' + r.code + '</span>' : '<span class="sp-nocode">—</span>';
+          const onclick = r.code ? 'openCompare(\'' + String(r.code).replace(/'/g, "\\'") + '\',\'' + String(r.item_name).replace(/'/g, "\\'").replace(/"/g,'&quot;') + '\')' : '';
+          return '<tr ' + (r.code ? 'onclick="' + onclick + '" title="اضغط لمقارنة المخازن بالكود"' : 'style="cursor:default"') + '>'
+            + '<td style="text-align:right;font-weight:600;">' + (r.item_name || '—') + '</td>'
+            + '<td>' + codeCell + '</td>'
+            + '<td><span class="sp-store">' + (r.store || '—') + '</span></td>'
+            + '<td>' + num(r.price) + '</td>'
+            + '<td class="sp-disc">' + num(r.discount_perc) + '%</td>'
+            + '</tr>';
+        }).join('');
+        renderPager();
+      } catch (e) {
+        body.innerHTML = '<tr><td colspan="5" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>';
+        console.error(e);
+      } finally { spBusy = false; }
+    }
+
+    function renderPager() {
+      const totalPages = Math.max(1, Math.ceil(spTotal / SP_SIZE));
+      if (spPage > totalPages) spPage = totalPages;
+      const el = document.getElementById('sp-pager');
+      if (totalPages <= 1) { el.innerHTML = ''; return; }
+      const btn = (p, lbl, dis, act) => '<button class="sp-pg' + (act ? ' act' : '') + '" ' + (dis ? 'disabled' : 'onclick="spGo(' + p + ')"') + '>' + lbl + '</button>';
+      let nums = '', win = 2, from = Math.max(1, spPage - win), to = Math.min(totalPages, spPage + win);
+      if (from > 1) { nums += btn(1, '1', false, spPage === 1); if (from > 2) nums += '<span class="sp-pg-dots">…</span>'; }
+      for (let p = from; p <= to; p++) nums += btn(p, String(p), false, p === spPage);
+      if (to < totalPages) { if (to < totalPages - 1) nums += '<span class="sp-pg-dots">…</span>'; nums += btn(totalPages, String(totalPages), false, spPage === totalPages); }
+      const start = (spPage - 1) * SP_SIZE;
+      el.innerHTML = '<div class="sp-pager">'
+        + '<div class="sp-pg-info">عرض ' + (start + 1) + '–' + Math.min(start + SP_SIZE, spTotal) + ' من ' + spTotal.toLocaleString('ar-EG') + '</div>'
+        + '<div class="sp-pg-nav">' + btn(1, '«', spPage === 1) + btn(spPage - 1, '‹', spPage === 1) + nums + btn(spPage + 1, '›', spPage === totalPages) + btn(totalPages, '»', spPage === totalPages) + '</div>'
+        + '<div class="sp-pg-info">صفحة ' + spPage + ' من ' + totalPages + '</div>'
+        + '</div>';
+    }
+
+    function spGo(p) { spPage = p; loadPage(); const w = document.querySelector('.sp-wrap'); if (w) w.scrollTop = 0; }
+
+    // ===== مقارنة أفضل خصم لكود =====
+    async function openCompare(code, name) {
+      const bg = document.getElementById('sp-modal-bg');
+      document.getElementById('sp-modal-title').textContent = 'مقارنة المخازن — كود ' + code;
+      document.getElementById('sp-modal-body').innerHTML = 'جارٍ التحميل…';
+      bg.classList.add('open');
+      try {
+        const url = SB_URL_API + '/rest/v1/store_item_prices?select=item_name,store,price,discount_perc&code=eq.' + encodeURIComponent(code) + '&order=discount_perc.desc.nullslast';
+        const rows = await (await fetch(url, { headers: H })).json();
+        if (!rows.length) { document.getElementById('sp-modal-body').innerHTML = '<div style="color:var(--text-muted)">لا توجد مخازن بهذا الكود</div>'; return; }
+        const best = rows[0].discount_perc;
+        document.getElementById('sp-modal-body').innerHTML =
+          '<div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:8px;">' + rows.length + ' مخزن عندهم الكود ده — الأعلى خصمًا فوق</div>'
+          + '<table class="sp-table" style="min-width:auto"><thead><tr><th style="text-align:right;">المخزن</th><th>الصنف عندهم</th><th>السعر</th><th>الخصم %</th></tr></thead><tbody>'
+          + rows.map((r, i) => '<tr' + (r.discount_perc === best && best != null ? ' class="sp-best"' : '') + '>'
+              + '<td style="text-align:right;font-weight:700;">' + (i === 0 && best != null ? '🏆 ' : '') + (r.store || '—') + '</td>'
+              + '<td style="text-align:right;font-size:0.72rem;color:var(--text-muted);">' + (r.item_name || '') + '</td>'
+              + '<td>' + num(r.price) + '</td>'
+              + '<td class="sp-disc">' + num(r.discount_perc) + '%</td></tr>').join('')
+          + '</tbody></table>';
+      } catch (e) { document.getElementById('sp-modal-body').innerHTML = '<div style="color:var(--danger)">خطأ في التحميل</div>'; }
+    }
+    function closeCompare() { document.getElementById('sp-modal-bg').classList.remove('open'); }
+
+    // ===== أحداث =====
+    document.getElementById('sp-search').addEventListener('input', () => {
+      clearTimeout(spTimer); spTimer = setTimeout(() => { spPage = 1; loadPage(); }, 300);
+    });
+    document.getElementById('sp-store').addEventListener('change', () => { spPage = 1; loadPage(); });
+    document.getElementById('sp-refresh').addEventListener('click', () => { spPage = 1; loadPage(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeCompare(); });
+
+    loadPage();
+  </script>
+</body>
+</html>
