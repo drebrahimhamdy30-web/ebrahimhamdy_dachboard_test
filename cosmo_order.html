@@ -25,9 +25,18 @@
     .company-dropdown-wrap { position:relative; }
     .company-trigger { display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-size:0.8rem;font-family:var(--font);background:var(--surface);user-select:none; }
     .actions-row { display:flex;gap:8px;margin-top:10px;flex-wrap:wrap; }
-    .order-wrap { overflow-x:auto; }
+    .order-wrap { overflow:auto; max-height:calc(100vh - 150px); }
     .order-table { width:100%;border-collapse:collapse;min-width:860px; }
-    .order-table th { background:var(--primary);color:#fff;padding:9px 8px;font-size:0.7rem;font-weight:700;text-align:center;white-space:nowrap; }
+    .order-table th { background:var(--primary);color:#fff;padding:9px 8px;font-size:0.7rem;font-weight:700;text-align:center;white-space:nowrap; position:sticky;top:0;z-index:5; }
+    /* شريط تقسيم الصفحات */
+    .cosmo-pager { display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:12px;padding-top:10px;border-top:1px solid var(--surface-3); }
+    .cosmo-pg-info { font-size:0.72rem;color:var(--text-muted);font-weight:600; }
+    .cosmo-pg-nav { display:flex;align-items:center;gap:4px;flex-wrap:wrap; }
+    .cosmo-pg { min-width:30px;height:30px;padding:0 8px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-secondary);border-radius:8px;font-family:inherit;font-size:0.78rem;font-weight:700;cursor:pointer;transition:0.15s; }
+    .cosmo-pg:hover:not(:disabled){ border-color:var(--primary);color:var(--primary); }
+    .cosmo-pg.act { background:var(--primary);color:#fff;border-color:var(--primary); }
+    .cosmo-pg:disabled { opacity:0.4;cursor:default; }
+    .cosmo-pg-dots { padding:0 2px;color:var(--text-muted);font-weight:700; }
     .order-table td { padding:7px 8px;font-size:0.77rem;border-bottom:1px solid var(--surface-3);text-align:center;vertical-align:middle; }
     .order-table tr:hover td { background:var(--surface-2); }
     .order-table tr.ignored-row td { opacity:0.4; }
@@ -221,6 +230,9 @@
     var showIgnored = false;            // إظهار المتجاهَل (افتراضي مخفي)
     var customQty  = JSON.parse(localStorage.getItem('cosmo_qty')||'{}');
     var origQty    = {}; // الكميات المحسوبة الأصلية
+    var cosmoPage  = 1;                 // الصفحة الحالية في تقسيم النتائج
+    var _cosmoSig  = '';                // بصمة الفلاتر — نرجع لأول صفحة لما تتغيّر
+    const COSMO_PAGE_SIZE = 50;         // عدد الأصناف في الصفحة
 
     function saveQty(){ localStorage.setItem('cosmo_qty', JSON.stringify(customQty)); }
 
@@ -658,6 +670,9 @@ saveQty();
     // ===== Render =====
     function renderResults(list){
       var container=document.getElementById('result-container');
+      // نرجع لأول صفحة عند تغيّر الفلاتر فقط (مش عند تعليم/تجاهل صنف)
+      var _sig=[document.getElementById('search-input').value,document.getElementById('status-filter').value,getSelectedCompanies().join(','),selectedBranch,currentType,showIgnored].join('|');
+      if(_sig!==_cosmoSig){ _cosmoSig=_sig; cosmoPage=1; }
       var ordered=list.filter(function(i){return (itemStates[i.code]||{}).ordered;}).length;
       // عدّ المتجاهَل من كل النتائج (حتى لو مخفي من القائمة)
       var ignored=allResults.filter(function(i){return (itemStates[i.code]||{}).ignored;}).length;
@@ -698,7 +713,13 @@ saveQty();
             <tbody>
       `;
 
-      list.forEach(function(item){
+      var _total=list.length;
+      var _totalPages=Math.max(1,Math.ceil(_total/COSMO_PAGE_SIZE));
+      if(cosmoPage>_totalPages)cosmoPage=_totalPages;
+      if(cosmoPage<1)cosmoPage=1;
+      var _start=(cosmoPage-1)*COSMO_PAGE_SIZE;
+      var pageRows=list.slice(_start,_start+COSMO_PAGE_SIZE);
+      pageRows.forEach(function(item){
         var state=itemStates[item.code]||{};
         var rowClass=state.ignored?'ignored-row':state.ordered?'ordered-row':'';
         var qty=qtyOf(item);
@@ -740,7 +761,36 @@ saveQty();
       });
 
       html+='</tbody></table></div>';
+      if(_totalPages>1){ html+=cosmoPagerHtml(cosmoPage,_totalPages,_total,_start,pageRows.length); }
       container.innerHTML=html;
+    }
+
+    // ===== تقسيم الصفحات =====
+    function cosmoPagerHtml(page,totalPages,total,startIdx,shown){
+      function btn(p,lbl,dis,act){
+        return '<button class="cosmo-pg'+(act?' act':'')+'" '+
+          (dis?'disabled':'onclick="cosmoGoPage('+p+')"')+'>'+lbl+'</button>';
+      }
+      var nums='', win=2;
+      var from=Math.max(1,page-win), to=Math.min(totalPages,page+win);
+      if(from>1){ nums+=btn(1,'1',false,page===1); if(from>2) nums+='<span class="cosmo-pg-dots">…</span>'; }
+      for(var p=from;p<=to;p++) nums+=btn(p,String(p),false,p===page);
+      if(to<totalPages){ if(to<totalPages-1) nums+='<span class="cosmo-pg-dots">…</span>'; nums+=btn(totalPages,String(totalPages),false,page===totalPages); }
+      return '<div class="cosmo-pager">'+
+        '<div class="cosmo-pg-info">عرض '+(startIdx+1)+'–'+(startIdx+shown)+' من '+total+'</div>'+
+        '<div class="cosmo-pg-nav">'+
+          btn(1,'«',page===1,false)+btn(page-1,'‹',page===1,false)+nums+
+          btn(page+1,'›',page===totalPages,false)+btn(totalPages,'»',page===totalPages,false)+
+        '</div>'+
+        '<div class="cosmo-pg-info">صفحة '+page+' من '+totalPages+'</div>'+
+      '</div>';
+    }
+    function cosmoGoPage(p){
+      cosmoPage=p;
+      renderResults(filteredResults);
+      // scroll لأعلى قائمة النتائج
+      var w=document.querySelector('.order-wrap'); if(w) w.scrollTop=0;
+      var c=document.getElementById('result-container'); if(c) c.scrollIntoView({behavior:'smooth',block:'start'});
     }
 
     // ===== State toggles =====
