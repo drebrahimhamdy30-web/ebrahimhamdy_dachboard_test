@@ -73,7 +73,7 @@ async function computeFairScores(from, to, branchId) {
   const [orders, attendanceRows, driversRows] = await Promise.all([
     _fsFetchAll(() => {
       let oq = db.from('orders')
-        .select('id,driver_id,deliveryman,delivered_at,total_bill_net,status,branch_id')
+        .select('id,driver_id,deliveryman,delivered_at,picked_at,assigned_at,total_bill_net,status,branch_id')
         .in('status', ['delivered', 'completed'])
         .not('delivered_at', 'is', null)
         .gte('delivered_at', from + 'T00:00:00')
@@ -99,28 +99,8 @@ async function computeFairScores(from, to, branchId) {
   const sessions = buildAttendanceSessions(attendanceRows || []);
   sessions.forEach(s => { s.branch_id = driverBranch[s.driver_id] || null; });
 
-  // 2.5) نمدّد نهاية شيفت الطيار لتغطّي الطلبات اللي خلّصها بعد انصرافه بدقايق (أو بعد منتصف الليل)
-  // — الطيار حاضر لحد ما يخلّص آخر تسليم فعلي. حد أقصى للتمديد ساعتين عشان ما نغطّيش توصيل بعيد بالغلط.
-  (function extendSessionsToLastActivity() {
-    const MAX_EXTEND = 2 * 60 * 60 * 1000;
-    const byDriver = {};
-    sessions.forEach(s => { (byDriver[s.driver_id] = byDriver[s.driver_id] || []).push(s); });
-    const ordersByDriver = {};
-    (orders || []).forEach(o => {
-      if (o.driver_id && o.delivered_at)
-        (ordersByDriver[o.driver_id] = ordersByDriver[o.driver_id] || []).push(new Date(o.delivered_at).getTime());
-    });
-    Object.keys(byDriver).forEach(drvId => {
-      const sess = byDriver[drvId].sort((a, b) => a.start - b.start);
-      (ordersByDriver[drvId] || []).forEach(t => {
-        let cur = null;
-        for (const s of sess) { if (s.start <= t) cur = s; else break; }
-        if (cur && t >= cur.end && (t - cur.end) <= MAX_EXTEND) cur.end = t + 1;
-      });
-    });
-  })();
-
-  // 3) لكل طلب: مين كان أونلاين لحظة التسليم؟
+  // 3) لكل طلب: مين كان أونلاين لحظة **استلام** الطلب (مش التسليم)؟
+  //    الاستلام بيحصل والطيار حاضر دايمًا، فمافيش داعي لتمديد الشيفت.
   const stats = {};   // driver_id -> { expected, actual, revenue }
   const ensure = id => (stats[id] = stats[id] || { expected: 0, actual: 0, revenue: 0 });
 
@@ -128,8 +108,9 @@ async function computeFairScores(from, to, branchId) {
   let unmatchedDriver = 0;   // طلبات من غير driver_id
 
   orders.forEach(o => {
-    const t = new Date(o.delivered_at).getTime();
-    // الحاضرين = طيارين نفس فرع الطلب اللي كانوا أونلاين وقت التسليم
+    // وقت المطابقة = وقت الاستلام (الطيار حاضر وقتها أكيد)، وإلا التعيين، وإلا التسليم
+    const t = new Date(o.picked_at || o.assigned_at || o.delivered_at).getTime();
+    // الحاضرين = طيارين نفس فرع الطلب اللي كانوا أونلاين وقت استلام الطلب
     const online = sessions.filter(s => s.branch_id === o.branch_id && t >= s.start && t < s.end);
 
     if (online.length === 0) {
