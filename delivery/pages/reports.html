@@ -893,13 +893,29 @@ function renderSlaAnalysis() {
 }
 
 // ===== أداء الطيارين — إحصائيات شاملة + النتيجة المركّبة (أفضل الطيارين) =====
-// النتيجة = متوسط بوزن متساوٍ (25% لكل عامل): طلبات/ساعة + رحلات/ساعة + كم/ساعة
-// (كلها نسبةً لأفضل طيار مؤهّل) + قلة التأخير (100 − % متأخر). تُحسب للمؤهّلين فقط (عيّنة كافية).
+// النتيجة = متوسط موزون: طلبات/ساعة + رحلات/ساعة + كم/ساعة (كلها نسبةً لأفضل طيار مؤهّل)
+// + قلة التأخير (100 − % متأخر). الأوزان تتحكّم فيها من «إعدادات التوزيع» (افتراضي 50/25/20/5).
 const BD_MIN_ORDERS = 20;   // حد أدنى للطلبات لحساب النتيجة (يتجنّب العيّنات الصغيرة)
 const BD_MIN_HOURS  = 8;    // حد أدنى لساعات الحضور
-const BD_W = { oph: 0.25, tph: 0.25, kph: 0.25, late: 0.25 };
+let BD_W = { oph: 0.50, tph: 0.25, kph: 0.20, late: 0.05 };   // كسور (المجموع=1)؛ تُحمّل من dispatch_settings
 let driverPerfRows = [];
 let driverPerfSort = { col: 'score', dir: -1 };   // افتراضي: الأعلى نتيجة
+
+// يحمّل أوزان النتيجة من إعدادات التوزيع (score_w_*). لو فرع محدّد يستخدم أوزانه،
+// وإلا يستخدم أول فرع؛ ويطبّع القيم لكسور مجموعها 1.
+async function loadScoreWeights() {
+  try {
+    const { data } = await db.from('dispatch_settings')
+      .select('branch_id,score_w_orders,score_w_trips,score_w_distance,score_w_late');
+    const rows = data || [];
+    const bid = effectiveBranch();
+    let row = (bid ? rows.find(r => r.branch_id === bid) : null) || rows[0] || null;
+    const w = row ? { o:+row.score_w_orders, t:+row.score_w_trips, d:+row.score_w_distance, l:+row.score_w_late }
+                  : { o:50, t:25, d:20, l:5 };
+    const tot = (w.o + w.t + w.d + w.l) || 1;
+    BD_W = { oph: w.o/tot, tph: w.t/tot, kph: w.d/tot, late: w.l/tot };
+  } catch (e) { console.error(e); /* نسيب الافتراضي */ }
+}
 
 async function loadDriverPerfTab(from, to) {
   const el = document.getElementById('driverPerf'); if (!el) return;
@@ -948,6 +964,7 @@ async function loadDriverPerfTab(from, to) {
   });
 
   // النتيجة المركّبة (أفضل الطيارين): تطبيع نسبةً لأفضل طيار مؤهّل + قلة التأخير
+  await loadScoreWeights();   // الأوزان من إعدادات التوزيع
   const qual = driverPerfRows.filter(r => r.orders >= BD_MIN_ORDERS && r.hours >= BD_MIN_HOURS);
   const maxOph = Math.max(1, ...qual.map(r => r.oph));
   const maxTph = Math.max(1, ...qual.map(r => r.tph));
@@ -1004,8 +1021,9 @@ function drawDriverPerfTable() {
         <span style="display:inline-block;width:46px;height:6px;background:var(--border);border-radius:4px;overflow:hidden"><span style="display:block;height:100%;width:${Math.min(100, r.score)}%;background:${sc}"></span></span>
       </span></td>`;
   };
+  const wp = k => Math.round((BD_W[k]||0)*100);
   el.innerHTML = `<div style="font-size:.68rem;color:var(--text-muted);margin-bottom:.5rem;line-height:1.6">
-      🏆 <b>النتيجة</b> = متوسط بوزن متساوٍ (25% لكل عامل): <b style="color:#2563eb">طلبات/ساعة</b> + <b style="color:#7c3aed">رحلات/ساعة</b> + <b style="color:#0891b2">كم/ساعة</b> (نسبةً لأفضل طيار) + <b style="color:#16a34a">قلة التأخير</b> (100−%متأخر). تُحسب للمؤهّلين (≥${BD_MIN_ORDERS} طلب و≥${BD_MIN_HOURS} ساعة)؛ غيرهم «—». اضغط أي عمود للترتيب.
+      🏆 <b>النتيجة</b> = متوسط موزون: <b style="color:#2563eb">طلبات/ساعة ${wp('oph')}%</b> + <b style="color:#7c3aed">رحلات/ساعة ${wp('tph')}%</b> + <b style="color:#0891b2">كم/ساعة ${wp('kph')}%</b> (نسبةً لأفضل طيار) + <b style="color:#16a34a">قلة التأخير ${wp('late')}%</b> (100−%متأخر). تُحسب للمؤهّلين (≥${BD_MIN_ORDERS} طلب و≥${BD_MIN_HOURS} ساعة)؛ غيرهم «—». الأوزان من إعدادات التوزيع.
     </div>
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.78rem">
     <thead><tr style="text-align:right;color:var(--text-muted);border-bottom:2px solid var(--border)">
