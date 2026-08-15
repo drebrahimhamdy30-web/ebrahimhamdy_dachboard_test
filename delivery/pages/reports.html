@@ -119,17 +119,10 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
 </div>
 
 <!-- Bottom row -->
-<div class="charts-2">
-  <!-- Top regions -->
-  <div class="card">
-    <div class="card-header"><span class="card-title">أكثر المناطق طلبات</span></div>
-    <div class="card-body" id="regionsChart"></div>
-  </div>
-  <!-- Driver rankings -->
-  <div class="card">
-    <div class="card-header"><span class="card-title">أفضل الطيارين</span></div>
-    <div class="card-body" id="driverRankings"></div>
-  </div>
+<!-- Top regions -->
+<div class="card" style="margin-bottom:1.25rem">
+  <div class="card-header"><span class="card-title">أكثر المناطق طلبات</span></div>
+  <div class="card-body" id="regionsChart"></div>
 </div>
 
 <!-- Fair driver scoring -->
@@ -379,7 +372,6 @@ async function loadReport() {
   renderDailyChart();
   renderStatusPie();
   renderRegions();
-  renderDriverRankings();
   await loadFairScores(from, to);
   await loadOrdersTab(from, to);
   renderSlaAnalysis();
@@ -901,6 +893,9 @@ function renderSlaAnalysis() {
 }
 
 // ===== أداء الطيارين (Google perf_rating) — تاب الطيارين =====
+let driverPerfRows = [];
+let driverPerfSort = { col: 'total', dir: -1 };   // افتراضي: الأكثر توصيلات
+
 function renderDriverPerf() {
   const el = document.getElementById('driverPerf'); if (!el) return;
   const rated = reportOrders.filter(o => o.perf_rating && o.deliveryman);
@@ -909,20 +904,41 @@ function renderDriverPerf() {
   rated.forEach(o => { const d=o.deliveryman;
     if (!m[d]) m[d] = { name:d, 'ممتاز':0, 'جيد':0, 'متأخر':0, total:0 };
     m[d][o.perf_rating] = (m[d][o.perf_rating]||0)+1; m[d].total++; });
-  const rows = Object.values(m).sort((a,b)=> (b['متأخر']/b.total)-(a['متأخر']/a.total) || b.total-a.total);
-  if (!rows.length) { el.innerHTML = '<div class="empty-state"><p>لا بيانات</p></div>'; return; }
+  driverPerfRows = Object.values(m).map(r => ({ ...r, pct: r.total ? Math.round(r['متأخر']/r.total*100) : 0 }));
+  drawDriverPerfTable();
+}
+
+function sortDriverPerf(col) {
+  if (driverPerfSort.col === col) driverPerfSort.dir *= -1;
+  else driverPerfSort = { col, dir: (col === 'name' ? 1 : -1) };
+  drawDriverPerfTable();
+}
+
+function drawDriverPerfTable() {
+  const el = document.getElementById('driverPerf'); if (!el) return;
+  if (!driverPerfRows.length) { el.innerHTML = '<div class="empty-state"><p>لا بيانات</p></div>'; return; }
+  const { col, dir } = driverPerfSort;
+  const rows = [...driverPerfRows].sort((a, b) => {
+    if (col === 'name') return dir * String(a.name).localeCompare(String(b.name), 'ar');
+    return dir * ((Number(a[col]) || 0) - (Number(b[col]) || 0));
+  });
+  const cols = [
+    { k:'name', t:'الطيار' }, { k:'total', t:'توصيلات' }, { k:'ممتاز', t:'ممتاز' },
+    { k:'جيد', t:'جيد' }, { k:'متأخر', t:'متأخر' }, { k:'pct', t:'% متأخر' }
+  ];
+  const arrow = k => driverPerfSort.col === k ? (driverPerfSort.dir < 0 ? '▼' : '▲') : '↕';
   el.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.78rem">
     <thead><tr style="text-align:right;color:var(--text-muted);border-bottom:2px solid var(--border)">
-      <th style="padding:.5rem">الطيار</th><th style="padding:.5rem">توصيلات</th><th style="padding:.5rem">ممتاز</th>
-      <th style="padding:.5rem">جيد</th><th style="padding:.5rem">متأخر</th><th style="padding:.5rem">% متأخر</th></tr></thead>
-    <tbody>${rows.map(r=>{ const pct=r.total?Math.round(r['متأخر']/r.total*100):0; const c=pct>=30?'#dc2626':pct>=15?'#ca8a04':'#16a34a';
+      ${cols.map(c=>`<th style="padding:.5rem;cursor:pointer;user-select:none;white-space:nowrap" onclick="sortDriverPerf('${c.k}')">${c.t} <span style="font-size:.6rem">${arrow(c.k)}</span></th>`).join('')}
+    </tr></thead>
+    <tbody>${rows.map(r=>{ const c=r.pct>=30?'#dc2626':r.pct>=15?'#ca8a04':'#16a34a';
       return `<tr style="border-bottom:1px solid var(--border)">
         <td style="padding:.5rem;font-weight:700">${r.name}</td>
         <td style="padding:.5rem">${r.total}</td>
         <td style="padding:.5rem;color:#16a34a">${r['ممتاز']}</td>
         <td style="padding:.5rem;color:#ca8a04">${r['جيد']}</td>
         <td style="padding:.5rem;color:#dc2626;font-weight:700">${r['متأخر']}</td>
-        <td style="padding:.5rem;color:${c};font-weight:800">${pct}%</td></tr>`;}).join('')}
+        <td style="padding:.5rem;color:${c};font-weight:800">${r.pct}%</td></tr>`;}).join('')}
     </tbody></table></div>`;
 }
 
