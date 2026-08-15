@@ -134,9 +134,9 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
   <div class="card-body" id="fairScores"></div>
 </div>
 
-<!-- أداء الطيارين (Google) -->
+<!-- أداء الطيارين — إحصائيات شاملة -->
 <div class="card" style="margin-bottom:1.25rem">
-  <div class="card-header"><span class="card-title">أداء الطيارين (Google — فعلي مقابل متوقع)</span>
+  <div class="card-header"><span class="card-title">أداء الطيارين — طلبات · رحلات · مسافة · ساعات · تقييم Google</span>
     <span style="font-size:.68rem;color:var(--text-muted)" id="driverPerfCount"></span></div>
   <div class="card-body" id="driverPerf"></div>
 </div>
@@ -375,7 +375,7 @@ async function loadReport() {
   await loadFairScores(from, to);
   await loadOrdersTab(from, to);
   renderSlaAnalysis();
-  renderDriverPerf();
+  await loadDriverPerfTab(from, to);
   await loadIncentivesTab(from, to);
   await loadJardTab(from, to);
   showLoading(false);
@@ -892,19 +892,58 @@ function renderSlaAnalysis() {
       </tbody></table></div>` : '<div class="empty-state"><p>لا يوجد طلبات مقيّمة</p></div>';
 }
 
-// ===== أداء الطيارين (Google perf_rating) — تاب الطيارين =====
+// ===== أداء الطيارين — إحصائيات شاملة (طلبات/رحلات/مسافة/ساعات + معدّلات بالساعة + تقييم Google) =====
 let driverPerfRows = [];
-let driverPerfSort = { col: 'total', dir: -1 };   // افتراضي: الأكثر توصيلات
+let driverPerfSort = { col: 'orders', dir: -1 };   // افتراضي: الأكثر طلبات
 
-function renderDriverPerf() {
+async function loadDriverPerfTab(from, to) {
   const el = document.getElementById('driverPerf'); if (!el) return;
-  const rated = reportOrders.filter(o => o.perf_rating && o.deliveryman);
-  document.getElementById('driverPerfCount').textContent = `(${rated.length} توصيلة مقيّمة)`;
+  const branchId = effectiveBranch();
+
+  // 1) الرحلات المكتملة لكل طيار في الفترة
+  const trips = await fetchAllPaged(() => {
+    let q = db.from('trips').select('driver_id,completed_at,branch_id').eq('status', 'completed');
+    if (branchId) q = q.eq('branch_id', branchId);
+    if (from) q = q.gte('completed_at', from + 'T00:00:00');
+    if (to) q = q.lte('completed_at', to + 'T23:59:59');
+    return q;
+  });
+  const tripsByDrv = {};
+  (trips || []).forEach(t => { if (t.driver_id) tripsByDrv[t.driver_id] = (tripsByDrv[t.driver_id] || 0) + 1; });
+
+  // 2) ساعات الحضور لكل طيار (نفس منطق fair-score من جلسات الحضور)
+  let hoursByDrv = {};
+  try { hoursByDrv = await computeWorkedHours(from, to); } catch (e) { console.error(e); }
+
+  // 3) الأسماء
+  if (!driversCache) { const { data } = await db.from('drivers').select('id,full_name'); driversCache = data || []; }
+  const nameById = {}; (driversCache || []).forEach(d => nameById[d.id] = d.full_name);
+
+  // 4) تجميع الطلبات المسلّمة + المسافة + تقييم Google لكل طيار (بالـ driver_id)
   const m = {};
-  rated.forEach(o => { const d=o.deliveryman;
-    if (!m[d]) m[d] = { name:d, 'ممتاز':0, 'جيد':0, 'متأخر':0, total:0 };
-    m[d][o.perf_rating] = (m[d][o.perf_rating]||0)+1; m[d].total++; });
-  driverPerfRows = Object.values(m).map(r => ({ ...r, pct: r.total ? Math.round(r['متأخر']/r.total*100) : 0 }));
+  reportOrders.filter(o => ['delivered', 'completed'].includes(o.status) && o.driver_id).forEach(o => {
+    const id = o.driver_id;
+    if (!m[id]) m[id] = { driver_id: id, name: nameById[id] || o.deliveryman || '—', orders: 0, km: 0, 'ممتاز': 0, 'جيد': 0, 'متأخر': 0, rated: 0 };
+    const x = m[id];
+    x.orders++;
+    x.km += (Number(o.distance_meters) || 0) / 1000;
+    if (o.perf_rating) { x[o.perf_rating] = (x[o.perf_rating] || 0) + 1; x.rated++; }
+  });
+
+  driverPerfRows = Object.values(m).map(r => {
+    const hours = hoursByDrv[r.driver_id] || 0;
+    const trips = tripsByDrv[r.driver_id] || 0;
+    return {
+      ...r, trips, hours,
+      oph: hours > 0 ? r.orders / hours : 0,   // طلبات/ساعة
+      tph: hours > 0 ? trips / hours : 0,       // رحلات/ساعة
+      kph: hours > 0 ? r.km / hours : 0,        // كم/ساعة
+      pct: r.rated ? Math.round(r['متأخر'] / r.rated * 100) : 0
+    };
+  });
+
+  const cntEl = document.getElementById('driverPerfCount');
+  if (cntEl) cntEl.textContent = `(${driverPerfRows.length} طيار)`;
   drawDriverPerfTable();
 }
 
@@ -923,22 +962,30 @@ function drawDriverPerfTable() {
     return dir * ((Number(a[col]) || 0) - (Number(b[col]) || 0));
   });
   const cols = [
-    { k:'name', t:'الطيار' }, { k:'total', t:'توصيلات' }, { k:'ممتاز', t:'ممتاز' },
-    { k:'جيد', t:'جيد' }, { k:'متأخر', t:'متأخر' }, { k:'pct', t:'% متأخر' }
+    { k:'name', t:'الطيار' },
+    { k:'orders', t:'طلبات' }, { k:'trips', t:'رحلات' }, { k:'km', t:'مسافة (كم)' }, { k:'hours', t:'ساعات' },
+    { k:'oph', t:'طلبات/س' }, { k:'tph', t:'رحلات/س' }, { k:'kph', t:'كم/س' },
+    { k:'ممتاز', t:'ممتاز' }, { k:'جيد', t:'جيد' }, { k:'متأخر', t:'متأخر' }, { k:'pct', t:'% متأخر' }
   ];
   const arrow = k => driverPerfSort.col === k ? (driverPerfSort.dir < 0 ? '▼' : '▲') : '↕';
   el.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.78rem">
     <thead><tr style="text-align:right;color:var(--text-muted);border-bottom:2px solid var(--border)">
-      ${cols.map(c=>`<th style="padding:.5rem;cursor:pointer;user-select:none;white-space:nowrap" onclick="sortDriverPerf('${c.k}')">${c.t} <span style="font-size:.6rem">${arrow(c.k)}</span></th>`).join('')}
+      ${cols.map(c=>`<th style="padding:.45rem .5rem;cursor:pointer;user-select:none;white-space:nowrap" onclick="sortDriverPerf('${c.k}')">${c.t} <span style="font-size:.6rem">${arrow(c.k)}</span></th>`).join('')}
     </tr></thead>
     <tbody>${rows.map(r=>{ const c=r.pct>=30?'#dc2626':r.pct>=15?'#ca8a04':'#16a34a';
       return `<tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:.5rem;font-weight:700">${r.name}</td>
-        <td style="padding:.5rem">${r.total}</td>
-        <td style="padding:.5rem;color:#16a34a">${r['ممتاز']}</td>
-        <td style="padding:.5rem;color:#ca8a04">${r['جيد']}</td>
-        <td style="padding:.5rem;color:#dc2626;font-weight:700">${r['متأخر']}</td>
-        <td style="padding:.5rem;color:${c};font-weight:800">${r.pct}%</td></tr>`;}).join('')}
+        <td style="padding:.45rem .5rem;font-weight:700;white-space:nowrap">${r.name}</td>
+        <td style="padding:.45rem .5rem;font-weight:700">${r.orders}</td>
+        <td style="padding:.45rem .5rem">${r.trips}</td>
+        <td style="padding:.45rem .5rem">${r.km.toFixed(1)}</td>
+        <td style="padding:.45rem .5rem">${r.hours.toFixed(1)}</td>
+        <td style="padding:.45rem .5rem;font-weight:700;color:#2563eb">${r.oph.toFixed(1)}</td>
+        <td style="padding:.45rem .5rem">${r.tph.toFixed(2)}</td>
+        <td style="padding:.45rem .5rem">${r.kph.toFixed(1)}</td>
+        <td style="padding:.45rem .5rem;color:#16a34a">${r['ممتاز']}</td>
+        <td style="padding:.45rem .5rem;color:#ca8a04">${r['جيد']}</td>
+        <td style="padding:.45rem .5rem;color:#dc2626;font-weight:700">${r['متأخر']}</td>
+        <td style="padding:.45rem .5rem;color:${c};font-weight:800">${r.pct}%</td></tr>`;}).join('')}
     </tbody></table></div>`;
 }
 
