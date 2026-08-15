@@ -121,6 +121,8 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text);heigh
 .tc-nm{font-size:.75rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tc-mt{font-size:.62rem;color:var(--text-muted)}
 .tc-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+@keyframes tcDotPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(2);opacity:.4}}
+.tc-dot-late{animation:tcDotPulse .9s ease-in-out infinite}
 .tc-orders{padding:.4rem .5rem;display:flex;flex-direction:column;gap:.3rem;max-height:205px;overflow-y:auto;flex:1}
 .tc-orders::-webkit-scrollbar{width:3px}
 .tc-orders::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
@@ -184,6 +186,9 @@ body.dark .tc-timer2{color:#fff!important}
 
 /* ORDERS GRID */
 .orders-grid{flex:1;display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:.5rem;padding:.625rem 1rem;overflow-y:auto;align-content:start}
+/* فاصل بيخلي كل مجموعة تبدأ في سطر جديد (هتتوزع في سطر، المؤجلة في سطر تحته) */
+.orders-rowlabel{grid-column:1/-1;font-size:.72rem;font-weight:800;color:var(--text-muted);padding:.35rem .15rem .1rem;display:flex;align-items:center;gap:.35rem;border-top:1px dashed var(--border)}
+.orders-rowlabel:first-child{border-top:none;padding-top:0}
 .orders-grid::-webkit-scrollbar{width:5px}
 .orders-grid::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px}
 
@@ -1623,6 +1628,8 @@ function renderTrips(){
     const tot=tO.reduce((s,o)=>s+Number(o.total_bill_net||0),0);
     const done=tO.filter(o=>['delivered','completed'].includes(o.status)).length;
     const waitingPickup=tO.filter(o=>o.status==='assigned').length;
+    // الرحلة متأخرة لو أي طلب فيها اتأخر — في الاستلام (assigned) أو في التسليم (picked)
+    const tripLate=tO.some(o=>isLate(o));
     // مدة الرحلة = من وقت استلام أول طلب
     const pickedMs=tO.map(o=>o.picked_at).filter(Boolean).map(t=>new Date(t).getTime()).filter(n=>!isNaN(n));
     const firstPicked=pickedMs.length?Math.min(...pickedMs):null;
@@ -1639,7 +1646,7 @@ function renderTrips(){
           <div style="font-size:.54rem;color:#94a3b8;font-weight:700;line-height:1">مدة الرحلة</div>
           <div class="tc-timer2" data-start="${firstPicked}" style="font-size:.85rem;color:#000;font-weight:800;white-space:nowrap;margin-top:.14rem;font-variant-numeric:tabular-nums">00:00:00</div>
         </div>`:''}
-        <div class="tc-dot" style="background:${done===tO.length&&tO.length>0?'#4ade80':'#a78bfa'}"></div>
+        <div class="tc-dot${tripLate?' tc-dot-late':''}" title="${tripLate?'رحلة فيها طلب متأخر':''}" style="background:${tripLate?'#ef4444':(done===tO.length&&tO.length>0?'#4ade80':'#a78bfa')}"></div>
       </div>
       <div class="tc-orders">
         ${tO.length?tO.map(o=>{
@@ -1817,7 +1824,7 @@ function renderOrders(){
   const codeQ=(document.getElementById('searchCode')?.value||'').trim().toLowerCase();
   const billActive=billQ.length>=3;
   const codeActive=codeQ.length>=1;
-  let orders;
+  let orders, combined=false;   // combined = العرض الافتراضي (هتتوزع + مؤجلة) => نفصلهم في صفّين
   if(billActive||codeActive){
     orders=allOrders.filter(o=>
       (!billActive || (o.bill_no||'').toLowerCase().includes(billQ)) &&
@@ -1829,7 +1836,7 @@ function renderOrders(){
     else if(currentFilter==='postponed') orders=orders.filter(o=>o.status==='postponed');
     else if(currentFilter==='picked') orders=orders.filter(o=>o.status==='picked');
     else if(currentFilter==='late') orders=orders.filter(o=>isLate(o));
-    else orders=orders.filter(o=>(o.status==='pending'&&!o.driver_id)||o.status==='postponed');
+    else { orders=orders.filter(o=>(o.status==='pending'&&!o.driver_id)||o.status==='postponed'); combined=true; }
   }
 
   const all=allOrders.filter(o=>
@@ -1847,6 +1854,10 @@ function renderOrders(){
   if(currentFilter==='unclosed'){ renderUnclosedFlags(); return; }
 
   orders.sort((a,b)=>{
+    if(combined){   // هتتوزع (pending) قبل المؤجلة (postponed) دايمًا
+      const ga=a.status==='postponed'?1:0, gb=b.status==='postponed'?1:0;
+      if(ga!==gb)return ga-gb;
+    }
     const ap=isLate(a)?0:{pending:1,postponed:2,assigned:3,picked:4}[a.status]||9;
     const bp=isLate(b)?0:{pending:1,postponed:2,assigned:3,picked:4}[b.status]||9;
     if(ap!==bp)return ap-bp;
@@ -1856,8 +1867,19 @@ function renderOrders(){
   const grid=document.getElementById('ordersGrid');
   if(!orders.length){grid.innerHTML='<div class="empty-msg">📭 لا توجد طلبات</div>';return;}
 
+  let _lastGrp=null;
   grid.innerHTML=orders.map(o=>{
     const late=isLate(o);
+    // فاصل المجموعة (يظهر مرة واحدة فوق أول كارت في كل مجموعة) — في العرض المدمج فقط
+    let _rowLbl='';
+    if(combined){
+      const _g=o.status==='postponed'?'post':'pend';
+      if(_g!==_lastGrp){ _lastGrp=_g;
+        _rowLbl = _g==='pend'
+          ? '<div class="orders-rowlabel">🟢 للتوزيع</div>'
+          : '<div class="orders-rowlabel">⏰ مؤجلة</div>';
+      }
+    }
     const sel=selectedOrders.has(o.id);
     const cn=o.customer_name||o.cust_name||'—';
     const pm=o.payment_method||(o.bill_type?.includes('فيزا')?'visa':'cash');
@@ -1898,7 +1920,7 @@ function renderOrders(){
     const _bal=Number(o.current_customer_balance||0);
     const owesBal=_bal>=3, creditBal=_bal<=-3;
     const bColor = sel ? '' : `border-color:${ocBorder(o, late, owesBal)}`;
-    return `<div class="order-card ${sel?'sel':''} ${(o.notes||'').includes('🚨')?'urgent':''}" id="oc-${o.id}" onclick="toggleSel('${o.id}',event)" style="${bColor}">
+    return _rowLbl+`<div class="order-card ${sel?'sel':''} ${(o.notes||'').includes('🚨')?'urgent':''}" id="oc-${o.id}" onclick="toggleSel('${o.id}',event)" style="${bColor}">
       <div class="oc-check">${sel?'✓':''}</div>
       <div class="oc-timers">${buildTimers(o)}</div>
       ${postponeInfo(o)}
