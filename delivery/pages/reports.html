@@ -134,6 +134,13 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
   <div class="card-body" id="fairScores"></div>
 </div>
 
+<!-- أفضل الطيارين — نتيجة مركّبة -->
+<div class="card" style="margin-bottom:1.25rem">
+  <div class="card-header"><span class="card-title">🏆 أفضل الطيارين — النتيجة المركّبة</span>
+    <span style="font-size:.68rem;color:var(--text-muted)" id="bestDriversNote"></span></div>
+  <div class="card-body" id="bestDrivers"></div>
+</div>
+
 <!-- أداء الطيارين — إحصائيات شاملة -->
 <div class="card" style="margin-bottom:1.25rem">
   <div class="card-header"><span class="card-title">أداء الطيارين — طلبات · رحلات · مسافة · ساعات · تقييم Google</span>
@@ -945,6 +952,7 @@ async function loadDriverPerfTab(from, to) {
   const cntEl = document.getElementById('driverPerfCount');
   if (cntEl) cntEl.textContent = `(${driverPerfRows.length} طيار)`;
   drawDriverPerfTable();
+  renderBestDrivers();
 }
 
 function sortDriverPerf(col) {
@@ -987,6 +995,78 @@ function drawDriverPerfTable() {
         <td style="padding:.45rem .5rem;color:#dc2626;font-weight:700">${r['متأخر']}</td>
         <td style="padding:.45rem .5rem;color:${c};font-weight:800">${r.pct}%</td></tr>`;}).join('')}
     </tbody></table></div>`;
+}
+
+// ===== أفضل الطيارين — نتيجة مركّبة =====
+// النتيجة = متوسط أربعة عوامل بوزن متساوٍ (25% لكل عامل):
+//   • طلبات/ساعة   نسبةً للأفضل   • رحلات/ساعة نسبةً للأفضل
+//   • كم/ساعة      نسبةً للأفضل   • قلة التأخير = (100 − % متأخر)
+// كله من نفس أرقام جدول «أداء الطيارين». نستبعد العيّنات الصغيرة عشان الترتيب يبقى عادل.
+const BD_MIN_ORDERS = 20;   // حد أدنى للطلبات للدخول في الترتيب
+const BD_MIN_HOURS  = 8;    // حد أدنى لساعات الحضور
+const BD_W = { oph: 0.25, tph: 0.25, kph: 0.25, late: 0.25 };
+
+function renderBestDrivers() {
+  const el = document.getElementById('bestDrivers'); if (!el) return;
+  const note = document.getElementById('bestDriversNote');
+  const all = driverPerfRows || [];
+  const qualified = all.filter(r => r.orders >= BD_MIN_ORDERS && r.hours >= BD_MIN_HOURS);
+  const excluded = all.length - qualified.length;
+  if (note) note.textContent = `(${qualified.length} مؤهّل${excluded ? ` · ${excluded} مستبعد لعينة صغيرة (<${BD_MIN_ORDERS} طلب أو <${BD_MIN_HOURS} ساعة)` : ''})`;
+  if (!qualified.length) { el.innerHTML = `<div class="empty-state"><p>لا يوجد طيارين مؤهّلين (الحد الأدنى ${BD_MIN_ORDERS} طلب و${BD_MIN_HOURS} ساعة حضور)</p></div>`; return; }
+
+  const maxOph = Math.max(...qualified.map(r => r.oph)) || 1;
+  const maxTph = Math.max(...qualified.map(r => r.tph)) || 1;
+  const maxKph = Math.max(...qualified.map(r => r.kph)) || 1;
+
+  const scored = qualified.map(r => {
+    const sOph = r.oph / maxOph, sTph = r.tph / maxTph, sKph = r.kph / maxKph;
+    const sLate = Math.max(0, (100 - r.pct) / 100);
+    const score = (sOph*BD_W.oph + sTph*BD_W.tph + sKph*BD_W.kph + sLate*BD_W.late) * 100;
+    return { ...r, score };
+  }).sort((a, b) => b.score - a.score);
+
+  const scoreColor = s => s >= 75 ? '#16a34a' : s >= 55 ? '#ca8a04' : '#dc2626';
+  const rankCell = i => i===0 ? '🥇' : i===1 ? '🥈' : i===2 ? '🥉'
+    : `<span style="display:inline-block;min-width:1.4rem;text-align:center;color:var(--text-muted);font-weight:700">${i+1}</span>`;
+
+  el.innerHTML = `
+    <div style="font-size:.7rem;color:var(--text-muted);margin-bottom:.6rem;line-height:1.6">
+      النتيجة = متوسط بوزن متساوٍ (25% لكل عامل): <b style="color:#2563eb">طلبات/ساعة</b> +
+      <b style="color:#7c3aed">رحلات/ساعة</b> + <b style="color:#0891b2">كم/ساعة</b> — كلها نسبةً لأفضل طيار —
+      + <b style="color:#16a34a">قلة التأخير</b> (100 − % متأخر).
+    </div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem">
+      <thead><tr style="text-align:right;color:var(--text-muted);border-bottom:2px solid var(--border)">
+        <th style="padding:.5rem;width:2.5rem">#</th>
+        <th style="padding:.5rem">الطيار</th>
+        <th style="padding:.5rem">النتيجة</th>
+        <th style="padding:.5rem">طلبات/س</th>
+        <th style="padding:.5rem">رحلات/س</th>
+        <th style="padding:.5rem">كم/س</th>
+        <th style="padding:.5rem">% متأخر</th>
+        <th style="padding:.5rem" title="إجمالي الطلبات · ساعات الحضور">طلبات · ساعات</th>
+      </tr></thead>
+      <tbody>${scored.map((r, i) => {
+        const sc = scoreColor(r.score); const top = i < 3;
+        return `<tr style="border-bottom:1px solid var(--border);${top ? 'background:rgba(202,138,4,.06)' : ''}">
+          <td style="padding:.5rem;font-size:1.05rem">${rankCell(i)}</td>
+          <td style="padding:.5rem;font-weight:${top ? 800 : 700};white-space:nowrap">${r.name}</td>
+          <td style="padding:.5rem">
+            <span style="display:inline-flex;align-items:center;gap:.4rem">
+              <span style="font-weight:800;color:${sc};min-width:2.6rem">${r.score.toFixed(1)}</span>
+              <span style="display:inline-block;width:60px;height:7px;background:var(--border);border-radius:4px;overflow:hidden">
+                <span style="display:block;height:100%;width:${Math.min(100, r.score)}%;background:${sc}"></span></span>
+            </span>
+          </td>
+          <td style="padding:.5rem;color:#2563eb;font-weight:700">${r.oph.toFixed(2)}</td>
+          <td style="padding:.5rem;color:#7c3aed">${r.tph.toFixed(2)}</td>
+          <td style="padding:.5rem;color:#0891b2">${r.kph.toFixed(1)}</td>
+          <td style="padding:.5rem;color:${r.pct>=30?'#dc2626':r.pct>=15?'#ca8a04':'#16a34a'};font-weight:700">${r.pct}%</td>
+          <td style="padding:.5rem;color:var(--text-muted)">${r.orders} · ${r.hours.toFixed(0)}س</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`;
 }
 
 function showLoading(show) { document.getElementById('loadingOverlay').classList.toggle('show', show); }
