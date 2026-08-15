@@ -198,7 +198,7 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
     <div class="card-body" style="font-size:.75rem;color:#78350f;line-height:1.7">
       💰 <strong>طريقة الحساب (نقاط مطلقة × جودة):</strong>
       <strong>إجمالي الحافز</strong> لكل فرع = عدد الطلبات المسلّمة × قيمة الطلب في الحافز (من إعدادات التوزيع، افتراضي 3 ج).
-      <strong>نقاط الطيار</strong> = وزن موزون على مجهوده الفعلي — طلبات (40%) + رحلات (25%) + مسافة (20%) + ساعات (15%) —
+      <strong>نقاط الطيار</strong> = وزن موزون على مجهوده الفعلي — طلبات + رحلات + مسافة + ساعات (الأوزان من إعدادات التوزيع، افتراضي 40/25/20/15) —
       <strong>× التقييم العادل</strong> (معامل جودة: فعلي ÷ نصيبه المفترض، مسقوف 200%، والغياب = محايد 100%).
       <strong>نصيب الطيار = إجمالي حافز فرعه × (نقاطه ÷ إجمالي نقاط طياري الفرع)</strong> — فمجموع الحوافز = الإجمالي بالظبط.
       <span style="color:#92400e">التقييم العادل من قسم "تقييم الطيارين العادل" · الأرقام من جدول "أداء الطيارين". إجمالي حافز كل فرع يتوزّع على طياريه فقط.</span>
@@ -390,7 +390,7 @@ let lastIncentiveRows = [];
 
 async function loadIncentiveSettings() {
   const { data } = await db.from('dispatch_settings').select(
-    'branch_id,incentive_enabled,incentive_rating_enabled,incentive_rating_scope,incentive_per_order_enabled,incentive_per_order,incentive_min_enabled,incentive_min_orders_per_hour');
+    'branch_id,incentive_enabled,incentive_rating_enabled,incentive_rating_scope,incentive_per_order_enabled,incentive_per_order,incentive_min_enabled,incentive_min_orders_per_hour,inc_w_orders,inc_w_trips,inc_w_distance,inc_w_hours');
   incSettingsMap = {};
   (data||[]).forEach(s => { incSettingsMap[s.branch_id] = s; });
 }
@@ -423,8 +423,8 @@ function orderQualifies(o, s) {
   return o.perf_rating === 'ممتاز' || o.perf_rating === 'جيد'; // excellent_good
 }
 
-// أوزان النقاط المطلقة للحافز (طلبات/رحلات/مسافة/ساعات) — المجموع=1
-const INC_W = { orders: 0.40, trips: 0.25, distance: 0.20, hours: 0.15 };
+// أوزان النقاط المطلقة للحافز الافتراضية (تُقرأ من إعدادات التوزيع inc_w_* لكل فرع)
+const INC_W_DEFAULT = { orders: 40, trips: 25, distance: 20, hours: 15 };
 
 async function loadIncentivesTab(from, to) {
   const el = document.getElementById('incBody');
@@ -464,16 +464,24 @@ async function loadIncentivesTab(from, to) {
   const rows = [];
   Object.entries(branchPool).forEach(([bid, bp]) => {
     const list = drvByBranch[bid] || [];
+    // أوزان الحافز لهذا الفرع (من الإعدادات)، مطبّعة لكسور مجموعها 1
+    const bs = incSettingsMap[bid] || {};
+    const wo = Number(bs.inc_w_orders   ?? INC_W_DEFAULT.orders),
+          wt = Number(bs.inc_w_trips    ?? INC_W_DEFAULT.trips),
+          wd = Number(bs.inc_w_distance ?? INC_W_DEFAULT.distance),
+          wh = Number(bs.inc_w_hours    ?? INC_W_DEFAULT.hours);
+    const wsum = (wo + wt + wd + wh) || 1;
+    const W = { orders: wo/wsum, trips: wt/wsum, distance: wd/wsum, hours: wh/wsum };
     const sum = k => list.reduce((a, r) => a + (Number(r[k]) || 0), 0);
     const totO = sum('orders'), totT = sum('trips'), totK = sum('km'), totH = sum('hours');
     let tp = 0;
     const local = list.map(r => {
       const eff = effById[r.driver_id];
       const q = (eff == null) ? 1 : Math.min(eff, RATING_CAP);   // معامل جودة، null=محايد(1)
-      const base = (totO ? INC_W.orders   * r.orders / totO : 0)
-                 + (totT ? INC_W.trips    * r.trips  / totT : 0)
-                 + (totK ? INC_W.distance * r.km     / totK : 0)
-                 + (totH ? INC_W.hours    * r.hours  / totH : 0);
+      const base = (totO ? W.orders   * r.orders / totO : 0)
+                 + (totT ? W.trips    * r.trips  / totT : 0)
+                 + (totK ? W.distance * r.km     / totK : 0)
+                 + (totH ? W.hours    * r.hours  / totH : 0);
       const points = base * q; tp += points;
       return { id: r.driver_id, name: r.name, branch_id: bid, orders: r.orders, trips: r.trips,
                km: r.km, hours: r.hours, effPct: eff == null ? null : Math.round(eff * 100), points };
