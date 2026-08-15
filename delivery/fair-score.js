@@ -65,6 +65,9 @@ function buildAttendanceSessions(records) {
  * @param {string} branchId  اختياري: فلترة بفرع
  */
 async function computeFairScores(from, to, branchId) {
+  // نجيب الحضور من يوم قبل البداية — عشان الشيفت الليلي اللي بدأ قبل المدة وطلباته بعد منتصف الليل
+  // (الحساب بالشيفت مش باليوم)
+  const _attFrom = (() => { const d = new Date(from + 'T00:00:00'); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10); })();
   // 1) الطلبات المسلّمة فعلاً في الفترة (نفلتر على delivered_at مش created_at)
   // كل الطلبات وأحداث الحضور مع pagination (يتجاوز حد 1000 صف)
   const [orders, attendanceRows, driversRows] = await Promise.all([
@@ -83,7 +86,7 @@ async function computeFairScores(from, to, branchId) {
       .select('driver_id,status,approved_at,ended_at,date')
       .in('status', ['online', 'offline', 'break'])
       .not('approved_at', 'is', null)
-      .gte('date', from).lte('date', to)
+      .gte('date', _attFrom).lte('date', to)
       .order('date', { ascending: true })),
     _fsFetchAll(() => db.from('drivers').select('id,branch_id')),
   ]);
@@ -95,6 +98,27 @@ async function computeFairScores(from, to, branchId) {
   // فترات الحضور متصلة عبر منتصف الليل (شيفت ليلي) عبر ended_at، وكل فترة معاها فرع الطيار.
   const sessions = buildAttendanceSessions(attendanceRows || []);
   sessions.forEach(s => { s.branch_id = driverBranch[s.driver_id] || null; });
+
+  // 2.5) نمدّد نهاية شيفت الطيار لتغطّي الطلبات اللي خلّصها بعد انصرافه بدقايق (أو بعد منتصف الليل)
+  // — الطيار حاضر لحد ما يخلّص آخر تسليم فعلي. حد أقصى للتمديد ساعتين عشان ما نغطّيش توصيل بعيد بالغلط.
+  (function extendSessionsToLastActivity() {
+    const MAX_EXTEND = 2 * 60 * 60 * 1000;
+    const byDriver = {};
+    sessions.forEach(s => { (byDriver[s.driver_id] = byDriver[s.driver_id] || []).push(s); });
+    const ordersByDriver = {};
+    (orders || []).forEach(o => {
+      if (o.driver_id && o.delivered_at)
+        (ordersByDriver[o.driver_id] = ordersByDriver[o.driver_id] || []).push(new Date(o.delivered_at).getTime());
+    });
+    Object.keys(byDriver).forEach(drvId => {
+      const sess = byDriver[drvId].sort((a, b) => a.start - b.start);
+      (ordersByDriver[drvId] || []).forEach(t => {
+        let cur = null;
+        for (const s of sess) { if (s.start <= t) cur = s; else break; }
+        if (cur && t >= cur.end && (t - cur.end) <= MAX_EXTEND) cur.end = t + 1;
+      });
+    });
+  })();
 
   // 3) لكل طلب: مين كان أونلاين لحظة التسليم؟
   const stats = {};   // driver_id -> { expected, actual, revenue }
