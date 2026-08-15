@@ -260,6 +260,8 @@ const PAGE_META = {
   // نظرة عامة
   'dashboard.html':{title:'داشبورد', group:'نظرة عامة'},
   'notifications.html':{title:'الإشعارات', group:'نظرة عامة'},
+  'reports.html':{title:'التقارير', group:'نظرة عامة'},
+  'salesanalysis.html':{title:'تحليل المبيعات', group:'نظرة عامة'},
   // المبيعات والعملاء
   'main.html':{title:'طلب جديد', group:'المبيعات والعملاء'},
   'print_invoice.html':{title:'طباعة فاتورة بيع', group:'المبيعات والعملاء'},
@@ -304,9 +306,6 @@ const PAGE_META = {
   'regions.html':{title:'المناطق', group:'إعدادات التوصيل'},
   'routes.html':{title:'خطوط السير', group:'إعدادات التوصيل'},
   'dispatch-settings.html':{title:'إعدادات التوزيع', group:'إعدادات التوصيل'},
-  // التقارير
-  'reports.html':{title:'التقارير', group:'التقارير'},
-  'salesanalysis.html':{title:'تحليل المبيعات', group:'التقارير'},
   // الإدارة والنظام
   'employees.html':{title:'الموظفين', group:'الإدارة والنظام'},
   'users.html':{title:'المستخدمون', group:'الإدارة والنظام'},
@@ -314,7 +313,7 @@ const PAGE_META = {
   'pos_methods.html':{title:'إدارة ماكينات الفروع', group:'الإدارة والنظام'},
 };
 
-const GROUP_ORDER = ['نظرة عامة','المبيعات والعملاء','المخزون والجرد','المشتريات والموردين','التعاقدات والتحصيل','الحسابات والخزينة','التوصيل','إعدادات التوصيل','التقارير','الإدارة والنظام'];
+const GROUP_ORDER = ['نظرة عامة','المبيعات والعملاء','المخزون والجرد','المشتريات والموردين','التعاقدات والتحصيل','الحسابات والخزينة','التوصيل','إعدادات التوصيل','الإدارة والنظام'];
 
 // أيقونة مناسبة لكل صفحة (خطية 24×24)
 const NAV_ICONS = {
@@ -468,18 +467,21 @@ async function loadAllowedPages() {
 
 // المجموعات المطويّة — محفوظة في المتصفح عشان تفتكر آخر حالة
 const SIDEBAR_COLLAPSE_KEY = 'phalix_sidebar_collapsed_groups';
+// null = مفيش حالة محفوظة (أول مرة) => الافتراضي: كل المجموعات مطويّة
 function getCollapsedGroups() {
-  try { return JSON.parse(localStorage.getItem(SIDEBAR_COLLAPSE_KEY) || '[]'); } catch (e) { return []; }
+  const raw = localStorage.getItem(SIDEBAR_COLLAPSE_KEY);
+  if (raw === null) return null;
+  try { const a = JSON.parse(raw); return Array.isArray(a) ? a : []; } catch (e) { return []; }
 }
 function setCollapsedGroups(arr) {
   try { localStorage.setItem(SIDEBAR_COLLAPSE_KEY, JSON.stringify(arr)); } catch (e) {}
 }
 function toggleGroup(btn, group) {
   const sec = btn.closest('.nav-group'); if (!sec) return;
-  const nowCollapsed = sec.classList.toggle('collapsed');
-  const col = getCollapsedGroups(); const i = col.indexOf(group);
-  if (nowCollapsed) { if (i < 0) col.push(group); } else if (i >= 0) { col.splice(i, 1); }
-  setCollapsedGroups(col);
+  sec.classList.toggle('collapsed');
+  // نحفظ الحالة الفعلية من الـDOM (يحوّل الافتراضي «الكل مطوي» لحالة صريحة محفوظة)
+  const cols = Array.from(document.querySelectorAll('.nav-group.collapsed')).map(el => el.dataset.group);
+  setCollapsedGroups(cols);
 }
 
 function buildSidebar() {
@@ -502,7 +504,7 @@ function buildSidebar() {
   GROUP_ORDER.forEach(group => {
     const items = byGroup[group];
     if (!items || !items.length) return;
-    const isCol = collapsed.includes(group);
+    const isCol = collapsed ? collapsed.includes(group) : true;   // أول مرة: الكل مطوي
     const gEsc = group.replace(/'/g, "\\'");
     html += `<div class="nav-group${isCol ? ' collapsed' : ''}" data-group="${group}">`;
     html += `<button type="button" class="nav-section-label" onclick="toggleGroup(this,'${gEsc}')">
@@ -604,7 +606,11 @@ function navigate(page, title, el) {
   sessionStorage.setItem('delivery_last_title', title);
   document.getElementById('pageTitle').textContent = title;
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  if (el) el.classList.add('active');
+  if (el) {
+    el.classList.add('active');
+    // افتح مجموعة الصفحة الحالية لو كانت مطويّة عشان تبان مكانك
+    const g = el.closest('.nav-group'); if (g) g.classList.remove('collapsed');
+  }
   showLoading(true);
   document.getElementById('mainFrame').src = buildFrameSrc(page);
   if (window.innerWidth <= 768) closeSidebar();
