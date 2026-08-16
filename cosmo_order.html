@@ -325,12 +325,14 @@
       }
     }
 
-    // ===== States من n8n =====
+    // ===== States من Supabase مباشرة (بدل n8n) =====
     async function loadStates(){
       try {
-        var r    = await fetch(INV_URL+'?type=cosmo_states');
-        var data = await r.json();
-        var rows = Array.isArray(data) ? data : (data.data||[]);
+        var r    = await fetch(SB_URL_API+'/rest/v1/cosmo_states?select=item_code,state', {
+          headers:{ apikey:SB_ANON_API, Authorization:'Bearer '+SB_ANON_API }
+        });
+        var rows = await r.json();
+        if(!Array.isArray(rows)) rows = [];
         itemStates = {};
         rows.forEach(function(row){
           var code = String(row.item_code||'').trim();
@@ -343,15 +345,23 @@
 
     async function saveState(code, state){
       try {
-        await fetch(INV_URL+'?type=cosmo_update&item_code='+encodeURIComponent(code)+'&state='+encodeURIComponent(state));
+        await fetch(SB_URL_API+'/rest/v1/cosmo_states?on_conflict=item_code', {
+          method:'POST',
+          headers:{ apikey:SB_ANON_API, Authorization:'Bearer '+SB_ANON_API,
+                    'Content-Type':'application/json', Prefer:'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify([{ item_code:String(code), state:state }])
+        });
       } catch(e){ console.log('saveState error',e); }
     }
 
     async function clearOrdered(){
       if(!confirm('هتمسح كل الطلبيات وترجع الكميات للمحسوبة؟')) return;
       try {
-        // حذف كل ordered من n8n
-        await fetch(INV_URL+'?type=clear_ordered');
+        // حذف كل ordered من Supabase مباشرة
+        await fetch(SB_URL_API+'/rest/v1/cosmo_states?state=eq.ordered', {
+          method:'DELETE',
+          headers:{ apikey:SB_ANON_API, Authorization:'Bearer '+SB_ANON_API }
+        });
         // مسح الـ state محلياً + رجوع الكميات
 Object.keys(itemStates).forEach(function(c){
   if(itemStates[c] && itemStates[c].ordered){
