@@ -366,6 +366,19 @@ saveQty();
 
     checkAuth().then(function(user){ if(user) loadAllData(); });
 
+    // ملخّص المبيعات من Supabase مباشرة (RPC) بدل n8n — أسرع بكتير وحمولة أقل
+    async function getSalesSummary(){
+      try {
+        var res = await fetch(SB_URL_API+'/rest/v1/rpc/get_sales_summary', {
+          method:'POST',
+          headers:{ apikey:SB_ANON_API, Authorization:'Bearer '+SB_ANON_API, 'Content-Type':'application/json' },
+          body:'{}'
+        });
+        var d = await res.json();
+        return Array.isArray(d) ? d : [];
+      } catch(e){ console.error('فشل تحميل ملخّص المبيعات', e); return []; }
+    }
+
     async function loadAllData(){
       document.getElementById('result-container').innerHTML='<div class="loading-overlay">⏳ جاري تحميل البيانات...</div>';
       try {
@@ -374,7 +387,7 @@ saveQty();
           fetch(INV_URL+'?type=stock_mamora').then(function(x){return x.json();}),
           fetch(INV_URL+'?type=stock_san').then(function(x){return x.json();}),
           fetch(INV_URL+'?type=stock_bishr').then(function(x){return x.json();}),
-          fetch(INV_URL+'?type=sales_monthly').then(function(x){return x.json();})
+          getSalesSummary()
         ]);
         stockMamora=Array.isArray(r[0])?r[0]:(r[0].data||[]);
         stockSan   =Array.isArray(r[1])?r[1]:(r[1].data||[]);
@@ -575,14 +588,16 @@ saveQty();
       }
       addStock(stockMamora,'mamora'); addStock(stockSan,'san'); addStock(stockBishr,'bishr');
 
+      // salesData بقت ملخّص جاهز من الـRPC: {itm_code, mamora_total, mamora_active, ...}
       var salesMap={};
       salesData.forEach(function(row){
         var code=String(row.itm_code||'').trim();
-        if(!salesMap[code]) salesMap[code]={mamora:{},san:{},bishr:{}};
-        var m=String(row.month||'').trim();
-        salesMap[code].mamora[m]=(salesMap[code].mamora[m]||0)+(parseFloat(row.mamora)||0);
-        salesMap[code].san[m]   =(salesMap[code].san[m]   ||0)+(parseFloat(row.san)   ||0);
-        salesMap[code].bishr[m] =(salesMap[code].bishr[m] ||0)+(parseFloat(row.bishr) ||0);
+        if(!code) return;
+        salesMap[code]={
+          mamora:{ total:parseFloat(row.mamora_total)||0, active:parseInt(row.mamora_active)||0 },
+          san:   { total:parseFloat(row.san_total)||0,    active:parseInt(row.san_active)||0 },
+          bishr: { total:parseFloat(row.bishr_total)||0,  active:parseInt(row.bishr_active)||0 }
+        };
       });
 
       var list=[];
@@ -590,10 +605,9 @@ saveQty();
         var s=stockMap[code];
         var sale=salesMap[code]||{mamora:{},san:{},bishr:{}};
         function bc(bs){
-          var active=Object.keys(bs).filter(function(m){return bs[m]>0;});
-          var total=active.reduce(function(sum,m){return sum+bs[m];},0);
-          var avg=active.length>0?total/active.length:0;
-          return{avg:avg,activeMonths:active.length};
+          var active=(bs&&bs.active)||0, total=(bs&&bs.total)||0;
+          var avg=active>0?total/active:0;
+          return{avg:avg,activeMonths:active};
         }
         var m=bc(sale.mamora),n=bc(sale.san),b=bc(sale.bishr);
         var mulM=getMultiply(m.avg,m.activeMonths,rules);
