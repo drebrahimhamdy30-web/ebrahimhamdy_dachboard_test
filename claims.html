@@ -97,6 +97,11 @@
       <div id="tab-pending">
         <div class="filter-bar">
           <div class="filter-group">
+            <label>🔍 بحث (اسم العميل / رقم القيد)</label>
+            <input type="text" id="claim-search" class="date-input" placeholder="اسم العميل أو رقم القيد أو رقم الفاتورة..."
+                   oninput="onSearchChange()" style="min-width:230px;">
+          </div>
+          <div class="filter-group">
             <label>من تاريخ</label>
             <input type="date" id="date-from" class="date-input" onchange="onDateFilterChange()">
           </div>
@@ -304,9 +309,30 @@
       });
     }
 
-    // الفواتير الظاهرة حاليًا (بعد فلتر التاريخ)
+    // تطبيع عربي بسيط عشان البحث بالاسم يبقى متسامح (أ/إ/آ→ا، ى→ي، ة→ه، شيل التطويل والمسافات الزيادة)
+    function normAr(s){
+      return String(s || '').toLowerCase()
+        .replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه')
+        .replace(/ـ/g, '').replace(/\s+/g, ' ').trim();
+    }
+
+    // فلتر البحث: اسم العميل أو رقم القيد أو رقم الفاتورة
+    function applySearchFilter(list){
+      const raw = (document.getElementById('claim-search')?.value || '').trim();
+      if (!raw) return list;
+      const q  = normAr(raw);
+      const qd = raw.toLowerCase();
+      return list.filter(item => {
+        const name     = normAr(item.cust_name_ar || '');
+        const { qaid } = extractQaid(item.cust_name_ar || '');
+        const billNo   = String(item.bill_no || '').toLowerCase();
+        return name.includes(q) || String(qaid || '').includes(qd) || billNo.includes(qd);
+      });
+    }
+
+    // الفواتير الظاهرة حاليًا (بعد فلتر التاريخ + البحث)
     function getVisible() {
-      const list = applyDateFilter(getUnclaimed());
+      const list = applySearchFilter(applyDateFilter(getUnclaimed()));
       list.sort((a, b) => {
         const aSerial = parseInt(a.serial_no) || 9999;
         const bSerial = parseInt(b.serial_no) || 9999;
@@ -325,9 +351,17 @@
       renderPending();
     }
 
+    // بحث فوري مع debounce بسيط (عشان مانعملش render على كل حرف)
+    let _searchTimer = null;
+    function onSearchChange() {
+      clearTimeout(_searchTimer);
+      _searchTimer = setTimeout(function(){ renderPending(); }, 280);
+    }
+
     function clearDateFilter() {
       document.getElementById('date-from').value = '';
       document.getElementById('date-to').value   = '';
+      const s = document.getElementById('claim-search'); if (s) s.value = '';
       excludedIds.clear();
       renderPending();
     }
