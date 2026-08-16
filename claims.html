@@ -239,6 +239,7 @@
         ]);
         allContracts = Array.isArray(cResp)  ? cResp  : (cResp.data  || []);
         allClaims    = Array.isArray(clResp) ? clResp : (clResp.data || []);
+        freezeOrder();   // ثبّت ترتيب العرض (بالتسلسل) مرة واحدة عشان أي تعديل ما يحرّكش الصفوف
         renderCurrentTab();
       } catch(e) {
         console.error(e);
@@ -330,13 +331,23 @@
       });
     }
 
-    // الفواتير الظاهرة حاليًا (بعد فلتر التاريخ + البحث)
+    // ترتيب ثابت يتحسب مرة واحدة عند التحميل (بالتسلسل serial_no) — بحيث أي تعديل بعد كده
+    // مايحرّكش ترتيب الفواتير. الفاتورة تفضل في مكانها لحد ما تعمل refresh للصفحة.
+    let orderKey = new Map();
+    function freezeOrder() {
+      const sorted = [...allContracts].sort((a, b) =>
+        (parseInt(a.serial_no) || 9999) - (parseInt(b.serial_no) || 9999));
+      orderKey = new Map();
+      sorted.forEach((it, i) => orderKey.set(String(it.id), i));
+    }
+
+    // الفواتير الظاهرة حاليًا (بعد فلتر التاريخ + البحث) — مرتّبة بالترتيب المُثبّت
     function getVisible() {
       const list = applySearchFilter(applyDateFilter(getUnclaimed()));
       list.sort((a, b) => {
-        const aSerial = parseInt(a.serial_no) || 9999;
-        const bSerial = parseInt(b.serial_no) || 9999;
-        return aSerial - bSerial;
+        const ao = orderKey.has(String(a.id)) ? orderKey.get(String(a.id)) : 9e9;
+        const bo = orderKey.has(String(b.id)) ? orderKey.get(String(b.id)) : 9e9;
+        return ao - bo;
       });
       return list;
     }
