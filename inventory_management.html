@@ -308,7 +308,7 @@
     const BRANCH_NAME_MAP = { 'الصيدلية':'mamora', 'ابراهيم حمدي 2':'san', 'ابراهيم حمدي 3':'bishr' };
     const STALE_HOURS = 12;
 
-    var stockMamora=[], stockSan=[], stockBishr=[], salesData=[];
+    var stockSummary={meta:{},items:[]}, salesData=[];
     var dataLoaded=false;
     var allResults=[], filteredResults=[];
     var currentTab='prices';
@@ -426,14 +426,18 @@
         if(x && Array.isArray(x.data)) return x.data;
         return [];
       }
-      async function getStock(type){
+      // ملخّص المخزون من Supabase (RPC واحد يقرأ جدول مُسطّح مُجهّز مسبقًا) بدل 3 نداءات كاملة عبر n8n
+      async function getStockSummary(){
         try {
-          var res = await fetch(INV_URL+'?type='+type);
-          return norm(await res.json());
-        } catch(e){
-          console.error('فشل تحميل '+type, e);
-          return [];
-        }
+          var res = await fetch(SB_URL_API+'/rest/v1/rpc/get_stock_summary', {
+            method:'POST',
+            headers:{ apikey:SB_ANON_API, Authorization:'Bearer '+SB_ANON_API, 'Content-Type':'application/json' },
+            body:'{}'
+          });
+          var d = await res.json();
+          if(d && Array.isArray(d.items)) return d;
+          return {meta:{},items:[]};
+        } catch(e){ console.error('فشل تحميل ملخّص المخزون', e); return {meta:{},items:[]}; }
       }
 
       // ملخّص المبيعات من Supabase مباشرة (RPC) بدل n8n — أسرع بكتير وحمولة أقل بكتير
@@ -450,28 +454,23 @@
       }
 
       var r = await Promise.allSettled([
-        getStock('stock_mamora_all'),
-        getStock('stock_san_all'),
-        getStock('stock_bishr_all'),
+        getStockSummary(),
         getSalesSummary()
       ]);
-      var val = function(i){ return r[i].status==='fulfilled' ? r[i].value : []; };
+      stockSummary = r[0].status==='fulfilled' ? r[0].value : {meta:{},items:[]};
+      salesData    = r[1].status==='fulfilled' ? r[1].value : [];
+      var meta = stockSummary.meta || {};
 
-      stockMamora = val(0);
-      stockSan    = val(1);
-      stockBishr  = val(2);
-      salesData   = val(3);
-
-      branchEmpty.mamora = stockMamora.length===0;
-      branchEmpty.san    = stockSan.length===0;
-      branchEmpty.bishr  = stockBishr.length===0;
+      branchEmpty.mamora = !(meta.mamora && meta.mamora.count>0);
+      branchEmpty.san    = !(meta.san    && meta.san.count>0);
+      branchEmpty.bishr  = !(meta.bishr  && meta.bishr.count>0);
 
       dataLoaded=true;
       stockLoaded=true;
       computeBranchUpdates();
       renderBranchUpdates();
 
-      if(stockMamora.length===0 && stockSan.length===0 && stockBishr.length===0){
+      if(!stockSummary.items || stockSummary.items.length===0){
         if(!silent && currentTab!=='disbursement' && currentTab!=='pricechanges')
           document.getElementById('result-container').innerHTML=
             '<div class="loading-overlay" style="color:var(--danger);">❌ كل المخازن فارغة — تأكد من تشغيل سحب الأرصدة</div>';
@@ -490,10 +489,17 @@
       });
       return max;
     }
+    function metaUpdated(key){
+      var meta=(stockSummary&&stockSummary.meta)||{};
+      var u=meta[key]&&meta[key].updated;
+      if(!u) return null;
+      var t=new Date(u).getTime();
+      return isNaN(t)?null:t;
+    }
     function computeBranchUpdates(){
-      branchUpdates.mamora=latestUpdate(stockMamora);
-      branchUpdates.san   =latestUpdate(stockSan);
-      branchUpdates.bishr =latestUpdate(stockBishr);
+      branchUpdates.mamora=metaUpdated('mamora');
+      branchUpdates.san   =metaUpdated('san');
+      branchUpdates.bishr =metaUpdated('bishr');
     }
     function timeAgo(ts){
       if(!ts) return 'غير معروف';
@@ -539,30 +545,23 @@
 
     function buildItemsMap(){
       var map={};
-      function addStock(arr, branch){
-        arr.forEach(function(item){
-          var code=String(item.itm_code||'').trim();
-          if(!code) return;
-          if(!map[code]){
-            map[code]={
-              code:code, name:item.itm_name_ar||'', company:item.Company_Name_Ar||'',
-              unit:item.u_name_big||'',
-              isMedicine: String(item.itm_ismedicine||'0').trim()!=='0',
-              mamora:{stock:0,price:0,has:false,avg:0,active:0,target:0},
-              san:   {stock:0,price:0,has:false,avg:0,active:0,target:0},
-              bishr: {stock:0,price:0,has:false,avg:0,active:0,target:0}
-            };
-          }
-          if(!map[code].name && item.itm_name_ar) map[code].name=item.itm_name_ar;
-          if(!map[code].company && item.Company_Name_Ar) map[code].company=item.Company_Name_Ar;
-          map[code][branch].stock = parseFloat(item.sto_qty_big)||0;
-          map[code][branch].price = parseFloat(item.itm_sell_price_big)||0;
-          map[code][branch].has   = true;
-        });
+      // stockSummary.items: صف واحد لكل صنف من الـRPC {c,n,co,u,med,m:{h,q,p},s:{...},b:{...}}
+      function branchObj(bo){
+        bo = bo||{};
+        return {stock:parseFloat(bo.q)||0, price:parseFloat(bo.p)||0, has:!!bo.h, avg:0, active:0, target:0};
       }
-      addStock(stockMamora,'mamora');
-      addStock(stockSan,'san');
-      addStock(stockBishr,'bishr');
+      (stockSummary.items||[]).forEach(function(item){
+        var code=String(item.c||'').trim();
+        if(!code) return;
+        map[code]={
+          code:code, name:item.n||'', company:item.co||'',
+          unit:item.u||'',
+          isMedicine: (parseInt(item.med)||0)!==0,
+          mamora: branchObj(item.m),
+          san:    branchObj(item.s),
+          bishr:  branchObj(item.b)
+        };
+      });
 
       // salesData بقت ملخّص جاهز من الـRPC: {itm_code, mamora_total, mamora_active, ...}
       var salesMap={};

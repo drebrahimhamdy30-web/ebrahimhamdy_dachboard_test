@@ -219,7 +219,7 @@
   <script src="api.js"></script>
   <script>
     const INV_URL = 'https://agent.ebrahimhamdy.com/webhook/inventory';
-    var stockMamora=[], stockSan=[], stockBishr=[], salesData=[];
+    var stockSummary=[], salesData=[];
     var dataLoaded=false, allResults=[], filteredResults=[];
     var itemStates = {};
     var currentType = 'cosmo';          // 'cosmo' = itm_ismedicine 0 | 'medicine' = 1
@@ -379,20 +379,29 @@ saveQty();
       } catch(e){ console.error('فشل تحميل ملخّص المبيعات', e); return []; }
     }
 
+    // ملخّص المخزون من Supabase (RPC واحد يجمّع الفروع التلاتة) بدل 3 نداءات كاملة عبر n8n
+    async function getStockSummary(){
+      try {
+        var res = await fetch(SB_URL_API+'/rest/v1/rpc/get_stock_summary', {
+          method:'POST',
+          headers:{ apikey:SB_ANON_API, Authorization:'Bearer '+SB_ANON_API, 'Content-Type':'application/json' },
+          body:'{}'
+        });
+        var d = await res.json();
+        return (d && Array.isArray(d.items)) ? d.items : [];
+      } catch(e){ console.error('فشل تحميل ملخّص المخزون', e); return []; }
+    }
+
     async function loadAllData(){
       document.getElementById('result-container').innerHTML='<div class="loading-overlay">⏳ جاري تحميل البيانات...</div>';
       try {
         await loadStates();
         var r = await Promise.all([
-          fetch(INV_URL+'?type=stock_mamora').then(function(x){return x.json();}),
-          fetch(INV_URL+'?type=stock_san').then(function(x){return x.json();}),
-          fetch(INV_URL+'?type=stock_bishr').then(function(x){return x.json();}),
+          getStockSummary(),
           getSalesSummary()
         ]);
-        stockMamora=Array.isArray(r[0])?r[0]:(r[0].data||[]);
-        stockSan   =Array.isArray(r[1])?r[1]:(r[1].data||[]);
-        stockBishr =Array.isArray(r[2])?r[2]:(r[2].data||[]);
-        salesData  =Array.isArray(r[3])?r[3]:(r[3].data||[]);
+        stockSummary=Array.isArray(r[0])?r[0]:[];
+        salesData   =Array.isArray(r[1])?r[1]:[];
         dataLoaded=true;
         document.getElementById('result-container').innerHTML='<div class="loading-overlay">✅ جاهز — اضغط "احسب"</div>';
       } catch(e){
@@ -571,22 +580,23 @@ saveQty();
       var rules=getRules();
       var stockMap={};
       var wantMed = currentType === 'medicine' ? 1 : 0;
-      function addStock(arr,branch){
-        arr.forEach(function(item){
-          // فلترة النوع: كوزمو (0) أو دوا (1)
-          var isMed = parseInt(item.itm_ismedicine);
-          if(isNaN(isMed)) isMed = 0;
-          if(isMed !== wantMed) return;
-          var code=String(item.itm_code||'').trim();
-          if(!stockMap[code]) stockMap[code]={
-            name:item.itm_name_ar||'',company:item.Company_Name_Ar||'',
-            unit:item.u_name_big||'',price:parseFloat(item.itm_sell_price_big)||0,
-            mamora:0,san:0,bishr:0
-          };
-          stockMap[code][branch]=parseFloat(item.sto_qty_big)||0;
-        });
-      }
-      addStock(stockMamora,'mamora'); addStock(stockSan,'san'); addStock(stockBishr,'bishr');
+      // stockSummary: صف واحد لكل صنف من الـRPC {c,n,co,u,med,m:{h,q,p},s:{...},b:{...}}
+      stockSummary.forEach(function(item){
+        // فلترة النوع: كوزمو (0) أو دوا (1)
+        var isMed = parseInt(item.med);
+        if(isNaN(isMed)) isMed = 0;
+        if(isMed !== wantMed) return;
+        var code=String(item.c||'').trim();
+        if(!code) return;
+        var m=item.m||{},s=item.s||{},b=item.b||{};
+        // السعر التمثيلي: أول فرع مسجّل فيه الصنف (المعمورة ← سان ← بشر)
+        var price = m.h ? m.p : (s.h ? s.p : (b.h ? b.p : 0));
+        stockMap[code]={
+          name:item.n||'',company:item.co||'',
+          unit:item.u||'',price:parseFloat(price)||0,
+          mamora:parseFloat(m.q)||0,san:parseFloat(s.q)||0,bishr:parseFloat(b.q)||0
+        };
+      });
 
       // salesData بقت ملخّص جاهز من الـRPC: {itm_code, mamora_total, mamora_active, ...}
       var salesMap={};
