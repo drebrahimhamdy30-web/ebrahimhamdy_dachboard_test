@@ -183,6 +183,41 @@
     let currentTab   = 'pending';
     let excludedIds  = new Set();   // الفواتير اللي شيلت علامة الاختيار عنها
 
+    // ===== مصدر الفواتير: contract_invoices في Supabase (بدل n8n القديم اللي بيرجّع نسخة ناقصة) =====
+    const SB_URL_CI = 'https://rxtjoqulmgkkcohmgzgi.supabase.co';
+    const SB_KEY_CI = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
+    const CI_URL = SB_URL_CI + '/rest/v1/contract_invoices';
+    const CI_H   = { apikey: SB_KEY_CI, Authorization: 'Bearer ' + SB_KEY_CI, 'Content-Type': 'application/json' };
+    const CI_HW  = { ...CI_H, Prefer: 'return=minimal' };
+    function ciReviewer(){ return (activeUser && (activeUser.full_name || activeUser.username)) || localStorage.getItem('fullName') || 'مراجع'; }
+
+    // قراءة كل فواتير التعاقد من Supabase (مقسّمة صفحات — سقف 1000/طلب)
+    async function ciLoadInvoices(){
+      let all = [], from = 0; const PAGE = 1000;
+      while (true) {
+        const r = await fetch(CI_URL + `?select=*&order=bill_date.desc.nullslast&limit=${PAGE}&offset=${from}`, { headers: CI_H });
+        if (!r.ok) break;
+        const chunk = await r.json();
+        if (!Array.isArray(chunk)) break;
+        all = all.concat(chunk);
+        if (chunk.length < PAGE) break;
+        from += PAGE;
+      }
+      return all;
+    }
+
+    // كتابة claim_id/المراجعة على contract_invoices مباشرة — بديل updateData بتاع n8n (نفس الاستدعاءات)
+    async function updateData(p){
+      try{
+        const stamp = new Date().toISOString(), by = ciReviewer();
+        const patch = { reviewed_at: stamp, reviewed_by: by };
+        ['bill_state','bill_type','payment_type','serial_no','cust_name_ar','claim_id','claim_date','merged_into']
+          .forEach(k => { if (k in p) patch[k] = (p[k] === '' ? null : p[k]); });
+        const r = await fetch(CI_URL + '?id=eq.' + encodeURIComponent(p.id), { method:'PATCH', headers:CI_HW, body:JSON.stringify(patch) });
+        return r.ok;
+      }catch(e){ console.error('updateData(CI) error', e); return false; }
+    }
+
     checkAuth().then(user => {
       activeUser = user;
       if (user) {
@@ -194,7 +229,7 @@
     async function loadAll() {
       try {
         const [cResp, clResp] = await Promise.all([
-          fetchFromN8N('sales_contract'),
+          ciLoadInvoices(),
           fetchFromN8N('claims').catch(() => [])
         ]);
         allContracts = Array.isArray(cResp)  ? cResp  : (cResp.data  || []);
