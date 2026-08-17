@@ -157,14 +157,19 @@ const ROLE_COLORS = {
 };
 let allUsers = [];
 let deleteTargetId = null;
+let IS_MANAGER = false;   // مدير فرع: صلاحيات محدودة (فرعه فقط، بدون أدمن/مدير)
+let MY_BRANCH  = '';
 
 async function init() {
   const user = getCurrentUser();
   if (!user) return;
-  if (user.role !== 'admin') {
+  if (user.role !== 'admin' && user.role !== 'manager') {
     document.body.innerHTML = '<div class="empty-state" style="padding:4rem"><div class="icon">🔒</div><p>ليس لديك صلاحية لعرض هذه الصفحة</p></div>';
     return;
   }
+  IS_MANAGER = (user.role === 'manager');
+  MY_BRANCH  = (localStorage.getItem('userBranch') || '').trim();
+  if (IS_MANAGER) applyManagerRestrictions();
   showLoading(true);
   const { data, error } = await db.rpc('get_all_branch_users');
   if (error) { console.error(error); showLoading(false); return; }
@@ -172,6 +177,20 @@ async function init() {
   renderStats();
   renderUsers();
   showLoading(false);
+}
+
+// قيود مدير الفرع في الواجهة (الحماية الحقيقية سيرفرية كمان في الـRPC):
+// يشيل خياري أدمن/مدير من قائمة الأدوار، ويقفل الفرع على فرعه.
+function applyManagerRestrictions() {
+  const roleSel = document.getElementById('u-role');
+  ['admin','manager'].forEach(r => {
+    const opt = roleSel.querySelector('option[value="'+r+'"]');
+    if (opt) opt.remove();
+  });
+  const brSel = document.getElementById('u-branch');
+  Array.from(brSel.options).forEach(o => { if (o.value && o.value !== MY_BRANCH) o.remove(); });
+  brSel.value = MY_BRANCH;
+  brSel.disabled = true;
 }
 
 function toggleBranchField() {
@@ -206,24 +225,43 @@ function renderUsers() {
   const tbody = document.getElementById('usersBody');
   if (!users.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--text-muted)">لا يوجد مستخدمون</td></tr>'; return; }
 
-  tbody.innerHTML = users.map(u => {
+  // تجميع حسب الفرع بترتيب ثابت، وداخل كل فرع بالدور ثم الاسم
+  const branchName = u => (u.role === 'admin' ? 'كل الفروع' : (u.branch || '—'));
+  const BR_ORDER = ['المعمورة','سان ستيفانو','سيدى بشر','عام','كل الفروع'];
+  const bi = b => { const i = BR_ORDER.indexOf(b); return i < 0 ? 90 : i; };
+  users.sort((a,b) =>
+    (bi(branchName(a)) - bi(branchName(b))) ||
+    String(a.role).localeCompare(String(b.role)) ||
+    String(a.full_name||'').localeCompare(String(b.full_name||''),'ar'));
+
+  let html = '', lastBranch = null;
+  users.forEach(u => {
+    const br = branchName(u);
+    if (br !== lastBranch) {
+      const cnt = users.filter(x => branchName(x) === br).length;
+      html += `<tr><td colspan="6" style="background:#f1f5f9;color:#334155;font-weight:700;font-size:.8rem;padding:.45rem .75rem;border-top:1px solid #e2e8f0;">
+        <i class="fas fa-store" style="font-size:.72rem;color:#64748b;"></i> ${br}
+        <span style="color:#94a3b8;font-weight:400;font-size:.72rem;">· ${cnt}</span></td></tr>`;
+      lastBranch = br;
+    }
     const color = ROLE_COLORS[u.role] || '#6b7280';
     const initials = (u.full_name||u.username||'?').split(' ').slice(0,2).map(w=>w[0]).join('');
-    return `<tr>
+    html += `<tr>
       <td><div class="user-name-cell"><div class="user-mini-avatar" style="background:${color}">${initials}</div><span style="font-weight:600">${u.full_name||'—'}</span></div></td>
       <td style="font-family:monospace;font-size:.75rem;color:var(--text-muted)">${u.username||'—'}</td>
       <td><span class="role-badge" style="background:${color}">${ROLE_LABELS[u.role]||u.role}</span></td>
       <td><span class="badge ${u.is_active?'badge-active':'badge-inactive'}">${u.is_active?'نشط':'معطل'}</span></td>
-      <td style="font-size:.72rem;color:var(--text-muted)">${u.role==='admin'?'كل الفروع':(u.branch||'—')}</td>
+      <td style="font-size:.72rem;color:var(--text-muted)">${branchName(u)}</td>
       <td>
         <div class="action-cell">
           <button class="btn btn-outline btn-sm" onclick="openEditModal(${u.id})">تعديل</button>
           <button class="btn btn-sm ${u.is_active?'btn-outline':'btn-green'}" onclick="toggleActive(${u.id},${u.is_active})">${u.is_active?'تعطيل':'تفعيل'}</button>
-          <button class="btn btn-sm" style="background:var(--red-light);color:#b91c1c" onclick="openDelete(${u.id},'${(u.full_name||'').replace(/'/g,"")}')">حذف</button>
+          ${IS_MANAGER ? '' : `<button class="btn btn-sm" style="background:var(--red-light);color:#b91c1c" onclick="openDelete(${u.id},'${(u.full_name||'').replace(/'/g,"")}')">حذف</button>`}
         </div>
       </td>
     </tr>`;
-  }).join('');
+  });
+  tbody.innerHTML = html;
 }
 
 function openUserModal() {
@@ -231,7 +269,7 @@ function openUserModal() {
   ['u-id','u-name','u-username','u-password','u-phone','u-email'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('u-role').value = 'employee';
   document.getElementById('u-active').value = '1';
-  document.getElementById('u-branch').value = '';
+  document.getElementById('u-branch').value = IS_MANAGER ? MY_BRANCH : '';
   document.getElementById('pwd-hint').textContent = '*';
   toggleBranchField();
   document.getElementById('userModal').classList.add('open');
