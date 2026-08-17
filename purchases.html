@@ -168,6 +168,22 @@
     let activeUser = null;
     let rawData    = [];
 
+    // خريطة (اسم مستخدم/موبايل → اسم الشخص) عشان نعرض مين عمل طلب الشراء
+    let userNameMap = {};
+    function nameOf(u){ if (!u) return u; return userNameMap[u] || u; }
+    async function loadUserNameMap(){
+      if (Object.keys(userNameMap).length) return;
+      try {
+        const res = await fetch(SB_URL_API + '/rest/v1/rpc/get_user_name_map', {
+          method:'POST',
+          headers:{ apikey:SB_ANON_API, Authorization:'Bearer '+SB_ANON_API, 'Content-Type':'application/json' },
+          body:'{}'
+        });
+        const d = await res.json();
+        userNameMap = (d && typeof d === 'object' && !Array.isArray(d)) ? d : {};
+      } catch(e){ userNameMap = {}; }
+    }
+
     checkAuth().then(user => {
       activeUser = user;
       if (user) loadOrders();
@@ -177,6 +193,7 @@
       const tbody = document.getElementById('table-body');
       tbody.innerHTML = '<tr class="loading-row"><td colspan="9">⏳ جاري جلب البيانات...</td></tr>';
       try {
+        await loadUserNameMap();
         const response = await sbTaskList({ type: 'شراء' });
         let items = (response && response[0]?.data)
           ? response[0].data
@@ -186,6 +203,7 @@
           rawData = items.map(item => ({
             id:            item.id || item.row_id || item.ID,
             branch:        item.branch || '-',
+            user:          item.user || '',
             item_code:     item.item_code || '',
             item_name:     item.item || item.item_name || 'صنف غير مسمى',
             customer_code: item.cust_code || '',
@@ -267,7 +285,11 @@
               ${displayDate}<br>
               <span style="color:var(--text-muted);font-size:0.7rem;">${displayTime}</span>
             </td>
-            <td><span class="branch-tag">${i.branch}</span></td>
+            <td>
+              ${(nameOf(i.user) && nameOf(i.user) !== i.branch)
+                ? `<div style="font-weight:600;font-size:0.8rem;">${nameOf(i.user)}</div>` : ''}
+              <span class="branch-tag">${i.branch}</span>
+            </td>
             <td>${orderTypeBadge}</td>
             <td style="text-align:right;">
               <div style="font-weight:700;font-size:0.85rem;">${i.item_name}</div>

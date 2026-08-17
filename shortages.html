@@ -75,6 +75,22 @@
       } catch(e){ userBranchMap = {}; }
     }
 
+    // خريطة (اسم مستخدم/موبايل → اسم الشخص) عشان نعرض مين طلب الصنف
+    let userNameMap = {};
+    function nameOf(u){ if (!u) return u; return userNameMap[u] || u; }
+    async function loadUserNameMap(){
+      if (Object.keys(userNameMap).length) return;
+      try {
+        const res = await fetch(SB_URL_API + '/rest/v1/rpc/get_user_name_map', {
+          method:'POST',
+          headers:{ apikey:SB_ANON_API, Authorization:'Bearer '+SB_ANON_API, 'Content-Type':'application/json' },
+          body:'{}'
+        });
+        const d = await res.json();
+        userNameMap = (d && typeof d === 'object' && !Array.isArray(d)) ? d : {};
+      } catch(e){ userNameMap = {}; }
+    }
+
     checkAuth().then(user => {
       if (user) {
         userBranch = (localStorage.getItem('userBranch') || "عام").trim();
@@ -85,7 +101,7 @@
 
     async function loadShortages(forceRefresh = false) {
       const tbody = document.getElementById('shortage-list');
-      await loadUserBranchMap();
+      await Promise.all([loadUserBranchMap(), loadUserNameMap()]);
       if (cachedData.length === 0 || forceRefresh) {
         tbody.innerHTML = '<tr class="loading-row"><td colspan="8">⏳ جاري جلب البيانات...</td></tr>';
         try {
@@ -173,7 +189,11 @@
                 ${stq}
               </b>
             </td>
-            <td><span class="branch-tag">${branchOf(item.user) || '---'}</span></td>
+            <td>
+              <div style="font-weight:600;font-size:0.8rem;">${nameOf(item.user) || '---'}</div>
+              ${(branchOf(item.user) && branchOf(item.user) !== nameOf(item.user))
+                ? `<div style="font-size:0.68rem;color:var(--text-muted);"><i class="fas fa-store" style="font-size:0.62rem;"></i> ${branchOf(item.user)}</div>` : ''}
+            </td>
             <td style="font-size:0.82rem;">${item.cust_name || '---'}</td>
             <td>
               <code style="font-size:0.78rem;color:var(--text-secondary);">
