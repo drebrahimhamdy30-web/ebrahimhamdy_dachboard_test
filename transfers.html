@@ -186,6 +186,31 @@
     let activeUser     = null;
     let userBranchName = '';
 
+    // الفروع الثابتة في النظام
+    const ALL_BRANCHES = ['المعمورة', 'سان ستيفانو', 'سيدى بشر'];
+    // خريطة (اسم مستخدم/موبايل → فرع) عشان نحوّل قيمة user لاسم الفرع بدل ما تظهر رقم موبايل
+    let userBranchMap = {};
+    // أسماء مستخدمين قديمة مش موجودة في الحسابات الحالية (fallback يدوي)
+    const LEGACY_USER_BRANCH = {
+      mangersan: 'سان ستيفانو', mangermamora: 'المعمورة',
+      inventorymamora: 'المعمورة', inventorysbishr: 'سيدى بشر'
+    };
+    function branchOf(u){
+      if (!u) return u;
+      return userBranchMap[u] || LEGACY_USER_BRANCH[u] || u;
+    }
+    async function loadUserBranchMap(){
+      try {
+        const res = await fetch(SB_URL_API + '/rest/v1/rpc/get_user_branch_map', {
+          method:'POST',
+          headers:{ apikey:SB_ANON_API, Authorization:'Bearer '+SB_ANON_API, 'Content-Type':'application/json' },
+          body:'{}'
+        });
+        const d = await res.json();
+        userBranchMap = (d && typeof d === 'object' && !Array.isArray(d)) ? d : {};
+      } catch(e){ userBranchMap = {}; }
+    }
+
     checkAuth().then(user => {
       activeUser = user;
       if (user) {
@@ -199,6 +224,7 @@
       const tbody = document.getElementById('table-body');
       tbody.innerHTML = '<tr class="loading-row"><td colspan="9">⏳ جاري جلب البيانات...</td></tr>';
       try {
+        await loadUserBranchMap();
         const response = await sbTaskList({ type: 'تحويل' });
         let items = (response && response[0]?.data)
           ? response[0].data
@@ -218,13 +244,9 @@
 
     function populateBranchFilter(data) {
       const branchSelect = document.getElementById('branch-select-filter');
-      const branches     = new Set();
-      data.forEach(item => {
-        if (item.user   && item.user   !== userBranchName) branches.add(item.user);
-        if (item.branch && item.branch !== userBranchName) branches.add(item.branch);
-      });
+      // فلتر ثابت بأسماء الفروع (غير فرع المستخدم) — مايظهرش أرقام موبايل أبدًا
       branchSelect.innerHTML = '<option value="all">كل الفروع</option>';
-      branches.forEach(br => {
+      ALL_BRANCHES.filter(br => br !== userBranchName).forEach(br => {
         const opt = document.createElement('option');
         opt.value       = br;
         opt.textContent = br;
@@ -240,11 +262,12 @@
       const searchCol = document.getElementById('search-col').value;
 
       const filtered = rawData.filter(item => {
+        const userBr      = branchOf(item.user);   // فرع الطالب (بدل اسم المستخدم/الموبايل)
         const isTarget    = (item.branch === userBranchName);
-        const isSource    = (item.user   === userBranchName);
+        const isSource    = (userBr === userBranchName);
         const dirMatch    = (dv === 'all') || (dv === 'inbound' && isTarget) || (dv === 'outbound' && isSource);
         const statMatch   = (sv === 'all') || ((item.state || 'pending') === sv);
-        const branchMatch = (bv === 'all') || (item.user === bv || item.branch === bv);
+        const branchMatch = (bv === 'all') || (userBr === bv || item.branch === bv);
 
         let searchMatch = true;
         if (searchVal) {
@@ -272,7 +295,7 @@
       tbody.innerHTML = '';
       items.forEach(item => {
         const canReply     = (item.branch === userBranchName);
-const otherBranch  = canReply ? item.user : item.branch;
+const otherBranch  = canReply ? branchOf(item.user) : item.branch;
         const currentState = item.state || 'pending';
         // شريط لوني للحالة: أخضر=تم، أحمر=غير متوفر، أصفر=انتظار
         const stColor = currentState==='transferred' ? '#16a34a' : (currentState==='unavailable' ? '#dc2626' : '#f59e0b');
