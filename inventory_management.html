@@ -124,6 +124,7 @@
         <button class="tab-btn" data-tab="missing" onclick="switchTab('missing', this)">📭 ناقص من فرع</button>
         <button class="tab-btn" data-tab="pricechanges" onclick="switchTab('pricechanges', this)">📈 تغيّرات الأسعار</button>
         <button class="tab-btn" data-tab="disbursement" onclick="switchTab('disbursement', this)">📋 أذون الصرف</button>
+        <button class="tab-btn" data-tab="overstock" onclick="switchTab('overstock', this)">📦 مخزون زائد</button>
       </div>
       <div class="branch-updates" id="branch-updates"></div>
     </div>
@@ -231,6 +232,26 @@
                 <span class="help-ic">؟<span class="tip">افتراضياً يظهر ما لم تتم مراجعته فقط. فعّله لعرض الأصناف التي تمت مراجعتها أيضاً.</span></span>
               </label>
               <button class="btn-refresh-branch" onclick="loadPriceChanges()" style="align-self:flex-end;margin-bottom:1px"><i class="fas fa-sync-alt"></i> تحديث</button>
+            </div>
+
+            <div class="settings-strip" id="over-config-wrap" style="display:none;">
+              <div class="mini-field wide">
+                <span class="filter-label">النطاق <span class="help-ic">؟<span class="tip">احسب الفائض على إجمالي الفروع مجتمعة، أو على فرع واحد لوحده.</span></span></span>
+                <select id="over-scope" onchange="renderOverstock()">
+                  <option value="all">كل الفروع (مجمّعة)</option>
+                  <option value="mamora">المعمورة</option>
+                  <option value="san">سان ستيفانو</option>
+                  <option value="bishr">سيدى بشر</option>
+                </select>
+              </div>
+              <div class="mini-field auto">
+                <span class="filter-label">فترة التوفير (يوم) <span class="help-ic">؟<span class="tip">لو رصيد الصنف بيكفي أكتر من هذا العدد من الأيام يبقى مخزون زائد. مثلاً 120 يوم = 4 شهور.</span></span></span>
+                <input type="number" id="over-days" value="120" min="1" step="5" style="width:auto;min-width:110px" oninput="renderOverstock()">
+              </div>
+              <div class="mini-field auto">
+                <span class="filter-label">الرصيد الزائد ≥ <span class="help-ic">؟<span class="tip">لا يعرض إلا الأصناف التي فائضها هذا الرقم على الأقل.</span></span></span>
+                <input type="number" id="over-min" value="1" min="0" step="1" style="width:auto;min-width:90px" oninput="renderOverstock()">
+              </div>
             </div>
           </div>
 
@@ -373,6 +394,7 @@
     function onFilterChange(){
       currentPage=1;
       saveSettings();
+      if(currentTab==='overstock'){ overPage=1; renderOverstock(); return; }
       if(hasCalculated) applyAndRender();
     }
     function setItemType(t, btn){
@@ -381,6 +403,7 @@
       document.querySelectorAll('.type-btn').forEach(function(b){b.classList.remove('active');});
       if(btn) btn.classList.add('active');
       saveSettings();
+      if(currentTab==='overstock'){ overPage=1; renderOverstock(); return; }
       if(hasCalculated) calculate();
     }
 
@@ -804,6 +827,8 @@
         renderDisbContainer();
       } else if(tab==='pricechanges'){
         loadPriceChanges();
+      } else if(tab==='overstock'){
+        overPage=1; renderOverstock();
       } else if(hasCalculated){
         applyAndRender();
       } else {
@@ -811,7 +836,7 @@
       }
     }
     function updateTabUI(){
-      var titles={prices:'فرق الأسعار بين الفروع', transfer:'التحويل بين الفروع', missing:'أصناف ناقصة من فرع', pricechanges:'تغيّرات الأسعار', disbursement:'أذون صرف التحويل'};
+      var titles={prices:'فرق الأسعار بين الفروع', transfer:'التحويل بين الفروع', missing:'أصناف ناقصة من فرع', pricechanges:'تغيّرات الأسعار', disbursement:'أذون صرف التحويل', overstock:'مخزون زائد (Over Stock)'};
       document.getElementById('result-title').textContent=titles[currentTab]||'';
 
       var isPrices   = (currentTab==='prices');
@@ -819,17 +844,18 @@
       var isMissing  = (currentTab==='missing');
       var isPC       = (currentTab==='pricechanges');
       var isDisb     = (currentTab==='disbursement');
+      var isOver     = (currentTab==='overstock');
 
       document.getElementById('stock-toolbar').style.display = isDisb ? 'none' : 'block';
       document.getElementById('disb-toolbar').style.display  = isDisb ? 'block' : 'none';
-      document.getElementById('panel-title-text').textContent = isDisb ? 'أذون الصرف — توزيع المشتريات' : (isPC ? 'تغيّرات الأسعار — للمراجعة' : 'بحث وفلتر');
+      document.getElementById('panel-title-text').textContent = isDisb ? 'أذون الصرف — توزيع المشتريات' : (isPC ? 'تغيّرات الأسعار — للمراجعة' : (isOver ? 'مخزون زائد — فائض عن فترة التوفير' : 'بحث وفلتر'));
 
       // صف البحث + نوع الأصناف: يظهر فقط في الأصناف (مش في تغيّرات الأسعار)
       var searchRow = document.querySelector('#stock-toolbar .search-row');
       if(searchRow) searchRow.style.display = isPC ? 'none' : 'flex';
 
       var mainCalc = document.getElementById('main-calc-btn');
-      if(mainCalc) mainCalc.style.display = (isDisb || isPC) ? 'none' : 'inline-flex';
+      if(mainCalc) mainCalc.style.display = (isDisb || isPC || isOver) ? 'none' : 'inline-flex';
 
       var needWrap = document.getElementById('need-config-wrap');
       if(needWrap) needWrap.style.display = isTransfer ? 'flex' : 'none';
@@ -837,10 +863,12 @@
       if(missWrap) missWrap.style.display = isMissing ? 'flex' : 'none';
       var pcWrap = document.getElementById('pc-config-wrap');
       if(pcWrap) pcWrap.style.display = isPC ? 'flex' : 'none';
+      var overWrap = document.getElementById('over-config-wrap');
+      if(overWrap) overWrap.style.display = isOver ? 'flex' : 'none';
 
       var excelBtn = document.getElementById('excel-btn');
       if(excelBtn){
-        if(isPrices || isPC){ excelBtn.style.display='none'; }
+        if(isPrices || isPC || isOver){ excelBtn.style.display='none'; }
         else if(isDisb){ excelBtn.style.display='inline-flex'; excelBtn.innerHTML='<i class="fas fa-file-excel"></i> تصدير أذون الصرف'; excelBtn.disabled = disbWithQty()===0; }
         else { excelBtn.style.display='inline-flex'; excelBtn.innerHTML='<i class="fas fa-file-excel"></i> Excel'; excelBtn.disabled=false; }
       }
@@ -964,6 +992,87 @@
         alert('❌ تعذّر حفظ المراجعة — حاول مرة أخرى');
       }
     }
+
+    // ===================================================================
+    // ============== تاب المخزون الزائد (Over Stock) ====================
+    // ===================================================================
+    const OVER_PAGE = 50;
+    var overPage = 1;
+    var overResults = [];
+
+    async function renderOverstock(){
+      var cont = document.getElementById('result-container');
+      if(!stockLoaded){
+        cont.innerHTML = '<div class="loading-overlay">⏳ جاري تحميل بيانات المخزون...</div>';
+        var ok = await loadStockData(true);
+        if(!ok){ cont.innerHTML='<div class="loading-overlay" style="color:var(--danger)">❌ فشل تحميل المخزون</div>'; return; }
+      }
+      var days  = parseFloat(document.getElementById('over-days').value)||120;
+      var scope = document.getElementById('over-scope').value;
+      var minEx = parseFloat(document.getElementById('over-min').value)||0;
+      var search= (document.getElementById('search-input').value||'').trim().toLowerCase();
+
+      var map = buildItemsMap();
+      var branches = (scope==='all') ? ['mamora','san','bishr'] : [scope];
+      var rows = [];
+      Object.keys(map).forEach(function(code){
+        var it = map[code];
+        if(itemType==='med' && !it.isMedicine) return;
+        if(itemType==='cos' &&  it.isMedicine) return;
+        if(search && !(String(it.name||'').toLowerCase().indexOf(search)>-1 || String(code).toLowerCase().indexOf(search)>-1)) return;
+        var avg=0, stock=0;
+        branches.forEach(function(b){ avg += it[b].avg||0; stock += it[b].stock||0; });
+        var required = coverQtyDays(avg, days);   // (المعدل/30) × الأيام
+        var excess = stock - required;
+        if(excess < minEx || excess <= 0) return;
+        rows.push({code:code, name:it.name, avg:avg, required:required, stock:stock, excess:excess});
+      });
+      rows.sort(function(a,b){ return b.excess - a.excess; });
+      overResults = rows;
+      renderOverstockTable();
+    }
+
+    function renderOverstockTable(){
+      var cont = document.getElementById('result-container');
+      var rows = overResults;
+      document.getElementById('result-count').textContent = rows.length + ' صنف زائد';
+      if(!rows.length){ cont.innerHTML='<div class="loading-overlay">✅ لا توجد أصناف زائدة بالمعايير الحالية</div>'; return; }
+
+      var totExcess = rows.reduce(function(s,r){return s+r.excess;},0);
+      var totalPages = Math.max(1, Math.ceil(rows.length/OVER_PAGE));
+      if(overPage>totalPages) overPage=totalPages;
+      if(overPage<1) overPage=1;
+      var pageRows = rows.slice((overPage-1)*OVER_PAGE, overPage*OVER_PAGE);
+      var scopeLbl = ({all:'كل الفروع',mamora:'المعمورة',san:'سان ستيفانو',bishr:'سيدى بشر'})[document.getElementById('over-scope').value]||'';
+
+      var html = '<div class="summary-bar">'+
+        '<div class="summary-item">أصناف زائدة: <b>'+rows.length+'</b></div>'+
+        '<div class="summary-item">إجمالي الرصيد الزائد: <b>'+Math.round(totExcess)+'</b></div>'+
+        '<div class="summary-item">النطاق: <b>'+scopeLbl+'</b></div></div>';
+      html += '<div class="res-wrap"><table class="res-table" style="min-width:720px"><thead><tr>'+
+        '<th style="text-align:right">الصنف</th><th>كود الصنف</th><th>معدل الاستهلاك (شهري)</th>'+
+        '<th>كمية التوفير المطلوبة</th><th>إجمالي الرصيد</th><th>الرصيد الزائد</th></tr></thead><tbody>';
+      pageRows.forEach(function(r){
+        html += '<tr>'+
+          '<td class="name-cell" style="text-align:right"><b>'+(r.name||'—')+'</b></td>'+
+          '<td><code style="font-size:0.8rem;color:var(--text-secondary)">'+r.code+'</code></td>'+
+          '<td>'+r1(r.avg)+'</td>'+
+          '<td>'+Math.round(r.required)+'</td>'+
+          '<td style="font-weight:700">'+Math.round(r.stock)+'</td>'+
+          '<td style="font-weight:800;color:var(--danger)">'+Math.round(r.excess)+'</td>'+
+        '</tr>';
+      });
+      html += '</tbody></table></div>';
+      if(totalPages>1){
+        var btn=function(p,txt,dis){ return '<button onclick="goOverPage('+p+')" '+(dis?'disabled':'')+' style="padding:5px 11px;border:1px solid var(--border);background:'+(dis?'#f1f5f9':'#fff')+';border-radius:8px;cursor:'+(dis?'default':'pointer')+';font-family:inherit">'+txt+'</button>'; };
+        html += '<div style="display:flex;justify-content:center;gap:8px;align-items:center;margin-top:14px">'+
+          btn(overPage-1,'‹',overPage<=1)+
+          '<span style="font-size:0.82rem;color:var(--text-muted)">صفحة '+overPage+' من '+totalPages+'</span>'+
+          btn(overPage+1,'›',overPage>=totalPages)+'</div>';
+      }
+      cont.innerHTML = html;
+    }
+    function goOverPage(p){ overPage=p; renderOverstockTable(); document.getElementById('result-container').scrollIntoView({behavior:'smooth',block:'start'}); }
 
     // ===================================================================
     // ============== تاب أذون الصرف (Disbursement) =====================
