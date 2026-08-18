@@ -37,6 +37,13 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
 .checkbox-item input{accent-color:var(--primary);width:15px;height:15px}
 .filter-chip{padding:.3rem .75rem;border-radius:20px;font-size:.72rem;font-weight:600;cursor:pointer;border:1.5px solid var(--border);background:white;color:var(--text-muted);font-family:'Cairo',sans-serif;transition:all .15s}
 .filter-chip.active{background:var(--primary);color:white;border-color:var(--primary)}
+/* تبويبات العرض (كل المناطق / مناطق الفرع) */
+.view-switch{display:flex;gap:.4rem;margin-bottom:1.25rem;flex-wrap:wrap}
+.view-tab{padding:.55rem 1.1rem;border-radius:10px;font-size:.85rem;font-weight:700;cursor:pointer;border:1.5px solid var(--border);background:white;color:var(--text-muted);font-family:'Cairo',sans-serif;transition:all .15s;display:flex;align-items:center;gap:.4rem}
+.view-tab.active{background:var(--primary);color:white;border-color:var(--primary)}
+.master-bar{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.75rem}
+.use-badge{font-size:.68rem;font-weight:700;padding:.14rem .55rem;border-radius:20px;background:var(--bg);color:var(--text-muted);border:1px solid var(--border);white-space:nowrap}
+.use-badge.used{background:var(--green-light);color:#15803d;border-color:transparent}
 
 /* Import */
 .import-zone{border:2px dashed var(--border);border-radius:12px;padding:2rem;text-align:center;cursor:pointer;transition:all .15s}
@@ -72,6 +79,31 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
 </head>
 <body>
 
+<!-- مبدّل العرض -->
+<div class="view-switch">
+  <button class="view-tab active" id="tab-master" onclick="switchView('master')">🗂️ كل المناطق (الأساسية)</button>
+  <button class="view-tab" id="tab-branch" onclick="switchView('branch')">🏢 مناطق الفرع</button>
+</div>
+
+<!-- ===== كل المناطق (القائمة الأساسية) ===== -->
+<div id="masterView">
+  <div class="master-bar">
+    <input type="text" class="search-input" id="masterSearch" placeholder="🔍 بحث في كل المناطق..." oninput="masterPage=1;renderMaster()" style="width:220px">
+    <span class="stats-compact" id="masterStats" style="margin-bottom:0"></span>
+    <div id="masterAdminActions" style="display:none;gap:.5rem;align-items:center;margin-right:auto">
+      <input type="text" id="newMasterName" placeholder="اسم منطقة جديدة" style="height:36px;padding:0 .7rem;border:1.5px solid var(--border);border-radius:9px;font-family:'Cairo',sans-serif;font-size:.82rem" onkeydown="if(event.key==='Enter')addMasterName()">
+      <button class="btn btn-outline btn-sm" onclick="addMasterName()">+ إضافة اسم</button>
+      <button class="btn btn-primary btn-sm" onclick="openImportModal()" title="استيراد أسماء مناطق من Excel">📥 استيراد Excel</button>
+    </div>
+  </div>
+  <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.85rem;background:#f0f9ff;border-radius:10px;padding:.6rem .8rem;color:#0369a1">
+    ℹ️ دي القائمة الأساسية لكل المناطق — مشتركة بين كل الفروع. كل فرع بيختار منها المناطق اللي تخصه من تبويب «مناطق الفرع».
+  </div>
+  <div id="masterGrid"></div>
+</div>
+
+<!-- ===== مناطق الفرع ===== -->
+<div id="branchView" style="display:none">
 <!-- Branch selector -->
 <div class="branch-bar">
   <span style="font-size:.8rem;font-weight:700;color:var(--text-muted);white-space:nowrap">الفرع:</span>
@@ -79,8 +111,7 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
     <option value="">اختر الفرع...</option>
   </select>
   <div style="display:flex;gap:.5rem;flex-shrink:0">
-    <button class="btn btn-outline btn-sm" onclick="openImportModal()" title="استيراد أسماء مناطق من Excel">📥 استيراد Excel</button>
-    <button class="btn btn-primary btn-sm" id="addRegionBtn" onclick="openAddFromList()" style="display:none">+ إضافة منطقة</button>
+    <button class="btn btn-primary btn-sm" id="addRegionBtn" onclick="openAddFromList()" style="display:none">+ إضافة منطقة من القائمة</button>
   </div>
 </div>
 
@@ -119,6 +150,7 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
 
   <div id="regionsGrid"></div>
 </div>
+</div><!-- /branchView -->
 
 <!-- Modal: Edit Region (per branch) -->
 <div class="modal-overlay" id="regionModal">
@@ -249,11 +281,13 @@ let branches=[], allRegions=[], allRegionNames=[];
 let curBranchId=null, currentFilter='all';
 let deleteTargetId=null, importNewNames=[], selectedNames=new Set();
 let selectedRegions=new Set();   // مناطق محدّدة للإجراءات الجماعية
+let isAdmin=false, allBranchRegions=[], curView='master', masterPage=1;
+const MASTER_PAGE=50;
 
 async function init(){
   const user=getCurrentUser();if(!user)return;
   showLoading(true);
-  const isAdmin=user.role==='admin';
+  isAdmin=user.role==='admin';
   const userBranch=user.branch_id;
 
   const {data:br}=await db.from('branches').select('id,name').order('name');
@@ -276,7 +310,103 @@ async function init(){
       await onBranchChange();
     }
   }
+  document.getElementById('masterAdminActions').style.display=isAdmin?'flex':'none';
+  await loadMaster();
+  switchView('master');
   showLoading(false);
+}
+
+// ===== كل المناطق (القائمة الأساسية) =====
+function switchView(v){
+  curView=v;
+  document.getElementById('masterView').style.display=v==='master'?'block':'none';
+  document.getElementById('branchView').style.display=v==='branch'?'block':'none';
+  document.getElementById('tab-master').classList.toggle('active',v==='master');
+  document.getElementById('tab-branch').classList.toggle('active',v==='branch');
+  if(v==='master') renderMaster();
+}
+
+async function loadMaster(){
+  const {data:names}=await db.from('region_names').select('*').order('name');
+  allRegionNames=names||[];
+  const {data:regs}=await db.from('regions').select('name');
+  allBranchRegions=regs||[];
+  renderMaster();
+}
+
+function renderMaster(){
+  const q=(document.getElementById('masterSearch').value||'').toLowerCase();
+  const counts={};
+  allBranchRegions.forEach(r=>{counts[r.name]=(counts[r.name]||0)+1;});
+  const total=allRegionNames.length;
+  const usedInSome=allRegionNames.filter(n=>counts[n.name]).length;
+  document.getElementById('masterStats').innerHTML=
+    `<span>إجمالي المناطق <b>${total}</b></span>`+
+    `<span>مستخدمة في فروع <b>${usedInSome}</b></span>`+
+    `<span>غير مستخدمة <b>${total-usedInSome}</b></span>`;
+
+  const list=allRegionNames.filter(n=>!q||(n.name||'').toLowerCase().includes(q));
+  const grid=document.getElementById('masterGrid');
+  if(!list.length){grid.innerHTML='<div style="text-align:center;padding:2.5rem;color:var(--text-muted)">لا توجد مناطق مطابقة</div>';return;}
+
+  const pages=Math.max(1,Math.ceil(list.length/MASTER_PAGE));
+  if(masterPage>pages)masterPage=pages;
+  const start=(masterPage-1)*MASTER_PAGE;
+  const pageItems=list.slice(start,start+MASTER_PAGE);
+
+  const rows=pageItems.map(n=>{
+    const c=counts[n.name]||0;
+    const nm=(n.name||'').replace(/'/g,"\\'");
+    return `<tr>
+      <td style="font-weight:700">${n.name}</td>
+      <td><span class="use-badge ${c?'used':''}">${c?`مستخدمة في ${c} فرع`:'غير مستخدمة'}</span></td>
+      <td style="white-space:nowrap;text-align:left">${isAdmin?`<button class="btn btn-sm" style="background:var(--red-light);color:#b91c1c" onclick="deleteMasterName('${n.id}','${nm}',${c})">حذف</button>`:''}</td>
+    </tr>`;
+  }).join('');
+
+  let nav='';
+  if(pages>1){
+    nav=`<div style="display:flex;align-items:center;justify-content:center;gap:.5rem;margin-top:.85rem;font-size:.8rem">
+      <button class="btn btn-outline btn-sm" onclick="masterGo(1)" ${masterPage===1?'disabled':''}>«</button>
+      <button class="btn btn-outline btn-sm" onclick="masterGo(${masterPage-1})" ${masterPage===1?'disabled':''}>‹</button>
+      <span style="color:var(--text-muted)">صفحة ${masterPage} من ${pages}</span>
+      <button class="btn btn-outline btn-sm" onclick="masterGo(${masterPage+1})" ${masterPage===pages?'disabled':''}>›</button>
+      <button class="btn btn-outline btn-sm" onclick="masterGo(${pages})" ${masterPage===pages?'disabled':''}>»</button>
+    </div>`;
+  }
+
+  grid.innerHTML=`<div style="overflow-x:auto"><table class="reg-table">
+    <thead><tr><th>المنطقة</th><th>الاستخدام في الفروع</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`+nav;
+}
+
+function masterGo(p){masterPage=p;renderMaster();document.getElementById('masterGrid').scrollIntoView({behavior:'smooth',block:'start'});}
+
+async function addMasterName(){
+  if(!isAdmin)return;
+  const inp=document.getElementById('newMasterName');
+  const name=(inp.value||'').trim();
+  if(!name)return;
+  if(allRegionNames.some(n=>(n.name||'').trim()===name)){alert('الاسم موجود بالفعل في القائمة الأساسية');return;}
+  showLoading(true);
+  await db.from('region_names').insert({name});
+  inp.value='';
+  masterPage=1;
+  await loadMaster();
+  showLoading(false);
+  showToast('✓ تمت إضافة المنطقة للقائمة الأساسية');
+}
+
+async function deleteMasterName(id,name,count){
+  if(!isAdmin)return;
+  let msg=`حذف «${name}» من القائمة الأساسية؟`;
+  if(count>0)msg+=`\n⚠️ المنطقة مستخدمة في ${count} فرع — الحذف من هنا مش هيشيلها من الفروع، لكن مش هتقدر تضيفها لفرع جديد.`;
+  if(!confirm(msg))return;
+  showLoading(true);
+  await db.from('region_names').delete().eq('id',id);
+  await loadMaster();
+  showLoading(false);
+  showToast('✓ تم الحذف من القائمة الأساسية');
 }
 
 async function onBranchChange(){
@@ -290,6 +420,9 @@ async function onBranchChange(){
   // جيب القائمة الأساسية
   const {data:names}=await db.from('region_names').select('*').order('name');
   allRegionNames=names||[];
+  // حدّث عدّاد استخدام المناطق في كل الفروع (لتبويب كل المناطق)
+  const {data:allr}=await db.from('regions').select('name');
+  allBranchRegions=allr||[];
   renderStats();
   renderRegions();
   document.getElementById('mainContent').style.display='block';
@@ -566,9 +699,9 @@ async function confirmImport(){
   }
   closeModal('importModal');
   showToast(`✓ تم إضافة ${importNewNames.length} اسم للقائمة الأساسية`);
-  // حدّث القائمة
-  const {data:names}=await db.from('region_names').select('*').order('name');
-  allRegionNames=names||[];
+  // حدّث القائمة + تبويب كل المناطق
+  masterPage=1;
+  await loadMaster();
   showLoading(false);
 }
 
