@@ -2141,7 +2141,8 @@ async function fetchInvoice(){
   preview.innerHTML='<div style="text-align:center;padding:1rem;color:var(--text-muted)">جاري البحث...</div>';
 
   try{
-    const res = await fetch(INVOICE_WEBHOOK, {
+    // نستخدم sales_item لأنه بيجيب كل الفواتير (بما فيها الكاش)، مش فواتير التوصيل بس
+    const res = await fetch(SALES_ITEMS_WEBHOOK, {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ bill_no: billNo, branch_id: branchId })
@@ -2149,16 +2150,35 @@ async function fetchInvoice(){
     if(!res.ok) throw new Error('HTTP '+res.status);
     const json = await res.json();
 
-    // الـ response ممكن يكون array أو object
-    const payload = Array.isArray(json) ? json[0] : json;
-    const rec = payload?.Data?.[0];
+    const root  = Array.isArray(json) ? (json[0]||{}) : (json||{});
+    const bills = (root && root.Data) || [];
+    const bill  = bills.find(b=>String(b.bill_no)===String(billNo)) || bills[0];
 
-    if(!rec){
+    if(!bill){
       preview.innerHTML = `<div style="background:var(--red-light);color:#b91c1c;padding:.75rem;border-radius:8px;font-size:.8rem;font-weight:600">
-        ❌ لم يتم العثور على الفاتورة #${billNo}${payload?.Error?' — '+payload.Error:''}</div>`;
+        ❌ لم يتم العثور على الفاتورة #${billNo}${root?.Error?' — '+root.Error:''}</div>`;
       aoInvoiceData=null;
       return;
     }
+
+    // توحيد أسماء الحقول لنفس الشكل اللي باقي الكود بيتوقعه (كان من deliveryinvoice)
+    const rec = {
+      bill_no:                  bill.bill_no,
+      bill_type:                bill.bill_type || null,
+      bill_status:              bill.bill_status || null,
+      bill_date:                bill.bill_date || null,
+      cust_code:                bill.cust_code || null,
+      cust_name:                bill.cust_name_ar || bill.cust_name_en || null,
+      cust_address:             bill.cust_address || null,
+      cust_region:              bill.cust_region || null,
+      total_bill_net:           bill.total_bill_net,
+      count_of_items:           (bill.Items||[]).length,
+      employee_name:            bill.employee_name || null,
+      notes:                    bill.bill_notes || null,
+      current_customer_balance: 0,
+      AddithionalExpenses:      0,
+      money_with_deliveryman:   0
+    };
 
     aoInvoiceData = rec;
     const regKnown = knownRegions.has(rec.cust_region);
