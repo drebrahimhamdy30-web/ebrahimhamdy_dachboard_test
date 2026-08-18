@@ -1020,12 +1020,12 @@
         if(itemType==='med' && !it.isMedicine) return;
         if(itemType==='cos' &&  it.isMedicine) return;
         if(search && !(String(it.name||'').toLowerCase().indexOf(search)>-1 || String(code).toLowerCase().indexOf(search)>-1)) return;
-        var avg=0, stock=0;
-        branches.forEach(function(b){ avg += it[b].avg||0; stock += it[b].stock||0; });
+        var avg=0, stock=0, price=0;
+        branches.forEach(function(b){ avg += it[b].avg||0; stock += it[b].stock||0; if(!price && it[b].price) price=it[b].price; });
         var required = coverQtyDays(avg, days);   // (المعدل/30) × الأيام
         var excess = stock - required;
         if(excess < minEx || excess <= 0) return;
-        rows.push({code:code, name:it.name, avg:avg, required:required, stock:stock, excess:excess});
+        rows.push({code:code, name:it.name, avg:avg, required:required, stock:stock, excess:excess, price:price, exVal:excess*price});
       });
       rows.sort(function(a,b){ return b.excess - a.excess; });
       overResults = rows;
@@ -1039,6 +1039,7 @@
       if(!rows.length){ cont.innerHTML='<div class="loading-overlay">✅ لا توجد أصناف زائدة بالمعايير الحالية</div>'; return; }
 
       var totExcess = rows.reduce(function(s,r){return s+r.excess;},0);
+      var totExVal  = rows.reduce(function(s,r){return s+(r.exVal||0);},0);
       var totalPages = Math.max(1, Math.ceil(rows.length/OVER_PAGE));
       if(overPage>totalPages) overPage=totalPages;
       if(overPage<1) overPage=1;
@@ -1048,10 +1049,12 @@
       var html = '<div class="summary-bar">'+
         '<div class="summary-item">أصناف زائدة: <b>'+rows.length+'</b></div>'+
         '<div class="summary-item">إجمالي الرصيد الزائد: <b>'+Math.round(totExcess)+'</b></div>'+
+        '<div class="summary-item">قيمة الزائد: <b>'+Math.round(totExVal).toLocaleString('en-US')+'</b> ج</div>'+
         '<div class="summary-item">النطاق: <b>'+scopeLbl+'</b></div></div>';
-      html += '<div class="res-wrap"><table class="res-table" style="min-width:720px"><thead><tr>'+
+      html += '<div class="res-wrap"><table class="res-table" style="min-width:820px"><thead><tr>'+
         '<th style="text-align:right">الصنف</th><th>كود الصنف</th><th>معدل الاستهلاك (شهري)</th>'+
-        '<th>كمية التوفير المطلوبة</th><th>إجمالي الرصيد</th><th>الرصيد الزائد</th></tr></thead><tbody>';
+        '<th>كمية التوفير المطلوبة</th><th>إجمالي الرصيد</th><th>الرصيد الزائد</th>'+
+        '<th>سعر البيع</th><th>قيمة الزائد</th></tr></thead><tbody>';
       pageRows.forEach(function(r){
         html += '<tr>'+
           '<td class="name-cell" style="text-align:right"><b>'+(r.name||'—')+'</b></td>'+
@@ -1060,6 +1063,8 @@
           '<td>'+Math.round(r.required)+'</td>'+
           '<td style="font-weight:700">'+Math.round(r.stock)+'</td>'+
           '<td style="font-weight:800;color:var(--danger)">'+Math.round(r.excess)+'</td>'+
+          '<td>'+r1(r.price)+'</td>'+
+          '<td style="font-weight:700;color:var(--accent-dark)">'+Math.round(r.exVal).toLocaleString('en-US')+'</td>'+
         '</tr>';
       });
       html += '</tbody></table></div>';
