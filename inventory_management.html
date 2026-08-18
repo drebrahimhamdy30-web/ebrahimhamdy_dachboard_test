@@ -1007,10 +1007,23 @@
     // ============== تاب بحث الصنف (Lookup) =============================
     // ===================================================================
     const LOOKUP_MAX = 40;
+    // تطبيع للبحث: يشيل الألفات (اختيارية غالبًا)، يوحّد ى/ي و ة/ه، يشيل الهمزات
+    // والتطويل والتشكيل، وأي رمز غير حرف/رقم يبقى مسافة — عشان اختلاف الكتابة ما يأثرش.
+    function normSearch(s){
+      return String(s==null?'':s).toLowerCase()
+        .replace(/[أإآا]/g,'')
+        .replace(/ى/g,'ي').replace(/ة/g,'ه')
+        .replace(/[ؤئءٓ]/g,'')
+        .replace(/ـ/g,'')
+        .replace(/[ً-ْ]/g,'')
+        .replace(/[^؀-ۿ0-9a-z]+/g,' ')
+        .replace(/\s+/g,' ').trim();
+    }
     async function renderLookup(){
       var cont = document.getElementById('result-container');
-      var search = (document.getElementById('search-input').value||'').trim().toLowerCase();
-      if(search.length < 2){ cont.innerHTML='<div class="loading-overlay">🔍 اكتب اسم الصنف أو كوده (حرفين على الأقل)</div>'; document.getElementById('result-count').textContent=''; return; }
+      var rawSearch = (document.getElementById('search-input').value||'').trim();
+      var qTokens = normSearch(rawSearch).split(' ').filter(Boolean);
+      if(rawSearch.length < 2 || !qTokens.length){ cont.innerHTML='<div class="loading-overlay">🔍 اكتب اسم الصنف أو كوده (حرفين على الأقل)</div>'; document.getElementById('result-count').textContent=''; return; }
       if(!stockLoaded){
         cont.innerHTML='<div class="loading-overlay">⏳ جاري تحميل بيانات المخزون...</div>';
         var ok=await loadStockData(true);
@@ -1022,7 +1035,9 @@
         var it=map[code];
         if(itemType==='med' && !it.isMedicine) return;
         if(itemType==='cos' &&  it.isMedicine) return;
-        if(String(it.name||'').toLowerCase().indexOf(search)>-1 || String(code).toLowerCase().indexOf(search)>-1) matches.push(it);
+        // مطابقة بالكلمات: كل كلمة في البحث لازم تكون موجودة (بأي ترتيب) في الاسم أو الكود
+        var target = normSearch(it.name)+' '+normSearch(code);
+        if(qTokens.every(function(t){ return target.indexOf(t)>-1; })) matches.push(it);
       });
       document.getElementById('result-count').textContent = matches.length+' نتيجة';
       if(!matches.length){ cont.innerHTML='<div class="loading-overlay">لا يوجد صنف بهذا الاسم أو الكود</div>'; return; }
