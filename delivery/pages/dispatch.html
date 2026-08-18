@@ -2182,12 +2182,19 @@ async function fetchInvoice(){
 
     aoInvoiceData = rec;
     const regKnown = knownRegions.has(rec.cust_region);
+    const esc = s => String(s||'').replace(/"/g,'&quot;');
+    const noCust = !(rec.cust_name || rec.cust_address || rec.cust_region);
     preview.innerHTML = `
       <div style="background:var(--green-light);border:1px solid #bbf7d0;border-radius:10px;padding:.75rem">
         <div style="font-weight:800;color:#15803d;margin-bottom:.5rem">✓ تم العثور على الفاتورة</div>
-        <div class="d-row"><span class="d-lbl">العميل</span><strong class="d-val">${rec.cust_name||'—'}</strong></div>
-        <div class="d-row"><span class="d-lbl">العنوان</span><span class="d-val">${rec.cust_address||'—'}</span></div>
-        <div class="d-row"><span class="d-lbl">المنطقة</span><span class="d-val" style="${!regKnown?'color:#b91c1c;font-weight:700':''}">${rec.cust_region||'—'}${!regKnown&&rec.cust_region?' ⚠️ غير مسجلة':''}</span></div>
+        ${noCust?`<div style="background:#fef9c3;color:#854d0e;padding:.4rem .55rem;border-radius:6px;font-size:.72rem;font-weight:600;margin-bottom:.5rem">⚠️ فاتورة كاش بدون بيانات عميل — اكتب العميل والعنوان والمنطقة</div>`:''}
+        <div class="form-group" style="margin-bottom:.5rem"><label style="font-size:.72rem">العميل</label>
+          <input type="text" class="form-control" id="ao-inv-cust" value="${esc(rec.cust_name)}" placeholder="اسم العميل"></div>
+        <div class="form-group" style="margin-bottom:.5rem"><label style="font-size:.72rem">العنوان</label>
+          <input type="text" class="form-control" id="ao-inv-addr" value="${esc(rec.cust_address)}" placeholder="العنوان"></div>
+        <div class="form-group" style="margin-bottom:.5rem"><label style="font-size:.72rem">المنطقة *</label>
+          <input type="text" class="form-control" id="ao-inv-region" list="ao-region-list" value="${esc(rec.cust_region)}" placeholder="🔍 اكتب حرف لتصفية المناطق" autocomplete="off">
+          ${(!regKnown && rec.cust_region)?`<div style="font-size:.66rem;color:#b91c1c;font-weight:600;margin-top:.2rem">⚠️ المنطقة غير مسجّلة — اختر من القائمة</div>`:''}</div>
         <div class="d-row"><span class="d-lbl">المبلغ</span><strong class="d-val">${Number(rec.total_bill_net||0).toLocaleString()} ج.م</strong></div>
         <div class="d-row"><span class="d-lbl">النوع</span><span class="d-val">${rec.bill_type||'—'}</span></div>
         <div class="d-row"><span class="d-lbl">الأصناف</span><span class="d-val">${rec.count_of_items||0}</span></div>
@@ -2212,6 +2219,11 @@ async function saveNewOrder(){
   if(aoType === 'invoice'){
     if(!aoInvoiceData){ showToast('ابحث عن الفاتورة أولاً'); return; }
     const r = aoInvoiceData;
+    // الحقول القابلة للتعديل (تتملّى من الفاتورة، ويكملها المستخدم لو الفاتورة كاش بدون عميل)
+    const invCust   = (document.getElementById('ao-inv-cust')?.value||'').trim();
+    const invAddr   = (document.getElementById('ao-inv-addr')?.value||'').trim();
+    const invRegion = (document.getElementById('ao-inv-region')?.value||'').trim();
+    if(!invRegion){ showToast('اكتب المنطقة'); return; }
     const pay = (r.bill_type||'').includes('فيزا') ? 'visa'
               : (r.bill_type||'').includes('تحويل') ? 'transfer'
               : (r.bill_type||'').includes('آجل') ? 'deferred' : 'cash';
@@ -2221,9 +2233,9 @@ async function saveNewOrder(){
       bill_status: r.bill_status || null,
       bill_date: r.bill_date ? new Date(r.bill_date).toISOString() : now,
       cust_code: r.cust_code || null,
-      customer_name: r.cust_name || null,
-      customer_address: r.cust_address || null,
-      cust_region: r.cust_region || null,
+      customer_name: invCust || r.cust_name || null,
+      customer_address: invAddr || r.cust_address || null,
+      cust_region: invRegion || r.cust_region || null,
       count_of_items: r.count_of_items || 0,
       total_bill_net: Number(r.total_bill_net || 0),
       amount: Number(r.total_bill_net || 0),
