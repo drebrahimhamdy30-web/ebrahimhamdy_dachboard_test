@@ -434,10 +434,10 @@
           <div class="table-wrap">
             <table class="report-table">
               <thead>
-                <tr><th>الكود</th><th>الاسم</th><th>الفئة</th><th>الحالة</th><th>رصيد النظام</th><th>الرصيد الفعلي</th><th>بواسطة</th><th>التاريخ</th><th>الرصيد / مراجعة</th></tr>
+                <tr><th>الكود</th><th>الاسم</th><th>الفئة</th><th>الحالة</th><th>رصيد النظام</th><th>الرصيد الفعلي</th><th>الفرق</th><th>بواسطة</th><th>التاريخ</th><th>الرصيد / مراجعة</th></tr>
               </thead>
               <tbody id="full-report-body">
-                <tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>
+                <tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>
               </tbody>
             </table>
           </div>
@@ -1665,7 +1665,7 @@
       const dateTo   = document.getElementById('full-report-to').value;
       const body     = document.getElementById('full-report-body');
 
-      body.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>';
+      body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>';
       fullReportPage = 1;
 
       try {
@@ -1680,7 +1680,7 @@
         }));
         renderFullReport();
       } catch(e) {
-        body.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--danger);padding:20px;">❌ فشل تحميل التقرير</td></tr>';
+        body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--danger);padding:20px;">❌ فشل تحميل التقرير</td></tr>';
       }
     }
 
@@ -1720,7 +1720,7 @@
       document.getElementById('fr-btn-next').disabled = fullReportPage >= pages;
 
       if (!data.length) {
-        body.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px;">لا توجد نتائج</td></tr>';
+        body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:20px;">لا توجد نتائج</td></tr>';
         return;
       }
 
@@ -1743,6 +1743,14 @@
           action = `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">${bal}<button class="btn-done" onclick="markReportResolved(${i._ri}, true)">✅ تم</button></div>`;
         }
 
+        // الفرق = الرصيد الفعلي − رصيد النظام (+ زيادة / − عجز)
+        const _sq = Number(i.system_qty), _aq = Number(i.actual_qty);
+        const _hasDiff = i.system_qty != null && i.actual_qty != null && !isNaN(_sq) && !isNaN(_aq);
+        const _d = _hasDiff ? Math.round((_aq - _sq) * 100) / 100 : null;
+        const diffCell = !_hasDiff ? '<span style="color:var(--text-muted)">—</span>'
+          : _d === 0 ? '<span style="color:var(--text-muted)">0</span>'
+          : `<span style="font-weight:800;color:${_d > 0 ? 'var(--success,#16a34a)' : 'var(--danger,#dc2626)'}">${_d > 0 ? '+' : ''}${_d}</span>`;
+
         return `<tr>
           <td data-label="الكود">${i.code || '---'}</td>
           <td data-label="الاسم">${i.itm_name_ar || '---'}</td>
@@ -1750,6 +1758,7 @@
           <td data-label="الحالة" style="color:${isMatched ? 'var(--success,#16a34a)' : 'var(--danger,#dc2626)'};font-weight:700;">${isMatched ? '✅ مطابق' : '❌ غير مطابق'}</td>
           <td data-label="رصيد النظام">${i.system_qty ?? '—'}</td>
           <td data-label="الرصيد الفعلي">${i.actual_qty ?? '—'}</td>
+          <td data-label="الفرق">${diffCell}</td>
           <td data-label="بواسطة">${i.audited_by || '—'}</td>
           <td data-label="التاريخ" style="font-size:0.72rem;">${i.audited_at || ''}</td>
           <td data-label="الرصيد / مراجعة">${action}</td>
@@ -1812,6 +1821,7 @@
         'الحالة': (i.matched === true || i.matched === 'true') ? 'مطابق' : 'غير مطابق',
         'رصيد النظام': i.system_qty ?? '',
         'الرصيد الفعلي': i.actual_qty ?? '',
+        'الفرق': (i.system_qty != null && i.actual_qty != null && !isNaN(Number(i.system_qty)) && !isNaN(Number(i.actual_qty))) ? (Math.round((Number(i.actual_qty) - Number(i.system_qty)) * 100) / 100) : '',
         'بواسطة': i.audited_by || '',
         'التاريخ': i.audited_at ? new Date(i.audited_at).toLocaleString('ar-EG') : ''
       }));
