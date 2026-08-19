@@ -4,6 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>الجرد - صيدليات د. إبراهيم</title>
+  <link rel="manifest" href="inventory_manifest.json">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="الجرد">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -214,9 +220,64 @@
       .modal-actions { position:sticky; bottom:0; background:var(--surface,#fff); margin:auto -16px -16px; padding:12px 16px; padding-bottom:max(12px, env(safe-area-inset-bottom)); border-top:1px solid var(--border); }
       .report-table th, .report-table td { font-size:0.74rem; padding:5px 6px; }
     }
+
+    /* ============ قشرة تطبيق موبايل (شريط سفلي + شاشات) ============ */
+    .bottom-nav { display:none; }
+    /* كارت نتيجة الجرد بالكود */
+    .scan-card {
+      margin-top:12px; width:100%;
+      background:var(--surface,#fff); border:1px solid var(--border);
+      border-radius:16px; padding:18px; box-shadow:0 2px 12px rgba(0,0,0,0.06);
+    }
+    .scan-code { font-size:0.8rem; color:var(--text-muted); }
+    .scan-name-ar { font-size:1.1rem; font-weight:800; margin-top:4px; color:var(--text-primary); line-height:1.4; }
+    .scan-name-en { font-size:0.82rem; color:var(--text-secondary); direction:ltr; text-align:right; margin-top:2px; }
+    .scan-bal { font-size:0.95rem; margin-top:12px; color:var(--text-secondary); }
+    .scan-bal .balance-val { font-size:1.6rem; margin-right:4px; }
+    .scan-actions { display:flex; gap:10px; margin-top:16px; }
+    .scan-actions .scan-btn { flex:1; padding:14px; font-size:1.02rem; border-radius:12px; font-weight:800; }
+    .scan-mismatch-box { margin-top:14px; display:flex; gap:8px; }
+    .scan-mismatch-box input { flex:1; font-size:1.05rem; padding:12px; }
+
+    @media (max-width:640px) {
+      body { padding-bottom:76px; }
+      /* شريط عنوان تطبيق ثابت فوق */
+      .page-header { position:sticky; top:0; z-index:900; background:var(--surface,#fff);
+        padding-top:max(8px, env(safe-area-inset-top)); }
+      /* الشريط السفلي (تبويبات التطبيق) */
+      .bottom-nav {
+        display:flex; position:fixed; left:0; right:0; bottom:0; z-index:99999;
+        background:var(--surface,#fff); border-top:1px solid var(--border);
+        padding:6px 6px max(6px, env(safe-area-inset-bottom));
+        box-shadow:0 -2px 14px rgba(0,0,0,0.10);
+      }
+      .bnav-btn {
+        flex:1; display:flex; flex-direction:column; align-items:center; gap:2px;
+        background:transparent; border:none; padding:7px 4px; border-radius:12px;
+        font-family:inherit; font-size:0.72rem; font-weight:700; color:var(--text-muted); cursor:pointer;
+      }
+      .bnav-btn .bnav-ico { font-size:1.35rem; line-height:1; }
+      .bnav-btn.active { color:var(--primary); background:var(--surface-3); }
+
+      /* تبديل الشاشات حسب data-screen على body */
+      body[data-screen="scan"]    .m-items,  body[data-screen="scan"]    .m-reports { display:none !important; }
+      body[data-screen="items"]   .m-scan,   body[data-screen="items"]   .m-reports { display:none !important; }
+      body[data-screen="reports"] .m-scan,   body[data-screen="reports"] .m-items    { display:none !important; }
+
+      /* شاشة الجرد بالكود = مدخل كبير مريح */
+      .m-scan { flex-direction:column !important; align-items:stretch !important; }
+      .m-scan #balance-code-input { width:100% !important; font-size:1.15rem; padding:15px 12px !important; box-sizing:border-box; }
+      .m-scan #balance-lookup-btn { width:100%; justify-content:center; padding:15px; font-size:1.05rem; }
+      .m-scan #balance-result { width:100%; }
+
+      /* أزرار التقارير كبيرة عمودية */
+      .header-actions .m-reports.btn { width:100%; padding:14px; font-size:0.95rem; justify-content:center; }
+      .header-actions .m-reports { width:100%; box-sizing:border-box; }
+    }
+    @media (min-width:641px) { .bottom-nav { display:none !important; } }
   </style>
 </head>
-<body>
+<body data-screen="scan">
   <div class="nav-bar"></div>
   <div class="container">
     <div class="card">
@@ -226,7 +287,7 @@
           <span class="highlight" id="branch-tag"></span>
         </div>
         <div class="header-actions">
-          <div style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--surface-3);border-radius:20px;white-space:nowrap;">
+          <div class="m-reports" style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--surface-3);border-radius:20px;white-space:nowrap;">
             <span id="my-daily-count" style="font-size:0.82rem;font-weight:700;color:var(--primary);">
               📊 معدلك اليومي: <b>0</b>
             </span>
@@ -236,13 +297,13 @@
             <input type="date" id="my-rate-to" class="form-input" title="إلى تاريخ"
               onchange="loadMyDailyCount()" style="width:118px;font-size:0.72rem;padding:2px 4px;">
           </div>
-          <button class="btn btn-secondary" onclick="openFullReport()">
+          <button class="btn btn-secondary m-reports" onclick="openFullReport()">
             <i class="fas fa-list-check"></i> تقرير شامل
           </button>
-          <button class="btn btn-secondary" onclick="openDailyStats()">
+          <button class="btn btn-secondary m-reports" onclick="openDailyStats()">
             <i class="fas fa-users"></i> معدل موظف الجرد اليومي
           </button>
-          <button class="btn btn-secondary" onclick="openStaleReport()">
+          <button class="btn btn-secondary m-reports" onclick="openStaleReport()">
             <i class="fas fa-hourglass-half"></i> لم يُجرد منذ مدة
           </button>
           <div class="field-icon-wrap" id="branch-select-wrap" style="min-width:150px;display:none;">
@@ -254,7 +315,7 @@
               <option value="سيدى بشر">سيدى بشر</option>
             </select>
           </div>
-          <div class="field-icon-wrap" style="min-width:170px;">
+          <div class="field-icon-wrap m-items" style="min-width:170px;">
             <i class="fas fa-list field-icon"></i>
             <select id="category-select" class="form-select" onchange="onCategoryChange(this.value)" style="padding-right:34px;">
               <option value="erp" selected>🖥️ ERP</option>
@@ -264,13 +325,13 @@
               <option value="مرتجعات">🔄 مرتجعات</option>
             </select>
           </div>
-          <button class="btn btn-primary" onclick="loadCurrentTab()">
+          <button class="btn btn-primary m-items" onclick="loadCurrentTab()">
             <i class="fas fa-sync-alt"></i> تحديث
           </button>
         </div>
       </div>
 
-      <div class="top-bar">
+      <div class="top-bar m-items">
         <div class="field-icon-wrap" style="min-width:180px;flex:1;max-width:240px;">
           <i class="fas fa-search field-icon"></i>
           <input type="text" id="searchInput" class="form-input"
@@ -304,7 +365,7 @@
         </div>
       </div>
 
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;background:var(--surface-3);border-radius:10px;">
+      <div class="m-scan" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;background:var(--surface-3);border-radius:10px;">
         <span style="font-size:0.82rem;font-weight:700;color:var(--text-secondary);white-space:nowrap;">
           <i class="fas fa-magnifying-glass-dollar" style="color:var(--primary);"></i> بحث عن رصيد كود:
         </span>
@@ -317,7 +378,7 @@
         <div id="balance-result" style="font-size:0.85rem;"></div>
       </div>
 
-      <div class="table-wrap inv-table-wrap">
+      <div class="table-wrap inv-table-wrap m-items">
         <table id="inv-table">
           <thead id="inv-thead"></thead>
           <tbody id="table-body">
@@ -506,6 +567,19 @@
     </div>
   </div>
 
+  <!-- شريط تبويبات التطبيق (يظهر على الموبايل فقط) -->
+  <nav class="bottom-nav" id="bottom-nav">
+    <button class="bnav-btn active" data-screen="scan" onclick="showScreen('scan')">
+      <span class="bnav-ico">🔍</span><span>جرد بالكود</span>
+    </button>
+    <button class="bnav-btn" data-screen="items" onclick="showScreen('items')">
+      <span class="bnav-ico">📋</span><span>الأصناف</span>
+    </button>
+    <button class="bnav-btn" data-screen="reports" onclick="showScreen('reports')">
+      <span class="bnav-ico">📊</span><span>التقارير</span>
+    </button>
+  </nav>
+
 <script src="api.js?v=20260814"></script>
   <script>
     const BALANCE_URL = "https://agent.ebrahimhamdy.com/webhook/get_balance";
@@ -606,7 +680,20 @@
     let currentPage      = 1;
     let showPending      = true;
     let mismatchTargetId = null;
-    let mismatchSource   = 'old'; // 'old' | 'live' | 'stale'
+    let mismatchSource   = 'old'; // 'old' | 'live' | 'stale' | 'scan'
+    let scanItem         = null;  // الصنف المعروض حاليًا في شاشة «جرد بالكود»
+
+    // تبديل شاشات التطبيق على الموبايل (شريط سفلي)
+    function showScreen(name) {
+      document.body.setAttribute('data-screen', name);
+      document.querySelectorAll('.bnav-btn').forEach(b =>
+        b.classList.toggle('active', b.getAttribute('data-screen') === name));
+      window.scrollTo(0, 0);
+      if (name === 'scan') {
+        const i = document.getElementById('balance-code-input');
+        if (i && window.matchMedia('(max-width:640px)').matches) setTimeout(() => i.focus(), 200);
+      }
+    }
 
     checkAuth().then(async user => {
       activeUser = user;
@@ -1062,6 +1149,7 @@
       const btn   = document.getElementById('balance-lookup-btn');
       const code  = input.value.trim();
 
+      scanItem = null;
       if (!code) { resEl.innerHTML = '<span style="color:var(--warning);">اكتب الكود أولاً</span>'; return; }
 
       if (isAdmin && !userBranch) {
@@ -1073,22 +1161,98 @@
       resEl.innerHTML = '<span style="color:var(--text-muted);">⏳ جاري البحث...</span>';
 
       try {
-        const res  = await fetch(`${BALANCE_URL}?code=${encodeURIComponent(code)}&branch=${encodeURIComponent(userBranch)}`);
-        const raw  = await res.json();
-        const data = Array.isArray(raw) ? raw[0] : raw;
+        // الرصيد اللحظي من get_balance (عربي + رصيد حي)، والاسم الإنجليزي من item_lookup — بالتوازي
+        const [balRaw, look] = await Promise.all([
+          fetch(`${BALANCE_URL}?code=${encodeURIComponent(code)}&branch=${encodeURIComponent(userBranch)}`).then(r => r.json()).catch(() => null),
+          (typeof sbItemLookup === 'function' ? sbItemLookup(code, userBranch).catch(() => null) : Promise.resolve(null))
+        ]);
+        const bal = Array.isArray(balRaw) ? balRaw[0] : balRaw;
+        const lk  = Array.isArray(look)   ? look[0]   : look;
+        const found = (bal && bal.found) || (lk && lk.found);
 
-        if (data && data.found) {
-          resEl.innerHTML =
-            `<span style="font-weight:700;color:var(--text-primary);">${data.itm_name_ar || '---'}</span>` +
-            ` — الرصيد: <b class="balance-val">${data.balance}</b>`;
-        } else {
+        if (!found) {
           resEl.innerHTML = '<span style="color:var(--warning);">⚠️ الكود غير موجود</span>';
+        } else {
+          const nameAr = (bal && bal.itm_name_ar) || (lk && lk.itm_name_ar) || '---';
+          const nameEn = (lk && lk.itm_name_en) || '';
+          const sysQty = (bal && bal.balance != null) ? bal.balance
+                       : (lk && lk.balance != null ? lk.balance : 0);
+          scanItem = {
+            code, itm_name_ar: nameAr, itm_name_en: nameEn,
+            _systemQty: sysQty, item_type: (lk && lk.item_type) || 'erp',
+            branch: userBranch
+          };
+          renderScanCard();
         }
       } catch(e) {
         resEl.innerHTML = '<span style="color:var(--danger);">❌ فشل الاتصال</span>';
       }
 
       btn.disabled = false; btn.innerHTML = '<i class="fas fa-search"></i> بحث';
+    }
+
+    // كارت نتيجة الجرد بالكود + زر مطابق/غير مطابق
+    function renderScanCard() {
+      const resEl = document.getElementById('balance-result');
+      if (!scanItem) { resEl.innerHTML = ''; return; }
+      const it = scanItem;
+      const canEdit = (userRole === 'inventory' || userRole === 'admin');
+      resEl.innerHTML = `
+        <div class="scan-card">
+          <div class="scan-code">كود: <b>${it.code}</b></div>
+          <div class="scan-name-ar">${it.itm_name_ar || '---'}</div>
+          ${it.itm_name_en ? `<div class="scan-name-en">${it.itm_name_en}</div>` : ''}
+          <div class="scan-bal">الرصيد الحالي: <b class="balance-val">${it._systemQty}</b></div>
+          ${canEdit ? `
+          <div class="scan-actions">
+            <button class="btn-done scan-btn" onclick="submitScanMatched()">✅ مطابق</button>
+            <button class="btn-mismatch scan-btn" onclick="openMismatchModal(scanItem.code,'scan')">❌ غير مطابق</button>
+          </div>` : `
+          <div style="margin-top:12px;font-size:0.78rem;color:var(--text-muted);">🔒 التسجيل متاح لموظف الجرد فقط</div>`}
+        </div>`;
+    }
+
+    async function submitScanMatched() {
+      if (!scanItem) return;
+      const ok = await jardGuardedSubmit({
+        branch:      scanItem.branch || userBranch,
+        category:    scanItem.item_type || 'erp',
+        code:        scanItem.code,
+        itm_name_ar: scanItem.itm_name_ar,
+        itm_name_en: scanItem.itm_name_en,
+        matched:     true,
+        system_qty:  scanItem._systemQty,
+        actual_qty:  scanItem._systemQty,
+        audited_by:  employeeName
+      });
+      if (ok) { showToast(); afterScanSaved(); loadMyDailyCount(); }
+      else { alert('⚠️ فشل الحفظ، يرجى المحاولة مجدداً'); }
+    }
+
+    async function submitScanMismatchResult(actualVal) {
+      if (!scanItem) return;
+      const ok = await jardGuardedSubmit({
+        branch:      scanItem.branch || userBranch,
+        category:    scanItem.item_type || 'erp',
+        code:        scanItem.code,
+        itm_name_ar: scanItem.itm_name_ar,
+        itm_name_en: scanItem.itm_name_en,
+        matched:     false,
+        system_qty:  scanItem._systemQty,
+        actual_qty:  Number(actualVal),
+        audited_by:  employeeName
+      });
+      if (ok) { showToast(); afterScanSaved(); loadMyDailyCount(); }
+      else { alert('⚠️ فشل الحفظ، يرجى المحاولة مجدداً'); }
+    }
+
+    // بعد تسجيل صنف: امسح واستعد للكود اللي بعده فورًا (تدفّق سريع)
+    function afterScanSaved() {
+      const input = document.getElementById('balance-code-input');
+      const resEl = document.getElementById('balance-result');
+      if (resEl) resEl.innerHTML = '<span style="color:var(--success,#16a34a);font-weight:700;">✅ تم تسجيل الجرد</span>';
+      scanItem = null;
+      if (input) { input.value = ''; input.focus(); }
     }
 
     async function fetchBalance(id, code, btn) {
@@ -1149,9 +1313,11 @@
 
       const item = mismatchSource === 'stale'
         ? currentStaleData.find(x => x.code === idOrCode)
-        : mismatchSource === 'live'
-          ? findLiveItemById(idOrCode)
-          : rawData.find(x => String(x.id) === String(idOrCode));
+        : mismatchSource === 'scan'
+          ? scanItem
+          : mismatchSource === 'live'
+            ? findLiveItemById(idOrCode)
+            : rawData.find(x => String(x.id) === String(idOrCode));
 
       const sys  = mismatchSource === 'old' ? item?.system_balance : item?._systemQty;
       const info = document.getElementById('mismatch-item-info');
@@ -1190,6 +1356,8 @@
 
       if (mismatchSource === 'stale') {
         await submitStaleMismatchResult(id, val);
+      } else if (mismatchSource === 'scan') {
+        await submitScanMismatchResult(val);
       } else if (mismatchSource === 'live') {
         await submitLiveMismatchResult(id, val);
       } else {
