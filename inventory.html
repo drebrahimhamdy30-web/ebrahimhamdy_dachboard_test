@@ -243,6 +243,7 @@
     .reports-rate { background:var(--surface-3); border-radius:12px; padding:12px 14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:0.9rem; }
     .reports-btns { display:flex; flex-direction:column; gap:10px; }
     .reports-btns .btn { justify-content:flex-start; padding:14px 16px; font-size:0.95rem; }
+    .fr-inline { border-top:1px solid var(--border); padding-top:14px; margin-top:4px; }
     @media (min-width:641px) { .reports-btns { flex-direction:row; flex-wrap:wrap; } .reports-btns .btn { flex:0 0 auto; } }
     /* فلتر حالة التقرير الشامل */
     .fr-status { display:flex; gap:6px; flex-wrap:wrap; }
@@ -388,9 +389,64 @@
           <input type="date" id="my-rate-to" class="form-input" title="إلى تاريخ" onchange="loadMyDailyCount()" style="width:140px;">
         </div>
         <div class="reports-btns">
-          <button class="btn btn-secondary" onclick="openFullReport()"><i class="fas fa-list-check"></i> تقرير شامل</button>
           <button class="btn btn-secondary" onclick="openDailyStats()"><i class="fas fa-users"></i> معدل موظف الجرد اليومي</button>
           <button class="btn btn-secondary" onclick="openStaleReport()"><i class="fas fa-hourglass-half"></i> لم يُجرد منذ مدة</button>
+        </div>
+
+        <!-- التقرير الشامل (inline داخل التبويب) -->
+        <div class="fr-inline">
+          <div style="font-weight:800;font-size:1rem;margin-bottom:10px;">📋 تقرير شامل لكل عمليات الجرد</div>
+          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;background:var(--surface-3);border-radius:10px;">
+            <div>
+              <label class="modal-label" style="margin-bottom:4px;">الفئة</label>
+              <select id="full-report-category" class="form-select" style="width:150px;">
+                <option value="">كل الفئات</option>
+                <option value="تلاجه">🧊 تلاجة</option>
+                <option value="غوالى">💊 غوالي</option>
+                <option value="fastmove">⚡ سريع</option>
+                <option value="مرتجعات">🔄 مرتجعات</option>
+                <option value="erp">🖥️ ERP</option>
+              </select>
+            </div>
+            <div>
+              <label class="modal-label" style="margin-bottom:4px;">من تاريخ</label>
+              <input type="date" id="full-report-from" class="form-input" style="width:150px;">
+            </div>
+            <div>
+              <label class="modal-label" style="margin-bottom:4px;">إلى تاريخ</label>
+              <input type="date" id="full-report-to" class="form-input" style="width:150px;">
+            </div>
+            <button class="btn btn-primary" onclick="loadFullReport()"><i class="fas fa-search"></i> بحث</button>
+            <button class="btn btn-secondary" onclick="exportFullReportToExcel()"><i class="fas fa-file-excel"></i> تصدير إكسل</button>
+          </div>
+
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+            <span style="font-size:0.8rem;font-weight:700;color:var(--text-secondary);">الحالة:</span>
+            <div class="fr-status">
+              <button class="fr-chip active" id="frc-all"      onclick="setFullReportStatus('all',this)">الكل</button>
+              <button class="fr-chip"        id="frc-matched"  onclick="setFullReportStatus('matched',this)">✅ مطابق</button>
+              <button class="fr-chip"        id="frc-mismatch" onclick="setFullReportStatus('mismatch',this)">❌ غير مطابق</button>
+            </div>
+          </div>
+
+          <div id="full-report-summary" style="font-size:0.82rem;color:var(--text-muted);margin-bottom:10px;"></div>
+
+          <div class="table-wrap">
+            <table class="report-table">
+              <thead>
+                <tr><th>الكود</th><th>الاسم</th><th>الفئة</th><th>الحالة</th><th>رصيد النظام</th><th>الرصيد الفعلي</th><th>بواسطة</th><th>التاريخ</th><th>الرصيد الحالي / جرد</th></tr>
+              </thead>
+              <tbody id="full-report-body">
+                <tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="pagination" style="justify-content:center;margin-top:12px;">
+            <button class="page-btn" id="fr-btn-prev" onclick="changeFullReportPage(-1)"><i class="fas fa-chevron-right"></i></button>
+            <span id="fr-page-info" style="font-size:0.8rem;color:var(--text-secondary);white-space:nowrap;">1 / 1</span>
+            <button class="page-btn" id="fr-btn-next" onclick="changeFullReportPage(1)"><i class="fas fa-chevron-left"></i></button>
+          </div>
         </div>
       </div>
 
@@ -578,72 +634,6 @@
     </div>
   </div>
 
-  <!-- مودال: التقرير الشامل لكل عمليات الجرد (كل الفئات مع بعض) -->
-  <div id="full-report-modal" class="modal-overlay" style="display:none;">
-    <div class="modal-box report-box">
-      <div class="modal-title">📋 تقرير شامل لكل عمليات الجرد</div>
-
-      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;padding:10px 12px;background:var(--surface-3);border-radius:10px;">
-        <div>
-          <label class="modal-label" style="margin-bottom:4px;">الفئة</label>
-          <select id="full-report-category" class="form-select" style="width:150px;">
-            <option value="">كل الفئات</option>
-            <option value="تلاجه">🧊 تلاجة</option>
-            <option value="غوالى">💊 غوالي</option>
-            <option value="fastmove">⚡ سريع</option>
-            <option value="مرتجعات">🔄 مرتجعات</option>
-            <option value="erp">🖥️ ERP</option>
-          </select>
-        </div>
-        <div>
-          <label class="modal-label" style="margin-bottom:4px;">من تاريخ</label>
-          <input type="date" id="full-report-from" class="form-input" style="width:150px;">
-        </div>
-        <div>
-          <label class="modal-label" style="margin-bottom:4px;">إلى تاريخ</label>
-          <input type="date" id="full-report-to" class="form-input" style="width:150px;">
-        </div>
-        <button class="btn btn-primary" onclick="loadFullReport()">
-          <i class="fas fa-search"></i> بحث
-        </button>
-      </div>
-
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-        <span style="font-size:0.8rem;font-weight:700;color:var(--text-secondary);">الحالة:</span>
-        <div class="fr-status">
-          <button class="fr-chip active" id="frc-all"      onclick="setFullReportStatus('all',this)">الكل</button>
-          <button class="fr-chip"        id="frc-matched"  onclick="setFullReportStatus('matched',this)">✅ مطابق</button>
-          <button class="fr-chip"        id="frc-mismatch" onclick="setFullReportStatus('mismatch',this)">❌ غير مطابق</button>
-        </div>
-      </div>
-
-      <div id="full-report-summary" style="font-size:0.82rem;color:var(--text-muted);margin-bottom:10px;"></div>
-
-      <div class="table-wrap">
-        <table class="report-table">
-          <thead>
-            <tr><th>الكود</th><th>الاسم</th><th>الفئة</th><th>الحالة</th><th>رصيد النظام</th><th>الرصيد الفعلي</th><th>بواسطة</th><th>التاريخ</th><th>جرد</th></tr>
-          </thead>
-          <tbody id="full-report-body">
-            <tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px;">اضغط بحث لعرض النتائج</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="pagination" style="justify-content:center;margin-top:12px;">
-        <button class="page-btn" id="fr-btn-prev" onclick="changeFullReportPage(-1)"><i class="fas fa-chevron-right"></i></button>
-        <span id="fr-page-info" style="font-size:0.8rem;color:var(--text-secondary);white-space:nowrap;">1 / 1</span>
-        <button class="page-btn" id="fr-btn-next" onclick="changeFullReportPage(1)"><i class="fas fa-chevron-left"></i></button>
-      </div>
-
-      <div class="modal-actions">
-        <button class="btn btn-secondary" onclick="exportFullReportToExcel()">
-          <i class="fas fa-file-excel"></i> تصدير إكسل
-        </button>
-        <button class="btn btn-primary" onclick="closeFullReport()">إغلاق</button>
-      </div>
-    </div>
-  </div>
 
   <!-- القائمة الجانبية ☰ (تظهر على الموبايل فقط) -->
   <div class="drawer-overlay" id="drawer-overlay" onclick="if(event.target===this)closeDrawer()">
@@ -789,6 +779,8 @@
         const i = document.getElementById('balance-code-input');
         if (i && window.matchMedia('(max-width:640px)').matches) setTimeout(() => i.focus(), 200);
       }
+      // تبويب التقارير: حمّل التقرير الشامل inline أول مرة تدخله
+      if (name === 'reports' && typeof loadFullReport === 'function' && !currentFullReportData.length) loadFullReport();
     }
 
     // ===== القائمة الجانبية ☰ =====
@@ -1641,14 +1633,12 @@
       'مرتجعات': '🔄 مرتجعات', 'erp': '🖥️ ERP'
     };
 
+    // التقرير الشامل بقى inline داخل تبويب التقارير — «فتحه» = روح للتبويب وحمّله
     function openFullReport() {
-      openModalFullScreen(document.getElementById('full-report-modal'));
+      showScreen('reports');
       if (!currentFullReportData.length) loadFullReport();
     }
-
-    function closeFullReport() {
-      closeModalFullScreen(document.getElementById('full-report-modal'));
-    }
+    function closeFullReport() { /* لم يعد مودالاً */ }
 
     let fullReportPage = 1;
     const FULL_REPORT_PAGE_SIZE = 20;
@@ -1733,7 +1723,7 @@
         } else if (!canEdit) {
           action = '—';
         } else if (!i._balanceFetched) {
-          action = `<button class="btn-balance" onclick="fetchFullReportBalance(${i._ri})"><i class="fas fa-database"></i> جرد</button>`;
+          action = `<button class="btn-balance" onclick="fetchFullReportBalance(${i._ri})"><i class="fas fa-database"></i> الرصيد</button>`;
         } else {
           action = `<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">
               <span class="balance-val" style="font-size:0.85rem;">${i._systemQty}</span>
