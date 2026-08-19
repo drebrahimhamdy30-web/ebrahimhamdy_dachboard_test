@@ -434,7 +434,7 @@
           <div class="table-wrap">
             <table class="report-table">
               <thead>
-                <tr><th>الكود</th><th>الاسم</th><th>الفئة</th><th>الحالة</th><th>رصيد النظام</th><th>الرصيد الفعلي</th><th>بواسطة</th><th>التاريخ</th><th>الرصيد الحالي / جرد</th></tr>
+                <tr><th>الكود</th><th>الاسم</th><th>الفئة</th><th>الحالة</th><th>رصيد النظام</th><th>الرصيد الفعلي</th><th>بواسطة</th><th>التاريخ</th><th>الرصيد / مراجعة</th></tr>
               </thead>
               <tbody id="full-report-body">
                 <tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>
@@ -1628,6 +1628,37 @@
     const FULL_REPORT_PAGE_SIZE = 20;
     let fullReportStatus = 'all'; // 'all' | 'matched' | 'mismatch'
 
+    // مصدر التقرير الشامل = Supabase مباشرة (بالـid + حالة المراجعة)
+    async function sbFullReport(branch, category, from, to) {
+      try {
+        const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_jard_full_report`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + SB_ANON_API },
+          body: JSON.stringify({ p_branch: branch || '', p_category: category || '', p_from: from || '', p_to: to || '' })
+        });
+        if (!r.ok) return [];
+        const d = await r.json();
+        return Array.isArray(d) ? d : [];
+      } catch (e) { return []; }
+    }
+    async function sbResolveJard(id, by, resolved) {
+      try {
+        const r = await fetch(`${SB_URL_API}/rest/v1/rpc/resolve_jard_audit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + SB_ANON_API },
+          body: JSON.stringify({ p_id: id, p_by: by || null, p_resolved: resolved !== false })
+        });
+        return r.ok;
+      } catch (e) { return false; }
+    }
+    async function markReportResolved(ri, resolved) {
+      const row = currentFullReportData[ri];
+      if (!row || row.id == null) return;
+      const ok = await sbResolveJard(row.id, employeeName, resolved);
+      if (ok) { row._resolved = resolved; row.resolved_by = resolved ? employeeName : null; renderFullReport(); }
+      else { alert('⚠️ فشل الحفظ، حاول تاني'); }
+    }
+
     async function loadFullReport() {
       const category = document.getElementById('full-report-category').value;
       const dateFrom = document.getElementById('full-report-from').value;
@@ -1638,14 +1669,14 @@
       fullReportPage = 1;
 
       try {
-        const items = await fetchFullJardReport({ branch: userBranch, category, dateFrom, dateTo });
+        const items = await sbFullReport(userBranch, category, dateFrom, dateTo);
         currentFullReportData = (items || []).map((it, ix) => ({
           ...it,
           _ri: ix,
           _matched: (it.matched === true || it.matched === 'true'),
+          _resolved: (it.resolved === true || it.resolved === 'true'),
           _balanceFetched: false,
-          _systemQty: null,
-          _rejarded: null
+          _systemQty: null
         }));
         renderFullReport();
       } catch(e) {
@@ -1698,22 +1729,18 @@
 
       body.innerHTML = pageItems.map(i => {
         const isMatched = i._matched;
-        let dateStr = '';
-        try { dateStr = new Date(i.audited_at).toLocaleString('ar-EG'); } catch(e) {}
 
         let action;
-        if (i._rejarded) {
-          action = `<span style="font-size:0.75rem;font-weight:700;color:${i._rejarded === 'matched' ? 'var(--success,#16a34a)' : 'var(--danger,#dc2626)'};">✅ اتجرد (${i._rejarded === 'matched' ? 'مطابق' : 'غير مطابق'})</span>`;
+        if (i._resolved) {
+          action = `<span style="font-size:0.75rem;font-weight:700;color:var(--success,#16a34a);">✅ تمّت المراجعة${i.resolved_by ? ' — ' + i.resolved_by : ''}</span>`
+                 + (canEdit ? ` <button class="btn-skip" style="padding:3px 9px;font-size:0.7rem;" onclick="markReportResolved(${i._ri}, false)">تراجع</button>` : '');
         } else if (!canEdit) {
-          action = '—';
-        } else if (!i._balanceFetched) {
-          action = `<button class="btn-balance" onclick="fetchFullReportBalance(${i._ri})"><i class="fas fa-database"></i> الرصيد</button>`;
+          action = i._balanceFetched ? `<span class="balance-val">${i._systemQty}</span>` : '—';
         } else {
-          action = `<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">
-              <span class="balance-val" style="font-size:0.9rem;">${i._systemQty}</span>
-              <button class="btn-done" onclick="submitFullReportMatched(${i._ri})">✅ مطابق</button>
-              <button class="btn-mismatch" onclick="openMismatchModal(${i._ri},'report')">❌ غير مطابق</button>
-            </div>`;
+          const bal = i._balanceFetched
+            ? `<span class="balance-val" style="font-size:0.9rem;">${i._systemQty}</span>`
+            : `<button class="btn-balance" onclick="fetchFullReportBalance(${i._ri})"><i class="fas fa-database"></i> الرصيد</button>`;
+          action = `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">${bal}<button class="btn-done" onclick="markReportResolved(${i._ri}, true)">✅ تم</button></div>`;
         }
 
         return `<tr>
@@ -1724,8 +1751,8 @@
           <td data-label="رصيد النظام">${i.system_qty ?? '—'}</td>
           <td data-label="الرصيد الفعلي">${i.actual_qty ?? '—'}</td>
           <td data-label="بواسطة">${i.audited_by || '—'}</td>
-          <td data-label="التاريخ" style="font-size:0.72rem;">${dateStr}</td>
-          <td data-label="جرد">${action}</td>
+          <td data-label="التاريخ" style="font-size:0.72rem;">${i.audited_at || ''}</td>
+          <td data-label="الرصيد / مراجعة">${action}</td>
         </tr>`;
       }).join('');
     }
