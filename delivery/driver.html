@@ -1568,18 +1568,28 @@ async function confirmFail(){
   if(!reason){alert('اختر سبب التعذر');return;}
   const note=document.getElementById('fail-note').value.trim();
   const o=Object.values(tripOrders).flat().find(x=>x.id===id);
+  // موقع الطيار وقت التعذّر — لتوثيق إنه فعلاً راح للعميل وحساب المسافة (لا يمنع التسجيل لو تعذّر)
+  let floc = await getMyLocation();
+  if(!floc){
+    if(confirm('تعذّر تحديد موقعك (مطلوب لتوثيق محاولة التوصيل).\n\nشغّل الـGPS واضغط "موافق" للمحاولة تاني، أو "إلغاء" للتسجيل بدون موقع.')){
+      floc = await getMyLocation();
+    }
+  }
   load(true);
   const now=new Date().toISOString();
   // الأوردر يفضل في الرحلة مع الطيار — بس حالته تبقى "متعذر"
   // مش بنشيله من trip_orders ولا بنرجّع driver_id=null
-  await db.from('orders').update({
+  const upd={
     status:'failed',
     postpone_reason:reason,
     driver_notes:note||null,
     attempt_count:(o?.attempt_count||0)+1,
     updated_at:now
-  }).eq('id',id);
-  await addOrderLog(id,'order_postponed',{reason,kept_in_trip:true});
+  };
+  if(floc){ upd.fail_lat=floc.lat; upd.fail_lng=floc.lng; }
+  await db.from('orders').update(upd).eq('id',id);
+  await addOrderLog(id,'order_postponed',{reason,kept_in_trip:true,
+    ...(floc?{fail_loc:'https://www.google.com/maps?q='+floc.lat+','+floc.lng, gps_accuracy_m:Math.round(floc.acc||0)}:{})});
   closeModal('failModal');await loadAll();load(false);
 }
 async function retryFailed(orderId){
