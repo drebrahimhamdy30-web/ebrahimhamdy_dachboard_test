@@ -938,14 +938,19 @@ async function loadDriverPerfTab(from, to) {
 
   // 1) الرحلات المكتملة لكل طيار في الفترة
   const trips = await fetchAllPaged(() => {
-    let q = db.from('trips').select('driver_id,completed_at,branch_id').eq('status', 'completed');
+    let q = db.from('trips').select('driver_id,completed_at,branch_id,return_distance_meters').eq('status', 'completed');
     if (branchId) q = q.eq('branch_id', branchId);
     if (from) q = q.gte('completed_at', from + 'T00:00:00');
     if (to) q = q.lte('completed_at', to + 'T23:59:59');
     return q;
   });
   const tripsByDrv = {};
-  (trips || []).forEach(t => { if (t.driver_id) tripsByDrv[t.driver_id] = (tripsByDrv[t.driver_id] || 0) + 1; });
+  const returnKmByDrv = {};   // مسافة الرجوع للفرع لكل طيار (آخر عميل → الفرع)
+  (trips || []).forEach(t => {
+    if (!t.driver_id) return;
+    tripsByDrv[t.driver_id] = (tripsByDrv[t.driver_id] || 0) + 1;
+    returnKmByDrv[t.driver_id] = (returnKmByDrv[t.driver_id] || 0) + (Number(t.return_distance_meters) || 0) / 1000;
+  });
 
   // 2) ساعات الحضور لكل طيار (نفس منطق fair-score من جلسات الحضور)
   let hoursByDrv = {};
@@ -969,11 +974,12 @@ async function loadDriverPerfTab(from, to) {
   driverPerfRows = Object.values(m).map(r => {
     const hours = hoursByDrv[r.driver_id] || 0;
     const trips = tripsByDrv[r.driver_id] || 0;
+    const km = r.km + (returnKmByDrv[r.driver_id] || 0);   // مسافة التوصيل + مسافة الرجوع للفرع
     return {
-      ...r, trips, hours,
+      ...r, km, trips, hours,
       oph: hours > 0 ? r.orders / hours : 0,   // طلبات/ساعة
       tph: hours > 0 ? trips / hours : 0,       // رحلات/ساعة
-      kph: hours > 0 ? r.km / hours : 0,        // كم/ساعة
+      kph: hours > 0 ? km / hours : 0,          // كم/ساعة
       pct: r.rated ? Math.round(r['متأخر'] / r.rated * 100) : 0
     };
   });
