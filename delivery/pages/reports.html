@@ -974,10 +974,18 @@ async function loadDriverPerfTab(from, to) {
     if (o.perf_rating) { x[o.perf_rating] = (x[o.perf_rating] || 0) + 1; x.rated++; }
   });
 
+  // مسافة الرِجل المتعذّرة (الطيار راح للعميل وما لقاهوش) — تُضاف لمسافة الطيار مهما كانت حالة الطلب الآن
+  const failKmByDrv = {};
+  reportOrders.forEach(o => {
+    if (o.driver_id && o.fail_distance_meters) {
+      failKmByDrv[o.driver_id] = (failKmByDrv[o.driver_id] || 0) + (Number(o.fail_distance_meters) || 0) / 1000;
+    }
+  });
+
   driverPerfRows = Object.values(m).map(r => {
     const hours = hoursByDrv[r.driver_id] || 0;
     const trips = tripsByDrv[r.driver_id] || 0;
-    const km = r.km + (returnKmByDrv[r.driver_id] || 0);   // مسافة التوصيل + مسافة الرجوع للفرع
+    const km = r.km + (returnKmByDrv[r.driver_id] || 0) + (failKmByDrv[r.driver_id] || 0);   // توصيل + رجوع + محاولات متعذّرة
     return {
       ...r, km, trips, hours,
       oph: hours > 0 ? r.orders / hours : 0,   // طلبات/ساعة
