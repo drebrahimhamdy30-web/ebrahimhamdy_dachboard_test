@@ -6,8 +6,9 @@
   <title>أسعار وخصومات المخازن - Phalix</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
-    .sp-filters { display:grid; grid-template-columns:1fr 190px auto auto; gap:10px; align-items:end; margin-bottom:14px; }
+    .sp-filters { display:grid; grid-template-columns:1fr 150px 140px auto auto; gap:10px; align-items:end; margin-bottom:14px; }
     @media(max-width:760px){ .sp-filters{ grid-template-columns:1fr; } }
     .sp-field label { font-size:0.72rem;font-weight:700;color:var(--text-secondary);margin-bottom:3px;display:block; }
     .sp-checks { display:flex;gap:14px;align-items:center;height:38px; }
@@ -41,6 +42,18 @@
     .sp-close { background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--text-muted); }
     .sp-best { background:#dcfce7 !important; }
     .sp-best td { font-weight:800; }
+    .sp-av-yes { color:#15803d;font-weight:800; }
+    .sp-av-no { color:#b91c1c;font-weight:800; }
+    /* رفع الشيت */
+    .sp-up-btn { background:var(--primary);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-family:inherit;font-size:0.8rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px; }
+    .sp-up-grid { display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;margin-bottom:12px; }
+    @media(max-width:640px){ .sp-up-grid{ grid-template-columns:1fr; } }
+    .sp-up-map { display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px; }
+    @media(max-width:640px){ .sp-up-map{ grid-template-columns:1fr; } }
+    .sp-up-note { font-size:0.74rem;color:var(--text-muted);line-height:1.6;margin-bottom:10px; }
+    .sp-up-sum { background:var(--surface-2);border-radius:8px;padding:10px 12px;font-size:0.8rem;font-weight:700;margin:10px 0; }
+    .sp-msg-ok { color:#15803d;font-weight:800; }
+    .sp-msg-err { color:var(--danger);font-weight:800; }
   </style>
 </head>
 <body>
@@ -48,7 +61,10 @@
     <div class="card">
       <div class="page-header">
         <div class="page-title"><i class="fas fa-tags"></i> أسعار وخصومات المخازن</div>
-        <div id="sp-count" style="font-size:0.8rem;color:var(--text-muted);"></div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div id="sp-count" style="font-size:0.8rem;color:var(--text-muted);"></div>
+          <button class="sp-up-btn" id="sp-open-up" style="display:none;" onclick="openUpload()"><i class="fas fa-file-arrow-up"></i> رفع شيت مخزن</button>
+        </div>
       </div>
 
       <div class="sp-filters">
@@ -66,6 +82,14 @@
             <option value="هيلث">هيلث</option>
             <option value="عابدين">عابدين</option>
             <option value="ماك">ماك</option>
+          </select>
+        </div>
+        <div class="sp-field">
+          <label>الإتاحة</label>
+          <select id="sp-avail" class="form-select">
+            <option value="a" selected>المتاح فقط</option>
+            <option value="u">غير المتاح</option>
+            <option value="">الكل</option>
           </select>
         </div>
         <div class="sp-field">
@@ -90,15 +114,66 @@
               <th>المخزن</th>
               <th>السعر</th>
               <th>الخصم %</th>
+              <th>الإتاحة</th>
               <th>آخر تحديث</th>
             </tr>
           </thead>
           <tbody id="sp-body">
-            <tr><td colspan="6" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr>
+            <tr><td colspan="7" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr>
           </tbody>
         </table>
       </div>
       <div id="sp-pager"></div>
+    </div>
+  </div>
+
+  <!-- modal رفع شيت مخزن -->
+  <div class="sp-modal-bg" id="sp-up-bg" onclick="if(event.target===this)closeUpload()">
+    <div class="sp-modal" style="max-width:760px">
+      <div class="sp-modal-hd">
+        <div style="font-weight:800;font-size:0.9rem;"><i class="fas fa-file-arrow-up"></i> رفع شيت مخزن</div>
+        <button class="sp-close" onclick="closeUpload()">✕</button>
+      </div>
+      <div class="sp-modal-bd">
+        <div class="sp-up-note">
+          اختر المخزن ثم ملف الشيت (Excel / CSV). بعد التحليل أكّد أعمدة <b>الاسم</b> و<b>السعر</b> و<b>الخصم</b>.<br>
+          الأصناف الموجودة في الشيت يتحدّث سعرها وخصمها وتُعلَّم <b>متاحة</b>، والجديدة تُضاف، وبقية أصناف المخزن تُعلَّم <b>غير متاحة</b>.
+        </div>
+        <div class="sp-up-grid">
+          <div class="sp-field">
+            <label>المخزن</label>
+            <select id="up-store" class="form-select">
+              <option value="">— اختر المخزن —</option>
+              <option value="الابرار">الابرار</option>
+              <option value="نيوفارما">نيوفارما</option>
+              <option value="تارجت">تارجت</option>
+              <option value="هيلث">هيلث</option>
+              <option value="عابدين">عابدين</option>
+              <option value="ماك">ماك</option>
+            </select>
+          </div>
+          <div class="sp-field">
+            <label>ملف الشيت</label>
+            <input type="file" id="up-file" class="form-input" accept=".xlsx,.xls,.csv">
+          </div>
+          <button class="btn" id="up-analyze" onclick="analyzeSheet()"><i class="fas fa-table-list"></i> تحليل الأعمدة</button>
+        </div>
+
+        <div id="up-map" style="display:none">
+          <div class="sp-up-map">
+            <div class="sp-field"><label>عمود الاسم</label><select id="map-name" class="form-select" onchange="renderUpPreview()"></select></div>
+            <div class="sp-field"><label>عمود السعر</label><select id="map-price" class="form-select" onchange="renderUpPreview()"></select></div>
+            <div class="sp-field"><label>عمود الخصم %</label><select id="map-disc" class="form-select" onchange="renderUpPreview()"></select></div>
+          </div>
+          <div class="sp-wrap" style="max-height:260px"><div id="up-preview"></div></div>
+          <div class="sp-up-sum" id="up-summary"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
+            <button class="btn btn-secondary" onclick="closeUpload()">إلغاء</button>
+            <button class="btn btn-primary" id="up-confirm" onclick="confirmUpload()"><i class="fas fa-cloud-arrow-up"></i> تأكيد ورفع</button>
+          </div>
+        </div>
+        <div id="up-msg" style="margin-top:10px;"></div>
+      </div>
     </div>
   </div>
 
@@ -138,12 +213,15 @@
       const store = document.getElementById('sp-store').value;
       const wc = document.getElementById('sp-withcode').checked;
       const nc = document.getElementById('sp-nocodef').checked;
-      let url = SB_URL_API + '/rest/v1/store_item_prices?select=item_name,code,store,price,discount_perc,updated_at'
+      const av = document.getElementById('sp-avail').value;
+      let url = SB_URL_API + '/rest/v1/store_item_prices?select=item_name,code,store,price,discount_perc,available,updated_at'
         + '&order=item_name.asc&limit=' + SP_SIZE + '&offset=' + offset;
       if (q) { const e = encodeURIComponent(q); url += '&or=(item_name.ilike.*' + e + '*,code.ilike.*' + e + '*)'; }
       if (store) url += '&store=eq.' + encodeURIComponent(store);
       if (wc && !nc) url += '&code=not.is.null';        // بكود فقط
       else if (!wc && nc) url += '&code=is.null';        // بدون كود فقط
+      if (av === 'a') url += '&available=eq.true';       // المتاح فقط (افتراضي)
+      else if (av === 'u') url += '&available=eq.false'; // غير المتاح
       return url;
     }
 
@@ -156,9 +234,10 @@
         const cr = res.headers.get('content-range'); // "0-49/12345"
         spTotal = cr && cr.includes('/') ? parseInt(cr.split('/')[1]) : rows.length;
         document.getElementById('sp-count').textContent = spTotal.toLocaleString('ar-EG') + ' صنف';
-        if (!rows.length) { body.innerHTML = '<tr><td colspan="6" style="padding:24px;color:var(--text-muted);">لا توجد نتائج</td></tr>'; renderPager(); return; }
+        if (!rows.length) { body.innerHTML = '<tr><td colspan="7" style="padding:24px;color:var(--text-muted);">لا توجد نتائج</td></tr>'; renderPager(); return; }
         body.innerHTML = rows.map(r => {
           const codeCell = r.code ? '<span class="sp-code">' + r.code + '</span>' : '<span class="sp-nocode">—</span>';
+          const avCell = r.available ? '<span class="sp-av-yes">متاح</span>' : '<span class="sp-av-no">غير متاح</span>';
           const onclick = r.code ? 'openCompare(\'' + String(r.code).replace(/'/g, "\\'") + '\',\'' + String(r.item_name).replace(/'/g, "\\'").replace(/"/g,'&quot;') + '\')' : '';
           return '<tr ' + (r.code ? 'onclick="' + onclick + '" title="اضغط لمقارنة المخازن بالكود"' : 'style="cursor:default"') + '>'
             + '<td style="text-align:right;font-weight:600;">' + (r.item_name || '—') + '</td>'
@@ -166,12 +245,13 @@
             + '<td>' + (r.store || '—') + '</td>'
             + '<td>' + num(r.price) + '</td>'
             + '<td class="sp-disc">' + num(r.discount_perc) + '%</td>'
+            + '<td>' + avCell + '</td>'
             + '<td class="sp-date">' + fmtDate(r.updated_at) + '</td>'
             + '</tr>';
         }).join('');
         renderPager();
       } catch (e) {
-        body.innerHTML = '<tr><td colspan="6" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>';
+        body.innerHTML = '<tr><td colspan="7" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>';
         console.error(e);
       } finally { spBusy = false; }
     }
@@ -225,15 +305,138 @@
     }
     function closeCompare() { document.getElementById('sp-modal-bg').classList.remove('open'); }
 
+    // ===== رفع شيت مخزن =====
+    let upRows = [], upHeaders = [];   // upRows = صفوف البيانات (بدون الهيدر)
+
+    // تحويل قيمة خلية لرقم (أرقام عربية/فواصل آلاف/علامة %)
+    function toNum(v) {
+      if (v === null || v === undefined) return null;
+      if (typeof v === 'number') return isFinite(v) ? v : null;
+      let s = String(v).trim();
+      if (!s) return null;
+      s = s.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))
+           .replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d));
+      s = s.replace(/[^\d.\-]/g, '');   // شيل %، مسافات، فواصل آلاف
+      if (s === '' || s === '-' || s === '.') return null;
+      const n = parseFloat(s);
+      return isFinite(n) ? n : null;
+    }
+    const guess = (headers, keys) => {
+      for (let i = 0; i < headers.length; i++) {
+        const h = String(headers[i] || '').toLowerCase();
+        if (keys.some(k => h.includes(k))) return i;
+      }
+      return -1;
+    };
+
+    function openUpload() {
+      document.getElementById('up-msg').innerHTML = '';
+      document.getElementById('up-map').style.display = 'none';
+      document.getElementById('up-file').value = '';
+      upRows = []; upHeaders = [];
+      document.getElementById('sp-up-bg').classList.add('open');
+    }
+    function closeUpload() { document.getElementById('sp-up-bg').classList.remove('open'); }
+
+    function analyzeSheet() {
+      const store = document.getElementById('up-store').value;
+      const file = document.getElementById('up-file').files[0];
+      const msg = document.getElementById('up-msg');
+      msg.innerHTML = '';
+      if (!store) { msg.innerHTML = '<span class="sp-msg-err">اختر المخزن أولًا</span>'; return; }
+      if (!file) { msg.innerHTML = '<span class="sp-msg-err">اختر ملف الشيت</span>'; return; }
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const wb = XLSX.read(e.target.result, { type: 'array' });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
+          if (!aoa.length) { msg.innerHTML = '<span class="sp-msg-err">الملف فارغ</span>'; return; }
+          upHeaders = (aoa[0] || []).map(h => String(h).trim());
+          upRows = aoa.slice(1).filter(r => r.some(c => String(c).trim() !== ''));
+          if (!upRows.length) { msg.innerHTML = '<span class="sp-msg-err">لا توجد صفوف بيانات</span>'; return; }
+          // املأ قوائم اختيار الأعمدة
+          const opts = upHeaders.map((h, i) => '<option value="' + i + '">' + (h || ('عمود ' + (i + 1))) + '</option>').join('');
+          const nSel = document.getElementById('map-name'), pSel = document.getElementById('map-price'), dSel = document.getElementById('map-disc');
+          nSel.innerHTML = opts; pSel.innerHTML = opts; dSel.innerHTML = opts;
+          nSel.value = Math.max(0, guess(upHeaders, ['اسم', 'صنف', 'name', 'item']));
+          pSel.value = Math.max(0, guess(upHeaders, ['سعر', 'price']));
+          dSel.value = Math.max(0, guess(upHeaders, ['خصم', 'disc', '%']));
+          document.getElementById('up-map').style.display = 'block';
+          renderUpPreview();
+        } catch (err) { msg.innerHTML = '<span class="sp-msg-err">تعذّر قراءة الملف: ' + err.message + '</span>'; }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function currentMapping() {
+      return {
+        n: parseInt(document.getElementById('map-name').value),
+        p: parseInt(document.getElementById('map-price').value),
+        d: parseInt(document.getElementById('map-disc').value)
+      };
+    }
+    function buildUpRecords() {
+      const m = currentMapping();
+      return upRows.map(r => ({
+        name: String(r[m.n] == null ? '' : r[m.n]).trim(),
+        price: toNum(r[m.p]),
+        discount: toNum(r[m.d])
+      })).filter(x => x.name !== '');
+    }
+    function renderUpPreview() {
+      const recs = buildUpRecords();
+      const head = '<table class="sp-table" style="min-width:auto"><thead><tr><th style="text-align:right;">الاسم</th><th>السعر</th><th>الخصم %</th></tr></thead><tbody>';
+      const rowsHtml = recs.slice(0, 8).map(x =>
+        '<tr><td style="text-align:right;">' + x.name + '</td><td>' + num(x.price) + '</td><td>' + num(x.discount) + '%</td></tr>').join('');
+      document.getElementById('up-preview').innerHTML = head + rowsHtml + '</tbody></table>';
+      document.getElementById('up-summary').textContent =
+        'عدد الأصناف الصالحة للرفع: ' + recs.length.toLocaleString('ar-EG') + ' (تُعرض أول 8 كمعاينة)';
+    }
+
+    async function confirmUpload() {
+      const store = document.getElementById('up-store').value;
+      const recs = buildUpRecords();
+      const msg = document.getElementById('up-msg');
+      if (!store) { msg.innerHTML = '<span class="sp-msg-err">اختر المخزن</span>'; return; }
+      if (!recs.length) { msg.innerHTML = '<span class="sp-msg-err">لا توجد أصناف صالحة</span>'; return; }
+      const btn = document.getElementById('up-confirm');
+      btn.disabled = true;
+      msg.innerHTML = '<span style="color:var(--text-muted)">جارٍ الرفع… (' + recs.length.toLocaleString('ar-EG') + ' صنف)</span>';
+      try {
+        const res = await fetch(SB_URL_API + '/rest/v1/rpc/upload_store_sheet', {
+          method: 'POST',
+          headers: { ...H, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ p_store: store, p_rows: recs })
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status + ' — ' + (await res.text()));
+        const out = await res.json();
+        msg.innerHTML = '<span class="sp-msg-ok">تم ✓ — ' + (out.affected || 0).toLocaleString('ar-EG')
+          + ' صنف (محدّث/مضاف) في «' + store + '». إجمالي أصناف المخزن ' + (out.store_total || 0).toLocaleString('ar-EG')
+          + ' منها ' + (out.now_unavailable || 0).toLocaleString('ar-EG') + ' غير متاحة الآن.</span>';
+        document.getElementById('up-map').style.display = 'none';
+        spPage = 1; loadPage();
+      } catch (e) {
+        msg.innerHTML = '<span class="sp-msg-err">فشل الرفع: ' + e.message + '</span>';
+      } finally { btn.disabled = false; }
+    }
+
+    // إظهار زر الرفع لأصحاب الصلاحية (أدمن/مدير) — الشاشة أصلًا لا تُفتح إلا لهم عبر القشرة
+    (function () {
+      const role = (localStorage.getItem('userRole') || '').toLowerCase();
+      if (role === 'admin' || role === 'manager') document.getElementById('sp-open-up').style.display = 'inline-flex';
+    })();
+
     // ===== أحداث =====
     document.getElementById('sp-search').addEventListener('input', () => {
       clearTimeout(spTimer); spTimer = setTimeout(() => { spPage = 1; loadPage(); }, 300);
     });
     document.getElementById('sp-store').addEventListener('change', () => { spPage = 1; loadPage(); });
+    document.getElementById('sp-avail').addEventListener('change', () => { spPage = 1; loadPage(); });
     document.getElementById('sp-withcode').addEventListener('change', () => { spPage = 1; loadPage(); });
     document.getElementById('sp-nocodef').addEventListener('change', () => { spPage = 1; loadPage(); });
     document.getElementById('sp-refresh').addEventListener('click', () => { spPage = 1; loadPage(); });
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeCompare(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeCompare(); closeUpload(); } });
 
     loadPage();
   </script>
