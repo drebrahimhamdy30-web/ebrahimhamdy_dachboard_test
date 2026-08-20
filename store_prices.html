@@ -136,7 +136,7 @@
       </div>
       <div class="sp-modal-bd">
         <div class="sp-up-note">
-          اختر المخزن ثم ملف الشيت (Excel / CSV). بعد التحليل أكّد أعمدة <b>الاسم</b> و<b>السعر</b> و<b>الخصم</b>.<br>
+          اختر المخزن ثم ملف الشيت (Excel / CSV). النظام <b>يفتكر تعيين أعمدة كل مخزن</b> — أول مرة تحدّد أي عمود = الاسم/السعر/الخصم ويتحفظ، والمرات الجاية يتطبّق تلقائيًّا. لو المخزن غيّر أعمدته عدّل التعيين ويُحفظ الجديد.<br>
           الأصناف الموجودة في الشيت يتحدّث سعرها وخصمها وتُعلَّم <b>متاحة</b>، والجديدة تُضاف، وبقية أصناف المخزن تُعلَّم <b>غير متاحة</b>.
         </div>
         <div class="sp-up-grid">
@@ -160,6 +160,7 @@
         </div>
 
         <div id="up-map" style="display:none">
+          <div id="up-maphint" class="sp-up-note" style="margin:0 0 8px"></div>
           <div class="sp-up-map">
             <div class="sp-field"><label>عمود الاسم</label><select id="map-name" class="form-select" onchange="renderUpPreview()"></select></div>
             <div class="sp-field"><label>عمود السعر</label><select id="map-price" class="form-select" onchange="renderUpPreview()"></select></div>
@@ -348,6 +349,30 @@
     }
     function closeUpload() { document.getElementById('sp-up-bg').classList.remove('open'); }
 
+    // تعيين الأعمدة المحفوظ لكل مخزن (نحفظ أسماء الأعمدة لا أرقامها — يصمد لو ترتيب الأعمدة اتغيّر)
+    async function loadMapping(store) {
+      try {
+        const r = await fetch(SB_URL_API + '/rest/v1/store_sheet_mappings?store=eq.' + encodeURIComponent(store)
+          + '&select=name_header,price_header,discount_header', { headers: H });
+        const rows = await r.json();
+        return rows && rows[0] ? rows[0] : null;
+      } catch (e) { return null; }
+    }
+    async function saveMapping(store, nameH, priceH, discH) {
+      try {
+        await fetch(SB_URL_API + '/rest/v1/store_sheet_mappings?on_conflict=store', {
+          method: 'POST',
+          headers: { ...H, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify({ store, name_header: nameH, price_header: priceH, discount_header: discH, updated_at: new Date().toISOString() })
+        });
+      } catch (e) { /* الحفظ اختياري — لا يوقف الرفع */ }
+    }
+    const findHdr = (txt) => {
+      if (txt == null) return -1;
+      const t = String(txt).trim().toLowerCase();
+      return upHeaders.findIndex(h => String(h).trim().toLowerCase() === t);
+    };
+
     function analyzeSheet() {
       const store = document.getElementById('up-store').value;
       const file = document.getElementById('up-file').files[0];
@@ -356,7 +381,7 @@
       if (!store) { msg.innerHTML = '<span class="sp-msg-err">اختر المخزن أولًا</span>'; return; }
       if (!file) { msg.innerHTML = '<span class="sp-msg-err">اختر ملف الشيت</span>'; return; }
       const reader = new FileReader();
-      reader.onload = e => {
+      reader.onload = async e => {
         try {
           const wb = XLSX.read(e.target.result, { type: 'array' });
           const ws = wb.Sheets[wb.SheetNames[0]];
@@ -365,11 +390,27 @@
           upHeaders = (aoa[0] || []).map(h => String(h).trim());
           upRows = aoa.slice(1).filter(r => r.some(c => String(c).trim() !== ''));
           if (!upRows.length) { msg.innerHTML = '<span class="sp-msg-err">لا توجد صفوف بيانات</span>'; return; }
-          // املأ قوائم اختيار الأعمدة
+          // املأ قوائم اختيار الأعمدة بعناوين الشيت كما هي
           const opts = upHeaders.map((h, i) => '<option value="' + i + '">' + (h || ('عمود ' + (i + 1))) + '</option>').join('');
           const nSel = document.getElementById('map-name'), pSel = document.getElementById('map-price'), dSel = document.getElementById('map-disc');
           nSel.innerHTML = opts; pSel.innerHTML = opts; dSel.innerHTML = opts;
-          const mp = autoMap(upHeaders);
+          // طبّق التعيين المحفوظ للمخزن إن وُجد، وإلا خمّن
+          const saved = await loadMapping(store);
+          const hint = document.getElementById('up-maphint');
+          let mp;
+          if (saved) {
+            const ni = findHdr(saved.name_header), pi = findHdr(saved.price_header), di = findHdr(saved.discount_header);
+            if (ni >= 0 && pi >= 0 && di >= 0) {
+              mp = { n: ni, p: pi, d: di };
+              hint.innerHTML = '✅ تم تطبيق آخر تعيين محفوظ لهذا المخزن.';
+            } else {
+              mp = autoMap(upHeaders);
+              hint.innerHTML = '⚠️ أعمدة الشيت مختلفة عن آخر تعيين محفوظ — راجِع الأعمدة، وسيُحفظ التعيين الجديد عند الرفع.';
+            }
+          } else {
+            mp = autoMap(upHeaders);
+            hint.innerHTML = 'ℹ️ لا يوجد تعيين محفوظ لهذا المخزن — اضبط الأعمدة، وسيُحفظ تلقائيًّا عند الرفع للمرات القادمة.';
+          }
           nSel.value = mp.n; pSel.value = mp.p; dSel.value = mp.d;
           document.getElementById('up-map').style.display = 'block';
           renderUpPreview();
@@ -420,6 +461,9 @@
         });
         if (!res.ok) throw new Error('HTTP ' + res.status + ' — ' + (await res.text()));
         const out = await res.json();
+        // احفظ تعيين أعمدة هذا المخزن للمرات القادمة
+        const m = currentMapping();
+        await saveMapping(store, upHeaders[m.n], upHeaders[m.p], upHeaders[m.d]);
         msg.innerHTML = '<span class="sp-msg-ok">تم ✓ — ' + (out.affected || 0).toLocaleString('ar-EG')
           + ' صنف (محدّث/مضاف) في «' + store + '». إجمالي أصناف المخزن ' + (out.store_total || 0).toLocaleString('ar-EG')
           + ' منها ' + (out.now_unavailable || 0).toLocaleString('ar-EG') + ' غير متاحة الآن.</span>';
