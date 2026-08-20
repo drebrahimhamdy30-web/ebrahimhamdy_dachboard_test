@@ -54,6 +54,11 @@
     .sp-up-sum { background:var(--surface-2);border-radius:8px;padding:10px 12px;font-size:0.8rem;font-weight:700;margin:10px 0; }
     .sp-msg-ok { color:#15803d;font-weight:800; }
     .sp-msg-err { color:var(--danger);font-weight:800; }
+    /* إدارة المخازن */
+    .st-row { display:grid;grid-template-columns:1fr auto auto auto;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--surface-3); }
+    .st-active { display:flex;align-items:center;gap:5px;font-size:0.75rem;font-weight:700;white-space:nowrap;cursor:pointer; }
+    .st-active input { width:16px;height:16px;accent-color:var(--primary);cursor:pointer; }
+    .st-del { border:none;background:none;color:var(--danger);cursor:pointer;font-size:0.95rem;padding:4px 6px; }
   </style>
 </head>
 <body>
@@ -63,6 +68,7 @@
         <div class="page-title"><i class="fas fa-tags"></i> أسعار وخصومات المخازن</div>
         <div style="display:flex;align-items:center;gap:12px;">
           <div id="sp-count" style="font-size:0.8rem;color:var(--text-muted);"></div>
+          <button class="sp-up-btn" id="sp-open-st" style="display:none;background:var(--surface-3);color:var(--text-primary);" onclick="openStores()"><i class="fas fa-warehouse"></i> إدارة المخازن</button>
           <button class="sp-up-btn" id="sp-open-up" style="display:none;" onclick="openUpload()"><i class="fas fa-file-arrow-up"></i> رفع شيت مخزن</button>
         </div>
       </div>
@@ -76,12 +82,6 @@
           <label>المخزن</label>
           <select id="sp-store" class="form-select">
             <option value="">كل المخازن</option>
-            <option value="الابرار">الابرار</option>
-            <option value="نيوفارما">نيوفارما</option>
-            <option value="تارجت">تارجت</option>
-            <option value="هيلث">هيلث</option>
-            <option value="عابدين">عابدين</option>
-            <option value="ماك">ماك</option>
           </select>
         </div>
         <div class="sp-field">
@@ -127,6 +127,25 @@
     </div>
   </div>
 
+  <!-- modal إدارة المخازن -->
+  <div class="sp-modal-bg" id="sp-st-bg" onclick="if(event.target===this)closeStores()">
+    <div class="sp-modal" style="max-width:540px">
+      <div class="sp-modal-hd">
+        <div style="font-weight:800;font-size:0.9rem;"><i class="fas fa-warehouse"></i> إدارة المخازن</div>
+        <button class="sp-close" onclick="closeStores()">✕</button>
+      </div>
+      <div class="sp-modal-bd">
+        <div class="sp-up-note">أضف مخزنًا جديدًا، أو عدّل اسم مخزن (يُحدَّث تلقائيًّا في كل الأصناف والتعيينات المرتبطة به). «نشط» يظهر في القوائم؛ إلغاؤه يخفيه دون حذف بياناته.</div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+          <input id="st-new" class="form-input" placeholder="اسم مخزن جديد..." style="flex:1">
+          <button class="btn btn-primary" onclick="addStore()"><i class="fas fa-plus"></i> إضافة</button>
+        </div>
+        <div id="st-list"></div>
+        <div id="st-msg" style="margin-top:10px;"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- modal رفع شيت مخزن -->
   <div class="sp-modal-bg" id="sp-up-bg" onclick="if(event.target===this)closeUpload()">
     <div class="sp-modal" style="max-width:760px">
@@ -144,12 +163,6 @@
             <label>المخزن</label>
             <select id="up-store" class="form-select">
               <option value="">— اختر المخزن —</option>
-              <option value="الابرار">الابرار</option>
-              <option value="نيوفارما">نيوفارما</option>
-              <option value="تارجت">تارجت</option>
-              <option value="هيلث">هيلث</option>
-              <option value="عابدين">عابدين</option>
-              <option value="ماك">ماك</option>
             </select>
           </div>
           <div class="sp-field">
@@ -193,6 +206,7 @@
   <script>
     const SP_SIZE = 50;
     let spPage = 1, spTotal = 0, spBusy = false, spTimer = null;
+    let STORES = [];   // قائمة المخازن المُدارة
 
     const H = { 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + SB_ANON_API };
     const num = v => (v === null || v === undefined || v === '') ? '—' : (Math.round(Number(v) * 100) / 100);
@@ -474,10 +488,117 @@
       } finally { btn.disabled = false; }
     }
 
-    // إظهار زر الرفع لأصحاب الصلاحية (أدمن/مدير) — الشاشة أصلًا لا تُفتح إلا لهم عبر القشرة
+    // ===== قائمة المخازن المُدارة =====
+    async function loadStores() {
+      try {
+        const r = await fetch(SB_URL_API + '/rest/v1/stores?select=name,active,order_by&order=order_by.asc,name.asc', { headers: H });
+        STORES = await r.json();
+        if (!Array.isArray(STORES)) STORES = [];
+      } catch (e) { STORES = []; }
+      const active = STORES.filter(s => s.active);
+      const esc = s => String(s).replace(/</g, '&lt;').replace(/"/g, '&quot;');
+      const opts = active.map(s => '<option value="' + esc(s.name) + '">' + esc(s.name) + '</option>').join('');
+      const spSel = document.getElementById('sp-store');
+      const upSel = document.getElementById('up-store');
+      const keep = spSel.value;
+      spSel.innerHTML = '<option value="">كل المخازن</option>' + opts;
+      spSel.value = keep;
+      upSel.innerHTML = '<option value="">— اختر المخزن —</option>' + opts;
+    }
+
+    function openStores() { document.getElementById('st-msg').innerHTML = ''; document.getElementById('st-new').value = ''; renderStoreList(); document.getElementById('sp-st-bg').classList.add('open'); }
+    function closeStores() { document.getElementById('sp-st-bg').classList.remove('open'); }
+
+    function renderStoreList() {
+      const el = document.getElementById('st-list');
+      if (!STORES.length) { el.innerHTML = '<div style="color:var(--text-muted)">لا توجد مخازن — أضف واحدًا بالأعلى.</div>'; return; }
+      const esc = s => String(s).replace(/"/g, '&quot;');
+      el.innerHTML = STORES.map((s, i) =>
+        '<div class="st-row">'
+        + '<input class="form-input" id="st-name-' + i + '" value="' + esc(s.name) + '">'
+        + '<label class="st-active"><input type="checkbox" ' + (s.active ? 'checked' : '') + ' onchange="toggleStore(' + i + ', this.checked)"> نشط</label>'
+        + '<button class="btn btn-secondary" onclick="renameStore(' + i + ')">حفظ الاسم</button>'
+        + '<button class="st-del" title="حذف" onclick="deleteStore(' + i + ')"><i class="fas fa-trash"></i></button>'
+        + '</div>').join('');
+    }
+
+    async function refreshAfterStoreChange() { await loadStores(); renderStoreList(); spPage = 1; loadPage(); }
+
+    async function addStore() {
+      const name = (document.getElementById('st-new').value || '').trim();
+      const msg = document.getElementById('st-msg');
+      if (!name) { msg.innerHTML = '<span class="sp-msg-err">اكتب اسم المخزن</span>'; return; }
+      if (STORES.some(s => s.name === name)) { msg.innerHTML = '<span class="sp-msg-err">المخزن موجود بالفعل</span>'; return; }
+      try {
+        const res = await fetch(SB_URL_API + '/rest/v1/stores', {
+          method: 'POST',
+          headers: { ...H, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ name, order_by: 100, active: true })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        document.getElementById('st-new').value = '';
+        msg.innerHTML = '<span class="sp-msg-ok">تمت الإضافة ✓</span>';
+        await refreshAfterStoreChange();
+      } catch (e) { msg.innerHTML = '<span class="sp-msg-err">فشل الإضافة: ' + e.message + '</span>'; }
+    }
+
+    async function renameStore(i) {
+      const oldName = STORES[i].name;
+      const newName = (document.getElementById('st-name-' + i).value || '').trim();
+      const msg = document.getElementById('st-msg');
+      if (!newName) { msg.innerHTML = '<span class="sp-msg-err">الاسم لا يصح أن يكون فارغًا</span>'; return; }
+      if (newName === oldName) { msg.innerHTML = '<span style="color:var(--text-muted)">لا تغيير</span>'; return; }
+      try {
+        const res = await fetch(SB_URL_API + '/rest/v1/rpc/store_rename', {
+          method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ p_old: oldName, p_new: newName })
+        });
+        if (!res.ok) { const t = await res.text(); throw new Error(t.includes('name_exists') ? 'الاسم مستخدم بالفعل' : t); }
+        const out = await res.json();
+        msg.innerHTML = '<span class="sp-msg-ok">تم تعديل الاسم ✓ (' + (out.items_moved || 0).toLocaleString('ar-EG') + ' صنف مرتبط)</span>';
+        await refreshAfterStoreChange();
+      } catch (e) { msg.innerHTML = '<span class="sp-msg-err">فشل التعديل: ' + e.message + '</span>'; }
+    }
+
+    async function toggleStore(i, active) {
+      const name = STORES[i].name;
+      const msg = document.getElementById('st-msg');
+      try {
+        const res = await fetch(SB_URL_API + '/rest/v1/stores?name=eq.' + encodeURIComponent(name), {
+          method: 'PATCH', headers: { ...H, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ active })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        await refreshAfterStoreChange();
+      } catch (e) { msg.innerHTML = '<span class="sp-msg-err">تعذّر التغيير: ' + e.message + '</span>'; }
+    }
+
+    async function deleteStore(i) {
+      const name = STORES[i].name;
+      const msg = document.getElementById('st-msg');
+      if (!confirm('حذف المخزن «' + name + '»؟ (يُسمح فقط إن لم يكن له أصناف)')) return;
+      try {
+        const res = await fetch(SB_URL_API + '/rest/v1/rpc/store_delete', {
+          method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ p_name: name })
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          const mHas = t.match(/has_items:(\d+)/);
+          throw new Error(mHas ? ('لا يمكن الحذف — للمخزن ' + Number(mHas[1]).toLocaleString('ar-EG') + ' صنف. عطّله بدل الحذف.') : t);
+        }
+        msg.innerHTML = '<span class="sp-msg-ok">تم الحذف ✓</span>';
+        await refreshAfterStoreChange();
+      } catch (e) { msg.innerHTML = '<span class="sp-msg-err">' + e.message + '</span>'; }
+    }
+
+    // إظهار أزرار الإدارة/الرفع لأصحاب الصلاحية (أدمن/مدير) — الشاشة أصلًا لا تُفتح إلا لهم عبر القشرة
     (function () {
       const role = (localStorage.getItem('userRole') || '').toLowerCase();
-      if (role === 'admin' || role === 'manager') document.getElementById('sp-open-up').style.display = 'inline-flex';
+      if (role === 'admin' || role === 'manager') {
+        document.getElementById('sp-open-up').style.display = 'inline-flex';
+        document.getElementById('sp-open-st').style.display = 'inline-flex';
+      }
     })();
 
     // ===== أحداث =====
@@ -489,8 +610,9 @@
     document.getElementById('sp-withcode').addEventListener('change', () => { spPage = 1; loadPage(); });
     document.getElementById('sp-nocodef').addEventListener('change', () => { spPage = 1; loadPage(); });
     document.getElementById('sp-refresh').addEventListener('click', () => { spPage = 1; loadPage(); });
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeCompare(); closeUpload(); } });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeCompare(); closeUpload(); closeStores(); } });
 
+    loadStores();
     loadPage();
   </script>
 </body>
