@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>طلبيات الأدوية - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    .mo-tabs { display:flex;gap:6px;border-bottom:2px solid var(--surface-3);margin-bottom:14px;flex-wrap:wrap; }
+    .mo-tab { border:none;background:none;padding:9px 16px;font-family:inherit;font-size:0.85rem;font-weight:700;color:var(--text-muted);cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px; }
+    .mo-tab.active { color:var(--primary);border-bottom-color:var(--primary); }
+    .cr-filters { display:grid; grid-template-columns:1fr auto auto; gap:10px; align-items:end; margin-bottom:12px; }
+    @media(max-width:760px){ .cr-filters{ grid-template-columns:1fr; } }
+    .cr-field label { font-size:0.72rem;font-weight:700;color:var(--text-secondary);margin-bottom:3px;display:block; }
+    .cr-meta { font-size:0.72rem;color:var(--text-muted);margin-bottom:8px; }
+    .cr-table { width:100%;border-collapse:collapse;min-width:680px; }
+    .cr-wrap { overflow:auto; max-height:calc(100vh - 300px); }
+    .cr-table th { background:var(--primary);color:#fff;padding:9px 8px;font-size:0.72rem;font-weight:700;text-align:center;white-space:nowrap;position:sticky;top:0;z-index:5; }
+    .cr-table td { padding:7px 8px;font-size:0.8rem;border-bottom:1px solid var(--surface-3);text-align:center; }
+    .cr-table tr:hover td { background:var(--surface-2);cursor:pointer; }
+    .cr-code { color:var(--primary);font-weight:700; }
+    .cr-v { font-weight:800; }
+    .cr-act { font-size:0.72rem;color:var(--text-muted); }
+    .cr-up-btn { background:var(--primary);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-family:inherit;font-size:0.8rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px; }
+    /* الصفحات */
+    .cr-pager { display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:12px;padding-top:10px;border-top:1px solid var(--surface-3); }
+    .cr-pg-info { font-size:0.72rem;color:var(--text-muted);font-weight:600; }
+    .cr-pg-nav { display:flex;gap:4px;flex-wrap:wrap; }
+    .cr-pg { min-width:30px;height:30px;padding:0 8px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-secondary);border-radius:8px;font-family:inherit;font-size:0.78rem;font-weight:700;cursor:pointer; }
+    .cr-pg:hover:not(:disabled){ border-color:var(--primary);color:var(--primary); }
+    .cr-pg.act { background:var(--primary);color:#fff;border-color:var(--primary); }
+    .cr-pg:disabled { opacity:0.4;cursor:default; }
+    .cr-pg-dots { padding:0 2px;color:var(--text-muted); }
+    /* إدارة الشهور */
+    .mo-months { background:var(--surface-2);border:1px solid var(--surface-3);border-radius:10px;padding:12px;margin-bottom:14px; }
+    .mo-mhead { display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px; }
+    .mo-mtitle { font-weight:800;font-size:0.85rem; }
+    .mo-chips { display:flex;flex-wrap:wrap;gap:6px; }
+    .mo-chip { display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:4px 10px;font-size:0.74rem;font-weight:700; }
+    .mo-chip .del { color:var(--danger);cursor:pointer;font-weight:800; }
+    /* modal */
+    .cr-modal-bg { display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:9999;align-items:center;justify-content:center;padding:16px; }
+    .cr-modal-bg.open { display:flex; }
+    .cr-modal { background:var(--surface);border-radius:var(--radius-lg);max-width:760px;width:100%;max-height:88vh;overflow:auto;box-shadow:var(--shadow-lg); }
+    .cr-modal-hd { padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;position:sticky;top:0;background:var(--surface);z-index:2; }
+    .cr-modal-bd { padding:12px 16px; }
+    .cr-close { background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--text-muted); }
+    .cr-sec { font-weight:800;font-size:0.82rem;margin:14px 0 6px; }
+    .cr-mini { width:100%;border-collapse:collapse;min-width:auto; }
+    .cr-mini th { background:var(--surface-3);color:var(--text-primary);padding:6px;font-size:0.7rem;font-weight:700;text-align:center;white-space:nowrap; }
+    .cr-mini td { padding:5px 6px;font-size:0.76rem;border-bottom:1px solid var(--surface-3);text-align:center; }
+    .cr-note { background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;font-size:0.78rem;font-weight:700;margin-bottom:8px; }
+    .cr-final { color:#15803d;font-weight:800; }
+    .up-grid { display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;margin-bottom:12px; }
+    @media(max-width:640px){ .up-grid{ grid-template-columns:1fr; } }
+    .up-map { display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:10px; }
+    @media(max-width:640px){ .up-map{ grid-template-columns:1fr 1fr; } }
+    .msg-ok { color:#15803d;font-weight:800; } .msg-err { color:var(--danger);font-weight:800; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="page-header">
+        <div class="page-title"><i class="fas fa-capsules"></i> طلبيات الأدوية</div>
+        <div id="cr-count" style="font-size:0.8rem;color:var(--text-muted);"></div>
+      </div>
+
+      <div class="mo-tabs">
+        <button class="mo-tab active" id="tabbtn-rate" onclick="showTab('rate')">معدل الاستهلاك</button>
+        <button class="mo-tab" id="tabbtn-orders" onclick="showTab('orders')">الطلبيات</button>
+      </div>
+
+      <!-- ===== تبويب معدل الاستهلاك ===== -->
+      <div id="tab-rate">
+        <div class="cr-meta" id="cr-meta"></div>
+
+        <!-- إدارة الشهور (أدمن/مدير) -->
+        <div class="mo-months" id="mo-months" style="display:none">
+          <div class="mo-mhead">
+            <div class="mo-mtitle"><i class="fas fa-calendar-days"></i> إدارة شهور المبيعات</div>
+            <div>
+              <button class="cr-up-btn" onclick="openMonthUp()"><i class="fas fa-file-arrow-up"></i> إضافة/استبدال شهر</button>
+              <button class="cr-up-btn" style="background:var(--surface-3);color:var(--text-primary)" onclick="refreshCalc()"><i class="fas fa-rotate"></i> إعادة حساب</button>
+            </div>
+          </div>
+          <div class="mo-chips" id="mo-chips"></div>
+          <div style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;">أي إضافة/حذف لشهر يعيد حساب معدل الاستهلاك تلقائيًّا.</div>
+        </div>
+
+        <div class="cr-filters">
+          <div class="cr-field">
+            <label>بحث (اسم الصنف أو الكود)</label>
+            <input type="text" id="cr-search" class="form-input" placeholder="اكتب اسم الصنف أو كوده...">
+          </div>
+          <div class="cr-field">
+            <label>الفرع</label>
+            <select id="cr-branch" class="form-select">
+              <option value="">كل الفروع</option>
+              <option value="mamora">المعمورة</option>
+              <option value="san">سان ستيفانو</option>
+              <option value="bishr">سيدى بشر</option>
+            </select>
+          </div>
+          <div class="cr-field">
+            <label>&nbsp;</label>
+            <button class="btn" id="cr-reload"><i class="fas fa-sync-alt"></i> تحديث العرض</button>
+          </div>
+        </div>
+
+        <div class="cr-wrap">
+          <table class="cr-table">
+            <thead>
+              <tr>
+                <th style="text-align:right;">الصنف</th>
+                <th>الكود</th>
+                <th>المعمورة</th>
+                <th>سان ستيفانو</th>
+                <th>سيدى بشر</th>
+                <th>شهور نشطة (م/س/ب)</th>
+              </tr>
+            </thead>
+            <tbody id="cr-body">
+              <tr><td colspan="6" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div id="cr-pager"></div>
+      </div>
+
+      <!-- ===== تبويب الطلبيات ===== -->
+      <div id="tab-orders" style="display:none">
+        <div class="empty" style="padding:30px;text-align:center;color:var(--text-muted);line-height:1.9">
+          <i class="fas fa-cart-plus" style="font-size:1.6rem;opacity:.5"></i><br>
+          تبويب الطلبيات — قريبًا.<br>
+          هيعتمد على <b>معدل الاستهلاك المحسوب في التبويب الأول</b>: الكمية المطلوبة = (المستهدف − الرصيد الحالي) لكل فرع، ثم الطلب من <b>المخزن الأقل تكلفة</b>.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- modal تفاصيل الاشتقاق -->
+  <div class="cr-modal-bg" id="cr-modal-bg" onclick="if(event.target===this)closeDetail()">
+    <div class="cr-modal">
+      <div class="cr-modal-hd">
+        <div style="font-weight:800;font-size:0.9rem;" id="cr-modal-title">تفاصيل معدل الاستهلاك</div>
+        <button class="cr-close" onclick="closeDetail()">✕</button>
+      </div>
+      <div class="cr-modal-bd" id="cr-modal-body"></div>
+    </div>
+  </div>
+
+  <!-- modal رفع شهر -->
+  <div class="cr-modal-bg" id="mu-bg" onclick="if(event.target===this)closeMonthUp()">
+    <div class="cr-modal" style="max-width:820px">
+      <div class="cr-modal-hd">
+        <div style="font-weight:800;font-size:0.9rem;"><i class="fas fa-file-arrow-up"></i> إضافة/استبدال مبيعات شهر</div>
+        <button class="cr-close" onclick="closeMonthUp()">✕</button>
+      </div>
+      <div class="cr-modal-bd">
+        <div style="font-size:0.74rem;color:var(--text-muted);margin-bottom:10px">اختر الشهر وملف مبيعاته. لو الشهر موجود <b>هيتم استبداله بالكامل</b>. بعد الرفع يعاد حساب معدل الاستهلاك تلقائيًّا. أعمدة الفروع: «مبيعات الصيدلية» = المعمورة · «حمدي 2» = سان · «حمدي 3» = بشر.</div>
+        <div class="up-grid">
+          <div class="cr-field"><label>الشهر</label><input type="month" id="mu-month" class="form-input"></div>
+          <div class="cr-field"><label>ملف مبيعات الشهر</label><input type="file" id="mu-file" class="form-input" accept=".xlsx,.xls,.csv"></div>
+          <button class="btn" onclick="analyzeMonth()"><i class="fas fa-table-list"></i> تحليل</button>
+        </div>
+        <div id="mu-map" style="display:none">
+          <div class="up-map">
+            <div class="cr-field"><label>الكود</label><select id="m-code" class="form-select" onchange="renderMuPreview()"></select></div>
+            <div class="cr-field"><label>الاسم</label><select id="m-name" class="form-select" onchange="renderMuPreview()"></select></div>
+            <div class="cr-field"><label>المعمورة</label><select id="m-mam" class="form-select" onchange="renderMuPreview()"></select></div>
+            <div class="cr-field"><label>سان</label><select id="m-san" class="form-select" onchange="renderMuPreview()"></select></div>
+            <div class="cr-field"><label>بشر</label><select id="m-bishr" class="form-select" onchange="renderMuPreview()"></select></div>
+          </div>
+          <div class="cr-wrap" style="max-height:240px"><div id="mu-preview"></div></div>
+          <div style="font-weight:700;font-size:0.8rem;margin:8px 0" id="mu-sum"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn btn-secondary" onclick="closeMonthUp()">إلغاء</button>
+            <button class="btn btn-primary" id="mu-confirm" onclick="confirmMonth()"><i class="fas fa-cloud-arrow-up"></i> تأكيد ورفع + إعادة حساب</button>
+          </div>
+        </div>
+        <div id="mu-msg" style="margin-top:10px"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="api.js"></script>
+  <script>
+    const CR_SIZE = 50;
+    let crPage = 1, crTotal = 0, crBusy = false, crTimer = null, canEdit = false;
+    let muRows = [], muHeaders = [];
+    const H = { 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + SB_ANON_API };
+    const REST = SB_URL_API + '/rest/v1/';
+    const numv = v => (v === null || v === undefined || v === '') ? '0' : (Math.round(Number(v) * 10) / 10);
+    const BR = { mamora:'المعمورة', san:'سان ستيفانو', bishr:'سيدى بشر' };
+    const esc = s => String(s==null?'':s).replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+    function showTab(t) {
+      document.getElementById('tab-rate').style.display = (t==='rate')?'block':'none';
+      document.getElementById('tab-orders').style.display = (t==='orders')?'block':'none';
+      document.getElementById('tabbtn-rate').classList.toggle('active', t==='rate');
+      document.getElementById('tabbtn-orders').classList.toggle('active', t==='orders');
+    }
+
+    function buildQuery(offset) {
+      const q = document.getElementById('cr-search').value.trim();
+      const br = document.getElementById('cr-branch').value;
+      let url = REST + 'consumption_flat?select=code,itm_name,av_mamora,av_san,av_bishr,act_mamora,act_san,act_bishr'
+        + '&order=itm_name.asc&limit=' + CR_SIZE + '&offset=' + offset;
+      if (q) { const e = encodeURIComponent(q); url += '&or=(itm_name.ilike.*' + e + '*,code.ilike.*' + e + '*)'; }
+      if (br) url += '&av_' + br + '=gt.0';
+      return url;
+    }
+
+    async function loadPage() {
+      if (crBusy) return; crBusy = true;
+      const body = document.getElementById('cr-body');
+      try {
+        const res = await fetch(buildQuery((crPage - 1) * CR_SIZE), { headers: { ...H, 'Prefer': 'count=exact' } });
+        const rows = await res.json();
+        const cr = res.headers.get('content-range');
+        crTotal = cr && cr.includes('/') ? parseInt(cr.split('/')[1]) : rows.length;
+        document.getElementById('cr-count').textContent = crTotal.toLocaleString('ar-EG') + ' صنف';
+        if (!rows.length) { body.innerHTML = '<tr><td colspan="6" style="padding:24px;color:var(--text-muted);">لا توجد نتائج</td></tr>'; renderPager(); return; }
+        body.innerHTML = rows.map(r =>
+          '<tr onclick="openDetail(\'' + String(r.code).replace(/'/g, "\\'") + '\')" title="اضغط لتفاصيل الاشتقاق">'
+          + '<td style="text-align:right;font-weight:600;">' + esc(r.itm_name) + '</td>'
+          + '<td class="cr-code">' + esc(r.code) + '</td>'
+          + '<td class="cr-v">' + numv(r.av_mamora) + '</td>'
+          + '<td class="cr-v">' + numv(r.av_san) + '</td>'
+          + '<td class="cr-v">' + numv(r.av_bishr) + '</td>'
+          + '<td class="cr-act">' + (r.act_mamora||0) + ' / ' + (r.act_san||0) + ' / ' + (r.act_bishr||0) + '</td>'
+          + '</tr>').join('');
+        renderPager();
+      } catch (e) {
+        body.innerHTML = '<tr><td colspan="6" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>';
+      } finally { crBusy = false; }
+    }
+
+    async function loadMeta() {
+      try {
+        const r = await fetch(REST + 'consumption_flat?select=refreshed_at&order=refreshed_at.desc&limit=1', { headers: H });
+        const j = await r.json();
+        if (j && j[0]) {
+          const d = new Date(j[0].refreshed_at).toLocaleString('ar-EG', { timeZone:'Africa/Cairo', dateStyle:'medium', timeStyle:'short' });
+          document.getElementById('cr-meta').textContent = 'آخر إعادة حساب: ' + d + ' — المعدل = مبيعات الشهور ÷ الشهور النشطة × الاستثنائى × معامل التغطية.';
+        }
+      } catch (e) {}
+    }
+
+    async function loadMonths() {
+      try {
+        const r = await fetch(REST + 'rpc/list_sales_months', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' });
+        const list = await r.json();
+        const el = document.getElementById('mo-chips');
+        if (!Array.isArray(list) || !list.length) { el.innerHTML = '<span style="color:var(--text-muted);font-size:.75rem">لا توجد شهور.</span>'; return; }
+        el.innerHTML = list.map(m =>
+          '<span class="mo-chip">' + esc(m.month) + ' <span style="color:var(--text-muted);font-weight:600">(' + Number(m.rows).toLocaleString('ar-EG') + ')</span>'
+          + (canEdit ? ' <span class="del" title="حذف الشهر" onclick="deleteMonth(\'' + esc(m.month) + '\')">✕</span>' : '') + '</span>').join('');
+      } catch (e) {}
+    }
+
+    function renderPager() {
+      const totalPages = Math.max(1, Math.ceil(crTotal / CR_SIZE));
+      if (crPage > totalPages) crPage = totalPages;
+      const el = document.getElementById('cr-pager');
+      if (totalPages <= 1) { el.innerHTML = ''; return; }
+      const btn = (p, lbl, dis, act) => '<button class="cr-pg' + (act ? ' act' : '') + '" ' + (dis ? 'disabled' : 'onclick="crGo(' + p + ')"') + '>' + lbl + '</button>';
+      let nums = '', win = 2, from = Math.max(1, crPage - win), to = Math.min(totalPages, crPage + win);
+      if (from > 1) { nums += btn(1, '1', false, crPage === 1); if (from > 2) nums += '<span class="cr-pg-dots">…</span>'; }
+      for (let p = from; p <= to; p++) nums += btn(p, String(p), false, p === crPage);
+      if (to < totalPages) { if (to < totalPages - 1) nums += '<span class="cr-pg-dots">…</span>'; nums += btn(totalPages, String(totalPages), false, crPage === totalPages); }
+      const start = (crPage - 1) * CR_SIZE;
+      el.innerHTML = '<div class="cr-pager">'
+        + '<div class="cr-pg-info">عرض ' + (start + 1) + '–' + Math.min(start + CR_SIZE, crTotal) + ' من ' + crTotal.toLocaleString('ar-EG') + '</div>'
+        + '<div class="cr-pg-nav">' + btn(1, '«', crPage === 1) + btn(crPage - 1, '‹', crPage === 1) + nums + btn(crPage + 1, '›', crPage === totalPages) + btn(totalPages, '»', crPage === totalPages) + '</div>'
+        + '<div class="cr-pg-info">صفحة ' + crPage + ' من ' + totalPages + '</div>'
+        + '</div>';
+    }
+    function crGo(p) { crPage = p; loadPage(); const w = document.querySelector('.cr-wrap'); if (w) w.scrollTop = 0; }
+
+    // ===== تفاصيل الاشتقاق =====
+    async function openDetail(code) {
+      document.getElementById('cr-modal-title').textContent = 'تفاصيل — كود ' + code;
+      document.getElementById('cr-modal-body').innerHTML = 'جارٍ التحميل…';
+      document.getElementById('cr-modal-bg').classList.add('open');
+      try {
+        const r = await fetch(REST + 'rpc/get_consumption_detail', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body: JSON.stringify({ p_code: code }) });
+        document.getElementById('cr-modal-body').innerHTML = renderDetail(await r.json());
+      } catch (e) { document.getElementById('cr-modal-body').innerHTML = '<div style="color:var(--danger)">خطأ في جلب التفاصيل</div>'; }
+    }
+    function closeDetail() { document.getElementById('cr-modal-bg').classList.remove('open'); }
+
+    function renderDetail(d) {
+      if (!d) return '<div style="color:var(--text-muted)">لا توجد بيانات لهذا الكود</div>';
+      let html = '<div style="font-weight:800;margin-bottom:4px;">' + esc(d.itm_name || '') + '</div>';
+      if (d.is_source && d.redirected_to) {
+        html += '<div class="cr-note">⚠️ هذا الكود له بديل، ومعدله محسوب ضمن: '
+          + d.redirected_to.map(x => esc(x.replace) + ' (×' + x.qty + ')').join('، ') + '</div>';
+      }
+      html += '<div class="cr-sec">الناتج لكل فرع = المعدل الأساسي × الاستثنائى × معامل التغطية</div>';
+      html += '<table class="cr-mini"><thead><tr><th>الفرع</th><th>المعدل الأساسي</th><th>الاستثنائى</th><th>معامل التغطية</th><th>شهور نشطة</th><th>النهائي</th></tr></thead><tbody>';
+      ['mamora','san','bishr'].forEach(k => { const b = d.branches[k];
+        html += '<tr><td style="text-align:right;font-weight:700">' + BR[k] + '</td><td>' + b.pre + '</td><td>×' + b.exc + '</td><td>×' + b.factor + '</td><td>' + b.active + '</td><td class="cr-final">' + b.final + '</td></tr>';
+      });
+      html += '</tbody></table>';
+      if (d.sources && d.sources.length) {
+        html += '<div class="cr-sec">المصادر المكوّنة للمعدل (أساسي كل مصدر ÷ شهوره النشطة)</div>';
+        html += '<table class="cr-mini"><thead><tr><th>الكود</th><th>نوعه</th><th>وزن</th><th>استثنائى</th><th>معمورة (شهور)</th><th>سان (شهور)</th><th>بشر (شهور)</th></tr></thead><tbody>';
+        html += d.sources.map(s =>
+          '<tr><td class="cr-code">' + esc(s.code) + '</td><td>' + (s.is_self ? 'ذاتي' : 'بديل') + '</td><td>×' + s.qty + '</td><td>×' + s.exc + '</td>'
+          + '<td>' + s.base_m + ' (' + s.act_m + ')</td><td>' + s.base_s + ' (' + s.act_s + ')</td><td>' + s.base_b + ' (' + s.act_b + ')</td></tr>').join('');
+        html += '</tbody></table>';
+      }
+      if (d.months && d.months.length) {
+        html += '<div class="cr-sec">مبيعات الشهور (الخام) — لتقف على أي شهر غير طبيعي</div>';
+        html += '<div style="max-height:240px;overflow:auto"><table class="cr-mini"><thead><tr><th>المصدر</th><th>الشهر</th><th>المعمورة</th><th>سان</th><th>بشر</th></tr></thead><tbody>';
+        html += d.months.map(m =>
+          '<tr><td class="cr-code">' + esc(m.src) + '</td><td>' + esc(m.month) + '</td><td>' + numv(m.mamora) + '</td><td>' + numv(m.san) + '</td><td>' + numv(m.bishr) + '</td></tr>').join('');
+        html += '</tbody></table></div>';
+      }
+      return html;
+    }
+
+    // ===== إعادة حساب =====
+    async function refreshCalc() {
+      try {
+        const r = await fetch(REST + 'rpc/refresh_consumption_rates', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' });
+        if (!r.ok) throw new Error(await r.text());
+        crPage = 1; await loadMeta(); await loadPage();
+      } catch (e) { alert('تعذّرت إعادة الحساب: ' + e.message); }
+    }
+
+    // ===== حذف شهر =====
+    async function deleteMonth(m) {
+      if (!confirm('حذف كل مبيعات شهر «' + m + '»؟ سيعاد حساب معدل الاستهلاك.')) return;
+      try {
+        const r = await fetch(REST + 'rpc/delete_month_sales', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body: JSON.stringify({ p_month: m }) });
+        if (!r.ok) throw new Error(await r.text());
+        await loadMonths(); await loadMeta(); crPage = 1; await loadPage();
+      } catch (e) { alert('تعذّر الحذف: ' + e.message); }
+    }
+
+    // ===== رفع شهر =====
+    const toNum = v => { if (v==null) return null; if (typeof v==='number') return isFinite(v)?v:null;
+      let s=String(v).trim(); if(!s) return null;
+      s=s.replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[^\d.\-]/g,'');
+      if(s===''||s==='-'||s==='.') return null; const n=parseFloat(s); return isFinite(n)?n:null; };
+    const guess = (hs, keys) => { for (let i=0;i<hs.length;i++){ const h=String(hs[i]||'').toLowerCase(); if(keys.some(k=>h.includes(k))) return i; } return -1; };
+    function monthAutoMap(hs) {
+      let c=guess(hs,['كود','code']), n=guess(hs,['صنف','اسم','name']),
+          m=guess(hs,['صيدلية','معمورة','mamora']), s=guess(hs,['حمدي 2','حمدى 2','san','ستيفانو']), b=guess(hs,['حمدي 3','حمدى 3','bishr','بشر']);
+      // fallback بالرقم لو مفيش تطابق
+      if (s<0) s=guess(hs,[' 2','2']); if (b<0) b=guess(hs,[' 3','3']);
+      const used=new Set(); const ff=()=>{ for(let i=0;i<hs.length;i++) if(!used.has(i)) return i; return 0; };
+      const claim=i=>{ const v=(i>=0&&i<hs.length&&!used.has(i))?i:ff(); used.add(v); return v; };
+      return { c:claim(c), n:claim(n), m:claim(m), s:claim(s), b:claim(b) };
+    }
+    function openMonthUp() {
+      document.getElementById('mu-msg').innerHTML=''; document.getElementById('mu-map').style.display='none';
+      document.getElementById('mu-file').value=''; muRows=[]; muHeaders=[];
+      document.getElementById('mu-bg').classList.add('open');
+    }
+    function closeMonthUp() { document.getElementById('mu-bg').classList.remove('open'); }
+    function analyzeMonth() {
+      const file=document.getElementById('mu-file').files[0]; const msg=document.getElementById('mu-msg'); msg.innerHTML='';
+      const mv=document.getElementById('mu-month').value;
+      if(!mv){ msg.innerHTML='<span class="msg-err">اختر الشهر</span>'; return; }
+      if(!file){ msg.innerHTML='<span class="msg-err">اختر الملف</span>'; return; }
+      const rd=new FileReader();
+      rd.onload=e=>{ try{
+        const wb=XLSX.read(e.target.result,{type:'array'}); const ws=wb.Sheets[wb.SheetNames[0]];
+        const aoa=XLSX.utils.sheet_to_json(ws,{header:1,blankrows:false,defval:''});
+        if(!aoa.length){ msg.innerHTML='<span class="msg-err">الملف فارغ</span>'; return; }
+        muHeaders=(aoa[0]||[]).map(h=>String(h).trim());
+        muRows=aoa.slice(1).filter(r=>r.some(c=>String(c).trim()!==''));
+        if(!muRows.length){ msg.innerHTML='<span class="msg-err">لا توجد صفوف</span>'; return; }
+        const opts=muHeaders.map((h,i)=>'<option value="'+i+'">'+(esc(h)||('عمود '+(i+1)))+'</option>').join('');
+        ['m-code','m-name','m-mam','m-san','m-bishr'].forEach(id=>document.getElementById(id).innerHTML=opts);
+        const mp=monthAutoMap(muHeaders);
+        document.getElementById('m-code').value=mp.c; document.getElementById('m-name').value=mp.n;
+        document.getElementById('m-mam').value=mp.m; document.getElementById('m-san').value=mp.s; document.getElementById('m-bishr').value=mp.b;
+        document.getElementById('mu-map').style.display='block'; renderMuPreview();
+      }catch(err){ msg.innerHTML='<span class="msg-err">تعذّر قراءة الملف: '+err.message+'</span>'; } };
+      rd.readAsArrayBuffer(file);
+    }
+    function muMapping(){ return { c:+document.getElementById('m-code').value, n:+document.getElementById('m-name').value,
+      m:+document.getElementById('m-mam').value, s:+document.getElementById('m-san').value, b:+document.getElementById('m-bishr').value }; }
+    function buildMuRecords(){ const mp=muMapping(); return muRows.map(r=>({
+      code:String(r[mp.c]==null?'':r[mp.c]).trim(), name:String(r[mp.n]==null?'':r[mp.n]).trim(),
+      mamora:toNum(r[mp.m]), san:toNum(r[mp.s]), bishr:toNum(r[mp.b]) })).filter(x=>x.code!==''); }
+    function renderMuPreview(){ const recs=buildMuRecords();
+      const head='<table class="cr-mini"><thead><tr><th>الكود</th><th>الاسم</th><th>معمورة</th><th>سان</th><th>بشر</th></tr></thead><tbody>';
+      const rows=recs.slice(0,8).map(x=>'<tr><td class="cr-code">'+esc(x.code)+'</td><td style="text-align:right">'+esc(x.name)+'</td><td>'+(x.mamora??0)+'</td><td>'+(x.san??0)+'</td><td>'+(x.bishr??0)+'</td></tr>').join('');
+      document.getElementById('mu-preview').innerHTML=head+rows+'</tbody></table>';
+      document.getElementById('mu-sum').textContent='عدد الأصناف الصالحة: '+recs.length.toLocaleString('ar-EG')+' (معاينة أول 8)'; }
+    async function confirmMonth(){
+      const mv=document.getElementById('mu-month').value; const recs=buildMuRecords(); const msg=document.getElementById('mu-msg');
+      if(!mv){ msg.innerHTML='<span class="msg-err">اختر الشهر</span>'; return; }
+      if(!recs.length){ msg.innerHTML='<span class="msg-err">لا توجد أصناف</span>'; return; }
+      const [yy,mm]=mv.split('-'); const monthStr=mm+'-'+yy;   // MM-YYYY
+      const btn=document.getElementById('mu-confirm'); btn.disabled=true;
+      msg.innerHTML='<span style="color:var(--text-muted)">جارٍ الرفع وإعادة الحساب…</span>';
+      try{
+        const r=await fetch(REST+'rpc/upload_month_sales',{ method:'POST', headers:{ ...H,'Content-Type':'application/json' },
+          body: JSON.stringify({ p_month: monthStr, p_rows: recs }) });
+        if(!r.ok) throw new Error(await r.text());
+        const out=await r.json();
+        msg.innerHTML='<span class="msg-ok">تم ✓ — شهر '+monthStr+': '+(out.inserted||0).toLocaleString('ar-EG')+' صنف، وأُعيد حساب المعدل.</span>';
+        await loadMonths(); await loadMeta(); crPage=1; await loadPage();
+      }catch(e){ msg.innerHTML='<span class="msg-err">فشل الرفع: '+e.message+'</span>'; }
+      finally{ btn.disabled=false; }
+    }
+
+    (function () {
+      const role = (localStorage.getItem('userRole') || '').toLowerCase();
+      if (role === 'admin' || role === 'manager') { canEdit = true; document.getElementById('mo-months').style.display = 'block'; }
+    })();
+
+    document.getElementById('cr-search').addEventListener('input', () => { clearTimeout(crTimer); crTimer = setTimeout(() => { crPage = 1; loadPage(); }, 300); });
+    document.getElementById('cr-branch').addEventListener('change', () => { crPage = 1; loadPage(); });
+    document.getElementById('cr-reload').addEventListener('click', () => { crPage = 1; loadPage(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeDetail(); closeMonthUp(); } });
+
+    loadMeta(); loadMonths(); loadPage();
+  </script>
+</body>
+</html>
