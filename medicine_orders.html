@@ -171,10 +171,20 @@
         <div class="cr-wrap">
           <table class="cr-table">
             <thead><tr>
-              <th style="text-align:right;">الصنف</th><th>الكود</th><th>المطلوب</th><th>الرصيد</th><th>المعدل</th>
-              <th>الوحدة</th><th>سعر البيع</th><th>الشركة</th><th>فائض في فرع آخر</th><th>إجراءات</th>
+              <th><input type="checkbox" id="ord-all" title="تحت الطلب" onclick="ordToggleAll(this)"></th>
+              <th>الكود</th>
+              <th style="text-align:right;">الاسم</th>
+              <th>سعر البيع</th>
+              <th>مطلوب</th>
+              <th>فائض الفروع</th>
+              <th>صافى المطلوب</th>
+              <th>معدل الاستهلاك</th>
+              <th>كمية التوفير</th>
+              <th>الرصيد</th>
+              <th>الشركة</th>
+              <th>المخازن (الأقل تكلفة ←)</th>
             </tr></thead>
-            <tbody id="ord-body"><tr><td colspan="10" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr></tbody>
+            <tbody id="ord-body"><tr><td colspan="12" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr></tbody>
           </table>
         </div>
         <div id="ord-pager"></div>
@@ -358,6 +368,7 @@
     const ORD_SIZE = 50;
     let ordBranch = 'المعمورة', ordPage = 1, ordTotal = 0, ordTimer = null, ordLoaded = false, ordById = {};
     let branchReps = {};
+    const ordSel = new Set();   // الأصناف «تحت الطلب» المحددة
     const BR_LIST = [['المعمورة','surplus_mamora'],['سان ستيفانو','surplus_san'],['سيدى بشر','surplus_bishr']];
 
     function ordSetBranch(b) {
@@ -369,43 +380,74 @@
 
     function buildOrdQuery(offset) {
       const q = document.getElementById('ord-search').value.trim();
-      let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,required,surplus_mamora,surplus_san,surplus_bishr'
+      let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,surplus_mamora,surplus_san,surplus_bishr'
         + '&branch=eq.' + encodeURIComponent(ordBranch) + '&order=required.desc,itm_name.asc&limit=' + ORD_SIZE + '&offset=' + offset;
       if (q) { const e = encodeURIComponent(q); url += '&or=(itm_name.ilike.*' + e + '*,itm_code.ilike.*' + e + '*)'; }
       return url;
     }
+    // جلب أسعار المخازن دفعة واحدة لأكواد الصفحة → خريطة كود → مخازن مرتّبة بالتكلفة
+    async function fetchWarehouses(codes) {
+      const map = {};
+      const list = [...new Set(codes.filter(Boolean))];
+      if (!list.length) return map;
+      try {
+        const inList = list.map(c => '"' + String(c).replace(/"/g, '') + '"').join(',');
+        const url = REST + 'store_item_prices?select=code,store,price,discount_perc,available&code=in.(' + encodeURIComponent(inList) + ')';
+        const rows = await (await fetch(url, { headers: H })).json();
+        (rows || []).forEach(r => {
+          const nc = (r.price == null || r.price === '') ? null : Number(r.price) * (1 - (Number(r.discount_perc) || 0) / 100);
+          (map[r.code] = map[r.code] || []).push({ store: r.store, net: nc, av: r.available });
+        });
+        Object.values(map).forEach(arr => arr.sort((a, b) => (a.net == null ? Infinity : a.net) - (b.net == null ? Infinity : b.net)));
+      } catch (e) {}
+      return map;
+    }
     async function loadOrders() {
       const body = document.getElementById('ord-body');
-      body.innerHTML = '<tr><td colspan="10" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr>';
+      body.innerHTML = '<tr><td colspan="12" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr>';
       try {
         const res = await fetch(buildOrdQuery((ordPage - 1) * ORD_SIZE), { headers: { ...H, 'Prefer': 'count=exact' } });
         const rows = await res.json();
         const cr = res.headers.get('content-range');
         ordTotal = cr && cr.includes('/') ? parseInt(cr.split('/')[1]) : rows.length;
-        if (!rows.length) { body.innerHTML = '<tr><td colspan="10" style="padding:24px;color:var(--text-muted);">لا توجد أصناف مطلوبة لهذا الفرع.</td></tr>'; ordPager(); return; }
+        if (!rows.length) { body.innerHTML = '<tr><td colspan="12" style="padding:24px;color:var(--text-muted);">لا توجد أصناف مطلوبة لهذا الفرع.</td></tr>'; ordPager(); return; }
+        const wh = await fetchWarehouses(rows.map(r => r.itm_code));
         ordById = {};
         body.innerHTML = rows.map(r => {
           ordById[r.id] = r;
           const others = BR_LIST.filter(([bn, k]) => bn !== ordBranch && (r[k] || 0) > 0);
           const surp = others.length ? others.map(([bn, k]) => '<span class="ord-surp">' + bn + ': ' + r[k] + '</span>').join('<br>') : '<span style="color:var(--text-muted)">—</span>';
-          const nameEsc = String(r.itm_name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-          const trBtn = (canEdit && others.length) ? '<button class="ord-actbtn ord-tr" onclick="openTransfer(' + r.id + ')">تحويل</button> ' : '';
-          const bwBtn = '<button class="ord-actbtn ord-bw" onclick="openBest(\'' + String(r.itm_code).replace(/'/g, "\\'") + '\',\'' + nameEsc + '\')">أقل تكلفة</button>';
+          const maxSur = others.reduce((m, [, k]) => Math.max(m, r[k] || 0), 0);
+          const net = Math.max(0, r.required - maxSur);
+          const whArr = wh[r.itm_code] || [];
+          const whTxt = whArr.length
+            ? whArr.map((x, i) => '<span style="' + (i === 0 ? 'font-weight:800;color:#15803d' : '') + (x.av ? '' : ';opacity:.5') + '">' + esc(x.store) + ' (' + (x.net == null ? '—' : Math.round(x.net * 100) / 100) + ')</span>').join(' · ')
+            : '<span style="color:var(--text-muted)">—</span>';
+          const chk = '<input type="checkbox" ' + (ordSel.has(r.id) ? 'checked' : '') + ' onchange="ordSelToggle(' + r.id + ',this.checked)">';
+          const trBtn = (canEdit && others.length) ? '<button class="ord-actbtn ord-tr" style="margin-top:3px" onclick="openTransfer(' + r.id + ')">تحويل</button>' : '';
           return '<tr>'
-            + '<td style="text-align:right;font-weight:600;">' + esc(r.itm_name) + '</td>'
+            + '<td>' + chk + '</td>'
             + '<td class="cr-code">' + esc(r.itm_code) + '</td>'
-            + '<td class="ord-req">' + r.required + '</td>'
-            + '<td>' + numv(r.stock) + '</td>'
-            + '<td>' + numv(r.rate) + '</td>'
-            + '<td style="font-size:.72rem">' + esc(r.unit) + '</td>'
+            + '<td style="text-align:right;font-weight:600;">' + esc(r.itm_name) + '</td>'
             + '<td>' + (r.price == null ? '—' : numv(r.price)) + '</td>'
+            + '<td class="ord-req">' + r.required + '</td>'
+            + '<td>' + surp + (trBtn ? '<br>' + trBtn : '') + '</td>'
+            + '<td style="font-weight:800;color:#b91c1c">' + net + '</td>'
+            + '<td>' + numv(r.base_rate) + '</td>'
+            + '<td>' + numv(r.rate) + '</td>'
+            + '<td>' + numv(r.stock) + '</td>'
             + '<td style="font-size:.7rem;color:var(--text-muted)">' + esc(r.company) + '</td>'
-            + '<td>' + surp + '</td>'
-            + '<td style="white-space:nowrap">' + trBtn + bwBtn + '</td>'
+            + '<td style="font-size:.72rem;min-width:200px;text-align:right">' + whTxt + '</td>'
             + '</tr>';
         }).join('');
+        const allChk = document.getElementById('ord-all'); if (allChk) allChk.checked = rows.every(r => ordSel.has(r.id));
         ordPager();
-      } catch (e) { body.innerHTML = '<tr><td colspan="10" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>'; }
+      } catch (e) { body.innerHTML = '<tr><td colspan="12" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>'; }
+    }
+    function ordSelToggle(id, on) { if (on) ordSel.add(id); else ordSel.delete(id); }
+    function ordToggleAll(el) {
+      document.querySelectorAll('#ord-body input[type=checkbox]').forEach(cb => { cb.checked = el.checked; });
+      Object.keys(ordById).forEach(id => { if (el.checked) ordSel.add(+id); else ordSel.delete(+id); });
     }
     function ordPager() {
       const totalPages = Math.max(1, Math.ceil(ordTotal / ORD_SIZE));
