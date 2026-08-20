@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>مشاكل العملاء - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg,#f1f5f9)}
+    .cp-stats{display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem}
+    .cp-stat{flex:1;min-width:130px;background:var(--surface,#fff);border:1px solid var(--border);border-radius:12px;padding:.7rem .9rem}
+    .cp-stat .v{font-size:1.4rem;font-weight:800;color:var(--text-primary)}
+    .cp-stat .l{font-size:.72rem;color:var(--text-muted);margin-top:.15rem}
+    .cp-stat .chg{font-size:.78rem;font-weight:800}
+    .cp-toolbar{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem}
+    .cp-toolbar input,.cp-toolbar select{height:38px;padding:0 .6rem;border:1.5px solid var(--border);border-radius:9px;font-family:inherit;font-size:.82rem;background:#fff}
+    .prob-card{background:var(--surface,#fff);border:1px solid var(--border);border-radius:12px;margin-bottom:.7rem;overflow:hidden}
+    .prob-head{display:flex;align-items:center;gap:.7rem;padding:.85rem 1rem;cursor:pointer;flex-wrap:wrap}
+    .prob-head:hover{background:var(--surface-3,#f8fafc)}
+    .prob-name{font-weight:800;font-size:.98rem;color:var(--text-primary)}
+    .prob-badge{font-size:.72rem;font-weight:700;padding:.2rem .6rem;border-radius:20px;background:var(--purple-light,#ede9fe);color:#6d28d9;white-space:nowrap}
+    .prob-count{font-size:.75rem;color:var(--text-muted);white-space:nowrap}
+    .prob-count b{color:var(--danger,#dc2626);font-size:.95rem}
+    .prob-chevron{margin-inline-start:auto;color:var(--text-muted);transition:transform .2s}
+    .prob-card.open .prob-chevron{transform:rotate(180deg)}
+    .prob-body{padding:0 1rem 1rem;border-top:1px solid var(--border);display:none}
+    .prob-card.open .prob-body{display:block}
+    .prob-meta{display:flex;gap:1rem;flex-wrap:wrap;margin:.75rem 0;font-size:.83rem}
+    .prob-meta .mk{color:var(--text-muted);font-weight:700}
+    .occ-table{width:100%;border-collapse:collapse;font-size:.8rem;margin-top:.5rem}
+    .occ-table th,.occ-table td{padding:.45rem .6rem;border-bottom:1px solid var(--border);text-align:right}
+    .occ-table th{color:var(--text-muted);font-size:.72rem;background:var(--surface-3,#f8fafc)}
+    .add-occ{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin-top:.7rem;padding:.6rem;background:var(--surface-3,#f8fafc);border-radius:10px}
+    .add-occ input{height:34px;padding:0 .5rem;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:.8rem}
+    .cust-name-tag{font-size:.8rem;font-weight:700;color:var(--success,#16a34a);min-width:90px}
+    .cp-panel{background:var(--surface,#fff);border:1px solid var(--border);border-radius:12px;padding:1rem;margin-top:1rem}
+    .cp-panel h3{font-size:.9rem;margin:0 0 .6rem}
+    .cp-bar-row{display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem;font-size:.8rem}
+    .cp-bar{height:8px;border-radius:4px;background:var(--primary,#0f172a)}
+    .modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:9999;padding:1rem}
+    .modal-ov.open{display:flex}
+    .modal-bx{background:#fff;border-radius:14px;padding:1.25rem;width:100%;max-width:460px;max-height:90vh;overflow:auto}
+    .modal-bx h2{font-size:1.05rem;margin:0 0 1rem}
+    .fg{margin-bottom:.85rem}
+    .fg label{display:block;font-size:.8rem;font-weight:700;margin-bottom:.3rem;color:var(--text-secondary)}
+    .fg input,.fg select,.fg textarea{width:100%;padding:.55rem .6rem;border:1.5px solid var(--border);border-radius:9px;font-family:inherit;font-size:.85rem;box-sizing:border-box}
+    .fg textarea{min-height:60px;resize:vertical}
+    .row2{display:flex;gap:.5rem}.row2>*{flex:1}
+    .empty{text-align:center;padding:2.5rem;color:var(--text-muted)}
+  </style>
+</head>
+<body>
+  <div class="container" style="max-width:1100px;margin:0 auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem">
+      <div class="page-title" style="font-size:1.2rem;font-weight:800"><i class="fas fa-triangle-exclamation" style="color:var(--danger,#dc2626)"></i> مشاكل العملاء</div>
+      <button class="btn btn-primary" id="addProblemBtn" onclick="openProblemModal()" style="display:none"><i class="fas fa-plus"></i> تسجيل مشكلة جديدة</button>
+    </div>
+
+    <div id="denied" style="display:none" class="empty">🚫 غير مصرَّح لك بفتح هذه الشاشة.</div>
+
+    <div id="main" style="display:none">
+      <div class="cp-stats" id="statsRow"></div>
+
+      <div class="cp-toolbar">
+        <input type="text" id="search" placeholder="🔍 بحث في المشاكل / المسؤول..." oninput="render()" style="flex:1;min-width:180px">
+        <select id="roleFilter" onchange="render()"><option value="">كل المسؤولين</option></select>
+        <span style="font-size:.78rem;color:var(--text-muted)">من</span>
+        <input type="date" id="dFrom" onchange="render()">
+        <span style="font-size:.78rem;color:var(--text-muted)">إلى</span>
+        <input type="date" id="dTo" onchange="render()">
+        <button class="btn btn-secondary" onclick="loadAll()"><i class="fas fa-sync-alt"></i> تحديث</button>
+      </div>
+
+      <div id="problemsList"></div>
+
+      <div class="cp-panel">
+        <h3>📊 حسب المسؤول المباشر</h3>
+        <div id="byRole"></div>
+      </div>
+      <div class="cp-panel">
+        <h3>👥 العملاء الأكثر تكرارًا للمشاكل</h3>
+        <div id="topCust"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- مودال: مشكلة جديدة -->
+  <div class="modal-ov" id="problemModal">
+    <div class="modal-bx">
+      <h2>تسجيل مشكلة جديدة</h2>
+      <div class="fg"><label>اسم المشكلة *</label><input type="text" id="p-name" placeholder="مثال: عدم كتابة الاستخدام على الأدوية"></div>
+      <div class="fg"><label>المسؤول المباشر (وظيفة)</label>
+        <div class="row2">
+          <select id="p-role"></select>
+          <input type="text" id="p-role-new" placeholder="أو أضف وظيفة جديدة">
+        </div>
+      </div>
+      <div class="fg"><label>حل المشكلة</label><textarea id="p-solution" placeholder="إزاي بنحلّها / بنمنعها"></textarea></div>
+      <div class="fg"><label>تفاصيل</label><textarea id="p-details" placeholder="تفاصيل إضافية"></textarea></div>
+      <div style="display:flex;gap:.5rem;justify-content:flex-end">
+        <button class="btn btn-secondary" onclick="closeModal('problemModal')">إلغاء</button>
+        <button class="btn btn-primary" onclick="saveProblem()">حفظ</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="loading-overlay" id="loadingOverlay" style="display:none;position:fixed;inset:0;background:rgba(255,255,255,.6);align-items:center;justify-content:center;z-index:99999"><div class="spinner"></div></div>
+
+<script src="api.js?v=20260819"></script>
+<script>
+  const REST = SB_URL_API + '/rest/v1/';
+  const H  = { apikey: SB_ANON_API, Authorization: 'Bearer ' + SB_ANON_API };
+  const HW = { ...H, 'Content-Type': 'application/json', Prefer: 'return=representation' };
+  const BRANCHES = ['المعمورة', 'سان ستيفانو', 'سيدى بشر'];
+
+  let problems = [], occByProblem = {}, allOcc = [], roles = [];
+  let userRole = '', employeeName = '', userBranch = '', canEdit = false;
+  const nameCache = {};
+
+  function show(id, on){ const e=document.getElementById(id); if(e) e.style.display = on ? '' : 'none'; }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function loading(on){ document.getElementById('loadingOverlay').style.display = on ? 'flex' : 'none'; }
+  function closeModal(id){ document.getElementById(id).classList.remove('open'); }
+
+  checkAuth().then(async user => {
+    if (!user) return;
+    userRole     = (localStorage.getItem('userRole') || 'employee').trim();
+    employeeName = (localStorage.getItem('fullName') || user || '').trim();
+    userBranch   = (localStorage.getItem('userBranch') || '').trim();
+
+    // صلاحية: الأدمن كامل؛ غيره حسب get_role_pages لهذه الصفحة
+    let canView = (userRole === 'admin');
+    canEdit = (userRole === 'admin');
+    if (userRole !== 'admin') {
+      try {
+        const pages = await sbGetRolePages(userRole);
+        const p = (pages || []).find(x => x.page === 'customer_problems.html');
+        canView = !!(p && p.can_view);
+        canEdit = !!(p && p.can_edit);
+      } catch(e){}
+    }
+    if (!canView) { show('denied', true); return; }
+    show('main', true);
+    if (canEdit) show('addProblemBtn', true);
+    await loadAll();
+  });
+
+  async function loadAll() {
+    loading(true);
+    try {
+      const [pr, oc, rl] = await Promise.all([
+        fetch(REST + 'problems?select=*&order=created_at.desc', { headers: H }).then(r=>r.json()),
+        fetchAll('problem_occurrences?select=*&order=occurred_at.desc'),
+        fetch(REST + 'problem_responsible_roles?select=name&order=name.asc', { headers: H }).then(r=>r.json())
+      ]);
+      problems = Array.isArray(pr) ? pr : [];
+      allOcc   = Array.isArray(oc) ? oc : [];
+      roles    = Array.isArray(rl) ? rl.map(x=>x.name) : [];
+      fillRoleControls();
+      render();
+    } catch(e){ document.getElementById('problemsList').innerHTML = '<div class="empty" style="color:var(--danger)">❌ فشل التحميل</div>'; }
+    loading(false);
+  }
+
+  async function fetchAll(path){
+    let all=[], from=0; const PAGE=1000;
+    while(true){
+      const r = await fetch(REST + path + `&limit=${PAGE}&offset=${from}`, { headers: H });
+      if(!r.ok) break;
+      const chunk = await r.json();
+      all = all.concat(chunk);
+      if(!Array.isArray(chunk) || chunk.length < PAGE) break;
+      from += PAGE;
+    }
+    return all;
+  }
+
+  function fillRoleControls(){
+    const rf = document.getElementById('roleFilter');
+    rf.innerHTML = '<option value="">كل المسؤولين</option>' + roles.map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('');
+    const ps = document.getElementById('p-role');
+    ps.innerHTML = '<option value="">— اختر —</option>' + roles.map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join('');
+  }
+
+  // ===== الفلترة الزمنية للتكرارات =====
+  function inRange(occ){
+    const f = document.getElementById('dFrom').value, t = document.getElementById('dTo').value;
+    if(!f && !t) return true;
+    const d = (occ.occurred_at||'').slice(0,10);
+    if(f && d < f) return false;
+    if(t && d > t) return false;
+    return true;
+  }
+
+  function render(){
+    // جمّع التكرارات (المفلترة زمنيًا) حسب المشكلة
+    occByProblem = {};
+    allOcc.filter(inRange).forEach(o=>{ (occByProblem[o.problem_id] = occByProblem[o.problem_id] || []).push(o); });
+
+    const q = (document.getElementById('search').value||'').trim().toLowerCase();
+    const rf = document.getElementById('roleFilter').value;
+    const list = problems.filter(p=>{
+      if(rf && (p.responsible_role||'') !== rf) return false;
+      if(q){ const hay = [p.name,p.responsible_role,p.solution,p.details].map(x=>String(x||'').toLowerCase()).join(' '); if(!hay.includes(q)) return false; }
+      return true;
+    });
+
+    renderStats();
+    const el = document.getElementById('problemsList');
+    if(!list.length){ el.innerHTML = '<div class="empty">لا توجد مشاكل مسجّلة'+(canEdit?' — اضغط «تسجيل مشكلة جديدة»':'')+'</div>'; renderPanels(); return; }
+
+    el.innerHTML = list.map(p=>{
+      const occ = occByProblem[p.id] || [];
+      const custs = new Set(occ.map(o=>o.cust_code).filter(Boolean));
+      return `<div class="prob-card" id="card-${p.id}">
+        <div class="prob-head" onclick="toggleCard(${p.id})">
+          <span class="prob-name">${esc(p.name)}</span>
+          ${p.responsible_role?`<span class="prob-badge">👤 ${esc(p.responsible_role)}</span>`:''}
+          <span class="prob-count">التكرارات: <b>${occ.length}</b> · عملاء: ${custs.size}</span>
+          <i class="fas fa-chevron-down prob-chevron"></i>
+        </div>
+        <div class="prob-body">
+          <div class="prob-meta">
+            ${p.solution?`<div><span class="mk">💡 الحل:</span> ${esc(p.solution)}</div>`:''}
+            ${p.details?`<div><span class="mk">📝 تفاصيل:</span> ${esc(p.details)}</div>`:''}
+          </div>
+          <table class="occ-table">
+            <thead><tr><th>كود العميل</th><th>اسم العميل</th><th>الوقت</th><th>تفاصيل</th>${canEdit?'<th></th>':''}</tr></thead>
+            <tbody>
+              ${occ.length ? occ.map(o=>`<tr>
+                <td>${esc(o.cust_code||'—')}</td>
+                <td>${esc(o.cust_name||'—')}</td>
+                <td style="font-size:.72rem;white-space:nowrap">${fmtDate(o.occurred_at)}</td>
+                <td>${esc(o.details||'')}</td>
+                ${canEdit?`<td><button class="btn btn-sm" style="background:var(--red-light,#fee2e2);color:#b91c1c" onclick="delOcc(${o.id})">حذف</button></td>`:''}
+              </tr>`).join('') : `<tr><td colspan="${canEdit?5:4}" style="text-align:center;color:var(--text-muted);padding:1rem">لا تكرارات في الفترة</td></tr>`}
+            </tbody>
+          </table>
+          ${canEdit?`<div class="add-occ">
+            <span style="font-size:.78rem;font-weight:700">سجّل تكرار:</span>
+            <input type="text" id="occ-code-${p.id}" placeholder="كود العميل" inputmode="numeric" onblur="lookupName(${p.id})" onkeydown="if(event.key==='Enter')lookupName(${p.id})" style="width:110px">
+            <span class="cust-name-tag" id="occ-name-${p.id}"></span>
+            <input type="text" id="occ-det-${p.id}" placeholder="تفاصيل (اختياري)" style="flex:1;min-width:120px">
+            <button class="btn btn-primary btn-sm" onclick="addOccurrence(${p.id})"><i class="fas fa-plus"></i> تكررت</button>
+          </div>`:''}
+          ${canEdit?`<div style="text-align:left;margin-top:.5rem"><button class="btn btn-sm" style="background:var(--red-light,#fee2e2);color:#b91c1c" onclick="delProblem(${p.id})">🗑️ حذف المشكلة</button></div>`:''}
+        </div>
+      </div>`;
+    }).join('');
+    renderPanels();
+  }
+
+  function fmtDate(s){ if(!s) return ''; try{ return new Date(s).toLocaleString('ar-EG',{timeZone:'Africa/Cairo',dateStyle:'short',timeStyle:'short'}); }catch(e){ return s; } }
+
+  function renderStats(){
+    const occ = allOcc.filter(inRange);
+    const totalProblems = problems.length;
+    const totalOcc = occ.length;
+    // اتجاه: الشهر الحالي مقابل السابق (بتوقيت القاهرة)
+    const now = new Date();
+    const ym = d => { const x=new Date(d); return x.getFullYear()*12 + x.getMonth(); };
+    const curYM = now.getFullYear()*12 + now.getMonth();
+    let thisM=0, lastM=0;
+    allOcc.forEach(o=>{ const m=ym(o.occurred_at); if(m===curYM)thisM++; else if(m===curYM-1)lastM++; });
+    const chg = lastM===0 ? (thisM>0?100:0) : Math.round((thisM-lastM)/lastM*100);
+    const chgColor = chg>0?'#dc2626':(chg<0?'#16a34a':'#6b7280');
+    const chgTxt = lastM===0 && thisM===0 ? '—' : `${chg>0?'▲ +':(chg<0?'▼ ':'')}${chg}%`;
+    document.getElementById('statsRow').innerHTML =
+      `<div class="cp-stat"><div class="v">${totalProblems}</div><div class="l">أنواع المشاكل</div></div>
+       <div class="cp-stat"><div class="v">${totalOcc}</div><div class="l">إجمالي التكرارات (في الفترة)</div></div>
+       <div class="cp-stat"><div class="v">${thisM}</div><div class="l">الشهر الحالي</div></div>
+       <div class="cp-stat"><div class="v" style="color:${chgColor}">${lastM}</div><div class="l">الشهر السابق · <span class="chg" style="color:${chgColor}">${chgTxt}</span></div></div>`;
+  }
+
+  function renderPanels(){
+    const occ = allOcc.filter(inRange);
+    const probById = {}; problems.forEach(p=>probById[p.id]=p);
+    // حسب المسؤول
+    const byRole = {};
+    occ.forEach(o=>{ const r=(probById[o.problem_id]||{}).responsible_role || '(غير محدد)'; byRole[r]=(byRole[r]||0)+1; });
+    const rMax = Math.max(1,...Object.values(byRole));
+    const rRows = Object.entries(byRole).sort((a,b)=>b[1]-a[1]);
+    document.getElementById('byRole').innerHTML = rRows.length ? rRows.map(([r,c])=>`
+      <div class="cp-bar-row"><span style="min-width:120px;font-weight:700">${esc(r)}</span>
+        <span class="cp-bar" style="width:${Math.round(c/rMax*60)}%"></span><b>${c}</b></div>`).join('') : '<div class="empty">—</div>';
+    // حسب العميل
+    const byCust = {};
+    occ.forEach(o=>{ if(!o.cust_code) return; const k=o.cust_code; if(!byCust[k])byCust[k]={c:0,name:o.cust_name||''}; byCust[k].c++; if(o.cust_name)byCust[k].name=o.cust_name; });
+    const cRows = Object.entries(byCust).sort((a,b)=>b[1].c-a[1].c).slice(0,15);
+    const cMax = Math.max(1,...cRows.map(x=>x[1].c));
+    document.getElementById('topCust').innerHTML = cRows.length ? cRows.map(([code,o])=>`
+      <div class="cp-bar-row"><span style="min-width:150px"><b>${esc(code)}</b> ${esc(o.name)}</span>
+        <span class="cp-bar" style="width:${Math.round(o.c/cMax*60)}%;background:var(--danger,#dc2626)"></span><b>${o.c}</b></div>`).join('') : '<div class="empty">—</div>';
+  }
+
+  function toggleCard(id){ document.getElementById('card-'+id).classList.toggle('open'); }
+
+  // ===== جلب اسم العميل تلقائيًا =====
+  async function lookupName(pid){
+    const code = (document.getElementById('occ-code-'+pid).value||'').trim();
+    const tag = document.getElementById('occ-name-'+pid);
+    if(!code){ tag.textContent=''; return; }
+    if(nameCache[code]!==undefined){ tag.textContent = nameCache[code]||'(غير معروف)'; return; }
+    tag.textContent = '...';
+    try{
+      const r = await fetch(REST+'rpc/lookup_customer_name',{method:'POST',headers:HW,body:JSON.stringify({p_code:code})});
+      const name = await r.json();
+      nameCache[code] = (typeof name==='string')?name:'';
+      tag.textContent = nameCache[code] || '(غير معروف)';
+    }catch(e){ tag.textContent=''; }
+  }
+
+  async function addOccurrence(pid){
+    if(!canEdit) return;
+    const code = (document.getElementById('occ-code-'+pid).value||'').trim();
+    const det  = (document.getElementById('occ-det-'+pid).value||'').trim();
+    if(!code){ alert('اكتب كود العميل'); return; }
+    let cname = nameCache[code];
+    if(cname===undefined){ await lookupName(pid); cname = nameCache[code]; }
+    loading(true);
+    const row = { problem_id:pid, cust_code:code, cust_name:cname||null, branch:userBranch||null, occurred_at:new Date().toISOString(), details:det||null, logged_by:employeeName };
+    const r = await fetch(REST+'problem_occurrences',{method:'POST',headers:HW,body:JSON.stringify(row)});
+    loading(false);
+    if(r.ok){ const [saved]=await r.json(); allOcc.unshift(saved); document.getElementById('occ-code-'+pid).value=''; document.getElementById('occ-det-'+pid).value=''; document.getElementById('occ-name-'+pid).textContent=''; render(); document.getElementById('card-'+pid).classList.add('open'); }
+    else alert('فشل الحفظ');
+  }
+
+  function openProblemModal(){ document.getElementById('p-name').value=''; document.getElementById('p-role').value=''; document.getElementById('p-role-new').value=''; document.getElementById('p-solution').value=''; document.getElementById('p-details').value=''; document.getElementById('problemModal').classList.add('open'); }
+
+  async function saveProblem(){
+    const name=(document.getElementById('p-name').value||'').trim();
+    if(!name){ alert('اكتب اسم المشكلة'); return; }
+    let role=(document.getElementById('p-role').value||'').trim();
+    const roleNew=(document.getElementById('p-role-new').value||'').trim();
+    loading(true);
+    if(roleNew){ role=roleNew; try{ await fetch(REST+'problem_responsible_roles',{method:'POST',headers:{...HW,Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({name:roleNew})}); if(!roles.includes(roleNew))roles.push(roleNew); }catch(e){} }
+    const row={ name, responsible_role:role||null, solution:(document.getElementById('p-solution').value||'').trim()||null, details:(document.getElementById('p-details').value||'').trim()||null, created_by:employeeName };
+    const r=await fetch(REST+'problems',{method:'POST',headers:HW,body:JSON.stringify(row)});
+    loading(false);
+    if(r.ok){ const [saved]=await r.json(); problems.unshift(saved); fillRoleControls(); closeModal('problemModal'); render(); }
+    else alert('فشل الحفظ');
+  }
+
+  async function delOcc(id){
+    if(!canEdit || !confirm('حذف هذا التكرار؟')) return;
+    loading(true);
+    const r=await fetch(REST+'problem_occurrences?id=eq.'+id,{method:'DELETE',headers:H});
+    loading(false);
+    if(r.ok){ allOcc=allOcc.filter(o=>o.id!==id); render(); }
+  }
+  async function delProblem(id){
+    if(!canEdit || !confirm('حذف المشكلة وكل تكراراتها؟')) return;
+    loading(true);
+    const r=await fetch(REST+'problems?id=eq.'+id,{method:'DELETE',headers:H});
+    loading(false);
+    if(r.ok){ problems=problems.filter(p=>p.id!==id); allOcc=allOcc.filter(o=>o.problem_id!==id); render(); }
+  }
+</script>
+</body>
+</html>
