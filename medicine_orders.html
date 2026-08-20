@@ -407,8 +407,15 @@
         const wb=XLSX.read(e.target.result,{type:'array'}); const ws=wb.Sheets[wb.SheetNames[0]];
         const aoa=XLSX.utils.sheet_to_json(ws,{header:1,blankrows:false,defval:''});
         if(!aoa.length){ msg.innerHTML='<span class="msg-err">الملف فارغ</span>'; return; }
-        muHeaders=(aoa[0]||[]).map(h=>String(h).trim());
-        muRows=aoa.slice(1).filter(r=>r.some(c=>String(c).trim()!==''));
+        // اكتشاف صف العناوين (تخطّي صف العنوان في الأعلى): أول صف فيه ≥3 خلايا وكلمة كود/صنف/مبيعات
+        let hdrIdx=0;
+        for(let i=0;i<Math.min(aoa.length,6);i++){
+          const cells=(aoa[i]||[]).filter(c=>String(c).trim()!=='');
+          const txt=cells.map(c=>String(c).toLowerCase()).join(' ');
+          if(cells.length>=3 && /كود|صنف|مبيعات|code/.test(txt)){ hdrIdx=i; break; }
+        }
+        muHeaders=(aoa[hdrIdx]||[]).map(h=>String(h).trim());
+        muRows=aoa.slice(hdrIdx+1).filter(r=>r.some(c=>String(c).trim()!==''));
         if(!muRows.length){ msg.innerHTML='<span class="msg-err">لا توجد صفوف</span>'; return; }
         const opts=muHeaders.map((h,i)=>'<option value="'+i+'">'+(esc(h)||('عمود '+(i+1)))+'</option>').join('');
         ['m-code','m-name','m-mam','m-san','m-bishr'].forEach(id=>document.getElementById(id).innerHTML=opts);
