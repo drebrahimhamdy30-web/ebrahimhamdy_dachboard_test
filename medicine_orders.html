@@ -86,6 +86,7 @@
         <button class="mo-tab" id="tabbtn-exceptional" style="display:none" onclick="showTab('exceptional')">الأصناف الاستثنائية</button>
         <button class="mo-tab" id="tabbtn-tiers" style="display:none" onclick="showTab('tiers')">شرائح كمية الطلب</button>
         <button class="mo-tab" id="tabbtn-archive" style="display:none" onclick="showTab('archive')">الأرشيف</button>
+        <button class="mo-tab" id="tabbtn-settings" style="display:none" onclick="showTab('settings')">إعدادات المشتريات</button>
       </div>
 
       <!-- ===== تبويب معدل الاستهلاك ===== -->
@@ -174,6 +175,27 @@
         <input type="text" class="form-input et-search" id="et-search-archive" placeholder="🔍 بحث بالكود أو الملاحظة..." oninput="filterEditTable('archive')" style="max-width:260px;margin-bottom:10px">
         <div class="cr-wrap" id="et-wrap-archive"></div>
       </div>
+      <div id="tab-settings" style="display:none">
+        <div class="et-note">إعدادات منطق الطلب — تؤثر مباشرةً على تبويب «الطلبيات».</div>
+        <div style="max-width:560px;display:grid;gap:14px">
+          <div class="cr-field">
+            <label style="font-weight:700">الحد الأدنى للطلب الفوري (بطيء الحركة)</label>
+            <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:4px">الأصناف اللي معدلها ≤ هذا الرقم تُكمَّل للمعدل بمجرد نقص الرصيد. (الافتراضي 3)</div>
+            <input type="number" step="any" id="ps-min" class="form-input" style="max-width:160px">
+          </div>
+          <div class="cr-field">
+            <label style="font-weight:700">نقطة إعادة الطلب لسريع الحركة (نسبة من المعدل)</label>
+            <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:4px">الأصناف اللي معدلها &gt; الحد الأعلى تُطلَب لما ينزل الرصيد ≤ (المعدل × هذه النسبة). 0.5 = نصف المعدل.</div>
+            <input type="number" step="any" id="ps-ratio" class="form-input" style="max-width:160px">
+          </div>
+          <div class="cr-field">
+            <label style="font-weight:700">أقل رصيد لاعتبار «فائض»</label>
+            <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:4px">لا يُحتسب فائض إلا إذا كان رصيد الفرع ≥ هذا الرقم (يمنع اعتبار آخر وحدة فائضًا). (الافتراضي 2)</div>
+            <input type="number" step="any" id="ps-mss" class="form-input" style="max-width:160px">
+          </div>
+          <div><button class="btn btn-primary" onclick="saveSettings()"><i class="fas fa-save"></i> حفظ الإعدادات</button> <span id="ps-msg" style="margin-right:8px"></span></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -233,7 +255,7 @@
     const BR = { mamora:'المعمورة', san:'سان ستيفانو', bishr:'سيدى بشر' };
     const esc = s => String(s==null?'':s).replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
-    const TABS = ['rate','orders','replace','exceptional','tiers','archive'];
+    const TABS = ['rate','orders','replace','exceptional','tiers','archive','settings'];
     function showTab(t) {
       TABS.forEach(x => {
         const pane = document.getElementById('tab-' + x), btn = document.getElementById('tabbtn-' + x);
@@ -241,6 +263,30 @@
         if (btn) btn.classList.toggle('active', x===t);
       });
       if (['replace','exceptional','tiers','archive'].includes(t)) loadEditTable(t);
+      if (t === 'settings') loadSettings();
+    }
+    async function loadSettings() {
+      try {
+        const r = await fetch(REST + 'purchase_settings?id=eq.1&select=min_immediate,reorder_ratio,min_stock_surplus', { headers: H });
+        const j = await r.json(); const s = (j && j[0]) || {};
+        document.getElementById('ps-min').value = s.min_immediate ?? 3;
+        document.getElementById('ps-ratio').value = s.reorder_ratio ?? 0.5;
+        document.getElementById('ps-mss').value = s.min_stock_surplus ?? 2;
+      } catch (e) {}
+    }
+    async function saveSettings() {
+      const body = {
+        min_immediate: Number(document.getElementById('ps-min').value),
+        reorder_ratio: Number(document.getElementById('ps-ratio').value),
+        min_stock_surplus: Number(document.getElementById('ps-mss').value),
+        updated_at: new Date().toISOString()
+      };
+      const msg = document.getElementById('ps-msg');
+      try {
+        const r = await fetch(REST + 'purchase_settings?id=eq.1', { method:'PATCH', headers:{ ...H, 'Content-Type':'application/json', 'Prefer':'return=minimal' }, body: JSON.stringify(body) });
+        if (!r.ok) throw new Error(await r.text());
+        msg.innerHTML = '<span class="msg-ok">تم الحفظ ✓</span>';
+      } catch (e) { msg.innerHTML = '<span class="msg-err">فشل: ' + e.message + '</span>'; }
     }
 
     function buildQuery(offset) {
@@ -580,7 +626,7 @@
       if (role === 'admin' || role === 'manager') {
         canEdit = true;
         document.getElementById('mo-months').style.display = 'block';
-        ['replace','exceptional','tiers','archive'].forEach(t => document.getElementById('tabbtn-' + t).style.display = 'inline-block');
+        ['replace','exceptional','tiers','archive','settings'].forEach(t => document.getElementById('tabbtn-' + t).style.display = 'inline-block');
       }
     })();
 
