@@ -24,6 +24,12 @@
     .sp-disc { font-weight:800;color:#15803d; }
     .sp-code { color:var(--primary);font-weight:700; }
     .sp-nocode { color:var(--text-muted);font-size:0.7rem; }
+    .sp-code-td { white-space:nowrap; }
+    .sp-code-cell { cursor:text;padding:2px 6px;border-radius:6px;border:1px dashed transparent; }
+    .sp-code-cell:hover { border-color:var(--border);background:var(--surface-2); }
+    .sp-code-input { width:82px;font-family:inherit;font-size:0.78rem;text-align:center;padding:2px 4px;border:1.5px solid var(--primary);border-radius:6px; }
+    .sp-sugg-btn { border:none;background:none;color:var(--primary);cursor:pointer;font-size:0.85rem;padding:2px 5px;border-radius:6px; }
+    .sp-sugg-btn:hover { background:var(--surface-2); }
     /* شريط الصفحات */
     .sp-pager { display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:12px;padding-top:10px;border-top:1px solid var(--surface-3); }
     .sp-pg-info { font-size:0.72rem;color:var(--text-muted);font-weight:600; }
@@ -127,6 +133,17 @@
     </div>
   </div>
 
+  <!-- modal اقتراح كود من المخزون -->
+  <div class="sp-modal-bg" id="sp-sugg-bg" onclick="if(event.target===this)closeSugg()">
+    <div class="sp-modal" style="max-width:640px">
+      <div class="sp-modal-hd">
+        <div style="font-weight:800;font-size:0.9rem;" id="sugg-title"><i class="fas fa-wand-magic-sparkles"></i> اقتراح كود</div>
+        <button class="sp-close" onclick="closeSugg()">✕</button>
+      </div>
+      <div class="sp-modal-bd" id="sugg-body"></div>
+    </div>
+  </div>
+
   <!-- modal إدارة المخازن -->
   <div class="sp-modal-bg" id="sp-st-bg" onclick="if(event.target===this)closeStores()">
     <div class="sp-modal" style="max-width:540px">
@@ -207,6 +224,8 @@
     const SP_SIZE = 50;
     let spPage = 1, spTotal = 0, spBusy = false, spTimer = null;
     let STORES = [];   // قائمة المخازن المُدارة
+    let canEdit = false;   // صلاحية تعديل الأكواد (أدمن/مدير)
+    let rowById = {};      // صفوف الصفحة الحالية بالـ id
 
     const H = { 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + SB_ANON_API };
     const num = v => (v === null || v === undefined || v === '') ? '—' : (Math.round(Number(v) * 100) / 100);
@@ -229,7 +248,7 @@
       const wc = document.getElementById('sp-withcode').checked;
       const nc = document.getElementById('sp-nocodef').checked;
       const av = document.getElementById('sp-avail').value;
-      let url = SB_URL_API + '/rest/v1/store_item_prices?select=item_name,code,store,price,discount_perc,available,updated_at'
+      let url = SB_URL_API + '/rest/v1/store_item_prices?select=id,item_name,code,store,price,discount_perc,available,updated_at'
         + '&order=item_name.asc&limit=' + SP_SIZE + '&offset=' + offset;
       if (q) { const e = encodeURIComponent(q); url += '&or=(item_name.ilike.*' + e + '*,code.ilike.*' + e + '*)'; }
       if (store) url += '&store=eq.' + encodeURIComponent(store);
@@ -250,13 +269,24 @@
         spTotal = cr && cr.includes('/') ? parseInt(cr.split('/')[1]) : rows.length;
         document.getElementById('sp-count').textContent = spTotal.toLocaleString('ar-EG') + ' صنف';
         if (!rows.length) { body.innerHTML = '<tr><td colspan="7" style="padding:24px;color:var(--text-muted);">لا توجد نتائج</td></tr>'; renderPager(); return; }
+        rowById = {};
         body.innerHTML = rows.map(r => {
-          const codeCell = r.code ? '<span class="sp-code">' + r.code + '</span>' : '<span class="sp-nocode">—</span>';
+          rowById[r.id] = r;
           const avCell = r.available ? '<span class="sp-av-yes">متاح</span>' : '<span class="sp-av-no">غير متاح</span>';
           const onclick = r.code ? 'openCompare(\'' + String(r.code).replace(/'/g, "\\'") + '\',\'' + String(r.item_name).replace(/'/g, "\\'").replace(/"/g,'&quot;') + '\')' : '';
+          let codeTd;
+          if (canEdit) {
+            const disp = r.code ? '<span class="sp-code">' + r.code + '</span>' : '<span class="sp-nocode">بدون كود</span>';
+            codeTd = '<td class="sp-code-td" onclick="event.stopPropagation()">'
+              + '<span class="sp-code-cell" id="code-' + r.id + '" title="اضغط لتعديل الكود" onclick="editCode(' + r.id + ')">' + disp + '</span>'
+              + ' <button class="sp-sugg-btn" title="اقتراح كود من المخزون" onclick="suggestCode(' + r.id + ')"><i class="fas fa-wand-magic-sparkles"></i></button>'
+              + '</td>';
+          } else {
+            codeTd = '<td>' + (r.code ? '<span class="sp-code">' + r.code + '</span>' : '<span class="sp-nocode">—</span>') + '</td>';
+          }
           return '<tr ' + (r.code ? 'onclick="' + onclick + '" title="اضغط لمقارنة المخازن بالكود"' : 'style="cursor:default"') + '>'
             + '<td style="text-align:right;font-weight:600;">' + (r.item_name || '—') + '</td>'
-            + '<td>' + codeCell + '</td>'
+            + codeTd
             + '<td>' + (r.store || '—') + '</td>'
             + '<td>' + num(r.price) + '</td>'
             + '<td class="sp-disc">' + num(r.discount_perc) + '%</td>'
@@ -592,10 +622,81 @@
       } catch (e) { msg.innerHTML = '<span class="sp-msg-err">' + e.message + '</span>'; }
     }
 
+    // ===== تعديل الكود inline =====
+    function renderCodeCell(id) {
+      const span = document.getElementById('code-' + id);
+      if (!span) return;
+      delete span.dataset.editing;
+      const c = rowById[id] && rowById[id].code;
+      span.innerHTML = c ? '<span class="sp-code">' + c + '</span>' : '<span class="sp-nocode">بدون كود</span>';
+    }
+    function editCode(id) {
+      if (!canEdit) return;
+      const span = document.getElementById('code-' + id);
+      if (!span || span.dataset.editing) return;
+      span.dataset.editing = '1';
+      const cur = (rowById[id] && rowById[id].code) ? String(rowById[id].code) : '';
+      span.innerHTML = '<input class="sp-code-input" id="ci-' + id + '" value="' + cur.replace(/"/g, '&quot;') + '">';
+      const inp = document.getElementById('ci-' + id);
+      inp.focus(); inp.select();
+      let cancel = false;
+      inp.onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); inp.blur(); } else if (ev.key === 'Escape') { cancel = true; inp.blur(); } };
+      inp.onblur = () => { if (cancel) { renderCodeCell(id); } else { saveCode(id, inp.value); } };
+    }
+    async function saveCode(id, valRaw) {
+      const val = (valRaw == null ? '' : String(valRaw)).trim();
+      const cur = (rowById[id] && rowById[id].code) ? String(rowById[id].code) : '';
+      if (val === cur) { renderCodeCell(id); return; }
+      const span = document.getElementById('code-' + id);
+      if (span) span.innerHTML = '<span style="color:var(--text-muted)">…</span>';
+      try {
+        const res = await fetch(SB_URL_API + '/rest/v1/store_item_prices?id=eq.' + id, {
+          method: 'PATCH', headers: { ...H, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ code: val === '' ? null : val })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        if (rowById[id]) rowById[id].code = (val === '' ? null : val);
+        renderCodeCell(id);
+      } catch (e) { alert('تعذّر حفظ الكود: ' + e.message); renderCodeCell(id); }
+    }
+
+    // ===== اقتراح كود من المخزون =====
+    let suggTargetId = null;
+    async function suggestCode(id) {
+      const r = rowById[id]; if (!r) return;
+      suggTargetId = id;
+      document.getElementById('sugg-title').textContent = 'اقتراح كود — ' + (r.item_name || '');
+      document.getElementById('sugg-body').innerHTML = 'جارٍ البحث في المخزون…';
+      document.getElementById('sp-sugg-bg').classList.add('open');
+      try {
+        const res = await fetch(SB_URL_API + '/rest/v1/rpc/suggest_stock_codes', {
+          method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ p_name: r.item_name, p_limit: 12 })
+        });
+        const list = await res.json();
+        if (!Array.isArray(list) || !list.length) {
+          document.getElementById('sugg-body').innerHTML = '<div style="color:var(--text-muted)">لا توجد اقتراحات — عدّل الكود يدويًّا من خانة الكود.</div>'; return;
+        }
+        document.getElementById('sugg-body').innerHTML =
+          '<div style="font-size:.75rem;color:var(--text-muted);margin-bottom:8px;">اختر الصنف المطابق من مخزونك ليأخذ كوده:</div>'
+          + '<table class="sp-table" style="min-width:auto"><thead><tr><th style="text-align:right">اسم الصنف في المخزون</th><th>الكود</th><th>التشابه</th><th></th></tr></thead><tbody>'
+          + list.map(x => '<tr>'
+              + '<td style="text-align:right">' + (x.name || '') + (x.company ? ' <span style="color:var(--text-muted);font-size:.7rem">(' + x.company + ')</span>' : '') + '</td>'
+              + '<td class="sp-code">' + x.itm_code + '</td>'
+              + '<td>' + Math.round((x.sim || 0) * 100) + '%</td>'
+              + '<td><button class="btn btn-primary" style="padding:3px 10px;font-size:.72rem" onclick="pickSuggest(\'' + String(x.itm_code).replace(/'/g, "\\'") + '\')">اختيار</button></td>'
+              + '</tr>').join('')
+          + '</tbody></table>';
+      } catch (e) { document.getElementById('sugg-body').innerHTML = '<div style="color:var(--danger)">خطأ في جلب الاقتراحات</div>'; }
+    }
+    function closeSugg() { document.getElementById('sp-sugg-bg').classList.remove('open'); }
+    async function pickSuggest(code) { const id = suggTargetId; closeSugg(); await saveCode(id, code); }
+
     // إظهار أزرار الإدارة/الرفع لأصحاب الصلاحية (أدمن/مدير) — الشاشة أصلًا لا تُفتح إلا لهم عبر القشرة
     (function () {
       const role = (localStorage.getItem('userRole') || '').toLowerCase();
       if (role === 'admin' || role === 'manager') {
+        canEdit = true;
         document.getElementById('sp-open-up').style.display = 'inline-flex';
         document.getElementById('sp-open-st').style.display = 'inline-flex';
       }
@@ -610,7 +711,7 @@
     document.getElementById('sp-withcode').addEventListener('change', () => { spPage = 1; loadPage(); });
     document.getElementById('sp-nocodef').addEventListener('change', () => { spPage = 1; loadPage(); });
     document.getElementById('sp-refresh').addEventListener('click', () => { spPage = 1; loadPage(); });
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeCompare(); closeUpload(); closeStores(); } });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeCompare(); closeUpload(); closeStores(); closeSugg(); } });
 
     loadStores();
     loadPage();
