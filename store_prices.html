@@ -7,16 +7,20 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   <style>
-    .sp-filters { display:grid; grid-template-columns:1fr 200px auto; gap:10px; align-items:end; margin-bottom:14px; }
+    .sp-filters { display:grid; grid-template-columns:1fr 190px auto auto; gap:10px; align-items:end; margin-bottom:14px; }
     @media(max-width:760px){ .sp-filters{ grid-template-columns:1fr; } }
     .sp-field label { font-size:0.72rem;font-weight:700;color:var(--text-secondary);margin-bottom:3px;display:block; }
+    .sp-checks { display:flex;gap:14px;align-items:center;height:38px; }
+    .sp-checks label { display:flex;align-items:center;gap:5px;font-size:0.78rem;font-weight:700;color:var(--text-secondary);cursor:pointer;margin:0; }
+    .sp-checks input { width:16px;height:16px;cursor:pointer;accent-color:var(--primary); }
+    .sp-cost { font-weight:800;color:#b45309; }
+    .sp-date { font-size:0.7rem;color:var(--text-muted);white-space:nowrap; }
     .sp-table { width:100%;border-collapse:collapse;min-width:640px; }
     .sp-wrap { overflow:auto; max-height:calc(100vh - 230px); }
     .sp-table th { background:var(--primary);color:#fff;padding:9px 8px;font-size:0.72rem;font-weight:700;text-align:center;white-space:nowrap;position:sticky;top:0;z-index:5; }
     .sp-table td { padding:7px 8px;font-size:0.8rem;border-bottom:1px solid var(--surface-3);text-align:center; }
     .sp-table tr:hover td { background:var(--surface-2);cursor:pointer; }
     .sp-disc { font-weight:800;color:#15803d; }
-    .sp-store { display:inline-block;padding:2px 8px;border-radius:20px;background:var(--surface-3);font-size:0.7rem;font-weight:700; }
     .sp-code { color:var(--primary);font-weight:700; }
     .sp-nocode { color:var(--text-muted);font-size:0.7rem; }
     /* شريط الصفحات */
@@ -65,6 +69,13 @@
           </select>
         </div>
         <div class="sp-field">
+          <label>عرض الأصناف</label>
+          <div class="sp-checks">
+            <label><input type="checkbox" id="sp-withcode" checked> بكود</label>
+            <label><input type="checkbox" id="sp-nocodef" checked> بدون كود</label>
+          </div>
+        </div>
+        <div class="sp-field">
           <label>&nbsp;</label>
           <button class="btn" id="sp-refresh"><i class="fas fa-rotate"></i> تحديث</button>
         </div>
@@ -79,10 +90,11 @@
               <th>المخزن</th>
               <th>السعر</th>
               <th>الخصم %</th>
+              <th>آخر تحديث</th>
             </tr>
           </thead>
           <tbody id="sp-body">
-            <tr><td colspan="5" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr>
+            <tr><td colspan="6" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr>
           </tbody>
         </table>
       </div>
@@ -108,14 +120,30 @@
 
     const H = { 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + SB_ANON_API };
     const num = v => (v === null || v === undefined || v === '') ? '—' : (Math.round(Number(v) * 100) / 100);
+    // التكلفة الصافية = السعر بعد الخصم
+    const netCost = r => {
+      const p = Number(r.price), d = Number(r.discount_perc) || 0;
+      if (r.price === null || r.price === undefined || r.price === '' || isNaN(p)) return null;
+      return p * (1 - d / 100);
+    };
+    // تاريخ آخر تحديث بتوقيت القاهرة (updated_at مخزّن UTC حقيقي)
+    const fmtDate = s => {
+      if (!s) return '—';
+      try { return new Date(s).toLocaleDateString('ar-EG', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }); }
+      catch (e) { return '—'; }
+    };
 
     function buildQuery(offset) {
       const q = document.getElementById('sp-search').value.trim();
       const store = document.getElementById('sp-store').value;
-      let url = SB_URL_API + '/rest/v1/store_item_prices?select=item_name,code,store,price,discount_perc'
+      const wc = document.getElementById('sp-withcode').checked;
+      const nc = document.getElementById('sp-nocodef').checked;
+      let url = SB_URL_API + '/rest/v1/store_item_prices?select=item_name,code,store,price,discount_perc,updated_at'
         + '&order=item_name.asc&limit=' + SP_SIZE + '&offset=' + offset;
       if (q) { const e = encodeURIComponent(q); url += '&or=(item_name.ilike.*' + e + '*,code.ilike.*' + e + '*)'; }
       if (store) url += '&store=eq.' + encodeURIComponent(store);
+      if (wc && !nc) url += '&code=not.is.null';        // بكود فقط
+      else if (!wc && nc) url += '&code=is.null';        // بدون كود فقط
       return url;
     }
 
@@ -128,21 +156,22 @@
         const cr = res.headers.get('content-range'); // "0-49/12345"
         spTotal = cr && cr.includes('/') ? parseInt(cr.split('/')[1]) : rows.length;
         document.getElementById('sp-count').textContent = spTotal.toLocaleString('ar-EG') + ' صنف';
-        if (!rows.length) { body.innerHTML = '<tr><td colspan="5" style="padding:24px;color:var(--text-muted);">لا توجد نتائج</td></tr>'; renderPager(); return; }
+        if (!rows.length) { body.innerHTML = '<tr><td colspan="6" style="padding:24px;color:var(--text-muted);">لا توجد نتائج</td></tr>'; renderPager(); return; }
         body.innerHTML = rows.map(r => {
           const codeCell = r.code ? '<span class="sp-code">' + r.code + '</span>' : '<span class="sp-nocode">—</span>';
           const onclick = r.code ? 'openCompare(\'' + String(r.code).replace(/'/g, "\\'") + '\',\'' + String(r.item_name).replace(/'/g, "\\'").replace(/"/g,'&quot;') + '\')' : '';
           return '<tr ' + (r.code ? 'onclick="' + onclick + '" title="اضغط لمقارنة المخازن بالكود"' : 'style="cursor:default"') + '>'
             + '<td style="text-align:right;font-weight:600;">' + (r.item_name || '—') + '</td>'
             + '<td>' + codeCell + '</td>'
-            + '<td><span class="sp-store">' + (r.store || '—') + '</span></td>'
+            + '<td>' + (r.store || '—') + '</td>'
             + '<td>' + num(r.price) + '</td>'
             + '<td class="sp-disc">' + num(r.discount_perc) + '%</td>'
+            + '<td class="sp-date">' + fmtDate(r.updated_at) + '</td>'
             + '</tr>';
         }).join('');
         renderPager();
       } catch (e) {
-        body.innerHTML = '<tr><td colspan="5" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>';
+        body.innerHTML = '<tr><td colspan="6" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>';
         console.error(e);
       } finally { spBusy = false; }
     }
@@ -174,18 +203,23 @@
       document.getElementById('sp-modal-body').innerHTML = 'جارٍ التحميل…';
       bg.classList.add('open');
       try {
-        const url = SB_URL_API + '/rest/v1/store_item_prices?select=item_name,store,price,discount_perc&code=eq.' + encodeURIComponent(code) + '&order=discount_perc.desc.nullslast';
-        const rows = await (await fetch(url, { headers: H })).json();
+        const url = SB_URL_API + '/rest/v1/store_item_prices?select=item_name,store,price,discount_perc,updated_at&code=eq.' + encodeURIComponent(code);
+        let rows = await (await fetch(url, { headers: H })).json();
         if (!rows.length) { document.getElementById('sp-modal-body').innerHTML = '<div style="color:var(--text-muted)">لا توجد مخازن بهذا الكود</div>'; return; }
-        const best = rows[0].discount_perc;
+        // ترتيب بأفضل تكلفة صافية (الأرخص فوق)؛ الصفوف بدون سعر في الآخر
+        rows = rows.map(r => ({ ...r, _cost: netCost(r) }))
+                   .sort((a, b) => (a._cost == null ? Infinity : a._cost) - (b._cost == null ? Infinity : b._cost));
+        const bestCost = rows[0]._cost;
         document.getElementById('sp-modal-body').innerHTML =
-          '<div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:8px;">' + rows.length + ' مخزن عندهم الكود ده — الأعلى خصمًا فوق</div>'
-          + '<table class="sp-table" style="min-width:auto"><thead><tr><th style="text-align:right;">المخزن</th><th>الصنف عندهم</th><th>السعر</th><th>الخصم %</th></tr></thead><tbody>'
-          + rows.map((r, i) => '<tr' + (r.discount_perc === best && best != null ? ' class="sp-best"' : '') + '>'
-              + '<td style="text-align:right;font-weight:700;">' + (i === 0 && best != null ? '🏆 ' : '') + (r.store || '—') + '</td>'
+          '<div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:8px;">' + rows.length + ' مخزن عندهم الكود ده — الأقل تكلفةً فوق (السعر بعد الخصم)</div>'
+          + '<table class="sp-table" style="min-width:auto"><thead><tr><th style="text-align:right;">المخزن</th><th>الصنف عندهم</th><th>السعر</th><th>الخصم %</th><th>التكلفة</th><th>آخر تحديث</th></tr></thead><tbody>'
+          + rows.map((r, i) => '<tr' + (r._cost != null && r._cost === bestCost ? ' class="sp-best"' : '') + '>'
+              + '<td style="text-align:right;font-weight:700;">' + (i === 0 && bestCost != null ? '🏆 ' : '') + (r.store || '—') + '</td>'
               + '<td style="text-align:right;font-size:0.72rem;color:var(--text-muted);">' + (r.item_name || '') + '</td>'
               + '<td>' + num(r.price) + '</td>'
-              + '<td class="sp-disc">' + num(r.discount_perc) + '%</td></tr>').join('')
+              + '<td class="sp-disc">' + num(r.discount_perc) + '%</td>'
+              + '<td class="sp-cost">' + num(r._cost) + '</td>'
+              + '<td class="sp-date">' + fmtDate(r.updated_at) + '</td></tr>').join('')
           + '</tbody></table>';
       } catch (e) { document.getElementById('sp-modal-body').innerHTML = '<div style="color:var(--danger)">خطأ في التحميل</div>'; }
     }
@@ -196,6 +230,8 @@
       clearTimeout(spTimer); spTimer = setTimeout(() => { spPage = 1; loadPage(); }, 300);
     });
     document.getElementById('sp-store').addEventListener('change', () => { spPage = 1; loadPage(); });
+    document.getElementById('sp-withcode').addEventListener('change', () => { spPage = 1; loadPage(); });
+    document.getElementById('sp-nocodef').addEventListener('change', () => { spPage = 1; loadPage(); });
     document.getElementById('sp-refresh').addEventListener('click', () => { spPage = 1; loadPage(); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeCompare(); });
 
