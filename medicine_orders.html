@@ -468,8 +468,8 @@
         cols:[{f:'itm_code',l:'الكود'},{f:'itm_name',l:'الاسم'},{f:'qty',l:'المعامل',num:true}] },
       tiers: { table:'demand_tiers', key:'id', order:'rate_min.desc', search:[],
         cols:[{f:'rate_min',l:'المعدل الشهري ≥',num:true},{f:'active_min',l:'شهور نشطة ≥',num:true},{f:'save_factor',l:'كمية التوفير',num:true}] },
-      archive: { table:'archived_items', key:'itm_code', order:'itm_code.asc', search:['itm_code','note'], recompute:false,
-        cols:[{f:'itm_code',l:'الكود'},{f:'note',l:'ملاحظة (اسم الصنف / السبب)'}] }
+      archive: { table:'archived_items', key:'itm_code', order:'itm_code.asc', search:['itm_code','itm_name','note'], recompute:false,
+        cols:[{f:'itm_code',l:'الكود',lookup:true},{f:'itm_name',l:'اسم الصنف'},{f:'note',l:'ملاحظة'}] }
     };
     const ET_DATA = {};
 
@@ -499,18 +499,37 @@
       if (!q) return true;
       return ET[t].search.some(f => String(row[f] == null ? '' : row[f]).toLowerCase().includes(q));
     }
+    function cellInput(t, tag, c, value) {
+      const extra = c.lookup ? ' onblur="archLookupName(this,\'et-' + t + '-' + tag + '-itm_name\')"' : '';
+      const isAdd = tag === 'new';
+      const val = value == null ? '' : String(value).replace(/"/g, '&quot;');
+      return '<input id="et-' + t + '-' + tag + '-' + c.f + '"' + (c.num ? ' type="number" step="any"' : '')
+        + (isAdd ? ' placeholder="' + c.l + '"' : ' value="' + val + '"') + extra + '>';
+    }
     function renderEditTable(t) {
       const cfg = ET[t]; const all = ET_DATA[t] || []; const rows = all.filter(r => etMatch(t, r));
       let h = '<table class="et-table"><thead><tr>' + cfg.cols.map(c => '<th>' + c.l + '</th>').join('') + '<th>إجراء</th></tr></thead><tbody>';
-      h += '<tr class="et-add-row">' + cfg.cols.map(c => '<td><input id="et-' + t + '-new-' + c.f + '" ' + (c.num ? 'type="number" step="any"' : '') + ' placeholder="' + c.l + '"></td>').join('')
+      h += '<tr class="et-add-row">' + cfg.cols.map(c => '<td>' + cellInput(t, 'new', c) + '</td>').join('')
         + '<td><button class="et-btn et-add" onclick="etAdd(\'' + t + '\')">+ إضافة</button></td></tr>';
       h += rows.map(r => { const idx = all.indexOf(r);
-        return '<tr>' + cfg.cols.map(c => '<td><input id="et-' + t + '-' + idx + '-' + c.f + '" value="' + String(r[c.f] == null ? '' : r[c.f]).replace(/"/g, '&quot;') + '" ' + (c.num ? 'type="number" step="any"' : '') + '></td>').join('')
+        return '<tr>' + cfg.cols.map(c => '<td>' + cellInput(t, idx, c, r[c.f]) + '</td>').join('')
           + '<td style="white-space:nowrap"><button class="et-btn et-save" onclick="etSave(\'' + t + '\',' + idx + ')">حفظ</button> '
           + '<button class="et-btn et-del" onclick="etDel(\'' + t + '\',' + idx + ')" title="حذف"><i class="fas fa-trash"></i></button></td></tr>';
       }).join('');
       h += '</tbody></table>';
       document.getElementById('et-wrap-' + t).innerHTML = h;
+    }
+    async function archLookupName(inp, targetId) {
+      const code = (inp.value || '').trim(); const tgt = document.getElementById(targetId);
+      if (!code || !tgt || tgt.value.trim()) return;   // لا نكتب فوق اسم موجود
+      try {
+        let r = await fetch(REST + 'stock_flat?itm_code=eq.' + encodeURIComponent(code) + '&select=n&limit=1', { headers: H });
+        let j = await r.json();
+        if (j && j[0] && j[0].n) { tgt.value = j[0].n; return; }
+        r = await fetch(REST + 'consumption_flat?code=eq.' + encodeURIComponent(code) + '&select=itm_name&limit=1', { headers: H });
+        j = await r.json();
+        if (j && j[0] && j[0].itm_name) tgt.value = j[0].itm_name;
+      } catch (e) {}
     }
     function etCollect(t, tag) {
       const o = {};
