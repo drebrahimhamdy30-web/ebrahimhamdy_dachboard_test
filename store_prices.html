@@ -328,6 +328,16 @@
       }
       return -1;
     };
+    // اكتشاف أعمدة الاسم/السعر/الخصم مع ضمان عدم التصادم (لو فشل التخمين يختار أول عمود فاضي)
+    function autoMap(headers) {
+      let n = guess(headers, ['اسم', 'صنف', 'name', 'item', 'product']);
+      let p = guess(headers, ['سعر', 'price', 'cost']);
+      let d = guess(headers, ['خصم', 'disc', '%', 'vip', 'عرض']);
+      const used = new Set();
+      const firstFree = () => { for (let i = 0; i < headers.length; i++) if (!used.has(i)) return i; return 0; };
+      const claim = (i) => { const v = (i >= 0 && i < headers.length && !used.has(i)) ? i : firstFree(); used.add(v); return v; };
+      return { n: claim(n), p: claim(p), d: claim(d) };
+    }
 
     function openUpload() {
       document.getElementById('up-msg').innerHTML = '';
@@ -359,9 +369,8 @@
           const opts = upHeaders.map((h, i) => '<option value="' + i + '">' + (h || ('عمود ' + (i + 1))) + '</option>').join('');
           const nSel = document.getElementById('map-name'), pSel = document.getElementById('map-price'), dSel = document.getElementById('map-disc');
           nSel.innerHTML = opts; pSel.innerHTML = opts; dSel.innerHTML = opts;
-          nSel.value = Math.max(0, guess(upHeaders, ['اسم', 'صنف', 'name', 'item']));
-          pSel.value = Math.max(0, guess(upHeaders, ['سعر', 'price']));
-          dSel.value = Math.max(0, guess(upHeaders, ['خصم', 'disc', '%']));
+          const mp = autoMap(upHeaders);
+          nSel.value = mp.n; pSel.value = mp.p; dSel.value = mp.d;
           document.getElementById('up-map').style.display = 'block';
           renderUpPreview();
         } catch (err) { msg.innerHTML = '<span class="sp-msg-err">تعذّر قراءة الملف: ' + err.message + '</span>'; }
