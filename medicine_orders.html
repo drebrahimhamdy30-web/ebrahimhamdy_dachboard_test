@@ -85,6 +85,7 @@
         <button class="mo-tab" id="tabbtn-replace" style="display:none" onclick="showTab('replace')">الأكواد البديلة</button>
         <button class="mo-tab" id="tabbtn-exceptional" style="display:none" onclick="showTab('exceptional')">الأصناف الاستثنائية</button>
         <button class="mo-tab" id="tabbtn-tiers" style="display:none" onclick="showTab('tiers')">شرائح كمية الطلب</button>
+        <button class="mo-tab" id="tabbtn-archive" style="display:none" onclick="showTab('archive')">الأرشيف</button>
       </div>
 
       <!-- ===== تبويب معدل الاستهلاك ===== -->
@@ -168,6 +169,11 @@
         <div class="et-note">شرائح «كمية التوفير»: لكل صنف يُختار أعلى شريحة (المعدل الشهري ≥ الحد + الشهور النشطة ≥ الحد) وتُضرب كمية التوفير في المعدل. أي تعديل يعيد حساب المعدل تلقائيًّا.</div>
         <div class="cr-wrap" id="et-wrap-tiers"></div>
       </div>
+      <div id="tab-archive" style="display:none">
+        <div class="et-note">أصناف موقوفة/مؤرشفة — <b>لن تظهر في تبويب الطلبيات</b>. العدد: <span id="arch-count">—</span>. أضف كود الصنف الموقوف (والملاحظة اختيارية).</div>
+        <input type="text" class="form-input et-search" id="et-search-archive" placeholder="🔍 بحث بالكود أو الملاحظة..." oninput="filterEditTable('archive')" style="max-width:260px;margin-bottom:10px">
+        <div class="cr-wrap" id="et-wrap-archive"></div>
+      </div>
     </div>
   </div>
 
@@ -227,14 +233,14 @@
     const BR = { mamora:'المعمورة', san:'سان ستيفانو', bishr:'سيدى بشر' };
     const esc = s => String(s==null?'':s).replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
-    const TABS = ['rate','orders','replace','exceptional','tiers'];
+    const TABS = ['rate','orders','replace','exceptional','tiers','archive'];
     function showTab(t) {
       TABS.forEach(x => {
         const pane = document.getElementById('tab-' + x), btn = document.getElementById('tabbtn-' + x);
         if (pane) pane.style.display = (x===t)?'block':'none';
         if (btn) btn.classList.toggle('active', x===t);
       });
-      if (['replace','exceptional','tiers'].includes(t)) loadEditTable(t);
+      if (['replace','exceptional','tiers','archive'].includes(t)) loadEditTable(t);
     }
 
     function buildQuery(offset) {
@@ -461,7 +467,9 @@
       exceptional: { table:'consumption_exceptional', key:'itm_code', order:'itm_code.asc', search:['itm_code','itm_name'],
         cols:[{f:'itm_code',l:'الكود'},{f:'itm_name',l:'الاسم'},{f:'qty',l:'المعامل',num:true}] },
       tiers: { table:'demand_tiers', key:'id', order:'rate_min.desc', search:[],
-        cols:[{f:'rate_min',l:'المعدل الشهري ≥',num:true},{f:'active_min',l:'شهور نشطة ≥',num:true},{f:'save_factor',l:'كمية التوفير',num:true}] }
+        cols:[{f:'rate_min',l:'المعدل الشهري ≥',num:true},{f:'active_min',l:'شهور نشطة ≥',num:true},{f:'save_factor',l:'كمية التوفير',num:true}] },
+      archive: { table:'archived_items', key:'itm_code', order:'itm_code.asc', search:['itm_code','note'], recompute:false,
+        cols:[{f:'itm_code',l:'الكود'},{f:'note',l:'ملاحظة (اسم الصنف / السبب)'}] }
     };
     const ET_DATA = {};
 
@@ -482,6 +490,7 @@
         const r = await fetch(REST + cfg.table + '?select=' + sel + '&order=' + cfg.order + '&limit=5000', { headers: H });
         ET_DATA[t] = await r.json();
         renderEditTable(t);
+        if (t === 'archive') { const c = document.getElementById('arch-count'); if (c) c.textContent = (ET_DATA[t]||[]).length.toLocaleString('ar-EG'); }
       } catch (e) { wrap.innerHTML = '<div style="color:var(--danger)">خطأ في التحميل</div>'; }
     }
     function filterEditTable(t) { renderEditTable(t); }
@@ -510,7 +519,8 @@
         o[c.f] = c.num ? (v === '' ? null : Number(v)) : v; });
       return o;
     }
-    async function etRecompute() {
+    async function etRecompute(t) {
+      if (t && ET[t] && ET[t].recompute === false) return;   // الأرشيف لا يؤثر على حساب المعدل
       try { await fetch(REST + 'rpc/refresh_consumption_rates', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' }); } catch (e) {}
       loadMeta();
     }
@@ -522,7 +532,7 @@
                                      : REST + cfg.table + '?' + cfg.key + '=eq.' + encodeURIComponent(row[cfg.key]);
         const res = await fetch(url, { method:'PATCH', headers:{ ...H, 'Content-Type':'application/json', 'Prefer':'return=minimal' }, body: JSON.stringify(o) });
         if (!res.ok) throw new Error(await res.text());
-        await etRecompute(); await loadEditTable(t); toast('تم الحفظ وإعادة الحساب ✓');
+        await etRecompute(t); await loadEditTable(t); toast('تم الحفظ' + (ET[t].recompute!==false?' وإعادة الحساب':'') + ' ✓');
       } catch (e) { alert('تعذّر الحفظ: ' + e.message); }
     }
     async function etAdd(t) {
@@ -531,7 +541,7 @@
       try {
         const res = await fetch(REST + cfg.table, { method:'POST', headers:{ ...H, 'Content-Type':'application/json', 'Prefer':'return=minimal' }, body: JSON.stringify(o) });
         if (!res.ok) throw new Error(await res.text());
-        await etRecompute(); await loadEditTable(t); toast('تمت الإضافة وإعادة الحساب ✓');
+        await etRecompute(t); await loadEditTable(t); toast('تمت الإضافة' + (ET[t].recompute!==false?' وإعادة الحساب':'') + ' ✓');
       } catch (e) { alert('تعذّرت الإضافة: ' + e.message); }
     }
     async function etDel(t, idx) {
@@ -542,7 +552,7 @@
                                      : REST + cfg.table + '?' + cfg.key + '=eq.' + encodeURIComponent(row[cfg.key]);
         const res = await fetch(url, { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });
         if (!res.ok) throw new Error(await res.text());
-        await etRecompute(); await loadEditTable(t); toast('تم الحذف وإعادة الحساب ✓');
+        await etRecompute(t); await loadEditTable(t); toast('تم الحذف' + (ET[t].recompute!==false?' وإعادة الحساب':'') + ' ✓');
       } catch (e) { alert('تعذّر الحذف: ' + e.message); }
     }
 
@@ -551,7 +561,7 @@
       if (role === 'admin' || role === 'manager') {
         canEdit = true;
         document.getElementById('mo-months').style.display = 'block';
-        ['replace','exceptional','tiers'].forEach(t => document.getElementById('tabbtn-' + t).style.display = 'inline-block');
+        ['replace','exceptional','tiers','archive'].forEach(t => document.getElementById('tabbtn-' + t).style.display = 'inline-block');
       }
     })();
 
