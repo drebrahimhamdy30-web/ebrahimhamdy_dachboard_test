@@ -58,6 +58,17 @@
     .up-map { display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:10px; }
     @media(max-width:640px){ .up-map{ grid-template-columns:1fr 1fr; } }
     .msg-ok { color:#15803d;font-weight:800; } .msg-err { color:var(--danger);font-weight:800; }
+    /* جداول التعديل */
+    .et-note { background:var(--surface-2);border:1px solid var(--surface-3);border-radius:8px;padding:8px 10px;font-size:0.76rem;color:var(--text-secondary);margin-bottom:10px;line-height:1.7; }
+    .et-table { width:100%;border-collapse:collapse;min-width:520px; }
+    .et-table th { background:var(--primary);color:#fff;padding:8px;font-size:0.72rem;font-weight:700;text-align:center;white-space:nowrap;position:sticky;top:0;z-index:5; }
+    .et-table td { padding:5px 6px;font-size:0.8rem;border-bottom:1px solid var(--surface-3);text-align:center; }
+    .et-table input { width:100%;box-sizing:border-box;font-family:inherit;font-size:0.78rem;padding:5px 6px;border:1px solid var(--border);border-radius:6px;text-align:center; }
+    .et-add-row td { background:var(--surface-2); }
+    .et-btn { border:none;border-radius:6px;padding:5px 10px;font-family:inherit;font-size:0.72rem;font-weight:700;cursor:pointer; }
+    .et-save { background:var(--primary);color:#fff; }
+    .et-del { background:none;color:var(--danger);font-size:0.9rem;padding:4px 6px; }
+    .et-add { background:#16a34a;color:#fff; }
   </style>
 </head>
 <body>
@@ -71,6 +82,9 @@
       <div class="mo-tabs">
         <button class="mo-tab active" id="tabbtn-rate" onclick="showTab('rate')">معدل الاستهلاك</button>
         <button class="mo-tab" id="tabbtn-orders" onclick="showTab('orders')">الطلبيات</button>
+        <button class="mo-tab" id="tabbtn-replace" style="display:none" onclick="showTab('replace')">الأكواد البديلة</button>
+        <button class="mo-tab" id="tabbtn-exceptional" style="display:none" onclick="showTab('exceptional')">الأصناف الاستثنائية</button>
+        <button class="mo-tab" id="tabbtn-tiers" style="display:none" onclick="showTab('tiers')">شرائح كمية الطلب</button>
       </div>
 
       <!-- ===== تبويب معدل الاستهلاك ===== -->
@@ -138,6 +152,22 @@
           هيعتمد على <b>معدل الاستهلاك المحسوب في التبويب الأول</b>: الكمية المطلوبة = (المستهدف − الرصيد الحالي) لكل فرع، ثم الطلب من <b>المخزن الأقل تكلفة</b>.
         </div>
       </div>
+
+      <!-- ===== تبويبات إدارة الجداول المرجعية ===== -->
+      <div id="tab-replace" style="display:none">
+        <div class="et-note">كل كود له بديل يتحوّل إليه معدله بوزن معيّن (يمكن توزيعه على أكتر من بديل). أي تعديل يعيد حساب المعدل تلقائيًّا.</div>
+        <input type="text" class="form-input et-search" id="et-search-replace" placeholder="🔍 بحث بالكود..." oninput="filterEditTable('replace')" style="max-width:260px;margin-bottom:10px">
+        <div class="cr-wrap" id="et-wrap-replace"></div>
+      </div>
+      <div id="tab-exceptional" style="display:none">
+        <div class="et-note">معامل يُضرب في معدل أصناف بعينها (الافتراضي 1). أي تعديل يعيد حساب المعدل تلقائيًّا.</div>
+        <input type="text" class="form-input et-search" id="et-search-exceptional" placeholder="🔍 بحث بالكود أو الاسم..." oninput="filterEditTable('exceptional')" style="max-width:260px;margin-bottom:10px">
+        <div class="cr-wrap" id="et-wrap-exceptional"></div>
+      </div>
+      <div id="tab-tiers" style="display:none">
+        <div class="et-note">شرائح «كمية التوفير»: لكل صنف يُختار أعلى شريحة (المعدل الشهري ≥ الحد + الشهور النشطة ≥ الحد) وتُضرب كمية التوفير في المعدل. أي تعديل يعيد حساب المعدل تلقائيًّا.</div>
+        <div class="cr-wrap" id="et-wrap-tiers"></div>
+      </div>
     </div>
   </div>
 
@@ -197,11 +227,14 @@
     const BR = { mamora:'المعمورة', san:'سان ستيفانو', bishr:'سيدى بشر' };
     const esc = s => String(s==null?'':s).replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
+    const TABS = ['rate','orders','replace','exceptional','tiers'];
     function showTab(t) {
-      document.getElementById('tab-rate').style.display = (t==='rate')?'block':'none';
-      document.getElementById('tab-orders').style.display = (t==='orders')?'block':'none';
-      document.getElementById('tabbtn-rate').classList.toggle('active', t==='rate');
-      document.getElementById('tabbtn-orders').classList.toggle('active', t==='orders');
+      TABS.forEach(x => {
+        const pane = document.getElementById('tab-' + x), btn = document.getElementById('tabbtn-' + x);
+        if (pane) pane.style.display = (x===t)?'block':'none';
+        if (btn) btn.classList.toggle('active', x===t);
+      });
+      if (['replace','exceptional','tiers'].includes(t)) loadEditTable(t);
     }
 
     function buildQuery(offset) {
@@ -414,9 +447,105 @@
       finally{ btn.disabled=false; }
     }
 
+    // ===== جداول مرجعية قابلة للتعديل =====
+    const ET = {
+      replace: { table:'code_replace', key:'id', order:'code.asc', search:['code','replace'],
+        cols:[{f:'code',l:'الكود'},{f:'replace',l:'الكود البديل'},{f:'qty',l:'الوزن',num:true}] },
+      exceptional: { table:'consumption_exceptional', key:'itm_code', order:'itm_code.asc', search:['itm_code','itm_name'],
+        cols:[{f:'itm_code',l:'الكود'},{f:'itm_name',l:'الاسم'},{f:'qty',l:'المعامل',num:true}] },
+      tiers: { table:'demand_tiers', key:'id', order:'rate_min.desc', search:[],
+        cols:[{f:'rate_min',l:'المعدل الشهري ≥',num:true},{f:'active_min',l:'شهور نشطة ≥',num:true},{f:'save_factor',l:'كمية التوفير',num:true}] }
+    };
+    const ET_DATA = {};
+
+    function toast(msg) {
+      let el = document.getElementById('mo-toast');
+      if (!el) { el = document.createElement('div'); el.id = 'mo-toast';
+        el.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:8px 16px;border-radius:10px;font-size:.8rem;font-weight:700;z-index:10000;opacity:0;transition:opacity .2s';
+        document.body.appendChild(el); }
+      el.textContent = msg; el.style.opacity = '1'; clearTimeout(el._t); el._t = setTimeout(() => el.style.opacity = '0', 2200);
+    }
+
+    async function loadEditTable(t) {
+      const cfg = ET[t]; const wrap = document.getElementById('et-wrap-' + t);
+      wrap.innerHTML = 'جارٍ التحميل…';
+      try {
+        const selCols = cfg.cols.map(c => c.f).join(',');
+        const sel = cfg.key === 'id' ? 'id,' + selCols : selCols;
+        const r = await fetch(REST + cfg.table + '?select=' + sel + '&order=' + cfg.order + '&limit=5000', { headers: H });
+        ET_DATA[t] = await r.json();
+        renderEditTable(t);
+      } catch (e) { wrap.innerHTML = '<div style="color:var(--danger)">خطأ في التحميل</div>'; }
+    }
+    function filterEditTable(t) { renderEditTable(t); }
+    function etMatch(t, row) {
+      const el = document.getElementById('et-search-' + t); const q = (el ? el.value : '').trim().toLowerCase();
+      if (!q) return true;
+      return ET[t].search.some(f => String(row[f] == null ? '' : row[f]).toLowerCase().includes(q));
+    }
+    function renderEditTable(t) {
+      const cfg = ET[t]; const all = ET_DATA[t] || []; const rows = all.filter(r => etMatch(t, r));
+      let h = '<table class="et-table"><thead><tr>' + cfg.cols.map(c => '<th>' + c.l + '</th>').join('') + '<th>إجراء</th></tr></thead><tbody>';
+      h += '<tr class="et-add-row">' + cfg.cols.map(c => '<td><input id="et-' + t + '-new-' + c.f + '" ' + (c.num ? 'type="number" step="any"' : '') + ' placeholder="' + c.l + '"></td>').join('')
+        + '<td><button class="et-btn et-add" onclick="etAdd(\'' + t + '\')">+ إضافة</button></td></tr>';
+      h += rows.map(r => { const idx = all.indexOf(r);
+        return '<tr>' + cfg.cols.map(c => '<td><input id="et-' + t + '-' + idx + '-' + c.f + '" value="' + String(r[c.f] == null ? '' : r[c.f]).replace(/"/g, '&quot;') + '" ' + (c.num ? 'type="number" step="any"' : '') + '></td>').join('')
+          + '<td style="white-space:nowrap"><button class="et-btn et-save" onclick="etSave(\'' + t + '\',' + idx + ')">حفظ</button> '
+          + '<button class="et-btn et-del" onclick="etDel(\'' + t + '\',' + idx + ')" title="حذف"><i class="fas fa-trash"></i></button></td></tr>';
+      }).join('');
+      h += '</tbody></table>';
+      document.getElementById('et-wrap-' + t).innerHTML = h;
+    }
+    function etCollect(t, tag) {
+      const o = {};
+      ET[t].cols.forEach(c => { const el = document.getElementById('et-' + t + '-' + tag + '-' + c.f);
+        let v = el ? el.value.trim() : '';
+        o[c.f] = c.num ? (v === '' ? null : Number(v)) : v; });
+      return o;
+    }
+    async function etRecompute() {
+      try { await fetch(REST + 'rpc/refresh_consumption_rates', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' }); } catch (e) {}
+      loadMeta();
+    }
+    async function etSave(t, idx) {
+      const cfg = ET[t]; const row = ET_DATA[t][idx]; const o = etCollect(t, idx);
+      if (!String(o[cfg.cols[0].f] == null ? '' : o[cfg.cols[0].f]).length) { alert('القيمة الأولى مطلوبة'); return; }
+      try {
+        const url = cfg.key === 'id' ? REST + cfg.table + '?id=eq.' + row.id
+                                     : REST + cfg.table + '?' + cfg.key + '=eq.' + encodeURIComponent(row[cfg.key]);
+        const res = await fetch(url, { method:'PATCH', headers:{ ...H, 'Content-Type':'application/json', 'Prefer':'return=minimal' }, body: JSON.stringify(o) });
+        if (!res.ok) throw new Error(await res.text());
+        await etRecompute(); await loadEditTable(t); toast('تم الحفظ وإعادة الحساب ✓');
+      } catch (e) { alert('تعذّر الحفظ: ' + e.message); }
+    }
+    async function etAdd(t) {
+      const cfg = ET[t]; const o = etCollect(t, 'new');
+      if (!String(o[cfg.cols[0].f] == null ? '' : o[cfg.cols[0].f]).length) { alert('املأ القيم'); return; }
+      try {
+        const res = await fetch(REST + cfg.table, { method:'POST', headers:{ ...H, 'Content-Type':'application/json', 'Prefer':'return=minimal' }, body: JSON.stringify(o) });
+        if (!res.ok) throw new Error(await res.text());
+        await etRecompute(); await loadEditTable(t); toast('تمت الإضافة وإعادة الحساب ✓');
+      } catch (e) { alert('تعذّرت الإضافة: ' + e.message); }
+    }
+    async function etDel(t, idx) {
+      const cfg = ET[t]; const row = ET_DATA[t][idx];
+      if (!confirm('حذف هذا الصف؟ سيعاد حساب المعدل.')) return;
+      try {
+        const url = cfg.key === 'id' ? REST + cfg.table + '?id=eq.' + row.id
+                                     : REST + cfg.table + '?' + cfg.key + '=eq.' + encodeURIComponent(row[cfg.key]);
+        const res = await fetch(url, { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });
+        if (!res.ok) throw new Error(await res.text());
+        await etRecompute(); await loadEditTable(t); toast('تم الحذف وإعادة الحساب ✓');
+      } catch (e) { alert('تعذّر الحذف: ' + e.message); }
+    }
+
     (function () {
       const role = (localStorage.getItem('userRole') || '').toLowerCase();
-      if (role === 'admin' || role === 'manager') { canEdit = true; document.getElementById('mo-months').style.display = 'block'; }
+      if (role === 'admin' || role === 'manager') {
+        canEdit = true;
+        document.getElementById('mo-months').style.display = 'block';
+        ['replace','exceptional','tiers'].forEach(t => document.getElementById('tabbtn-' + t).style.display = 'inline-block');
+      }
     })();
 
     document.getElementById('cr-search').addEventListener('input', () => { clearTimeout(crTimer); crTimer = setTimeout(() => { crPage = 1; loadPage(); }, 300); });
