@@ -164,7 +164,9 @@
             <button class="ord-br" data-b="سان ستيفانو" onclick="ordSetBranch('سان ستيفانو')">سان ستيفانو</button>
             <button class="ord-br" data-b="سيدى بشر" onclick="ordSetBranch('سيدى بشر')">سيدى بشر</button>
           </div>
-          <input type="text" id="ord-search" class="form-input" placeholder="🔍 بحث بالصنف أو الكود..." oninput="ordDebounce()" style="max-width:220px">
+          <input type="text" id="ord-search" class="form-input" placeholder="🔍 بحث بالصنف أو الكود..." oninput="ordDebounce()" style="max-width:200px">
+          <select id="ord-wh" class="form-select" style="max-width:180px" onchange="ordPage=1;loadOrders()"><option value="">كل المخازن</option></select>
+          <button class="cr-up-btn" style="background:#16a34a" onclick="exportOrders()"><i class="fas fa-file-excel"></i> تصدير Excel</button>
           <button class="cr-up-btn" id="ord-refresh" style="display:none" onclick="refreshOrders()"><i class="fas fa-rotate"></i> تحديث الطلبيات</button>
         </div>
         <div class="cr-meta" id="ord-meta"></div>
@@ -182,9 +184,11 @@
               <th>كمية التوفير</th>
               <th>الرصيد</th>
               <th>الشركة</th>
-              <th>المخازن (الأقل تكلفة ←)</th>
+              <th>المخزن</th>
+              <th>سعر المخزن</th>
+              <th>الخصم</th>
             </tr></thead>
-            <tbody id="ord-body"><tr><td colspan="12" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr></tbody>
+            <tbody id="ord-body"><tr><td colspan="14" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr></tbody>
           </table>
         </div>
         <div id="ord-pager"></div>
@@ -369,6 +373,7 @@
     let ordBranch = 'المعمورة', ordPage = 1, ordTotal = 0, ordTimer = null, ordLoaded = false, ordById = {};
     let branchReps = {};
     const ordSel = new Set();   // الأصناف «تحت الطلب» المحددة
+    const ordWhChoice = {};     // المخزن المختار لكل صف (id → {store,price,disc,net,av})
     const BR_LIST = [['المعمورة','surplus_mamora'],['سان ستيفانو','surplus_san'],['سيدى بشر','surplus_bishr']];
 
     function ordSetBranch(b) {
@@ -380,69 +385,53 @@
 
     function buildOrdQuery(offset) {
       const q = document.getElementById('ord-search').value.trim();
-      let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,surplus_mamora,surplus_san,surplus_bishr'
+      const w = document.getElementById('ord-wh').value;
+      let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,net_required,surplus_mamora,surplus_san,surplus_bishr,best_store,best_price,best_disc'
         + '&branch=eq.' + encodeURIComponent(ordBranch) + '&order=required.desc,itm_name.asc&limit=' + ORD_SIZE + '&offset=' + offset;
       if (q) { const e = encodeURIComponent(q); url += '&or=(itm_name.ilike.*' + e + '*,itm_code.ilike.*' + e + '*)'; }
+      if (w) url += '&best_store=eq.' + encodeURIComponent(w);
       return url;
-    }
-    // جلب أسعار المخازن دفعة واحدة لأكواد الصفحة → خريطة كود → مخازن مرتّبة بالتكلفة
-    async function fetchWarehouses(codes) {
-      const map = {};
-      const list = [...new Set(codes.filter(Boolean))];
-      if (!list.length) return map;
-      try {
-        const inList = list.map(c => '"' + String(c).replace(/"/g, '') + '"').join(',');
-        const url = REST + 'store_item_prices?select=code,store,price,discount_perc,available&code=in.(' + encodeURIComponent(inList) + ')';
-        const rows = await (await fetch(url, { headers: H })).json();
-        (rows || []).forEach(r => {
-          const nc = (r.price == null || r.price === '') ? null : Number(r.price) * (1 - (Number(r.discount_perc) || 0) / 100);
-          (map[r.code] = map[r.code] || []).push({ store: r.store, net: nc, av: r.available });
-        });
-        Object.values(map).forEach(arr => arr.sort((a, b) => (a.net == null ? Infinity : a.net) - (b.net == null ? Infinity : b.net)));
-      } catch (e) {}
-      return map;
     }
     async function loadOrders() {
       const body = document.getElementById('ord-body');
-      body.innerHTML = '<tr><td colspan="12" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr>';
+      body.innerHTML = '<tr><td colspan="14" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr>';
       try {
         const res = await fetch(buildOrdQuery((ordPage - 1) * ORD_SIZE), { headers: { ...H, 'Prefer': 'count=exact' } });
         const rows = await res.json();
         const cr = res.headers.get('content-range');
         ordTotal = cr && cr.includes('/') ? parseInt(cr.split('/')[1]) : rows.length;
-        if (!rows.length) { body.innerHTML = '<tr><td colspan="12" style="padding:24px;color:var(--text-muted);">لا توجد أصناف مطلوبة لهذا الفرع.</td></tr>'; ordPager(); return; }
-        const wh = await fetchWarehouses(rows.map(r => r.itm_code));
+        if (!rows.length) { body.innerHTML = '<tr><td colspan="14" style="padding:24px;color:var(--text-muted);">لا توجد أصناف مطلوبة بهذا الفلتر.</td></tr>'; ordPager(); return; }
         ordById = {};
         body.innerHTML = rows.map(r => {
-          ordById[r.id] = r;
+          ordById[r.id] = r; r._wh = null;
           const others = BR_LIST.filter(([bn, k]) => bn !== ordBranch && (r[k] || 0) > 0);
-          const surp = others.length ? others.map(([bn, k]) => '<span class="ord-surp">' + bn + ': ' + r[k] + '</span>').join('<br>') : '<span style="color:var(--text-muted)">—</span>';
-          const maxSur = others.reduce((m, [, k]) => Math.max(m, r[k] || 0), 0);
-          const net = Math.max(0, r.required - maxSur);
-          const whArr = wh[r.itm_code] || [];
-          const whTxt = whArr.length
-            ? whArr.map((x, i) => '<span style="' + (i === 0 ? 'font-weight:800;color:#15803d' : '') + (x.av ? '' : ';opacity:.5') + '">' + esc(x.store) + ' (' + (x.net == null ? '—' : Math.round(x.net * 100) / 100) + ')</span>').join(' · ')
+          const totalSur = others.reduce((s, [, k]) => s + (r[k] || 0), 0);
+          const surCell = totalSur > 0
+            ? '<span style="color:#15803d;font-weight:800;cursor:pointer;text-decoration:underline" title="اضغط لتفاصيل الفائض والتحويل" onclick="openTransfer(' + r.id + ')">' + totalSur + '</span>'
             : '<span style="color:var(--text-muted)">—</span>';
+          const chosen = ordWhChoice[r.id] || (r.best_store ? { store: r.best_store, price: r.best_price, disc: r.best_disc, av: true } : null);
+          if (chosen) ordWhChoice[r.id] = chosen;
           const chk = '<input type="checkbox" ' + (ordSel.has(r.id) ? 'checked' : '') + ' onchange="ordSelToggle(' + r.id + ',this.checked)">';
-          const trBtn = (canEdit && others.length) ? '<button class="ord-actbtn ord-tr" style="margin-top:3px" onclick="openTransfer(' + r.id + ')">تحويل</button>' : '';
           return '<tr>'
             + '<td>' + chk + '</td>'
             + '<td class="cr-code">' + esc(r.itm_code) + '</td>'
             + '<td style="text-align:right;font-weight:600;">' + esc(r.itm_name) + '</td>'
             + '<td>' + (r.price == null ? '—' : numv(r.price)) + '</td>'
             + '<td class="ord-req">' + r.required + '</td>'
-            + '<td>' + surp + (trBtn ? '<br>' + trBtn : '') + '</td>'
-            + '<td style="font-weight:800;color:#b91c1c">' + net + '</td>'
+            + '<td>' + surCell + '</td>'
+            + '<td style="font-weight:800;color:#b91c1c">' + (r.net_required != null ? r.net_required : r.required) + '</td>'
             + '<td>' + numv(r.base_rate) + '</td>'
             + '<td>' + numv(r.rate) + '</td>'
             + '<td>' + numv(r.stock) + '</td>'
             + '<td style="font-size:.7rem;color:var(--text-muted)">' + esc(r.company) + '</td>'
-            + '<td style="font-size:.72rem;min-width:200px;text-align:right">' + whTxt + '</td>'
+            + '<td id="wh-name-' + r.id + '">' + whNameHtml(r.id, chosen) + '</td>'
+            + '<td id="wh-price-' + r.id + '">' + (chosen && chosen.price != null ? chosen.price : '—') + '</td>'
+            + '<td id="wh-disc-' + r.id + '">' + (chosen ? (chosen.disc == null ? 0 : chosen.disc) + '%' : '—') + '</td>'
             + '</tr>';
         }).join('');
         const allChk = document.getElementById('ord-all'); if (allChk) allChk.checked = rows.every(r => ordSel.has(r.id));
         ordPager();
-      } catch (e) { body.innerHTML = '<tr><td colspan="12" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>'; }
+      } catch (e) { body.innerHTML = '<tr><td colspan="14" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>'; }
     }
     function ordSelToggle(id, on) { if (on) ordSel.add(id); else ordSel.delete(id); }
     function ordToggleAll(el) {
@@ -472,6 +461,34 @@
         if (!r.ok) throw new Error(await r.text()); ordPage = 1; await loadOrders();
       } catch (e) { alert('تعذّرت إعادة حساب الطلبيات: ' + e.message); }
       finally { btn.disabled = false; btn.innerHTML = old; }
+    }
+
+    async function loadOrdStores() {
+      try {
+        const list = await (await fetch(REST + 'stores?select=name&active=eq.true&order=order_by.asc,name.asc', { headers: H })).json();
+        const sel = document.getElementById('ord-wh');
+        sel.innerHTML = '<option value="">كل المخازن</option>' + (list || []).map(s => '<option value="' + esc(s.name) + '">' + esc(s.name) + '</option>').join('');
+      } catch (e) {}
+    }
+    async function exportOrders() {
+      const w = document.getElementById('ord-wh').value;
+      const q = document.getElementById('ord-search').value.trim();
+      let base = REST + 'purchase_orders_flat?select=best_store,itm_code,itm_name,net_required,best_price,best_disc'
+        + '&branch=eq.' + encodeURIComponent(ordBranch) + '&net_required=gt.0&order=best_store.asc,itm_name.asc';
+      base += w ? '&best_store=eq.' + encodeURIComponent(w) : '&best_store=not.is.null';
+      if (q) { const e = encodeURIComponent(q); base += '&or=(itm_name.ilike.*' + e + '*,itm_code.ilike.*' + e + '*)'; }
+      let all = [], off = 0, SIZE = 1000;
+      try {
+        for (;;) {
+          const b = await (await fetch(base + '&limit=' + SIZE + '&offset=' + off, { headers: H })).json();
+          all = all.concat(b); if (!Array.isArray(b) || b.length < SIZE) break; off += SIZE;
+        }
+      } catch (e) { alert('تعذّر جلب البيانات للتصدير'); return; }
+      if (!all.length) { alert('لا توجد أصناف للتصدير (بصافي مطلوب > 0 ولها مخزن) بهذا الفلتر.'); return; }
+      const rows = all.map(x => ({ 'المخزن': x.best_store, 'الكود': x.itm_code, 'اسم الصنف': x.itm_name, 'العدد': x.net_required, 'سعر البيع': x.best_price, 'الخصم %': x.best_disc }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'طلبية');
+      XLSX.writeFile(wb, 'طلبية_' + ordBranch + (w ? '_' + w : '') + '.xlsx');
     }
 
     // ===== التحويل =====
@@ -511,22 +528,48 @@
       finally { btn.disabled = false; }
     }
 
-    // ===== المخزن الأقل تكلفة =====
-    async function openBest(code, name) {
-      document.getElementById('bw-title').textContent = 'أقل تكلفة — ' + name;
+    // ===== اختيار/استبدال المخزن =====
+    function whNameHtml(id, chosen) {
+      if (!chosen) return '<span onclick="openWh(' + id + ')" style="cursor:pointer;color:var(--text-muted);text-decoration:underline">— اختر —</span>';
+      return '<span onclick="openWh(' + id + ')" style="cursor:pointer;color:var(--primary);font-weight:700;text-decoration:underline">' + esc(chosen.store) + '</span>'
+        + (chosen.av ? '' : ' <span style="color:#b91c1c;font-size:.65rem">(غير متاح)</span>');
+    }
+    async function openWh(id) {
+      const r = ordById[id]; if (!r) return;
+      document.getElementById('bw-title').textContent = 'اختر المخزن — ' + (r.itm_name || '');
       document.getElementById('bw-body').innerHTML = 'جارٍ التحميل…';
       document.getElementById('bw-bg').classList.add('open');
-      try {
-        let rows = await (await fetch(REST + 'store_item_prices?select=store,price,discount_perc,available&code=eq.' + encodeURIComponent(code), { headers: H })).json();
-        if (!Array.isArray(rows) || !rows.length) { document.getElementById('bw-body').innerHTML = '<div style="color:var(--text-muted)">لا يوجد هذا الكود في أسعار المخازن.</div>'; return; }
-        rows = rows.map(r => ({ ...r, _c: (r.price == null || r.price === '') ? null : Number(r.price) * (1 - (Number(r.discount_perc) || 0) / 100) }));
-        rows.sort((a, b) => (a.available === b.available) ? ((a._c == null ? Infinity : a._c) - (b._c == null ? Infinity : b._c)) : (a.available ? -1 : 1));
-        const best = rows.find(r => r.available && r._c != null) || null;
-        document.getElementById('bw-body').innerHTML =
-          '<table class="cr-mini"><thead><tr><th style="text-align:right">المخزن</th><th>السعر</th><th>الخصم%</th><th>التكلفة</th><th>الإتاحة</th></tr></thead><tbody>'
-          + rows.map(r => '<tr' + (r === best ? ' style="background:#dcfce7;font-weight:800"' : '') + '><td style="text-align:right">' + (r === best ? '🏆 ' : '') + esc(r.store) + '</td><td>' + (r.price == null ? '—' : r.price) + '</td><td>' + (r.discount_perc == null ? 0 : r.discount_perc) + '%</td><td>' + (r._c == null ? '—' : Math.round(r._c * 100) / 100) + '</td><td>' + (r.available ? 'متاح' : 'غير متاح') + '</td></tr>').join('')
-          + '</tbody></table>';
-      } catch (e) { document.getElementById('bw-body').innerHTML = '<div style="color:var(--danger)">خطأ</div>'; }
+      if (!r._wh) {
+        try {
+          const rows = await (await fetch(REST + 'store_item_prices?select=store,price,discount_perc,available&code=eq.' + encodeURIComponent(r.itm_code), { headers: H })).json();
+          r._wh = (rows || []).map(x => ({ store: x.store, price: x.price, disc: x.discount_perc, av: x.available,
+            net: (x.price == null || x.price === '') ? null : Number(x.price) * (1 - (Number(x.discount_perc) || 0) / 100) }))
+            .sort((a, b) => (a.av === b.av ? ((a.net == null ? Infinity : a.net) - (b.net == null ? Infinity : b.net)) : (a.av ? -1 : 1)));
+        } catch (e) { r._wh = []; }
+      }
+      const arr = r._wh;
+      if (!arr.length) { document.getElementById('bw-body').innerHTML = '<div style="color:var(--text-muted)">لا يوجد هذا الكود في أسعار المخازن.</div>'; return; }
+      const chosen = ordWhChoice[id];
+      document.getElementById('bw-body').innerHTML =
+        '<div style="font-size:.75rem;color:var(--text-muted);margin-bottom:8px">مرتّبة من الأقل تكلفة — اضغط «اختيار» لاستبداله كمخزن الطلب.</div>'
+        + '<table class="cr-mini"><thead><tr><th style="text-align:right">المخزن</th><th>سعر البيع</th><th>الخصم</th><th>التكلفة</th><th>الإتاحة</th><th></th></tr></thead><tbody>'
+        + arr.map((x, i) => '<tr' + (chosen && chosen.store === x.store ? ' style="background:#dcfce7;font-weight:800"' : '') + '>'
+            + '<td style="text-align:right">' + esc(x.store) + '</td>'
+            + '<td>' + (x.price == null ? '—' : x.price) + '</td>'
+            + '<td>' + (x.disc == null ? 0 : x.disc) + '%</td>'
+            + '<td>' + (x.net == null ? '—' : Math.round(x.net * 100) / 100) + '</td>'
+            + '<td>' + (x.av ? 'متاح' : '<span style="color:#b91c1c">غير متاح</span>') + '</td>'
+            + '<td><button class="btn btn-primary" style="padding:3px 10px;font-size:.72rem" onclick="pickWh(' + id + ',' + i + ')">اختيار</button></td></tr>').join('')
+        + '</tbody></table>';
+      document.getElementById('bw-bg').classList.add('open');
+    }
+    function pickWh(id, i) {
+      const r = ordById[id]; if (!r || !r._wh || !r._wh[i]) return;
+      const c = r._wh[i]; ordWhChoice[id] = c;
+      document.getElementById('wh-name-' + id).innerHTML = whNameHtml(id, c);
+      document.getElementById('wh-price-' + id).textContent = (c.price == null ? '—' : c.price);
+      document.getElementById('wh-disc-' + id).textContent = (c.disc == null ? 0 : c.disc) + '%';
+      closeBest();
     }
     function closeBest() { document.getElementById('bw-bg').classList.remove('open'); }
 
@@ -877,7 +920,7 @@
     document.getElementById('cr-reload').addEventListener('click', () => { crPage = 1; loadPage(); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeDetail(); closeMonthUp(); closeTransfer(); closeBest(); } });
 
-    loadMeta(); loadMonths(); loadBranchReps(); loadPage();
+    loadMeta(); loadMonths(); loadBranchReps(); loadOrdStores(); loadPage();
   </script>
 </body>
 </html>
