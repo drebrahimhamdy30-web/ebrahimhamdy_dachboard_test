@@ -488,6 +488,16 @@ async function openDetail(id){
   // جيب سجل الطلب
   const {data:logs}=await db.from('order_logs').select('*').eq('order_id',id).order('created_at',{ascending:true});
 
+  // وقت إنهاء رحلة الطلب (order → trip_orders → trips.completed_at)
+  let tripEnd=null;
+  try{
+    const {data:to}=await db.from('trip_orders').select('trip_id').eq('order_id',id).order('created_at',{ascending:false}).limit(1);
+    if(to&&to[0]&&to[0].trip_id){
+      const {data:tr}=await db.from('trips').select('completed_at').eq('id',to[0].trip_id).limit(1);
+      if(tr&&tr[0]) tripEnd=tr[0].completed_at;
+    }
+  }catch(e){}
+
   const LOG_LABELS={order_created:'تم إنشاء الطلب',driver_assigned:'تعيين طيار',order_picked:'الطيار استلم',order_delivered:'تم التوصيل',order_completed:'اكتمل الطلب',order_postponed:'تأجيل',order_cancelled:'إلغاء',order_edited:'تعديل',order_urgent:'تحديد كعاجل',trip_created:'إنشاء رحلة'};
   const LOG_COLORS={order_created:'#16a34a',driver_assigned:'#1a56db',order_picked:'#0891b2',order_delivered:'#ca8a04',order_completed:'#16a34a',order_postponed:'#7c3aed',order_cancelled:'#dc2626',order_edited:'#0891b2',order_urgent:'#dc2626'};
 
@@ -517,6 +527,7 @@ async function openDetail(id){
     ${o.picked_at?`<div class="d-row"><span class="d-lbl">وقت الاستلام</span><span class="d-val">${fmDate(o.picked_at)}</span></div>`:''}
     ${o.delivered_at?`<div class="d-row"><span class="d-lbl">وقت التوصيل</span><span class="d-val">${fmDate(o.delivered_at)}</span></div>`:''}
     ${o.completed_at?`<div class="d-row"><span class="d-lbl">وقت الاكتمال</span><span class="d-val">${fmDate(o.completed_at)}</span></div>`:''}
+    ${tripEnd?`<div class="d-row"><span class="d-lbl">إنهاء الرحلة</span><span class="d-val">${fmDate(tripEnd)}</span></div>`:''}
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:.5rem 0">
       ${waitDuration!=='—'?`<span class="duration-box">⏳ انتظار: ${waitDuration}</span>`:''}
       ${delivDuration!=='—'?`<span class="duration-box" style="background:#f0fdf4;color:#15803d">🚚 توصيل: ${delivDuration}</span>`:''}
