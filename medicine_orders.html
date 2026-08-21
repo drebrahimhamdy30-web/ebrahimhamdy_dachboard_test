@@ -165,8 +165,10 @@
             <button class="ord-br" data-b="سان ستيفانو" onclick="ordSetBranch('سان ستيفانو')">سان ستيفانو</button>
             <button class="ord-br" data-b="سيدى بشر" onclick="ordSetBranch('سيدى بشر')">سيدى بشر</button>
           </div>
-          <input type="text" id="ord-search" class="form-input" placeholder="🔍 بحث بالصنف أو الكود..." oninput="ordDebounce()" style="max-width:200px">
-          <select id="ord-wh" class="form-select" style="max-width:180px" onchange="ordPage=1;loadOrders()"><option value="">كل المخازن</option></select>
+          <input type="text" id="ord-search" class="form-input" placeholder="🔍 بحث بالصنف أو الكود..." oninput="ordDebounce()" style="max-width:180px">
+          <select id="ord-wh" class="form-select" style="max-width:150px" onchange="ordPage=1;loadOrders()"><option value="">كل المخازن</option></select>
+          <select id="ord-company" class="form-select" style="max-width:150px" onchange="ordPage=1;loadOrders()"><option value="">كل الشركات</option></select>
+          <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;font-weight:700;cursor:pointer;white-space:nowrap"><input type="checkbox" id="ord-surp-only" onchange="ordPage=1;loadOrders()" style="width:16px;height:16px;accent-color:var(--primary)"> فائض فقط</label>
           <button class="cr-up-btn" style="background:#16a34a" onclick="exportOrders()"><i class="fas fa-file-excel"></i> تصدير Excel</button>
           <button class="cr-up-btn" id="ord-refresh" style="display:none" onclick="refreshOrders()"><i class="fas fa-rotate"></i> تحديث الطلبيات</button>
         </div>
@@ -387,11 +389,22 @@
     function buildOrdQuery(offset) {
       const q = document.getElementById('ord-search').value.trim();
       const w = document.getElementById('ord-wh').value;
-      let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,net_required,surplus_mamora,surplus_san,surplus_bishr,best_store,best_price,best_disc'
+      const co = document.getElementById('ord-company').value;
+      const surpOnly = document.getElementById('ord-surp-only').checked;
+      let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,net_required,surplus_mamora,surplus_san,surplus_bishr,surplus_other,best_store,best_price,best_disc'
         + '&branch=eq.' + encodeURIComponent(ordBranch) + '&order=required.desc,itm_name.asc&limit=' + ORD_SIZE + '&offset=' + offset;
       if (q) { const e = encodeURIComponent(q); url += '&or=(itm_name.ilike.*' + e + '*,itm_code.ilike.*' + e + '*)'; }
       if (w) url += '&best_store=eq.' + encodeURIComponent(w);
+      if (co) url += '&company=eq.' + encodeURIComponent(co);
+      if (surpOnly) url += '&surplus_other=gt.0';
       return url;
+    }
+    async function loadOrdCompanies() {
+      try {
+        const list = await (await fetch(REST + 'rpc/get_purchase_companies', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' })).json();
+        const sel = document.getElementById('ord-company');
+        sel.innerHTML = '<option value="">كل الشركات</option>' + (list || []).map(c => '<option value="' + esc(c.company) + '">' + esc(c.company) + '</option>').join('');
+      } catch (e) {}
     }
     async function loadOrders() {
       const body = document.getElementById('ord-body');
@@ -473,10 +486,14 @@
     }
     async function exportOrders() {
       const w = document.getElementById('ord-wh').value;
+      const co = document.getElementById('ord-company').value;
       const q = document.getElementById('ord-search').value.trim();
-      let base = REST + 'purchase_orders_flat?select=best_store,itm_code,itm_name,net_required,best_price,best_disc'
+      const surpOnly = document.getElementById('ord-surp-only').checked;
+      let base = REST + 'purchase_orders_flat?select=best_store,itm_code,itm_name,net_required,best_price,best_disc,company'
         + '&branch=eq.' + encodeURIComponent(ordBranch) + '&net_required=gt.0&order=best_store.asc,itm_name.asc';
       base += w ? '&best_store=eq.' + encodeURIComponent(w) : '&best_store=not.is.null';
+      if (co) base += '&company=eq.' + encodeURIComponent(co);
+      if (surpOnly) base += '&surplus_other=gt.0';
       if (q) { const e = encodeURIComponent(q); base += '&or=(itm_name.ilike.*' + e + '*,itm_code.ilike.*' + e + '*)'; }
       let all = [], off = 0, SIZE = 1000;
       try {
@@ -542,14 +559,14 @@
       document.getElementById('bw-bg').classList.add('open');
       if (!r._wh) {
         try {
-          const rows = await (await fetch(REST + 'store_item_prices?select=store,price,discount_perc,available&code=eq.' + encodeURIComponent(r.itm_code), { headers: H })).json();
+          const rows = await (await fetch(REST + 'store_item_prices?select=store,price,discount_perc,available&available=eq.true&code=eq.' + encodeURIComponent(r.itm_code), { headers: H })).json();
           r._wh = (rows || []).map(x => ({ store: x.store, price: x.price, disc: x.discount_perc, av: x.available,
             net: (x.price == null || x.price === '') ? null : Number(x.price) * (1 - (Number(x.discount_perc) || 0) / 100) }))
-            .sort((a, b) => (a.av === b.av ? ((a.net == null ? Infinity : a.net) - (b.net == null ? Infinity : b.net)) : (a.av ? -1 : 1)));
+            .sort((a, b) => (a.net == null ? Infinity : a.net) - (b.net == null ? Infinity : b.net));
         } catch (e) { r._wh = []; }
       }
       const arr = r._wh;
-      if (!arr.length) { document.getElementById('bw-body').innerHTML = '<div style="color:var(--text-muted)">لا يوجد هذا الكود في أسعار المخازن.</div>'; return; }
+      if (!arr.length) { document.getElementById('bw-body').innerHTML = '<div style="color:var(--text-muted)">لا يوجد هذا الصنف متاحًا في أي مخزن.</div>'; return; }
       const chosen = ordWhChoice[id];
       document.getElementById('bw-body').innerHTML =
         '<div style="font-size:.75rem;color:var(--text-muted);margin-bottom:8px">مرتّبة من الأقل تكلفة — اضغط «اختيار» لاستبداله كمخزن الطلب.</div>'
@@ -921,7 +938,7 @@
     document.getElementById('cr-reload').addEventListener('click', () => { crPage = 1; loadPage(); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeDetail(); closeMonthUp(); closeTransfer(); closeBest(); } });
 
-    loadMeta(); loadMonths(); loadBranchReps(); loadOrdStores(); loadPage();
+    loadMeta(); loadMonths(); loadBranchReps(); loadOrdStores(); loadOrdCompanies(); loadPage();
   </script>
 </body>
 </html>
