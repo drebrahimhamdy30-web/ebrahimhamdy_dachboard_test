@@ -169,6 +169,13 @@
           <input type="text" id="ord-search" class="form-input" placeholder="🔍 بحث بالصنف أو الكود..." oninput="ordDebounce()" style="max-width:180px">
           <select id="ord-wh" class="form-select" style="max-width:150px" onchange="ordPage=1;loadOrders()"><option value="">كل المخازن</option></select>
           <select id="ord-company" class="form-select" style="max-width:150px" onchange="ordPage=1;loadOrders()"><option value="">كل الشركات</option></select>
+          <select id="ord-under" class="form-select" style="max-width:130px" onchange="ordPage=1;loadOrders()"><option value="">تحت الطلب: الكل</option><option value="on">تحت الطلب فقط</option><option value="off">غير المطلوبة</option></select>
+          <span style="display:flex;align-items:center;gap:3px;font-size:0.78rem;font-weight:700;white-space:nowrap">الرصيد
+            <select id="ord-stock-op" class="form-select" style="max-width:56px;padding:6px 4px" onchange="ordPage=1;loadOrders()"><option value="lte">≤</option><option value="gte">≥</option></select>
+            <input type="number" id="ord-stock-v" class="form-input" style="max-width:66px" placeholder="—" oninput="ordDebounce()"></span>
+          <span style="display:flex;align-items:center;gap:3px;font-size:0.78rem;font-weight:700;white-space:nowrap">مطلوب
+            <select id="ord-req-op" class="form-select" style="max-width:56px;padding:6px 4px" onchange="ordPage=1;loadOrders()"><option value="lte">≤</option><option value="gte">≥</option></select>
+            <input type="number" id="ord-req-v" class="form-input" style="max-width:66px" placeholder="—" oninput="ordDebounce()"></span>
           <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;font-weight:700;cursor:pointer;white-space:nowrap"><input type="checkbox" id="ord-surp-only" onchange="ordPage=1;loadOrders()" style="width:16px;height:16px;accent-color:var(--primary)"> فائض فقط</label>
           <button class="cr-up-btn" style="background:#16a34a" onclick="exportOrders()"><i class="fas fa-file-excel"></i> تصدير Excel</button>
           <button class="cr-up-btn" id="ord-clear" style="display:none;background:#b91c1c" onclick="clearAllSelections()"><i class="fas fa-eraser"></i> مسح تحت الطلب (يوم جديد)</button>
@@ -245,6 +252,12 @@
           <div class="et-note">الرقم الأصغر = أولوية أعلى. عند تساوي التكلفة الصافية بين مخزنين لنفس الصنف، يُختار المخزن صاحب الأولوية الأعلى.</div>
           <div id="ps-wh-priority"></div>
           <div style="margin-top:8px"><button class="btn btn-primary" onclick="saveWhPriority()"><i class="fas fa-save"></i> حفظ الأولوية وإعادة الحساب</button> <span id="ps-wh-msg" style="margin-right:8px"></span></div>
+        </div>
+        <div style="max-width:640px;margin-top:22px;border-top:1px solid var(--surface-3);padding-top:16px">
+          <div style="font-weight:800;margin-bottom:4px">مخازن كل فرع</div>
+          <div class="et-note">حدّد المخازن اللي كل فرع بيطلب منها. عند حساب «أفضل مخزن» للفرع، بنختار الأرخص من مخازنه بس. لو الفرع <b>مفيهوش أي اختيار = بيطلب من كل المخازن</b> (السلوك الافتراضي). بيؤثر مباشرةً على تبويب «الطلبيات».</div>
+          <div id="ps-branch-stores"></div>
+          <div style="margin-top:10px"><button class="btn btn-primary" onclick="saveBranchStores()"><i class="fas fa-save"></i> حفظ مخازن الفروع وإعادة الحساب</button> <span id="ps-bs-msg" style="margin-right:8px"></span></div>
         </div>
       </div>
     </div>
@@ -365,6 +378,44 @@
         document.getElementById('ps-mss').value = s.min_stock_surplus ?? 2;
       } catch (e) {}
       loadWhPriority();
+      loadBranchStores();
+    }
+    const ORD_BR3 = ['المعمورة','سان ستيفانو','سيدى بشر'];
+    async function loadBranchStores() {
+      const wrap = document.getElementById('ps-branch-stores'); if (!wrap) return;
+      wrap.innerHTML = 'جارٍ التحميل…';
+      try {
+        const stores = await (await fetch(REST + 'stores?select=name&active=eq.true&order=order_by.asc,name.asc', { headers: H })).json();
+        const bs = await (await fetch(REST + 'branch_stores?select=branch,store&limit=5000', { headers: H })).json();
+        const byBranch = {};
+        (bs || []).forEach(r => { (byBranch[r.branch] = byBranch[r.branch] || new Set()).add(r.store); });
+        wrap.innerHTML = ORD_BR3.map(b => {
+          const sel = byBranch[b] || new Set();
+          const chips = (stores || []).map(s =>
+            '<label style="display:inline-flex;align-items:center;gap:5px;font-size:.76rem;font-weight:600;border:1px solid var(--border);border-radius:20px;padding:3px 11px;cursor:pointer">'
+            + '<input type="checkbox" data-branch="' + esc(b) + '" value="' + esc(s.name) + '"' + (sel.has(s.name) ? ' checked' : '') + ' style="accent-color:var(--primary)"> ' + esc(s.name) + '</label>').join('');
+          return '<div style="margin-bottom:12px"><div style="font-weight:800;font-size:.82rem;margin-bottom:5px;color:var(--primary)">' + esc(b)
+            + (sel.size ? '' : ' <span style="color:var(--text-muted);font-weight:600;font-size:.72rem">(كل المخازن)</span>')
+            + '</div><div style="display:flex;flex-wrap:wrap;gap:6px">' + chips + '</div></div>';
+        }).join('');
+      } catch (e) { wrap.innerHTML = '<div style="color:var(--danger)">خطأ في تحميل مخازن الفروع</div>'; }
+    }
+    async function saveBranchStores() {
+      const msg = document.getElementById('ps-bs-msg'); msg.textContent = '';
+      try {
+        for (const b of ORD_BR3) {
+          await fetch(REST + 'branch_stores?branch=eq.' + encodeURIComponent(b), { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });
+        }
+        const rows = [];
+        document.querySelectorAll('#ps-branch-stores input[type=checkbox]:checked').forEach(cb => rows.push({ branch: cb.dataset.branch, store: cb.value }));
+        if (rows.length) {
+          const r = await fetch(REST + 'branch_stores', { method:'POST', headers:{ ...H, 'Content-Type':'application/json', 'Prefer':'return=minimal' }, body: JSON.stringify(rows) });
+          if (!r.ok) throw new Error(await r.text());
+        }
+        await fetch(REST + 'rpc/refresh_purchase_orders', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' });
+        msg.innerHTML = '<span class="msg-ok">تم حفظ مخازن الفروع وإعادة حساب الطلبيات ✓</span>';
+        loadBranchStores();
+      } catch (e) { msg.innerHTML = '<span class="msg-err">فشل: ' + e.message + '</span>'; }
     }
     let whpList = [];
     async function loadWhPriority() {
@@ -434,7 +485,20 @@
       else if (w) url += '&best_store=eq.' + encodeURIComponent(w);
       if (co) url += '&company=eq.' + encodeURIComponent(co);
       if (surpOnly) url += '&surplus_other=gt.0';
+      url += ordExtraFilters();
       return url;
+    }
+    function ordInList() { return encodeURIComponent([...ordSelCodes].map(c => '"' + String(c).replace(/"/g, '') + '"').join(',')); }
+    function ordExtraFilters() {
+      let s = '';
+      const sOp = document.getElementById('ord-stock-op').value, sV = document.getElementById('ord-stock-v').value.trim();
+      const rOp = document.getElementById('ord-req-op').value, rV = document.getElementById('ord-req-v').value.trim();
+      const under = document.getElementById('ord-under').value;
+      if (sV !== '' && !isNaN(Number(sV))) s += '&stock=' + sOp + '.' + Number(sV);
+      if (rV !== '' && !isNaN(Number(rV))) s += '&required=' + rOp + '.' + Number(rV);
+      if (under === 'on') s += ordSelCodes.size ? '&itm_code=in.(' + ordInList() + ')' : '&itm_code=eq.__none__';
+      else if (under === 'off' && ordSelCodes.size) s += '&itm_code=not.in.(' + ordInList() + ')';
+      return s;
     }
     async function loadOrdCompanies() {
       try {
@@ -586,6 +650,7 @@
       if (co) base += '&company=eq.' + encodeURIComponent(co);
       if (surpOnly) base += '&surplus_other=gt.0';
       if (q) { const e = encodeURIComponent(q); base += '&or=(itm_name.ilike.*' + e + '*,itm_code.ilike.*' + e + '*)'; }
+      base += ordExtraFilters();
       let all = [], off = 0, SIZE = 1000;
       try {
         for (;;) {
