@@ -191,8 +191,9 @@
               <th>كمية التوفير</th>
               <th>الرصيد</th>
               <th>الشركة</th>
+              <th>أرشفة</th>
             </tr></thead>
-            <tbody id="ord-body"><tr><td colspan="14" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr></tbody>
+            <tbody id="ord-body"><tr><td colspan="15" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr></tbody>
           </table>
         </div>
         <div id="ord-pager"></div>
@@ -428,7 +429,8 @@
       let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,net_required,surplus_mamora,surplus_san,surplus_bishr,surplus_other,best_store,best_price,best_disc'
         + '&branch=eq.' + encodeURIComponent(ordBranch) + '&order=required.desc,itm_name.asc&limit=' + ORD_SIZE + '&offset=' + offset;
       if (q) { const e = encodeURIComponent(q); url += '&or=(itm_name.ilike.*' + e + '*,itm_code.ilike.*' + e + '*)'; }
-      if (w) url += '&best_store=eq.' + encodeURIComponent(w);
+      if (w === '__none__') url += '&best_store=is.null';       // بدون مخزن متاح
+      else if (w) url += '&best_store=eq.' + encodeURIComponent(w);
       if (co) url += '&company=eq.' + encodeURIComponent(co);
       if (surpOnly) url += '&surplus_other=gt.0';
       return url;
@@ -438,6 +440,14 @@
         const list = await (await fetch(REST + 'rpc/get_purchase_companies', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' })).json();
         const sel = document.getElementById('ord-company');
         sel.innerHTML = '<option value="">كل الشركات</option>' + (list || []).map(c => '<option value="' + esc(c.company) + '">' + esc(c.company) + '</option>').join('');
+      } catch (e) {}
+    }
+    async function loadOrdStores() {
+      try {
+        const list = await (await fetch(REST + 'stores?select=name&active=eq.true&order=order_by.asc,name.asc', { headers: H })).json();
+        const sel = document.getElementById('ord-wh');
+        sel.innerHTML = '<option value="">كل المخازن</option><option value="__none__">بدون مخزن</option>'
+          + (list || []).map(s => '<option value="' + esc(s.name) + '">' + esc(s.name) + '</option>').join('');
       } catch (e) {}
     }
     async function loadOrderSelections() {
@@ -453,14 +463,14 @@
     }
     async function loadOrders() {
       const body = document.getElementById('ord-body');
-      body.innerHTML = '<tr><td colspan="14" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr>';
+      body.innerHTML = '<tr><td colspan="15" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr>';
       try {
         if (ordSelBranch !== ordBranch) await loadOrderSelections();
         const res = await fetch(buildOrdQuery((ordPage - 1) * ORD_SIZE), { headers: { ...H, 'Prefer': 'count=exact' } });
         const rows = await res.json();
         const cr = res.headers.get('content-range');
         ordTotal = cr && cr.includes('/') ? parseInt(cr.split('/')[1]) : rows.length;
-        if (!rows.length) { body.innerHTML = '<tr><td colspan="14" style="padding:24px;color:var(--text-muted);">لا توجد أصناف مطلوبة بهذا الفلتر.</td></tr>'; ordPager(); return; }
+        if (!rows.length) { body.innerHTML = '<tr><td colspan="15" style="padding:24px;color:var(--text-muted);">لا توجد أصناف مطلوبة بهذا الفلتر.</td></tr>'; ordPager(); return; }
         ordById = {};
         body.innerHTML = rows.map(r => {
           ordById[r.id] = r; r._wh = null;
@@ -473,7 +483,8 @@
           if (chosen) ordWhChoice[r.id] = chosen;
           const cc = String(r.itm_code).replace(/'/g, "\\'");
           const chk = '<input type="checkbox" ' + (ordSelCodes.has(r.itm_code) ? 'checked' : '') + ' onchange="ordSelToggle(\'' + cc + '\',this.checked)">';
-          return '<tr>'
+          const arch = canEdit ? '<button class="ord-actbtn" style="background:#fee2e2;color:#b91c1c" title="أرشفة الصنف" onclick="archiveItem(' + r.id + ')"><i class="fas fa-box-archive"></i></button>' : '';
+          return '<tr id="ord-row-' + r.id + '">'
             + '<td>' + chk + '</td>'
             + '<td class="cr-code">' + esc(r.itm_code) + '</td>'
             + '<td style="text-align:right;font-weight:600;">' + esc(r.itm_name) + '</td>'
@@ -488,11 +499,12 @@
             + '<td>' + numv(r.rate) + '</td>'
             + '<td>' + numv(r.stock) + '</td>'
             + '<td style="font-size:.7rem;color:var(--text-muted)">' + esc(r.company) + '</td>'
+            + '<td>' + arch + '</td>'
             + '</tr>';
         }).join('');
         const allChk = document.getElementById('ord-all'); if (allChk) allChk.checked = rows.every(r => ordSelCodes.has(r.itm_code));
         ordPager();
-      } catch (e) { body.innerHTML = '<tr><td colspan="14" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>'; }
+      } catch (e) { body.innerHTML = '<tr><td colspan="15" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>'; }
     }
     async function ordSelToggle(code, on) {
       try {
@@ -527,6 +539,16 @@
         ordSelCodes = new Set(); ordSelBranch = null; loadOrders();
       } catch (e) { alert('تعذّر المسح: ' + e.message); }
     }
+    async function archiveItem(id) {
+      const r = ordById[id]; if (!r) return;
+      if (!confirm('أرشفة «' + (r.itm_name || '') + '» (كود ' + r.itm_code + ')؟\nهيتشال من الطلبيات نهائيًّا ومايظهرش تاني.')) return;
+      try {
+        await fetch(REST + 'archived_items?on_conflict=itm_code', { method:'POST', headers:{ ...H, 'Content-Type':'application/json', 'Prefer':'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ itm_code: r.itm_code, itm_name: r.itm_name }) });
+        await fetch(REST + 'purchase_orders_flat?itm_code=eq.' + encodeURIComponent(r.itm_code), { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });
+        const tr = document.getElementById('ord-row-' + id); if (tr) tr.remove();
+        toast('تمت أرشفة الصنف ✓');
+      } catch (e) { alert('تعذّرت الأرشفة: ' + e.message); }
+    }
     function ordPager() {
       const totalPages = Math.max(1, Math.ceil(ordTotal / ORD_SIZE));
       if (ordPage > totalPages) ordPage = totalPages;
@@ -552,13 +574,6 @@
       finally { btn.disabled = false; btn.innerHTML = old; }
     }
 
-    async function loadOrdStores() {
-      try {
-        const list = await (await fetch(REST + 'stores?select=name&active=eq.true&order=order_by.asc,name.asc', { headers: H })).json();
-        const sel = document.getElementById('ord-wh');
-        sel.innerHTML = '<option value="">كل المخازن</option>' + (list || []).map(s => '<option value="' + esc(s.name) + '">' + esc(s.name) + '</option>').join('');
-      } catch (e) {}
-    }
     async function exportOrders() {
       const w = document.getElementById('ord-wh').value;
       const co = document.getElementById('ord-company').value;
