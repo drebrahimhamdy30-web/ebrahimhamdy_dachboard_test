@@ -84,6 +84,13 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text);min-h
 .empty-perms{padding:2rem 1rem;text-align:center;color:var(--text-muted);font-size:.8rem}
 
 /* ===== الروابط السريعة في الهيدر (أيقونة + الاسم جنبها) ===== */
+.hdr-search{position:relative;display:flex;align-items:center;gap:4px}
+.hs-mode{font-family:inherit;font-size:.72rem;border:1px solid var(--border);border-radius:8px;padding:5px 6px;background:#fff;cursor:pointer;color:#334155}
+.hs-input{font-family:inherit;font-size:.78rem;border:1px solid var(--border);border-radius:8px;padding:6px 10px;width:210px;max-width:45vw}
+.hs-results{position:absolute;top:calc(100% + 5px);left:0;width:440px;max-width:92vw;max-height:62vh;overflow:auto;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 28px rgba(0,0,0,.16);z-index:1000;display:none}
+.hs-results.open{display:block}
+.hs-row{padding:7px 11px;border-bottom:1px solid #f1f5f9;font-size:.76rem;line-height:1.5}
+.hs-row:last-child{border-bottom:none}
 .quick-links{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap}
 .qbtn{height:34px;padding:0 .7rem;border-radius:9px;border:1px solid var(--border);background:#fff;color:var(--text-muted);display:inline-flex;align-items:center;gap:.35rem;cursor:pointer;transition:all .15s;position:relative;flex-shrink:0;font-family:'Cairo',sans-serif;font-size:.75rem;font-weight:700;white-space:nowrap}
 .qbtn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
@@ -191,6 +198,14 @@ html, body { max-width:100%; overflow-x:hidden; }
       <span class="header-title" id="pageTitle">جاري التحميل...</span>
     </div>
     <div class="header-actions">
+      <div class="hdr-search" id="hdrSearch">
+        <select id="hsMode" class="hs-mode" onchange="hsSearch()">
+          <option value="stock">المخزون</option>
+          <option value="stores">المخازن</option>
+        </select>
+        <input id="hsInput" class="hs-input" placeholder="🔍 بحث ذكي عن صنف..." autocomplete="off" oninput="hsDebounce()">
+        <div class="hs-results" id="hsResults"></div>
+      </div>
       <div class="quick-links" id="quickLinks"></div>
       <div class="q-divider"></div>
       <div class="header-stats" id="headerStats"></div>
@@ -548,6 +563,43 @@ function buildQuickLinks() {
       </button>`).join('');
   syncQuickActive(currentPage);
 }
+
+// ===== بحث سريع في الهيدر (المخزون / المخازن) =====
+let hsTimer = null;
+const hsEsc = s => String(s == null ? '' : s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const hsR1 = v => { const n = parseFloat(v); return isFinite(n) ? Math.round(n * 10) / 10 : 0; };
+function hsShow(html) { const r = document.getElementById('hsResults'); if (r) { r.innerHTML = html; r.classList.add('open'); } }
+function hsClose() { const r = document.getElementById('hsResults'); if (r) r.classList.remove('open'); }
+function hsDebounce() { clearTimeout(hsTimer); hsTimer = setTimeout(hsSearch, 300); }
+async function hsSearch() {
+  const q = (document.getElementById('hsInput').value || '').trim();
+  const mode = document.getElementById('hsMode').value;
+  if (q.length < 2) { hsClose(); return; }
+  hsShow('<div class="hs-row" style="color:#64748b">جارٍ البحث…</div>');
+  try {
+    if (mode === 'stock') {
+      const { data } = await db.rpc('quick_search_stock', { p_q: q, p_limit: 25 });
+      if (!data || !data.length) { hsShow('<div class="hs-row" style="color:#64748b">لا نتائج في المخزون</div>'); return; }
+      hsShow(data.map(x =>
+        '<div class="hs-row"><b>' + hsEsc(x.name) + '</b> <span style="color:#94a3b8">' + hsEsc(x.code) + '</span>'
+        + (x.company ? ' · <span style="color:#64748b">' + hsEsc(x.company) + '</span>' : '')
+        + '<div style="color:#334155;margin-top:2px">المعمورة: <b>' + hsR1(x.m_q) + '</b> · سان: <b>' + hsR1(x.s_q) + '</b> · بشر: <b>' + hsR1(x.b_q) + '</b>'
+        + (x.unit ? ' · ' + hsEsc(x.unit) : '') + (x.m_p ? ' · سعر ' + hsR1(x.m_p) : '') + '</div></div>').join(''));
+    } else {
+      const qs = q.replace(/[,()%]/g, ' ').trim();
+      const { data } = await db.from('store_item_prices')
+        .select('item_name,code,store,price,discount_perc')
+        .or('item_name.ilike.%' + qs + '%,code.ilike.%' + qs + '%')
+        .eq('available', true).order('item_name').limit(40);
+      if (!data || !data.length) { hsShow('<div class="hs-row" style="color:#64748b">لا نتائج في المخازن</div>'); return; }
+      hsShow(data.map(x =>
+        '<div class="hs-row"><b>' + hsEsc(x.item_name) + '</b>' + (x.code ? ' <span style="color:#94a3b8">' + hsEsc(x.code) + '</span>' : '')
+        + '<div style="color:#334155;margin-top:2px">' + hsEsc(x.store) + ' · سعر <b>' + (x.price == null ? '—' : x.price) + '</b> · خصم <b style="color:#15803d">' + (x.discount_perc == null ? 0 : x.discount_perc) + '%</b></div></div>').join(''));
+    }
+  } catch (e) { hsShow('<div class="hs-row" style="color:#b91c1c">خطأ في البحث</div>'); }
+}
+document.addEventListener('click', e => { const s = document.getElementById('hdrSearch'); if (s && !s.contains(e.target)) hsClose(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') hsClose(); });
 
 function quickGo(page, title) {
   const navEl = document.querySelector(`[data-page="${page}"]`);
