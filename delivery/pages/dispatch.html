@@ -774,6 +774,7 @@ const LOG_A={order_created:'تم إنشاء الطلب',driver_assigned:'تم ت
 
 let allOrders=[],allDrivers=[],activeTrips=[],tripOrdersMap={};
 let unclosedFlags=[]; // طلبات مكتملة على Phalix لكن لم تُغلق على B Connect (trip_review_flags غير المحلولة)
+let unclosedLoading=false; // بيتحمّل دلوقتي؟ (عشان مانعرضش «لا توجد» قبل ما يخلص)
 let currentPopupDriverId=null;
 let knownRegions=new Set();
 let selectedOrders=new Set(),currentFilter='all',filterDriver=null;
@@ -1710,7 +1711,7 @@ function renderTrips(){
 }
 
 // ===== ORDERS =====
-function setFilter(f,el){currentFilter=f;document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('active'));el.classList.add('active');renderOrders();if(f==='unclosed')refreshUnclosed();}
+function setFilter(f,el){currentFilter=f;document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('active'));el.classList.add('active');if(f==='unclosed')unclosedLoading=true;renderOrders();if(f==='unclosed')refreshUnclosed();}
 
 // ===== طلبات لم تُغلق على B Connect (trip_review_flags غير المحلولة) =====
 // قراءة حية بحتة (بدون أي كتابة): نجيب أرقام فواتير B Connect المفتوحة دلوقتى،
@@ -1718,6 +1719,7 @@ function setFilter(f,el){currentFilter=f;document.querySelectorAll('.ftab').forE
 const UNCLOSED_PENDING_URL='https://agent.ebrahimhamdy.com/webhook/lifependingorder';
 const UNCLOSED_SYNC_BRANCHES=['f13f20f2-9847-4c16-9946-668769f7ed20','42183044-0e64-4a73-bc66-2c9eea0c0832'];
 async function refreshUnclosed(){
+  unclosedLoading=true;
   const branchId=currentUser?.role==='admin'?activeBranchId:(currentUser?.branch_id||null);
   const targets=branchId?[branchId]:UNCLOSED_SYNC_BRANCHES;
   const grid=document.getElementById('ordersGrid');
@@ -1737,6 +1739,7 @@ async function refreshUnclosed(){
     const {data}=await db.rpc('get_completed_orders_for_bills',{p_branch:branchId||null,p_bills:bills});
     unclosedFlags=data||[];
   }catch(e){ unclosedFlags=[]; }
+  unclosedLoading=false;
   if(currentFilter==='unclosed') renderOrders();
 }
 function unclosedTimeAgo(ts){
@@ -1749,6 +1752,7 @@ function unclosedTimeAgo(ts){
 }
 function renderUnclosedFlags(){
   const grid=document.getElementById('ordersGrid');
+  if(unclosedLoading){ grid.innerHTML='<div class="empty-msg">⏳ جاري القراءة من B Connect...</div>'; return; }  // ماتظهرش «لا توجد» إلا بعد ما يخلص
   const billQ=(document.getElementById('searchBill')?.value||'').trim().toLowerCase();
   const codeQ=(document.getElementById('searchCode')?.value||'').trim().toLowerCase();
   let rows=[...unclosedFlags];
