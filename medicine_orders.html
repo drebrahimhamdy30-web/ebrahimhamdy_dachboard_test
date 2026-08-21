@@ -170,6 +170,7 @@
           <select id="ord-company" class="form-select" style="max-width:150px" onchange="ordPage=1;loadOrders()"><option value="">كل الشركات</option></select>
           <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;font-weight:700;cursor:pointer;white-space:nowrap"><input type="checkbox" id="ord-surp-only" onchange="ordPage=1;loadOrders()" style="width:16px;height:16px;accent-color:var(--primary)"> فائض فقط</label>
           <button class="cr-up-btn" style="background:#16a34a" onclick="exportOrders()"><i class="fas fa-file-excel"></i> تصدير Excel</button>
+          <button class="cr-up-btn" id="ord-clear" style="display:none;background:#b91c1c" onclick="clearAllSelections()"><i class="fas fa-eraser"></i> مسح تحت الطلب (يوم جديد)</button>
           <button class="cr-up-btn" id="ord-refresh" style="display:none" onclick="refreshOrders()"><i class="fas fa-rotate"></i> تحديث الطلبيات</button>
         </div>
         <div class="cr-meta" id="ord-meta"></div>
@@ -407,7 +408,8 @@
     const ORD_SIZE = 50;
     let ordBranch = 'المعمورة', ordPage = 1, ordTotal = 0, ordTimer = null, ordLoaded = false, ordById = {};
     let branchReps = {};
-    const ordSel = new Set();   // الأصناف «تحت الطلب» المحددة
+    let ordSelCodes = new Set();  // أكواد «تحت الطلب» للفرع الحالي (محفوظة في قاعدة البيانات)
+    let ordSelBranch = null;      // آخر فرع اتحمّلت تحديداته
     const ordWhChoice = {};     // المخزن المختار لكل صف (id → {store,price,disc,net,av})
     const BR_LIST = [['المعمورة','surplus_mamora'],['سان ستيفانو','surplus_san'],['سيدى بشر','surplus_bishr']];
 
@@ -438,10 +440,22 @@
         sel.innerHTML = '<option value="">كل الشركات</option>' + (list || []).map(c => '<option value="' + esc(c.company) + '">' + esc(c.company) + '</option>').join('');
       } catch (e) {}
     }
+    async function loadOrderSelections() {
+      try {
+        let all = [], off = 0;
+        for (;;) {
+          const b = await (await fetch(REST + 'order_selections?select=itm_code&branch=eq.' + encodeURIComponent(ordBranch) + '&limit=1000&offset=' + off, { headers: H })).json();
+          all = all.concat(b || []); if (!Array.isArray(b) || b.length < 1000) break; off += 1000;
+        }
+        ordSelCodes = new Set(all.map(x => x.itm_code));
+      } catch (e) { ordSelCodes = new Set(); }
+      ordSelBranch = ordBranch;
+    }
     async function loadOrders() {
       const body = document.getElementById('ord-body');
       body.innerHTML = '<tr><td colspan="14" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr>';
       try {
+        if (ordSelBranch !== ordBranch) await loadOrderSelections();
         const res = await fetch(buildOrdQuery((ordPage - 1) * ORD_SIZE), { headers: { ...H, 'Prefer': 'count=exact' } });
         const rows = await res.json();
         const cr = res.headers.get('content-range');
@@ -457,7 +471,8 @@
             : '<span style="color:var(--text-muted)">—</span>';
           const chosen = ordWhChoice[r.id] || (r.best_store ? { store: r.best_store, price: r.best_price, disc: r.best_disc, av: true } : null);
           if (chosen) ordWhChoice[r.id] = chosen;
-          const chk = '<input type="checkbox" ' + (ordSel.has(r.id) ? 'checked' : '') + ' onchange="ordSelToggle(' + r.id + ',this.checked)">';
+          const cc = String(r.itm_code).replace(/'/g, "\\'");
+          const chk = '<input type="checkbox" ' + (ordSelCodes.has(r.itm_code) ? 'checked' : '') + ' onchange="ordSelToggle(\'' + cc + '\',this.checked)">';
           return '<tr>'
             + '<td>' + chk + '</td>'
             + '<td class="cr-code">' + esc(r.itm_code) + '</td>'
@@ -475,14 +490,42 @@
             + '<td style="font-size:.7rem;color:var(--text-muted)">' + esc(r.company) + '</td>'
             + '</tr>';
         }).join('');
-        const allChk = document.getElementById('ord-all'); if (allChk) allChk.checked = rows.every(r => ordSel.has(r.id));
+        const allChk = document.getElementById('ord-all'); if (allChk) allChk.checked = rows.every(r => ordSelCodes.has(r.itm_code));
         ordPager();
       } catch (e) { body.innerHTML = '<tr><td colspan="14" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>'; }
     }
-    function ordSelToggle(id, on) { if (on) ordSel.add(id); else ordSel.delete(id); }
-    function ordToggleAll(el) {
-      document.querySelectorAll('#ord-body input[type=checkbox]').forEach(cb => { cb.checked = el.checked; });
-      Object.keys(ordById).forEach(id => { if (el.checked) ordSel.add(+id); else ordSel.delete(+id); });
+    async function ordSelToggle(code, on) {
+      try {
+        if (on) {
+          ordSelCodes.add(code);
+          await fetch(REST + 'order_selections?on_conflict=branch,itm_code', { method:'POST', headers:{ ...H, 'Content-Type':'application/json', 'Prefer':'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ branch: ordBranch, itm_code: code }) });
+        } else {
+          ordSelCodes.delete(code);
+          await fetch(REST + 'order_selections?branch=eq.' + encodeURIComponent(ordBranch) + '&itm_code=eq.' + encodeURIComponent(code), { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });
+        }
+      } catch (e) { alert('تعذّر حفظ التحديد: ' + e.message); }
+    }
+    async function ordToggleAll(el) {
+      const on = el.checked;
+      const codes = Object.values(ordById).map(r => r.itm_code);
+      document.querySelectorAll('#ord-body input[type=checkbox]').forEach(cb => { cb.checked = on; });
+      try {
+        if (on) {
+          codes.forEach(c => ordSelCodes.add(c));
+          await fetch(REST + 'order_selections?on_conflict=branch,itm_code', { method:'POST', headers:{ ...H, 'Content-Type':'application/json', 'Prefer':'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(codes.map(c => ({ branch: ordBranch, itm_code: c }))) });
+        } else {
+          codes.forEach(c => ordSelCodes.delete(c));
+          const inList = codes.map(c => '"' + String(c).replace(/"/g, '') + '"').join(',');
+          await fetch(REST + 'order_selections?branch=eq.' + encodeURIComponent(ordBranch) + '&itm_code=in.(' + encodeURIComponent(inList) + ')', { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });
+        }
+      } catch (e) { alert('تعذّر الحفظ: ' + e.message); }
+    }
+    async function clearAllSelections() {
+      if (!confirm('مسح كل الأصناف «تحت الطلب» في كل الفروع لبدء يوم جديد؟')) return;
+      try {
+        await fetch(REST + 'order_selections?itm_code=neq.__none__', { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });
+        ordSelCodes = new Set(); ordSelBranch = null; loadOrders();
+      } catch (e) { alert('تعذّر المسح: ' + e.message); }
     }
     function ordPager() {
       const totalPages = Math.max(1, Math.ceil(ordTotal / ORD_SIZE));
@@ -975,6 +1018,7 @@
         document.getElementById('mo-months').style.display = 'block';
         ['replace','exceptional','tiers','archive','settings'].forEach(t => document.getElementById('tabbtn-' + t).style.display = 'inline-block');
         document.getElementById('ord-refresh').style.display = 'inline-flex';
+        document.getElementById('ord-clear').style.display = 'inline-flex';
       }
     })();
 
