@@ -30,6 +30,12 @@
     .sp-code-input { width:82px;font-family:inherit;font-size:0.78rem;text-align:center;padding:2px 4px;border:1.5px solid var(--primary);border-radius:6px; }
     .sp-sugg-btn { border:none;background:none;color:var(--primary);cursor:pointer;font-size:0.85rem;padding:2px 5px;border-radius:6px; }
     .sp-sugg-btn:hover { background:var(--surface-2); }
+    .sp-sugg-line { margin-top:4px;font-size:0.72rem;color:var(--text-secondary);white-space:normal;text-align:right;max-width:220px; }
+    .sp-sugg-name { color:var(--text-muted);font-size:0.68rem;margin-top:1px; }
+    .sp-accept { border:none;background:#16a34a;color:#fff;border-radius:6px;padding:1px 8px;font-family:inherit;font-size:0.68rem;font-weight:700;cursor:pointer; }
+    .sp-sim-hi { color:#15803d;font-weight:800; }
+    .sp-sim-mid { color:#b45309;font-weight:800; }
+    .sp-sim-lo { color:#b91c1c;font-weight:700; }
     /* شريط الصفحات */
     .sp-pager { display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:12px;padding-top:10px;border-top:1px solid var(--surface-3); }
     .sp-pg-info { font-size:0.72rem;color:var(--text-muted);font-weight:600; }
@@ -248,12 +254,14 @@
       const wc = document.getElementById('sp-withcode').checked;
       const nc = document.getElementById('sp-nocodef').checked;
       const av = document.getElementById('sp-avail').value;
-      let url = SB_URL_API + '/rest/v1/store_item_prices?select=id,item_name,code,store,price,discount_perc,available,updated_at'
-        + '&order=item_name.asc&limit=' + SP_SIZE + '&offset=' + offset;
+      const noCodeOnly = (!wc && nc);
+      let url = SB_URL_API + '/rest/v1/v_store_item_prices?select=id,item_name,code,store,price,discount_perc,available,updated_at,sim,best_code,best_name'
+        + '&limit=' + SP_SIZE + '&offset=' + offset
+        + '&order=' + (noCodeOnly ? 'sim.desc.nullslast,item_name.asc' : 'item_name.asc');  // بدون كود: الأعلى تشابهًا فوق
       if (q) { const e = encodeURIComponent(q); url += '&or=(item_name.ilike.*' + e + '*,code.ilike.*' + e + '*)'; }
       if (store) url += '&store=eq.' + encodeURIComponent(store);
       if (wc && !nc) url += '&code=not.is.null';        // بكود فقط
-      else if (!wc && nc) url += '&code=is.null';        // بدون كود فقط
+      else if (noCodeOnly) url += '&code=is.null';       // بدون كود فقط
       if (av === 'a') url += '&available=eq.true';       // المتاح فقط (افتراضي)
       else if (av === 'u') url += '&available=eq.false'; // غير المتاح
       return url;
@@ -277,9 +285,19 @@
           let codeTd;
           if (canEdit) {
             const disp = r.code ? '<span class="sp-code">' + r.code + '</span>' : '<span class="sp-nocode">بدون كود</span>';
+            let sugg = '';
+            if (!r.code && r.best_code) {
+              const pct = Math.round((r.sim || 0) * 100);
+              const cls = pct >= 70 ? 'sp-sim-hi' : (pct >= 45 ? 'sp-sim-mid' : 'sp-sim-lo');
+              sugg = '<div class="sp-sugg-line">اقتراح: <b>' + r.best_code + '</b> '
+                + '<span class="' + cls + '">' + pct + '%</span> '
+                + '<button class="sp-accept" onclick="saveCode(' + r.id + ',\'' + String(r.best_code).replace(/'/g, "\\'") + '\')">اعتمد</button>'
+                + '<div class="sp-sugg-name">' + (r.best_name || '').replace(/</g, '&lt;') + '</div></div>';
+            }
             codeTd = '<td class="sp-code-td" onclick="event.stopPropagation()">'
               + '<span class="sp-code-cell" id="code-' + r.id + '" title="اضغط لتعديل الكود" onclick="editCode(' + r.id + ')">' + disp + '</span>'
               + ' <button class="sp-sugg-btn" title="اقتراح كود من المخزون" onclick="suggestCode(' + r.id + ')"><i class="fas fa-wand-magic-sparkles"></i></button>'
+              + sugg
               + '</td>';
           } else {
             codeTd = '<td>' + (r.code ? '<span class="sp-code">' + r.code + '</span>' : '<span class="sp-nocode">—</span>') + '</td>';
