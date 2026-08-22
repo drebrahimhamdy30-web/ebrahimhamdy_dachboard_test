@@ -102,7 +102,11 @@ body{padding:0;overflow:hidden;height:100vh;background:var(--bg);display:flex;fl
 <div class="orders-toolbar">
   <div class="search-wrap">
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-    <input type="text" class="search-box" id="searchInput" placeholder="بحث باسم أو رقم أو منطقة..." oninput="applyFilters()" style="padding-right:2rem">
+    <input type="text" class="search-box" id="searchBill" placeholder="رقم الفاتورة (كل التواريخ)" oninput="searchDebounce()" style="padding-right:2rem;width:165px" title="بحث برقم الفاتورة في كل الطلبات">
+  </div>
+  <div class="search-wrap">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <input type="text" class="search-box" id="searchCode" placeholder="كود العميل (كل طلباته)" oninput="searchDebounce()" style="padding-right:2rem;width:165px" title="بحث بكود العميل في كل طلباته على مدى كل التواريخ">
   </div>
 
   <!-- Status filter (dropdown) -->
@@ -239,6 +243,7 @@ function fmtLogDetails(d){
 }
 
 let allOrders=[], filtered=[], currentPage=1, pageSize=50, orderTrip={};
+let searchMode=false, searchRows=[], searchTimer=null;
 let sortCol='bill_date', sortDir=-1, statusFilter='', currentUser=null;
 
 async function init(){
@@ -367,26 +372,60 @@ function sortBy(col){
   applyFilters();
 }
 
+// بحث server-side مستهدف (رقم فاتورة / كود عميل) عبر كل الطلبات — مش مقيّد بالمدى الزمني ولا المحمّل في الصفحة
+function searchDebounce(){ clearTimeout(searchTimer); searchTimer=setTimeout(runSearch,350); }
+async function runSearch(){
+  const billQ=(document.getElementById('searchBill').value||'').trim();
+  const codeQ=(document.getElementById('searchCode').value||'').trim();
+  if(!billQ && !codeQ){ searchMode=false; searchRows=[]; currentPage=1; applyFilters(); return; }
+  searchMode=true; currentPage=1; showLoad(true);
+  try{
+    const build=()=>{
+      let q=db.from('orders').select('*').order('created_at',{ascending:false});
+      if(billQ) q=q.eq('bill_no', billQ);
+      if(codeQ) q=q.eq('cust_code', codeQ);
+      const ab=document.getElementById('branchFilter')?.value;
+      if(ab) q=q.eq('branch_id',ab);
+      else if(currentUser?.role!=='admin' && currentUser?.branch_id) q=q.eq('branch_id',currentUser.branch_id);
+      return q;
+    };
+    searchRows=[];
+    for(let off=0; off<10000; off+=1000){
+      const {data,error}=await build().range(off, off+999);
+      if(error){ console.error(error); break; }
+      if(!data||!data.length) break;
+      searchRows=searchRows.concat(data);
+      if(data.length<1000) break;
+    }
+    const oids=searchRows.map(o=>o.id);
+    for(let i=0;i<oids.length;i+=150){
+      const {data:to}=await db.from('trip_orders').select('order_id,trip_id').in('order_id',oids.slice(i,i+150));
+      (to||[]).forEach(r=>{orderTrip[r.order_id]=r.trip_id;});
+    }
+    applyFilters();
+  }catch(e){ console.error(e); }
+  showLoad(false);
+}
+
 function applyFilters(){
-  const search=document.getElementById('searchInput').value.toLowerCase();
   const dateFrom=document.getElementById('dateFrom').value;
   const dateTo=document.getElementById('dateTo').value;
   const payF=document.getElementById('payFilter').value;
   const perfF=document.getElementById('perfFilter').value;
+  const src=searchMode?searchRows:allOrders;
 
-  filtered=allOrders.filter(o=>{
+  filtered=src.filter(o=>{
     // Status
     if(statusFilter==='late'){if(!isLate(o))return false;}
     else if(statusFilter&&o.status!==statusFilter)return false;
     // Performance
     if(perfF&&o.perf_rating!==perfF)return false;
-    // Search
-    if(search&&![o.bill_no,o.customer_name,o.cust_name,o.cust_region,o.deliveryman,o.cust_address,o.customer_address]
-      .some(v=>(v||'').toLowerCase().includes(search)))return false;
-    // Date
-    const bd=getBillDate(o);
-    if(dateFrom&&bd<new Date(dateFrom))return false;
-    if(dateTo&&bd>new Date(dateTo+'T23:59:59'))return false;
+    // Date (يتطبّق في وضع العرض العادي فقط — البحث بيجيب كل التواريخ)
+    if(!searchMode){
+      const bd=getBillDate(o);
+      if(dateFrom&&bd<new Date(dateFrom))return false;
+      if(dateTo&&bd>new Date(dateTo+'T23:59:59'))return false;
+    }
     // Payment
     if(payF&&o.payment_method!==payF)return false;
     return true;
