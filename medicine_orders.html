@@ -82,6 +82,15 @@
     .ord-actbtn { border:none;border-radius:6px;padding:4px 8px;font-family:inherit;font-size:0.7rem;font-weight:700;cursor:pointer;white-space:nowrap; }
     .ord-tr { background:#16a34a;color:#fff; }
     .ord-bw { background:var(--surface-3);color:var(--text-primary); }
+    /* تحكّم الأعمدة: عرض + ترتيب */
+    #tab-orders .cr-table.ord-fit { width:auto;min-width:0; }
+    #tab-orders .cr-table.ord-fit td, #tab-orders .cr-table.ord-fit th { white-space:nowrap; }
+    #tab-orders .cr-table th { position:relative; }
+    #tab-orders .cr-table th[draggable=true] { cursor:grab; }
+    #tab-orders .cr-table th.ord-drag-over { outline:2px dashed #fff;outline-offset:-3px; }
+    #tab-orders .cr-table th.ord-dragging { opacity:.45; }
+    .ord-rsz { position:absolute;top:0;left:0;width:9px;height:100%;cursor:col-resize;z-index:6; }
+    .ord-rsz:hover { background:rgba(255,255,255,.35); }
   </style>
 </head>
 <body>
@@ -182,26 +191,28 @@
           <button class="cr-up-btn" style="background:#16a34a" onclick="exportOrders()"><i class="fas fa-file-excel"></i> تصدير Excel</button>
           <button class="cr-up-btn" id="ord-clear" style="display:none;background:#b91c1c" onclick="clearAllSelections()"><i class="fas fa-eraser"></i> مسح تحت الطلب (يوم جديد)</button>
           <button class="cr-up-btn" id="ord-refresh" style="display:none" onclick="refreshOrders()"><i class="fas fa-rotate"></i> تحديث الطلبيات</button>
+          <button class="cr-up-btn" id="ord-fit-btn" style="background:var(--surface-3);color:var(--text-primary)" onclick="ordToggleFit()" title="تصغير كل الأعمدة على حجم النص"><i class="fas fa-text-width"></i> محاذاة على النص</button>
+          <button class="cr-up-btn" style="background:var(--surface-3);color:var(--text-primary)" onclick="ordResetLayout()" title="استرجاع الترتيب والعرض الافتراضي"><i class="fas fa-rotate-left"></i> استرجاع الأعمدة</button>
         </div>
         <div class="cr-meta" id="ord-meta"></div>
         <div class="cr-wrap">
           <table class="cr-table">
-            <thead><tr>
-              <th><input type="checkbox" id="ord-all" title="تحت الطلب" onclick="ordToggleAll(this)"></th>
-              <th>الكود</th>
-              <th style="text-align:right;">الاسم</th>
-              <th>صافى المطلوب</th>
-              <th>المخزن</th>
-              <th>سعر المخزن</th>
-              <th>خصم المخزن</th>
-              <th>سعر البيع</th>
-              <th>مطلوب</th>
-              <th>فائض الفروع</th>
-              <th>معدل الاستهلاك</th>
-              <th>كمية التوفير</th>
-              <th>الرصيد</th>
-              <th>الشركة</th>
-              <th>أرشفة</th>
+            <thead><tr id="ord-head">
+              <th data-col="sel"><input type="checkbox" id="ord-all" title="تحت الطلب" onclick="ordToggleAll(this)"></th>
+              <th data-col="code">الكود</th>
+              <th data-col="name" style="text-align:right;">الاسم</th>
+              <th data-col="net">صافى المطلوب</th>
+              <th data-col="store">المخزن</th>
+              <th data-col="sprice">سعر المخزن</th>
+              <th data-col="sdisc">خصم المخزن</th>
+              <th data-col="price">سعر البيع</th>
+              <th data-col="req">مطلوب</th>
+              <th data-col="surplus">فائض الفروع</th>
+              <th data-col="rate">معدل الاستهلاك</th>
+              <th data-col="save">كمية التوفير</th>
+              <th data-col="stock">الرصيد</th>
+              <th data-col="company">الشركة</th>
+              <th data-col="arch">أرشفة</th>
             </tr></thead>
             <tbody id="ord-body"><tr><td colspan="15" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr></tbody>
           </table>
@@ -502,6 +513,104 @@
       else if (under === 'off' && ordSelCodes.size) s += '&itm_code=not.in.(' + ordInList() + ')';
       return s;
     }
+
+    // ===== تحكّم أعمدة جدول الطلبيات: عرض + ترتيب (محفوظ في المتصفح) =====
+    const ORD_COLS_DEF = ['sel','code','name','net','store','sprice','sdisc','price','req','surplus','rate','save','stock','company','arch'];
+    let ordColOrder = ordLoadJSON('ord_col_order_v1', ORD_COLS_DEF.slice());
+    let ordColWidth = ordLoadJSON('ord_col_width_v1', {});
+    let ordFit = localStorage.getItem('ord_fit_v1') === '1';
+    let ordRszState = null;
+    function ordLoadJSON(k, dflt) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? dflt : v; } catch (e) { return dflt; } }
+    function ordSaveOrder() { try { localStorage.setItem('ord_col_order_v1', JSON.stringify(ordColOrder)); } catch (e) {} }
+    function ordSaveWidth() { try { localStorage.setItem('ord_col_width_v1', JSON.stringify(ordColWidth)); } catch (e) {} }
+    function ordNormalizeOrder() {
+      const set = new Set(ORD_COLS_DEF);
+      ordColOrder = (ordColOrder || []).filter(k => set.has(k));
+      ORD_COLS_DEF.forEach(k => { if (!ordColOrder.includes(k)) ordColOrder.push(k); });
+    }
+    function ordReorderCells(rowEl) {
+      const map = {};
+      Array.from(rowEl.children).forEach(td => { const k = td.getAttribute('data-col'); if (k) map[k] = td; });
+      ordColOrder.forEach(k => { if (map[k]) rowEl.appendChild(map[k]); });
+    }
+    function ordApplyLayout() {
+      const table = document.querySelector('#tab-orders .cr-table'); if (!table) return;
+      ordNormalizeOrder();
+      table.classList.toggle('ord-fit', ordFit);
+      const head = document.getElementById('ord-head');
+      if (head) {
+        ordReorderCells(head);
+        Array.from(head.children).forEach(th => {
+          const w = ordColWidth[th.getAttribute('data-col')];
+          th.style.width = (w && !ordFit) ? (w + 'px') : '';
+        });
+        ordWireHead();
+      }
+      const body = document.getElementById('ord-body');
+      if (body) Array.from(body.children).forEach(tr => { if (tr.children.length > 3) ordReorderCells(tr); });
+    }
+    function ordWireHead() {
+      const head = document.getElementById('ord-head'); if (!head) return;
+      Array.from(head.children).forEach(th => {
+        if (th._ordWired) return; th._ordWired = true;
+        th.setAttribute('draggable', 'true');
+        const h = document.createElement('div'); h.className = 'ord-rsz';
+        h.addEventListener('mousedown', e => ordRszStart(e, th));
+        h.addEventListener('dblclick', e => { e.preventDefault(); e.stopPropagation(); ordAutofitCol(th.getAttribute('data-col')); });
+        h.addEventListener('click', e => e.stopPropagation());
+        th.appendChild(h);
+        th.addEventListener('dragstart', e => { if (ordRszState) { e.preventDefault(); return; } window._ordDragKey = th.getAttribute('data-col'); e.dataTransfer.effectAllowed = 'move'; th.classList.add('ord-dragging'); });
+        th.addEventListener('dragend', () => { th.classList.remove('ord-dragging'); document.querySelectorAll('#ord-head th.ord-drag-over').forEach(x => x.classList.remove('ord-drag-over')); });
+        th.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; th.classList.add('ord-drag-over'); });
+        th.addEventListener('dragleave', () => th.classList.remove('ord-drag-over'));
+        th.addEventListener('drop', e => {
+          e.preventDefault(); th.classList.remove('ord-drag-over');
+          const from = window._ordDragKey, to = th.getAttribute('data-col');
+          if (!from || from === to) return;
+          const a = ordColOrder.slice();
+          a.splice(a.indexOf(from), 1);
+          a.splice(a.indexOf(to), 0, from);
+          ordColOrder = a; ordSaveOrder(); ordApplyLayout();
+        });
+      });
+    }
+    function ordRszStart(e, th) {
+      e.preventDefault(); e.stopPropagation();
+      ordRszState = { th, key: th.getAttribute('data-col'), startX: e.clientX, startW: th.offsetWidth, _w: 0 };
+      document.addEventListener('mousemove', ordRszMove);
+      document.addEventListener('mouseup', ordRszEnd);
+    }
+    function ordRszMove(e) {
+      if (!ordRszState) return;
+      const dw = ordRszState.startX - e.clientX;   // RTL: المقبض على اليسار، السحب للداخل يصغّر
+      const w = Math.max(28, ordRszState.startW + dw);
+      ordRszState.th.style.width = w + 'px'; ordRszState._w = w;
+    }
+    function ordRszEnd() {
+      if (ordRszState && ordRszState._w) {
+        ordColWidth[ordRszState.key] = Math.round(ordRszState._w); ordSaveWidth();
+        if (ordFit) { ordFit = false; localStorage.setItem('ord_fit_v1', '0'); ordSyncFitBtn(); ordApplyLayout(); }
+      }
+      ordRszState = null;
+      document.removeEventListener('mousemove', ordRszMove);
+      document.removeEventListener('mouseup', ordRszEnd);
+    }
+    function ordAutofitCol(key) {
+      const table = document.querySelector('#tab-orders .cr-table'); if (!table || !key) return;
+      let max = 0;
+      table.querySelectorAll('[data-col="' + key + '"]').forEach(c => { max = Math.max(max, c.scrollWidth); });
+      if (max > 0) { ordColWidth[key] = max + 6; ordSaveWidth(); if (ordFit) { ordFit = false; localStorage.setItem('ord_fit_v1', '0'); ordSyncFitBtn(); } ordApplyLayout(); }
+    }
+    function ordSyncFitBtn() {
+      const b = document.getElementById('ord-fit-btn'); if (!b) return;
+      b.style.background = ordFit ? '#16a34a' : 'var(--surface-3)';
+      b.style.color = ordFit ? '#fff' : 'var(--text-primary)';
+    }
+    function ordToggleFit() { ordFit = !ordFit; localStorage.setItem('ord_fit_v1', ordFit ? '1' : '0'); ordSyncFitBtn(); ordApplyLayout(); }
+    function ordResetLayout() {
+      ordColOrder = ORD_COLS_DEF.slice(); ordColWidth = {}; ordFit = false;
+      ordSaveOrder(); ordSaveWidth(); localStorage.setItem('ord_fit_v1', '0'); ordSyncFitBtn(); ordApplyLayout();
+    }
     async function loadOrdCompanies() {
       try {
         const list = await (await fetch(REST + 'rpc/get_purchase_companies', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' })).json();
@@ -552,25 +661,26 @@
           const chk = '<input type="checkbox" ' + (ordSelCodes.has(r.itm_code) ? 'checked' : '') + ' onchange="ordSelToggle(\'' + cc + '\',this.checked)">';
           const arch = canEdit ? '<button class="ord-actbtn" style="background:#fee2e2;color:#b91c1c" title="أرشفة الصنف" onclick="archiveItem(' + r.id + ')"><i class="fas fa-box-archive"></i></button>' : '';
           return '<tr id="ord-row-' + r.id + '">'
-            + '<td>' + chk + '</td>'
-            + '<td class="cr-code">' + esc(r.itm_code) + '</td>'
-            + '<td style="text-align:right;font-weight:600;">' + esc(r.itm_name) + '</td>'
-            + '<td style="font-weight:800;color:#b91c1c">' + (r.net_required != null ? r.net_required : r.required) + '</td>'
-            + '<td id="wh-name-' + r.id + '">' + whNameHtml(r.id, chosen) + '</td>'
-            + '<td id="wh-price-' + r.id + '">' + (chosen && chosen.price != null ? chosen.price : '—') + '</td>'
-            + '<td id="wh-disc-' + r.id + '">' + (chosen ? (chosen.disc == null ? 0 : chosen.disc) + '%' : '—') + '</td>'
-            + '<td>' + (r.price == null ? '—' : numv(r.price)) + '</td>'
-            + '<td class="ord-req">' + r.required + '</td>'
-            + '<td>' + surCell + '</td>'
-            + '<td>' + numv(r.base_rate) + '</td>'
-            + '<td>' + numv(r.rate) + '</td>'
-            + '<td>' + numv(r.stock) + '</td>'
-            + '<td style="font-size:.7rem;color:var(--text-muted)">' + esc(r.company) + '</td>'
-            + '<td>' + arch + '</td>'
+            + '<td data-col="sel">' + chk + '</td>'
+            + '<td data-col="code" class="cr-code">' + esc(r.itm_code) + '</td>'
+            + '<td data-col="name" style="text-align:right;font-weight:600;">' + esc(r.itm_name) + '</td>'
+            + '<td data-col="net" style="font-weight:800;color:#b91c1c">' + (r.net_required != null ? r.net_required : r.required) + '</td>'
+            + '<td data-col="store" id="wh-name-' + r.id + '">' + whNameHtml(r.id, chosen) + '</td>'
+            + '<td data-col="sprice" id="wh-price-' + r.id + '">' + (chosen && chosen.price != null ? chosen.price : '—') + '</td>'
+            + '<td data-col="sdisc" id="wh-disc-' + r.id + '">' + (chosen ? (chosen.disc == null ? 0 : chosen.disc) + '%' : '—') + '</td>'
+            + '<td data-col="price">' + (r.price == null ? '—' : numv(r.price)) + '</td>'
+            + '<td data-col="req" class="ord-req">' + r.required + '</td>'
+            + '<td data-col="surplus">' + surCell + '</td>'
+            + '<td data-col="rate">' + numv(r.base_rate) + '</td>'
+            + '<td data-col="save">' + numv(r.rate) + '</td>'
+            + '<td data-col="stock">' + numv(r.stock) + '</td>'
+            + '<td data-col="company" style="font-size:.7rem;color:var(--text-muted)">' + esc(r.company) + '</td>'
+            + '<td data-col="arch">' + arch + '</td>'
             + '</tr>';
         }).join('');
         const allChk = document.getElementById('ord-all'); if (allChk) allChk.checked = rows.every(r => ordSelCodes.has(r.itm_code));
         ordPager();
+        ordApplyLayout();
       } catch (e) { body.innerHTML = '<tr><td colspan="15" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>'; }
     }
     async function ordSelToggle(code, on) {
@@ -1123,6 +1233,7 @@
     })();
 
     loadMeta(); loadMonths(); loadBranchReps(); loadOrdStores(); loadOrdCompanies(); loadPage();
+    ordSyncFitBtn();
     showTab('orders');   // الطلبيات هو التبويب الافتراضي عند فتح الشاشة
   </script>
 </body>
