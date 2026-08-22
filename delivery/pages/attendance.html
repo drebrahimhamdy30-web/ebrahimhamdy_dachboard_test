@@ -108,6 +108,7 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
 <script>
 const COLORS=['#1a56db','#7c3aed','#16a34a','#ea580c','#0891b2','#ca8a04'];
 let allDrivers=[], attendanceRecords=[], currentView='live';
+let isAdminG=false, branchDriverIds=null;   // مجموعة معرّفات طيارين الفرع الحالي (لغير الأدمن) لقصر العرض على الفرع
 
 async function init(){
   const user=getCurrentUser();if(!user)return;
@@ -127,7 +128,9 @@ const user=getCurrentUser();
 const isAdmin=user?.role==='admin';
 const userBranchName=user?.branch;
 
-let driversQuery=db.from('drivers').select('*,branches(name)').eq('is_active',true).order('full_name');
+// !inner عشان فلتر الفرع يقصر الطيارين فعلًا (بدونه PostgREST بيرجّع كل الطيارين)
+const drvSel=(!isAdmin && userBranchName) ? '*,branches!inner(name)' : '*,branches(name)';
+let driversQuery=db.from('drivers').select(drvSel).eq('is_active',true).order('full_name');
 if(!isAdmin && userBranchName) driversQuery=driversQuery.eq('branches.name',userBranchName);
 
     const [dRes,aRes]=await Promise.all([
@@ -136,6 +139,10 @@ if(!isAdmin && userBranchName) driversQuery=driversQuery.eq('branches.name',user
     ]);
     allDrivers=dRes.data||[];
     attendanceRecords=aRes.data||[];
+    // اقصر الحضور/الطلبات على طيارين الفرع الحالي (لغير الأدمن) — كانت بتظهر لكل الفروع
+    isAdminG=isAdmin;
+    branchDriverIds=(!isAdmin && userBranchName) ? new Set(allDrivers.map(d=>d.id)) : null;
+    if(branchDriverIds) attendanceRecords=attendanceRecords.filter(r=>branchDriverIds.has(r.driver_id));
 
     const pending=attendanceRecords.filter(r=>r.status.endsWith('_request'));
     document.getElementById('req-count').textContent=pending.length;
@@ -367,6 +374,7 @@ async function runReport(){
   const {data,error}=await q;
   if(error){console.error(error);showToast('خطأ في جلب البيانات');showLoading(false);return;}
   reportRecords=data||[];
+  if(branchDriverIds) reportRecords=reportRecords.filter(r=>branchDriverIds.has(r.driver_id));   // التقرير كمان يقتصر على الفرع لغير الأدمن
   buildReportResults();
   showLoading(false);
 }
