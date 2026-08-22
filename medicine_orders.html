@@ -171,7 +171,7 @@
           <input type="text" id="ord-search" class="form-input" placeholder="🔍 بحث بالصنف أو الكود..." oninput="ordDebounce()" style="max-width:180px">
           <select id="ord-wh" class="form-select" style="max-width:150px" onchange="ordPage=1;loadOrders()"><option value="">كل المخازن</option></select>
           <select id="ord-company" class="form-select" style="max-width:150px" onchange="ordPage=1;loadOrders()"><option value="">كل الشركات</option></select>
-          <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;font-weight:700;cursor:pointer;white-space:nowrap"><input type="checkbox" id="ord-under-only" onchange="ordPage=1;loadOrders()" style="width:16px;height:16px;accent-color:var(--primary)"> تحت الطلب فقط</label>
+          <select id="ord-under" class="form-select" style="max-width:150px" onchange="ordPage=1;loadOrders()"><option value="">تحت الطلب: الكل</option><option value="on">تحت الطلب فقط</option><option value="off">لسه مطلبتوش</option></select>
           <span style="display:flex;align-items:center;gap:3px;font-size:0.78rem;font-weight:700;white-space:nowrap">الرصيد
             <select id="ord-stock-op" class="form-select" style="max-width:56px;padding:6px 4px" onchange="ordPage=1;loadOrders()"><option value="lte">≤</option><option value="gte">≥</option></select>
             <input type="number" id="ord-stock-v" class="form-input" style="max-width:66px" placeholder="—" oninput="ordDebounce()"></span>
@@ -495,10 +495,11 @@
       let s = '';
       const sOp = document.getElementById('ord-stock-op').value, sV = document.getElementById('ord-stock-v').value.trim();
       const rOp = document.getElementById('ord-req-op').value, rV = document.getElementById('ord-req-v').value.trim();
-      const underOnly = document.getElementById('ord-under-only').checked;
+      const under = document.getElementById('ord-under').value;
       if (sV !== '' && !isNaN(Number(sV))) s += '&stock=' + sOp + '.' + Number(sV);
       if (rV !== '' && !isNaN(Number(rV))) s += '&required=' + rOp + '.' + Number(rV);
-      if (underOnly) s += ordSelCodes.size ? '&itm_code=in.(' + ordInList() + ')' : '&itm_code=eq.__none__';
+      if (under === 'on') s += ordSelCodes.size ? '&itm_code=in.(' + ordInList() + ')' : '&itm_code=eq.__none__';
+      else if (under === 'off' && ordSelCodes.size) s += '&itm_code=not.in.(' + ordInList() + ')';
       return s;
     }
     async function loadOrdCompanies() {
@@ -729,8 +730,8 @@
       document.getElementById('bw-bg').classList.add('open');
       if (!r._wh) {
         try {
-          const rows = await (await fetch(REST + 'store_item_prices?select=store,price,discount_perc,available&available=eq.true&code=eq.' + encodeURIComponent(r.itm_code), { headers: H })).json();
-          r._wh = (rows || []).map(x => ({ store: x.store, price: x.price, disc: x.discount_perc, av: x.available,
+          const rows = await (await fetch(REST + 'store_item_prices?select=store,item_name,price,discount_perc,available&available=eq.true&code=eq.' + encodeURIComponent(r.itm_code), { headers: H })).json();
+          r._wh = (rows || []).map(x => ({ store: x.store, name: x.item_name, price: x.price, disc: x.discount_perc, av: x.available,
             net: (x.price == null || x.price === '') ? null : Number(x.price) * (1 - (Number(x.discount_perc) || 0) / 100) }))
             .sort((a, b) => (a.net == null ? Infinity : a.net) - (b.net == null ? Infinity : b.net));
         } catch (e) { r._wh = []; }
@@ -740,9 +741,10 @@
       const chosen = ordWhChoice[id];
       document.getElementById('bw-body').innerHTML =
         '<div style="font-size:.75rem;color:var(--text-muted);margin-bottom:8px">مرتّبة من الأقل تكلفة — اضغط «اختيار» لاستبداله كمخزن الطلب.</div>'
-        + '<table class="cr-mini"><thead><tr><th style="text-align:right">المخزن</th><th>سعر البيع</th><th>الخصم</th><th>التكلفة</th><th>الإتاحة</th><th></th></tr></thead><tbody>'
+        + '<table class="cr-mini"><thead><tr><th style="text-align:right">المخزن</th><th style="text-align:right">اسم الصنف بالمخزن</th><th>سعر البيع</th><th>الخصم</th><th>التكلفة</th><th>الإتاحة</th><th></th></tr></thead><tbody>'
         + arr.map((x, i) => '<tr' + (chosen && chosen.store === x.store ? ' style="background:#dcfce7;font-weight:800"' : '') + '>'
             + '<td style="text-align:right">' + esc(x.store) + '</td>'
+            + '<td style="text-align:right;font-size:.72rem">' + esc(x.name || '—') + '</td>'
             + '<td>' + (x.price == null ? '—' : x.price) + '</td>'
             + '<td>' + (x.disc == null ? 0 : x.disc) + '%</td>'
             + '<td>' + (x.net == null ? '—' : Math.round(x.net * 100) / 100) + '</td>'
