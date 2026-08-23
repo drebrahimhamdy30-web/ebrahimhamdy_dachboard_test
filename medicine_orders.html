@@ -721,11 +721,16 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       } catch (e) { alert('تعذّر الحفظ: ' + e.message); }
     }
     async function clearAllSelections() {
-      if (!confirm('مسح كل الأصناف «تحت الطلب» في كل الفروع لبدء يوم جديد؟')) return;
+      if (!confirm('بدء يوم جديد؟\nهيتمسح كل «تحت الطلب» + ارتباطات المخازن اليدوية، والأصناف تتوزّع على المخزن الأرخص تلقائيًّا.')) return;
+      const btn = document.getElementById('ord-clear'); if (btn) btn.disabled = true;
       try {
         await fetch(REST + 'order_selections?itm_code=neq.__none__', { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });
-        ordSelCodes = new Set(); ordSelBranch = null; loadOrders();
+        await fetch(REST + 'order_store_override?itm_code=neq.__none__', { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });   // مسح ارتباطات المخازن
+        await fetch(REST + 'rpc/refresh_purchase_orders', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' });   // إعادة التوزيع الطبيعي
+        ordSelCodes = new Set(); ordSelBranch = null; ordPage = 1; await loadOrders();
+        toast('تم بدء يوم جديد — اتمسح تحت الطلب وارتباطات المخازن ✓');
       } catch (e) { alert('تعذّر المسح: ' + e.message); }
+      finally { if (btn) btn.disabled = false; }
     }
     async function archiveItem(id) {
       const r = ordById[id]; if (!r) return;
@@ -851,7 +856,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       document.getElementById('bw-bg').classList.add('open');
       if (!r._wh) {
         try {
-          const rows = await (await fetch(REST + 'store_item_prices?select=store,item_name,price,discount_perc,available&available=eq.true&code=eq.' + encodeURIComponent(r.itm_code), { headers: H })).json();
+          const rows = await (await fetch(REST + 'store_item_prices?select=store,item_name,price,discount_perc,available&available=eq.true&code=ilike.' + encodeURIComponent(r.itm_code), { headers: H })).json();
           r._wh = (rows || []).map(x => ({ store: x.store, name: x.item_name, price: x.price, disc: x.discount_perc, av: x.available,
             net: (x.price == null || x.price === '') ? null : Number(x.price) * (1 - (Number(x.discount_perc) || 0) / 100) }))
             .sort((a, b) => (a.net == null ? Infinity : a.net) - (b.net == null ? Infinity : b.net));
