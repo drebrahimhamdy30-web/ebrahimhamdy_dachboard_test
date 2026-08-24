@@ -7,3 +7,25 @@ const db = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
   global: { headers: _authJwt ? { Authorization: 'Bearer ' + _authJwt } : {} }
 });
+
+// ===== الهوية (White-label): تطبيق من الكاش فورًا + تحديث من org_settings =====
+(function () {
+  function setBrand(b) {
+    if (!b) return;
+    var r = document.documentElement.style;
+    if (b.brand_primary)       { r.setProperty('--primary', b.brand_primary); r.setProperty('--accent', b.brand_primary); }
+    if (b.brand_primary_dark)  { r.setProperty('--primary-dark', b.brand_primary_dark); r.setProperty('--accent-dark', b.brand_primary_dark); }
+    if (b.brand_primary_light) r.setProperty('--primary-light', b.brand_primary_light);
+    function els() {
+      if (b.company_name) document.querySelectorAll('[data-org-name]').forEach(function (e) { e.textContent = b.company_name; });
+      if (b.logo_url)     document.querySelectorAll('[data-org-logo]').forEach(function (e) { e.src = b.logo_url; });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', els); else els();
+  }
+  try { setBrand(JSON.parse(localStorage.getItem('orgBrand') || 'null')); } catch (e) {}
+  try {
+    db.from('org_settings').select('*').eq('id', 1).maybeSingle().then(function (res) {
+      if (res && res.data) { setBrand(res.data); try { localStorage.setItem('orgBrand', JSON.stringify(res.data)); } catch (e) {} }
+    });
+  } catch (e) {}
+})();

@@ -174,7 +174,7 @@ body.dark{ --bg:#0b1220; --white:#111a2e; --text:#e6ecf5; --text-muted:#93a3bd; 
       <svg viewBox="0 0 24 24"><path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4zM6 18.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm13.5-9l1.96 2.5H17V9.5h2.5zm-1.5 9c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
     </div>
     <div>
-      <div class="logo-text">Phalix</div>
+      <div class="logo-text" data-org-name>Phalix</div>
       <div class="logo-sub" id="branchName">—</div>
     </div>
   </div>
@@ -273,6 +273,28 @@ const db = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
   global: { headers: _authJwt ? { Authorization: 'Bearer ' + _authJwt } : {} }
 });
+
+// ===== الهوية (White-label): تطبيق من الكاش فورًا + تحديث من org_settings =====
+(function () {
+  function setBrand(b) {
+    if (!b) return;
+    var r = document.documentElement.style;
+    if (b.brand_primary)       { r.setProperty('--primary', b.brand_primary); r.setProperty('--accent', b.brand_primary); }
+    if (b.brand_primary_dark)  { r.setProperty('--primary-dark', b.brand_primary_dark); r.setProperty('--accent-dark', b.brand_primary_dark); }
+    if (b.brand_primary_light) r.setProperty('--primary-light', b.brand_primary_light);
+    function els() {
+      if (b.company_name) document.querySelectorAll('[data-org-name]').forEach(function (e) { e.textContent = b.company_name; });
+      if (b.logo_url)     document.querySelectorAll('[data-org-logo]').forEach(function (e) { e.src = b.logo_url; });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', els); else els();
+  }
+  try { setBrand(JSON.parse(localStorage.getItem('orgBrand') || 'null')); } catch (e) {}
+  try {
+    db.from('org_settings').select('*').eq('id', 1).maybeSingle().then(function (res) {
+      if (res && res.data) { setBrand(res.data); try { localStorage.setItem('orgBrand', JSON.stringify(res.data)); } catch (e) {} }
+    });
+  } catch (e) {}
+})();
 
 const ROLE_LABELS = {
   admin:'Admin', supervisor:'مشرف', cashier:'كاشير', pharmacist:'مشتريات', driver:'طيار',
