@@ -216,9 +216,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
               <th data-col="name" style="text-align:right;">الاسم</th>
               <th data-col="net">صافى المطلوب</th>
               <th data-col="store">المخزن</th>
-              <th data-col="sprice">سعر المخزن</th>
+              <th data-col="sprice">سعر الصيدلية</th>
               <th data-col="sdisc">خصم المخزن</th>
-              <th data-col="price">سعر البيع</th>
               <th data-col="req">مطلوب</th>
               <th data-col="surplus">فائض الفروع</th>
               <th data-col="rate">معدل الاستهلاك</th>
@@ -528,7 +527,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     }
 
     // ===== تحكّم أعمدة جدول الطلبيات: عرض + ترتيب (محفوظ في المتصفح) =====
-    const ORD_COLS_DEF = ['sel','code','name','net','store','sprice','sdisc','price','req','surplus','rate','save','stock','company','arch'];
+    const ORD_COLS_DEF = ['sel','code','name','net','store','sprice','sdisc','req','surplus','rate','save','stock','company','arch'];
     let ordColOrder = ordLoadJSON('ord_col_order_v1', ORD_COLS_DEF.slice());
     let ordColWidth = ordLoadJSON('ord_col_width_v1', {});
     let ordFit = localStorage.getItem('ord_fit_v1') === '1';
@@ -683,9 +682,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
             + '<td data-col="name" style="text-align:right;font-weight:600;">' + esc(r.itm_name) + '</td>'
             + '<td data-col="net" style="font-weight:800;color:#b91c1c">' + (r.net_required != null ? r.net_required : r.required) + '</td>'
             + '<td data-col="store" id="wh-name-' + r.id + '">' + whNameHtml(r.id, chosen) + '</td>'
-            + '<td data-col="sprice" id="wh-price-' + r.id + '">' + (chosen && chosen.price != null ? chosen.price : '—') + '</td>'
+            + '<td data-col="sprice">' + (r.price == null ? '—' : numv(r.price)) + '</td>'
             + '<td data-col="sdisc" id="wh-disc-' + r.id + '">' + (chosen ? (chosen.disc == null ? 0 : chosen.disc) + '%' : '—') + '</td>'
-            + '<td data-col="price">' + (r.price == null ? '—' : numv(r.price)) + '</td>'
             + '<td data-col="req" class="ord-req">' + r.required + '</td>'
             + '<td data-col="surplus">' + surCell + '</td>'
             + '<td data-col="rate">' + numv(r.base_rate) + '</td>'
@@ -854,7 +852,12 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     // ===== اختيار/استبدال المخزن =====
     function whNameHtml(id, chosen) {
       if (!chosen) return '<span onclick="openWh(' + id + ')" style="cursor:pointer;color:var(--text-muted);text-decoration:underline">— اختر —</span>';
-      return '<span onclick="openWh(' + id + ')" style="cursor:pointer;color:var(--primary);font-weight:700;text-decoration:underline">' + esc(chosen.store) + '</span>'
+      const r = ordById[id];
+      // لو سعر بيع المخزن (اللي عليه الخصم) مختلف عن سعر الصيدلية → اسم المخزن أحمر للتنبيه
+      const mismatch = r && chosen.price != null && r.price != null && Math.abs(Number(chosen.price) - Number(r.price)) > 0.01;
+      const col = mismatch ? '#dc2626' : 'var(--primary)';
+      const ttl = mismatch ? ' title="سعر بيع المخزن (' + chosen.price + ') مختلف عن سعر الصيدلية (' + r.price + ')"' : '';
+      return '<span onclick="openWh(' + id + ')"' + ttl + ' style="cursor:pointer;color:' + col + ';font-weight:700;text-decoration:underline">' + esc(chosen.store) + '</span>'
         + (chosen.av ? '' : ' <span style="color:#b91c1c;font-size:.65rem">(غير متاح)</span>');
     }
     async function openWh(id) {
@@ -891,7 +894,6 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const r = ordById[id]; if (!r || !r._wh || !r._wh[i]) return;
       const c = r._wh[i]; ordWhChoice[id] = c;
       document.getElementById('wh-name-' + id).innerHTML = whNameHtml(id, c);
-      document.getElementById('wh-price-' + id).textContent = (c.price == null ? '—' : c.price);
       document.getElementById('wh-disc-' + id).textContent = (c.disc == null ? 0 : c.disc) + '%';
       closeBest();
       if (canOrder) {
