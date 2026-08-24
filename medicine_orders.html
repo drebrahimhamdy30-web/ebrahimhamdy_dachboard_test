@@ -83,6 +83,9 @@
     #tab-orders tr.ord-onemonth td { color:#dc2626 !important; }
     /* صنف كان في الأرشيف ورجع = السطر كله أخضر (يغلب الأحمر عند التعارض) */
     #tab-orders tr.ord-exarchived td { color:#15803d !important; }
+    /* «تحت الطلب»: أزرق = لسه ماجاش/جه غلط، أخضر = جه ناقص (كمّل الكمية) */
+    .ord-sel-chk { width:16px; height:16px; cursor:pointer; accent-color:#2563eb; }
+    .ord-sel-chk.partial { accent-color:#16a34a; }
     .ord-surp { font-size:0.72rem;color:#15803d;font-weight:700;line-height:1.5; }
     .ord-actbtn { border:none;border-radius:6px;padding:4px 8px;font-family:inherit;font-size:0.7rem;font-weight:700;cursor:pointer;white-space:nowrap; }
     .ord-tr { background:#16a34a;color:#fff; }
@@ -487,6 +490,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     let ordBranch = 'المعمورة', ordPage = 1, ordTotal = 0, ordTimer = null, ordLoaded = false, ordById = {};
     let branchReps = {};
     let ordSelCodes = new Set();  // أكواد «تحت الطلب» للفرع الحالي (محفوظة في قاعدة البيانات)
+    let ordSelStock = {};         // رصيد الصنف وقت تعليمه «تحت الطلب» (لكشف الوصول الجزئي)
     let ordSelBranch = null;      // آخر فرع اتحمّلت تحديداته
     const ordWhChoice = {};     // المخزن المختار لكل صف (id → {store,price,disc,net,av})
     const BR_LIST = [['المعمورة','surplus_mamora'],['سان ستيفانو','surplus_san'],['سيدى بشر','surplus_bishr']];
@@ -675,11 +679,12 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       try {
         let all = [], off = 0;
         for (;;) {
-          const b = await (await fetch(REST + 'order_selections?select=itm_code&branch=eq.' + encodeURIComponent(ordBranch) + '&limit=1000&offset=' + off, { headers: H })).json();
+          const b = await (await fetch(REST + 'order_selections?select=itm_code,stock_at_order&branch=eq.' + encodeURIComponent(ordBranch) + '&limit=1000&offset=' + off, { headers: H })).json();
           all = all.concat(b || []); if (!Array.isArray(b) || b.length < 1000) break; off += 1000;
         }
         ordSelCodes = new Set(all.map(x => x.itm_code));
-      } catch (e) { ordSelCodes = new Set(); }
+        ordSelStock = {}; all.forEach(x => { ordSelStock[x.itm_code] = x.stock_at_order; });
+      } catch (e) { ordSelCodes = new Set(); ordSelStock = {}; }
       ordSelBranch = ordBranch;
     }
     async function loadOrders() {
@@ -703,7 +708,14 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           const chosen = ordWhChoice[r.id] || (r.best_store ? { store: r.best_store, price: r.best_price, disc: r.best_disc, av: true } : null);
           if (chosen) ordWhChoice[r.id] = chosen;
           const cc = String(r.itm_code).replace(/'/g, "\\'");
-          const chk = '<input type="checkbox" ' + (ordSelCodes.has(r.itm_code) ? 'checked ' : '') + (canOrder ? '' : 'disabled title="المشتريات فقط" ') + 'onchange="ordSelToggle(\'' + cc + '\',this.checked)">';
+          const selOn = ordSelCodes.has(r.itm_code);
+          const snap = ordSelStock[r.itm_code];
+          // جه ناقص = الرصيد الحالي أعلى من رصيد وقت التعليم (وصل جزء من الكمية) → أخضر؛ غير كده أزرق
+          const partial = selOn && snap != null && Number(r.stock) > Number(snap) + 0.001;
+          const chk = '<input type="checkbox" class="ord-sel-chk' + (partial ? ' partial' : '') + '" '
+            + (selOn ? 'checked ' : '') + (canOrder ? '' : 'disabled ')
+            + 'title="' + (partial ? 'جه ناقص — كمّل الكمية' : (canOrder ? 'تحت الطلب' : 'المشتريات فقط')) + '" '
+            + 'onchange="ordSelToggle(\'' + cc + '\',this.checked,' + Number(r.stock || 0) + ')">';
           const arch = canOrder ? '<button class="ord-actbtn" style="background:#fee2e2;color:#b91c1c" title="أرشفة الصنف" onclick="archiveItem(' + r.id + ')"><i class="fas fa-box-archive"></i></button>' : '';
           const oneMonth = Number(r.active_months) === 1;
           const exArch = r.ex_archived === true;
@@ -731,14 +743,14 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         ordApplyLayout();
       } catch (e) { body.innerHTML = '<tr><td colspan="15" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>'; }
     }
-    async function ordSelToggle(code, on) {
+    async function ordSelToggle(code, on, stock) {
       if (!canOrder) return;   // المشتريات فقط
       try {
         if (on) {
-          ordSelCodes.add(code);
-          await fetch(REST + 'order_selections?on_conflict=branch,itm_code', { method:'POST', headers:{ ...H, 'Content-Type':'application/json', 'Prefer':'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ branch: ordBranch, itm_code: code }) });
+          ordSelCodes.add(code); ordSelStock[code] = (stock == null ? null : Number(stock));
+          await fetch(REST + 'order_selections?on_conflict=branch,itm_code', { method:'POST', headers:{ ...H, 'Content-Type':'application/json', 'Prefer':'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ branch: ordBranch, itm_code: code, stock_at_order: (stock == null ? null : Number(stock)) }) });
         } else {
-          ordSelCodes.delete(code);
+          ordSelCodes.delete(code); delete ordSelStock[code];
           await fetch(REST + 'order_selections?branch=eq.' + encodeURIComponent(ordBranch) + '&itm_code=eq.' + encodeURIComponent(code), { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });
         }
       } catch (e) { alert('تعذّر حفظ التحديد: ' + e.message); }
@@ -746,14 +758,15 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     async function ordToggleAll(el) {
       if (!canOrder) { el.checked = false; return; }   // المشتريات فقط
       const on = el.checked;
-      const codes = Object.values(ordById).map(r => r.itm_code);
+      const rowsArr = Object.values(ordById);
+      const codes = rowsArr.map(r => r.itm_code);
       document.querySelectorAll('#ord-body input[type=checkbox]').forEach(cb => { cb.checked = on; });
       try {
         if (on) {
-          codes.forEach(c => ordSelCodes.add(c));
-          await fetch(REST + 'order_selections?on_conflict=branch,itm_code', { method:'POST', headers:{ ...H, 'Content-Type':'application/json', 'Prefer':'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(codes.map(c => ({ branch: ordBranch, itm_code: c }))) });
+          rowsArr.forEach(r => { ordSelCodes.add(r.itm_code); ordSelStock[r.itm_code] = Number(r.stock || 0); });
+          await fetch(REST + 'order_selections?on_conflict=branch,itm_code', { method:'POST', headers:{ ...H, 'Content-Type':'application/json', 'Prefer':'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rowsArr.map(r => ({ branch: ordBranch, itm_code: r.itm_code, stock_at_order: Number(r.stock || 0) }))) });
         } else {
-          codes.forEach(c => ordSelCodes.delete(c));
+          codes.forEach(c => { ordSelCodes.delete(c); delete ordSelStock[c]; });
           const inList = codes.map(c => '"' + String(c).replace(/"/g, '') + '"').join(',');
           await fetch(REST + 'order_selections?branch=eq.' + encodeURIComponent(ordBranch) + '&itm_code=in.(' + encodeURIComponent(inList) + ')', { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });
         }
@@ -766,7 +779,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         await fetch(REST + 'order_selections?itm_code=neq.__none__', { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });
         await fetch(REST + 'order_store_override?itm_code=neq.__none__', { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });   // مسح ارتباطات المخازن
         await fetch(REST + 'rpc/refresh_purchase_orders', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' });   // إعادة التوزيع الطبيعي
-        ordSelCodes = new Set(); ordSelBranch = null; ordPage = 1; await loadOrders();
+        ordSelCodes = new Set(); ordSelStock = {}; ordSelBranch = null; ordPage = 1; await loadOrders();
         toast('تم بدء يوم جديد — اتمسح تحت الطلب وارتباطات المخازن ✓');
       } catch (e) { alert('تعذّر المسح: ' + e.message); }
       finally { if (btn) btn.disabled = false; }
