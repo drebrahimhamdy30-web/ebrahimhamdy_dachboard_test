@@ -504,7 +504,9 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const co = document.getElementById('ord-company').value;
       const surpOnly = document.getElementById('ord-surp-only').checked;
       let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,net_required,surplus_mamora,surplus_san,surplus_bishr,surplus_other,best_store,best_price,best_disc,active_months,ex_archived'
-        + '&branch=eq.' + encodeURIComponent(ordBranch) + '&order=required.desc,itm_name.asc&limit=' + ORD_SIZE + '&offset=' + offset;
+        + '&branch=eq.' + encodeURIComponent(ordBranch)
+        + '&order=' + ((ordSortCol && ORD_SORT_MAP[ordSortCol]) ? (ORD_SORT_MAP[ordSortCol] + '.' + ordSortDir + '.nullslast') : 'required.desc,itm_name.asc')
+        + '&limit=' + ORD_SIZE + '&offset=' + offset;
       if (q) { const e = encodeURIComponent(q); url += '&or=(itm_name.ilike.*' + e + '*,itm_code.eq.' + e + ')'; }
       if (w === '__none__') url += '&best_store=is.null';       // بدون مخزن متاح
       else if (w) url += '&best_store=eq.' + encodeURIComponent(w);
@@ -528,6 +530,9 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
 
     // ===== تحكّم أعمدة جدول الطلبيات: عرض + ترتيب (محفوظ في المتصفح) =====
     const ORD_COLS_DEF = ['sel','code','name','net','store','sprice','sdisc','req','surplus','rate','save','stock','company','arch'];
+    // خريطة الفرز: عمود العرض → عمود قاعدة البيانات (server-side لكل البيانات مش الصفحة)
+    const ORD_SORT_MAP = { code:'itm_code', name:'itm_name', net:'net_required', store:'best_store', sprice:'price', sdisc:'best_disc', req:'required', surplus:'surplus_other', rate:'base_rate', save:'rate', stock:'stock', company:'company' };
+    let ordSortCol = null, ordSortDir = 'asc';
     let ordColOrder = ordLoadJSON('ord_col_order_v1', ORD_COLS_DEF.slice());
     let ordColWidth = ordLoadJSON('ord_col_width_v1', {});
     let ordFit = localStorage.getItem('ord_fit_v1') === '1';
@@ -557,6 +562,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           th.style.width = (w && !ordFit) ? (w + 'px') : '';
         });
         ordWireHead();
+        ordUpdateSortArrows();
       }
       const body = document.getElementById('ord-body');
       if (body) Array.from(body.children).forEach(tr => { if (tr.children.length > 3) ordReorderCells(tr); });
@@ -571,6 +577,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         h.addEventListener('dblclick', e => { e.preventDefault(); e.stopPropagation(); ordAutofitCol(th.getAttribute('data-col')); });
         h.addEventListener('click', e => e.stopPropagation());
         th.appendChild(h);
+        th.addEventListener('click', e => ordHeaderClick(e, th));   // ضغط الرأس = فرز
         th.addEventListener('dragstart', e => { if (ordRszState) { e.preventDefault(); return; } window._ordDragKey = th.getAttribute('data-col'); e.dataTransfer.effectAllowed = 'move'; th.classList.add('ord-dragging'); });
         th.addEventListener('dragend', () => { th.classList.remove('ord-dragging'); document.querySelectorAll('#ord-head th.ord-drag-over').forEach(x => x.classList.remove('ord-drag-over')); });
         th.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; th.classList.add('ord-drag-over'); });
@@ -584,6 +591,32 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           a.splice(a.indexOf(to), 0, from);
           ordColOrder = a; ordSaveOrder(); ordApplyLayout();
         });
+      });
+    }
+    function ordHeaderClick(e, th) {
+      if (ordRszState) return;                       // وسط عملية تحجيم
+      const key = th.getAttribute('data-col');
+      if (!ORD_SORT_MAP[key]) return;                // عمود غير قابل للفرز (sel/arch)
+      if (ordSortCol === key) ordSortDir = (ordSortDir === 'asc') ? 'desc' : 'asc';
+      else { ordSortCol = key; ordSortDir = 'asc'; }
+      ordPage = 1;
+      loadOrders();                                  // إعادة تحميل server-side بالترتيب الجديد
+    }
+    function ordUpdateSortArrows() {
+      const head = document.getElementById('ord-head'); if (!head) return;
+      Array.from(head.children).forEach(th => {
+        const key = th.getAttribute('data-col');
+        let ind = th.querySelector('.ord-sort-ind');
+        if (!ORD_SORT_MAP[key]) { if (ind) ind.remove(); th.style.cursor = ''; return; }
+        th.style.cursor = 'pointer';
+        if (!ind) {
+          ind = document.createElement('span'); ind.className = 'ord-sort-ind';
+          ind.style.cssText = 'font-size:.7rem;margin-inline-start:4px;user-select:none';
+          const rsz = th.querySelector('.ord-rsz');
+          if (rsz) th.insertBefore(ind, rsz); else th.appendChild(ind);
+        }
+        if (ordSortCol === key) { ind.textContent = ordSortDir === 'asc' ? '▲' : '▼'; ind.style.opacity = '1'; }
+        else { ind.textContent = '↕'; ind.style.opacity = '.3'; }
       });
     }
     function ordRszStart(e, th) {
