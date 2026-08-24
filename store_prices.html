@@ -265,7 +265,12 @@
       let url = SB_URL_API + '/rest/v1/v_store_item_prices?select=id,item_name,code,store,price,discount_perc,available,updated_at,sim,best_code,best_name'
         + '&limit=' + SP_SIZE + '&offset=' + offset
         + '&order=' + (spSortCol ? (spSortCol + '.' + spSortDir + '.nullslast') : (noCodeOnly ? 'sim.desc.nullslast,item_name.asc' : 'item_name.asc'));  // فرز المستخدم أو الافتراضي
-      if (q) { const e = encodeURIComponent(q); url += '&or=(item_name.ilike.*' + e + '*,code.eq.' + e + ')'; }   // الكود: تطابق تام (يجيب الكود فقط)
+      if (q) {
+        // بحث ذكي: نقسّم النص لكلمات، وكل كلمة لازم توجد في الاسم بأي ترتيب (يتحمّل نسيان كلمة قبل كلمة)
+        const toks = q.split(/\s+/).filter(Boolean);
+        const nameAnd = toks.map(t => 'item_name.ilike.*' + encodeURIComponent(t) + '*').join(',');
+        url += '&or=(and(' + nameAnd + '),code.eq.' + encodeURIComponent(q) + ')';   // (كل الكلمات) أو (الكود تطابق تام)
+      }
       if (store) url += '&store=eq.' + encodeURIComponent(store);
       if (wc && !nc) url += '&code=not.is.null';        // بكود فقط
       else if (noCodeOnly) url += '&code=is.null';       // بدون كود فقط
