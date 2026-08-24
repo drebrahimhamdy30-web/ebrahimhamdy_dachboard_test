@@ -306,10 +306,26 @@ function durationTxt(from,to){
 const BRANCH_ALIAS={'الصيدلية':'المعمورة','ابراهيم حمدي 2':'سان ستيفانو','ابراهيم حمدي 3':'سيدى بشر'};
 const USER_BRANCH_RAW=(localStorage.getItem('userBranch')||'').trim();
 const USER_BRANCH=BRANCH_ALIAS[USER_BRANCH_RAW]||USER_BRANCH_RAW;
-function getBranch(){ return USER_BRANCH||'المعمورة'; }
+const IS_ADMIN=(localStorage.getItem('userRole')||'').trim()==='admin';
+const ALL_BRANCHES=['المعمورة','سان ستيفانو','سيدى بشر'];
+// الأدمن يختار أي فرع لتسجيل التحويلات/الإغلاق دون الدخول بحساب الفرع
+let selectedBranch = IS_ADMIN ? (ALL_BRANCHES.includes(USER_BRANCH)?USER_BRANCH:ALL_BRANCHES[0]) : (USER_BRANCH||'المعمورة');
+function getBranch(){ return selectedBranch||'المعمورة'; }
 
 async function init(){
-  document.getElementById('branch-display').textContent=getBranch();
+  const disp=document.getElementById('branch-display');
+  if(IS_ADMIN){
+    disp.innerHTML='<i class="fas fa-store" style="margin-inline-end:6px"></i>الفرع: '
+      +'<select id="branch-select" style="font-family:inherit;font-weight:800;color:var(--accent);border:1.5px solid var(--accent);border-radius:6px;padding:4px 8px;background:#fff;cursor:pointer">'
+      +ALL_BRANCHES.map(b=>`<option value="${esc(b)}"${b===selectedBranch?' selected':''}>${esc(b)}</option>`).join('')
+      +'</select>';
+    document.getElementById('branch-select').addEventListener('change',async e=>{
+      selectedBranch=e.target.value;
+      await loadMethods();   // إعادة تحميل كل بيانات الفرع المختار (طرق الدفع + التحويلات + بداية الشيفت)
+    });
+  } else {
+    disp.textContent=getBranch();
+  }
   await loadMethods();
   setInterval(renderShiftBar,1000);
 }
