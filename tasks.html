@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>تنظيم المهام - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <script src="api.js?v=tt20260824"></script>
+  <style>
+    :root{ --primary:#0d9488; --primary-dark:#0f766e; --primary-light:#ccfbf1; }
+    .container { max-width:100% !important; width:100%; }
+
+    .tk-tabs { display:flex; gap:6px; border-bottom:2px solid var(--border); margin-bottom:16px; flex-wrap:wrap; }
+    .tk-tab { padding:9px 18px; border:none; background:none; font-family:var(--font); font-size:0.9rem; font-weight:700; color:var(--text-secondary); cursor:pointer; border-bottom:3px solid transparent; margin-bottom:-2px; }
+    .tk-tab.active { color:var(--primary-dark); border-bottom-color:var(--primary); }
+
+    .tk-daybar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; background:var(--surface-3); border:1px solid var(--border); border-radius:var(--radius-md); padding:12px 16px; margin-bottom:16px; }
+    .tk-daybar input[type=date], .tk-daybar select { font-family:var(--font); font-size:0.9rem; padding:7px 10px; border:1.5px solid var(--border); border-radius:var(--radius-sm); background:var(--surface); color:var(--text-primary); }
+    .tk-branch { font-weight:800; color:#fff; background:var(--primary); border-radius:8px; padding:7px 14px; }
+    .tk-dayname { font-weight:800; color:var(--primary-dark); }
+    .tk-daycount { margin-inline-start:auto; font-weight:800; color:var(--text-secondary); }
+
+    .tk-sections { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
+    .tk-sec { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); overflow:hidden; box-shadow:var(--shadow-sm); }
+    .tk-sec-head { display:flex; align-items:center; gap:8px; padding:11px 14px; color:#fff; font-weight:800; font-size:0.9rem; }
+    .tk-sec-daily   .tk-sec-head{ background:#0d9488; }
+    .tk-sec-weekly  .tk-sec-head{ background:#2563eb; }
+    .tk-sec-monthly .tk-sec-head{ background:#7c3aed; }
+    .tk-sec-yearly  .tk-sec-head{ background:#b45309; }
+    .tk-sec-head .tk-cnt { margin-inline-start:auto; background:rgba(255,255,255,.25); border-radius:20px; padding:1px 9px; font-size:0.75rem; }
+    .tk-list { padding:6px; display:flex; flex-direction:column; gap:5px; max-height:360px; overflow:auto; }
+    .tk-item { display:flex; align-items:center; gap:9px; padding:8px 10px; border-radius:var(--radius-sm); background:var(--surface-2); border:1px solid transparent; }
+    .tk-item.due { border-color:#86efac; background:#f0fdf4; }
+    .tk-item.done .tk-title { text-decoration:line-through; color:var(--text-muted); }
+    .tk-chk { width:19px; height:19px; accent-color:#16a34a; cursor:pointer; flex-shrink:0; }
+    .tk-body { flex:1; min-width:0; }
+    .tk-title { font-weight:700; font-size:0.85rem; color:var(--text-primary); }
+    .tk-meta { font-size:0.7rem; color:var(--text-muted); margin-top:2px; display:flex; gap:8px; flex-wrap:wrap; }
+    .tk-who { font-weight:700; color:var(--primary-dark); }
+    .tk-empty { padding:16px; text-align:center; color:var(--text-muted); font-size:0.8rem; }
+    .tk-due-badge { font-size:0.62rem; font-weight:800; color:#15803d; background:#dcfce7; border-radius:20px; padding:1px 7px; }
+
+    .badge-freq { font-size:0.68rem; font-weight:800; border-radius:20px; padding:2px 9px; white-space:nowrap; }
+    .bf-daily{ background:#ccfbf1; color:#0f766e; } .bf-weekly{ background:#dbeafe; color:#1d4ed8; }
+    .bf-monthly{ background:#ede9fe; color:#6d28d9; } .bf-yearly{ background:#ffedd5; color:#b45309; }
+
+    .tk-asg { display:flex; flex-direction:column; gap:2px; font-size:0.72rem; }
+    .tk-asg span b { color:var(--primary-dark); }
+    .tk-act { border:none; background:none; cursor:pointer; font-size:0.9rem; padding:4px 7px; border-radius:6px; }
+    .tk-act.edit{ color:var(--primary); } .tk-act.del{ color:var(--danger); }
+    .tk-inactive td { opacity:.5; }
+
+    .tk-ov { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:9999; align-items:center; justify-content:center; padding:16px; }
+    .tk-ov.open{ display:flex; }
+    .tk-modal { background:var(--surface); border-radius:var(--radius-lg); width:100%; max-width:480px; max-height:92vh; overflow:auto; box-shadow:var(--shadow-lg); }
+    .tk-modal h3 { padding:16px 18px; margin:0; font-size:1rem; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:8px; }
+    .tk-form { padding:16px 18px; display:flex; flex-direction:column; gap:12px; }
+    .tk-field label { display:block; font-size:0.78rem; font-weight:700; color:var(--text-secondary); margin-bottom:5px; }
+    .tk-field input, .tk-field select, .tk-field textarea { width:100%; padding:9px 11px; border:1.5px solid var(--border); border-radius:var(--radius-sm); font-family:var(--font); font-size:0.86rem; background:var(--surface); color:var(--text-primary); outline:none; }
+    .tk-field input:focus, .tk-field select:focus, .tk-field textarea:focus { border-color:var(--primary); }
+    .tk-asg-box { border:1px solid var(--border); border-radius:var(--radius-md); padding:12px; background:var(--surface-2); }
+    .tk-asg-box .lbl { font-size:0.78rem; font-weight:800; color:var(--text-secondary); margin-bottom:8px; display:flex; align-items:center; gap:6px; }
+    .tk-asg-row { display:grid; grid-template-columns:110px 1fr; gap:8px; align-items:center; margin-bottom:7px; }
+    .tk-asg-row span { font-size:0.8rem; font-weight:700; }
+    .tk-modal-act { display:flex; justify-content:flex-end; gap:8px; padding:0 18px 18px; }
+    .tk-row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .hidden{ display:none !important; }
+  </style>
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="page-header">
+      <div class="page-title"><i class="fas fa-list-check"></i> تنظيم المهام</div>
+      <button class="btn btn-primary" onclick="openTask()"><i class="fas fa-plus"></i> مهمة جديدة</button>
+    </div>
+
+    <div class="tk-tabs">
+      <button class="tk-tab active" id="tab-btn-schedule" onclick="tkTab('schedule')">الجدول</button>
+      <button class="tk-tab" id="tab-btn-all" onclick="tkTab('all')">كل المهام</button>
+    </div>
+
+    <div id="tab-schedule">
+      <div class="tk-daybar">
+        <span id="tk-branch-wrap"></span>
+        <i class="fas fa-calendar-day" style="color:var(--primary)"></i>
+        <input type="date" id="tk-date" onchange="renderSchedule()">
+        <span class="tk-dayname" id="tk-dayname">—</span>
+        <span class="tk-daycount" id="tk-daycount"></span>
+      </div>
+      <div class="tk-sections" id="tk-sections"></div>
+    </div>
+
+    <div id="tab-all" class="hidden">
+      <div class="table-wrap">
+        <table id="tk-table">
+          <thead><tr>
+            <th style="text-align:right">المهمة</th>
+            <th>التكرار</th>
+            <th>اليوم / الموعد</th>
+            <th>المسؤول بكل فرع</th>
+            <th>الحالة</th>
+            <th>إجراءات</th>
+          </tr></thead>
+          <tbody id="tk-all-body"><tr><td colspan="6" class="tk-empty">جارٍ التحميل…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="tk-ov" id="tk-ov">
+    <div class="tk-modal">
+      <h3 id="tk-modal-title"><i class="fas fa-plus"></i> مهمة جديدة</h3>
+      <div class="tk-form">
+        <div class="tk-field"><label>اسم المهمة *</label><input id="f-title" placeholder="مثال: جرد الثلاجة"></div>
+        <div class="tk-field"><label>التكرار *</label>
+          <select id="f-freq" onchange="tkFreqUI()">
+            <option value="daily">يومي</option><option value="weekly">أسبوعي</option>
+            <option value="monthly">شهري</option><option value="yearly">سنوي</option>
+          </select>
+        </div>
+        <div class="tk-field hidden" id="wrap-weekday"><label>يوم الأسبوع</label>
+          <select id="f-weekday">
+            <option value="0">الأحد</option><option value="1">الإثنين</option><option value="2">الثلاثاء</option>
+            <option value="3">الأربعاء</option><option value="4">الخميس</option><option value="5">الجمعة</option><option value="6">السبت</option>
+          </select>
+        </div>
+        <div class="tk-row2">
+          <div class="tk-field hidden" id="wrap-month"><label>الشهر</label><select id="f-month"></select></div>
+          <div class="tk-field hidden" id="wrap-monthday"><label>يوم من الشهر</label><select id="f-monthday"></select></div>
+        </div>
+        <div class="tk-asg-box">
+          <div class="lbl"><i class="fas fa-user-check"></i> المسؤول عن التنفيذ في كل فرع</div>
+          <div id="tk-asg-fields"></div>
+        </div>
+        <div class="tk-field"><label>ملاحظات (اختياري)</label><textarea id="f-notes" rows="2"></textarea></div>
+        <div class="tk-field"><label><input type="checkbox" id="f-active" checked style="width:auto"> نشطة</label></div>
+      </div>
+      <div class="tk-modal-act">
+        <button class="btn btn-sm" style="background:var(--surface-3)" onclick="closeTask()">إلغاء</button>
+        <button class="btn btn-primary btn-sm" onclick="saveTask()"><i class="fas fa-check"></i> حفظ</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const REST = SB_URL_API + '/rest/v1/';
+    const H = { apikey: SB_ANON_API, Authorization: 'Bearer ' + SB_ANON_API };
+    const HW = { ...H, 'Content-Type': 'application/json' };
+    const WD = ['الأحد','الإثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+    const MO = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+    const FREQ = { daily:'يومي', weekly:'أسبوعي', monthly:'شهري', yearly:'سنوي' };
+    const FREQ_ORDER = ['daily','weekly','monthly','yearly'];
+    const BRANCHES = ['المعمورة','سان ستيفانو','سيدى بشر'];
+    const BRANCH_ALIAS = { 'الصيدلية':'المعمورة','ابراهيم حمدي 2':'سان ستيفانو','ابراهيم حمدي 3':'سيدى بشر' };
+    const IS_ADMIN = (localStorage.getItem('userRole')||'').trim() === 'admin';
+    const USER_BRANCH_RAW = (localStorage.getItem('userBranch')||'').trim();
+    const USER_BRANCH = BRANCH_ALIAS[USER_BRANCH_RAW] || USER_BRANCH_RAW;
+    let selectedBranch = IS_ADMIN ? (BRANCHES.includes(USER_BRANCH)?USER_BRANCH:BRANCHES[0]) : (USER_BRANCH || BRANCHES[0]);
+    const me = (localStorage.getItem('userName') || USER_BRANCH_RAW || '').trim();
+
+    let TASKS = [], ASSIGN = {}, DONE = new Set(), editId = null;
+
+    function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function todayCairo(){ return new Date().toLocaleDateString('en-CA', { timeZone:'Africa/Cairo' }); }
+    function lastDayOfMonth(y,m){ return new Date(y, m+1, 0).getDate(); }
+    function whoOf(id, br){ return (ASSIGN[id] && ASSIGN[id][br]) ? ASSIGN[id][br] : ''; }
+
+    function isDue(t, d){
+      if (t.freq === 'daily') return true;
+      if (t.freq === 'weekly') return d.getDay() === Number(t.weekday);
+      const ld = lastDayOfMonth(d.getFullYear(), d.getMonth());
+      const wanted = Math.min(Number(t.month_day)||1, ld);
+      if (t.freq === 'monthly') return d.getDate() === wanted;
+      if (t.freq === 'yearly') return (d.getMonth()+1) === Number(t.month) && d.getDate() === wanted;
+      return false;
+    }
+    function dayLabel(t){
+      if (t.freq === 'daily')  return 'كل يوم';
+      if (t.freq === 'weekly') return 'كل ' + (WD[t.weekday] || '—');
+      if (t.freq === 'monthly')return 'يوم ' + (t.month_day||'—') + ' من كل شهر';
+      if (t.freq === 'yearly') return (t.month_day||'—') + ' ' + (MO[(t.month||1)-1] || '—');
+      return '—';
+    }
+    function badge(t){ return '<span class="badge-freq bf-'+t.freq+'">'+FREQ[t.freq]+'</span>'; }
+
+    function tkTab(which){
+      document.getElementById('tab-schedule').classList.toggle('hidden', which!=='schedule');
+      document.getElementById('tab-all').classList.toggle('hidden', which!=='all');
+      document.getElementById('tab-btn-schedule').classList.toggle('active', which==='schedule');
+      document.getElementById('tab-btn-all').classList.toggle('active', which==='all');
+      if (which==='all') renderAll();
+    }
+
+    function renderBranchBar(){
+      const w = document.getElementById('tk-branch-wrap');
+      if (IS_ADMIN){
+        w.innerHTML = '<i class="fas fa-store" style="color:var(--primary)"></i> '
+          + '<select id="tk-branch-sel" onchange="onBranchChange(this.value)" style="font-weight:800">'
+          + BRANCHES.map(b=>'<option value="'+esc(b)+'"'+(b===selectedBranch?' selected':'')+'>'+esc(b)+'</option>').join('')
+          + '</select>';
+      } else {
+        w.innerHTML = '<span class="tk-branch"><i class="fas fa-store"></i> '+esc(selectedBranch)+'</span>';
+      }
+    }
+    function onBranchChange(b){ selectedBranch = b; renderSchedule(); }
+
+    async function loadAll(){
+      try { TASKS = await (await fetch(REST+'tasks?select=*&order=freq.asc,sort_order.asc,title.asc', { headers:H })).json(); } catch(e){ TASKS=[]; }
+      try {
+        const rows = await (await fetch(REST+'task_assignee?select=task_id,branch,assignee', { headers:H })).json();
+        ASSIGN = {}; rows.forEach(r=>{ (ASSIGN[r.task_id] = ASSIGN[r.task_id]||{})[r.branch] = r.assignee; });
+      } catch(e){ ASSIGN={}; }
+      renderSchedule();
+    }
+    async function loadDone(){
+      const dstr = document.getElementById('tk-date').value || todayCairo();
+      try {
+        const rows = await (await fetch(REST+'task_done?select=task_id&branch=eq.'+encodeURIComponent(selectedBranch)+'&done_on=eq.'+dstr, { headers:H })).json();
+        DONE = new Set(rows.map(r=>r.task_id));
+      } catch(e){ DONE = new Set(); }
+    }
+
+    async function renderSchedule(){
+      renderBranchBar();
+      const dstr = document.getElementById('tk-date').value || todayCairo();
+      const d = new Date(dstr + 'T12:00:00');
+      document.getElementById('tk-dayname').textContent = WD[d.getDay()] + '، ' + d.getDate() + ' ' + MO[d.getMonth()] + ' ' + d.getFullYear();
+      await loadDone();
+      const active = TASKS.filter(t=>t.is_active);
+      document.getElementById('tk-daycount').textContent = 'مهام اليوم: ' + active.filter(t=>isDue(t,d)).length;
+
+      document.getElementById('tk-sections').innerHTML = FREQ_ORDER.map(fq=>{
+        const list = active.filter(t=>t.freq===fq);
+        const items = list.map(t=>{
+          const due = isDue(t,d), done = DONE.has(t.id), who = whoOf(t.id, selectedBranch);
+          const chk = due ? '<input type="checkbox" class="tk-chk" '+(done?'checked':'')+' onchange="toggleDone('+t.id+',this.checked)">' : '<span style="width:19px"></span>';
+          return '<div class="tk-item '+(due?'due ':'')+(done?'done':'')+'">'+chk
+            + '<div class="tk-body"><div class="tk-title">'+esc(t.title)+(due?' <span class="tk-due-badge">اليوم</span>':'')+'</div>'
+            + '<div class="tk-meta"><span><i class="fas fa-clock"></i> '+dayLabel(t)+'</span>'
+            + '<span class="tk-who"><i class="fas fa-user"></i> '+(who?esc(who):'— بدون مسؤول')+'</span></div></div></div>';
+        }).join('');
+        return '<div class="tk-sec tk-sec-'+fq+'"><div class="tk-sec-head"><i class="fas fa-'+
+          (fq==='daily'?'sun':fq==='weekly'?'calendar-week':fq==='monthly'?'calendar-days':'calendar')+'"></i> '+FREQ[fq]+
+          '<span class="tk-cnt">'+list.length+'</span></div>'+
+          '<div class="tk-list">'+(items||'<div class="tk-empty">لا مهام</div>')+'</div></div>';
+      }).join('');
+    }
+
+    async function toggleDone(id, on){
+      const dstr = document.getElementById('tk-date').value || todayCairo();
+      try {
+        if (on){
+          DONE.add(id);
+          await fetch(REST+'task_done', { method:'POST', headers:{ ...HW, Prefer:'resolution=merge-duplicates,return=minimal' },
+            body: JSON.stringify({ task_id:id, branch:selectedBranch, done_on:dstr, done_by: me || null }) });
+        } else {
+          DONE.delete(id);
+          await fetch(REST+'task_done?task_id=eq.'+id+'&branch=eq.'+encodeURIComponent(selectedBranch)+'&done_on=eq.'+dstr, { method:'DELETE', headers:{ ...H, Prefer:'return=minimal' } });
+        }
+      } catch(e){}
+      renderSchedule();
+    }
+
+    function renderAll(){
+      const body = document.getElementById('tk-all-body');
+      if (!TASKS.length){ body.innerHTML = '<tr><td colspan="6" class="tk-empty">لا توجد مهام — اضغط «مهمة جديدة»</td></tr>'; return; }
+      body.innerHTML = TASKS.map(t=>{
+        const asg = BRANCHES.map(b=>{ const w=whoOf(t.id,b); return '<span>'+b+': <b>'+(w?esc(w):'—')+'</b></span>'; }).join('');
+        return '<tr class="'+(t.is_active?'':'tk-inactive')+'">'
+        + '<td style="text-align:right;font-weight:700">'+esc(t.title)+(t.notes?' <i class="fas fa-note-sticky" title="'+esc(t.notes)+'" style="color:var(--text-muted);font-size:.72rem"></i>':'')+'</td>'
+        + '<td>'+badge(t)+'</td>'
+        + '<td>'+dayLabel(t)+'</td>'
+        + '<td><div class="tk-asg">'+asg+'</div></td>'
+        + '<td>'+(t.is_active?'<span class="badge badge-green">نشطة</span>':'<span class="badge badge-gray">موقوفة</span>')+'</td>'
+        + '<td><button class="tk-act edit" title="تعديل" onclick="openTask('+t.id+')"><i class="fas fa-pen"></i></button>'
+        +     '<button class="tk-act del" title="حذف" onclick="delTask('+t.id+')"><i class="fas fa-trash"></i></button></td>'
+        + '</tr>';
+      }).join('');
+    }
+
+    function fillDaySelectors(){
+      const fm = document.getElementById('f-month');
+      if (!fm.options.length) fm.innerHTML = MO.map((m,i)=>'<option value="'+(i+1)+'">'+m+'</option>').join('');
+      const fd = document.getElementById('f-monthday');
+      if (!fd.options.length){ let o=''; for(let i=1;i<=31;i++) o+='<option value="'+i+'">'+i+'</option>'; fd.innerHTML=o; }
+    }
+    function tkFreqUI(){
+      const f = document.getElementById('f-freq').value;
+      document.getElementById('wrap-weekday').classList.toggle('hidden', f!=='weekly');
+      document.getElementById('wrap-month').classList.toggle('hidden', f!=='yearly');
+      document.getElementById('wrap-monthday').classList.toggle('hidden', !(f==='monthly'||f==='yearly'));
+    }
+    function renderAsgFields(t){
+      document.getElementById('tk-asg-fields').innerHTML = BRANCHES.map(b=>
+        '<div class="tk-asg-row"><span>'+esc(b)+'</span><input class="f-asg" data-branch="'+esc(b)+'" placeholder="اسم المسؤول" value="'+esc(t?whoOf(t.id,b):'')+'"></div>'
+      ).join('');
+    }
+    function openTask(id){
+      fillDaySelectors();
+      editId = id || null;
+      const t = id ? TASKS.find(x=>x.id===id) : null;
+      document.getElementById('tk-modal-title').innerHTML = t ? '<i class="fas fa-pen"></i> تعديل مهمة' : '<i class="fas fa-plus"></i> مهمة جديدة';
+      document.getElementById('f-title').value = t ? t.title : '';
+      document.getElementById('f-freq').value = t ? t.freq : 'daily';
+      document.getElementById('f-weekday').value = (t && t.weekday!=null) ? t.weekday : 0;
+      document.getElementById('f-month').value = (t && t.month) ? t.month : 1;
+      document.getElementById('f-monthday').value = (t && t.month_day) ? t.month_day : 1;
+      document.getElementById('f-notes').value = t ? (t.notes||'') : '';
+      document.getElementById('f-active').checked = t ? t.is_active : true;
+      renderAsgFields(t);
+      tkFreqUI();
+      document.getElementById('tk-ov').classList.add('open');
+    }
+    function closeTask(){ document.getElementById('tk-ov').classList.remove('open'); }
+
+    async function saveTask(){
+      const title = document.getElementById('f-title').value.trim();
+      if (!title){ alert('اكتب اسم المهمة'); return; }
+      const freq = document.getElementById('f-freq').value;
+      const rec = {
+        title, freq,
+        weekday:   freq==='weekly' ? Number(document.getElementById('f-weekday').value) : null,
+        month_day: (freq==='monthly'||freq==='yearly') ? Number(document.getElementById('f-monthday').value) : null,
+        month:     freq==='yearly' ? Number(document.getElementById('f-month').value) : null,
+        notes:     document.getElementById('f-notes').value.trim() || null,
+        is_active: document.getElementById('f-active').checked
+      };
+      const asg = Array.from(document.querySelectorAll('.f-asg')).map(i=>({ branch:i.getAttribute('data-branch'), assignee:i.value.trim() }));
+      try {
+        let tid = editId;
+        if (editId){
+          await fetch(REST+'tasks?id=eq.'+editId, { method:'PATCH', headers:{ ...HW, Prefer:'return=minimal' }, body: JSON.stringify(rec) });
+        } else {
+          rec.created_by = me || null;
+          const r = await fetch(REST+'tasks', { method:'POST', headers:{ ...HW, Prefer:'return=representation' }, body: JSON.stringify(rec) });
+          const row = (await r.json())[0]; tid = row && row.id;
+        }
+        if (tid){
+          const rows = asg.map(a=>({ task_id: tid, branch: a.branch, assignee: a.assignee || null }));
+          await fetch(REST+'task_assignee?on_conflict=task_id,branch', { method:'POST', headers:{ ...HW, Prefer:'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows) });
+        }
+        closeTask();
+        await loadAll();
+        if (!document.getElementById('tab-all').classList.contains('hidden')) renderAll();
+      } catch(e){ alert('تعذّر الحفظ'); }
+    }
+
+    async function delTask(id){
+      const t = TASKS.find(x=>x.id===id);
+      if (!confirm('حذف المهمة «'+(t?t.title:'')+'» نهائيًا من كل الفروع؟')) return;
+      try {
+        await fetch(REST+'tasks?id=eq.'+id, { method:'DELETE', headers:{ ...H, Prefer:'return=minimal' } });
+        await loadAll(); renderAll();
+      } catch(e){ alert('تعذّر الحذف'); }
+    }
+
+    document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeTask(); });
+    document.getElementById('tk-date').value = todayCairo();
+    renderBranchBar();
+    loadAll();
+  </script>
+</body>
+</html>
