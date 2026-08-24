@@ -72,6 +72,9 @@
     .st-active { display:flex;align-items:center;gap:5px;font-size:0.75rem;font-weight:700;white-space:nowrap;cursor:pointer; }
     .st-active input { width:16px;height:16px;accent-color:var(--primary);cursor:pointer; }
     .st-del { border:none;background:none;color:var(--danger);cursor:pointer;font-size:0.95rem;padding:4px 6px; }
+    /* فرز الأعمدة بالضغط */
+    th.sp-sortable { cursor:pointer; user-select:none; white-space:nowrap; }
+    th.sp-sortable .sp-sort-ind { font-size:0.7rem; margin-inline-start:4px; opacity:.3; }
   </style>
 </head>
 <body>
@@ -122,13 +125,13 @@
         <table class="sp-table">
           <thead>
             <tr>
-              <th style="text-align:right;">الصنف</th>
-              <th>الكود</th>
-              <th>المخزن</th>
-              <th>السعر</th>
-              <th>الخصم %</th>
-              <th>الإتاحة</th>
-              <th>آخر تحديث</th>
+              <th class="sp-sortable" data-sort="item_name" onclick="spSort('item_name')" style="text-align:right;">الصنف<span class="sp-sort-ind"></span></th>
+              <th class="sp-sortable" data-sort="code" onclick="spSort('code')">الكود<span class="sp-sort-ind"></span></th>
+              <th class="sp-sortable" data-sort="store" onclick="spSort('store')">المخزن<span class="sp-sort-ind"></span></th>
+              <th class="sp-sortable" data-sort="price" onclick="spSort('price')">السعر<span class="sp-sort-ind"></span></th>
+              <th class="sp-sortable" data-sort="discount_perc" onclick="spSort('discount_perc')">الخصم %<span class="sp-sort-ind"></span></th>
+              <th class="sp-sortable" data-sort="available" onclick="spSort('available')">الإتاحة<span class="sp-sort-ind"></span></th>
+              <th class="sp-sortable" data-sort="updated_at" onclick="spSort('updated_at')">آخر تحديث<span class="sp-sort-ind"></span></th>
             </tr>
           </thead>
           <tbody id="sp-body">
@@ -230,6 +233,7 @@
   <script>
     const SP_SIZE = 50;
     let spPage = 1, spTotal = 0, spBusy = false, spTimer = null;
+    let spSortCol = null, spSortDir = 'asc';   // فرز server-side بالضغط على الرأس
     let STORES = [];   // قائمة المخازن المُدارة
     let canEdit = false;   // صلاحية تعديل الأكواد (أدمن/مدير)
     let rowById = {};      // صفوف الصفحة الحالية بالـ id
@@ -258,7 +262,7 @@
       const noCodeOnly = (!wc && nc);
       let url = SB_URL_API + '/rest/v1/v_store_item_prices?select=id,item_name,code,store,price,discount_perc,available,updated_at,sim,best_code,best_name'
         + '&limit=' + SP_SIZE + '&offset=' + offset
-        + '&order=' + (noCodeOnly ? 'sim.desc.nullslast,item_name.asc' : 'item_name.asc');  // بدون كود: الأعلى تشابهًا فوق
+        + '&order=' + (spSortCol ? (spSortCol + '.' + spSortDir + '.nullslast') : (noCodeOnly ? 'sim.desc.nullslast,item_name.asc' : 'item_name.asc'));  // فرز المستخدم أو الافتراضي
       if (q) { const e = encodeURIComponent(q); url += '&or=(item_name.ilike.*' + e + '*,code.eq.' + e + ')'; }   // الكود: تطابق تام (يجيب الكود فقط)
       if (store) url += '&store=eq.' + encodeURIComponent(store);
       if (wc && !nc) url += '&code=not.is.null';        // بكود فقط
@@ -339,6 +343,18 @@
     }
 
     function spGo(p) { spPage = p; loadPage(); const w = document.querySelector('.sp-wrap'); if (w) w.scrollTop = 0; }
+    function spSort(col) {                               // فرز server-side بالضغط على الرأس
+      if (spSortCol === col) spSortDir = (spSortDir === 'asc') ? 'desc' : 'asc';
+      else { spSortCol = col; spSortDir = 'asc'; }
+      spPage = 1; spUpdateSortArrows(); loadPage();
+    }
+    function spUpdateSortArrows() {
+      document.querySelectorAll('th.sp-sortable').forEach(th => {
+        const c = th.getAttribute('data-sort'); const ind = th.querySelector('.sp-sort-ind'); if (!ind) return;
+        if (spSortCol === c) { ind.textContent = spSortDir === 'asc' ? '▲' : '▼'; ind.style.opacity = '1'; }
+        else { ind.textContent = '↕'; ind.style.opacity = '.3'; }
+      });
+    }
 
     // ===== مقارنة أفضل خصم لكود =====
     async function openCompare(code, name) {
@@ -733,6 +749,7 @@
     document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeCompare(); closeUpload(); closeStores(); closeSugg(); } });
 
     loadStores();
+    spUpdateSortArrows();   // إظهار مؤشّر ↕ على الأعمدة القابلة للفرز
     loadPage();
   </script>
 </body>
