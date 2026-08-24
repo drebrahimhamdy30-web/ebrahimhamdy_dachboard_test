@@ -1147,3 +1147,97 @@ async function sbSupBalSaveSettings({ threshold, updated_by }) {
     return r.ok;
   } catch (e) { console.error('sbSupBalSaveSettings error:', e); return false; }
 }
+
+
+/* ===== أدوات الجداول العامة: تحجيم الأعمدة + محاذاة تلقائية على النص =====
+   تُطبَّق تلقائيًا على أي <table> فيه رأس (thead/th)، وتتخطّى الجداول ذات
+   التحكّم الخاص (طلبيات الأدوية) أو المعلّمة data-no-tabletools.
+   - اسحب حدّ العمود  = تغيير العرض (قابل للتوسيع)
+   - دبل كليك الحدّ   = محاذاة العمود تلقائيًا على أعرض نص فيه
+   العرض محفوظ في المتصفح لكل شاشة/عمود. */
+(function () {
+  if (window.__tableToolsInit) return; window.__tableToolsInit = true;
+  var PAGE = (location.pathname.split('/').pop() || 'page').replace(/[^a-z0-9]/gi, '_');
+
+  var st = document.createElement('style');
+  st.textContent =
+    '.tt-rsz{position:absolute;top:0;left:0;width:9px;height:100%;cursor:col-resize;z-index:20;user-select:none}' +
+    '.tt-rsz:hover{background:rgba(13,148,136,.35)}';
+  (document.head || document.documentElement).appendChild(st);
+
+  function keyFor(tid, ci) { return 'tt_w::' + PAGE + '::' + tid + '::' + ci; }
+  function tableId(t, i) { return t.id || ('tbl' + i); }
+  function headRow(t) {
+    if (t.tHead && t.tHead.rows.length) return t.tHead.rows[t.tHead.rows.length - 1];
+    var r = t.rows[0];
+    if (r && r.cells.length && r.cells[0].tagName === 'TH') return r;
+    return null;
+  }
+  function skip(t) {
+    if (t.hasAttribute('data-no-tabletools') || t.closest('[data-no-tabletools]')) return true;
+    if (t.querySelector('.ord-rsz')) return true;   // شاشة لها تحكّم أعمدة خاص
+    return false;
+  }
+
+  var RS = null;
+  function onMove(e) {
+    if (!RS) return;
+    var dw = RS.startX - e.clientX;                 // RTL: المقبض على اليسار، السحب لليسار يوسّع
+    var w = Math.max(30, RS.startW + dw);
+    RS.th.style.width = w + 'px'; RS.w = w;
+  }
+  function onUp() {
+    if (RS && RS.w) { try { localStorage.setItem(keyFor(RS.tid, RS.ci), Math.round(RS.w)); } catch (e) {} }
+    RS = null;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    document.body.style.userSelect = '';
+  }
+  function startResize(e, tid, th, ci) {
+    e.preventDefault(); e.stopPropagation();
+    RS = { tid: tid, ci: ci, th: th, startX: e.clientX, startW: th.offsetWidth, w: 0 };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.userSelect = 'none';
+  }
+  function autofit(t, tid, th, ci) {
+    var max = 0, rows = t.rows;
+    for (var i = 0; i < rows.length; i++) { var c = rows[i].cells[ci]; if (c && c.scrollWidth > max) max = c.scrollWidth; }
+    if (max > 0) { var w = max + 14; th.style.width = w + 'px'; try { localStorage.setItem(keyFor(tid, ci), Math.round(w)); } catch (e) {} }
+  }
+
+  function enhance(t, i) {
+    if (t.__tt || skip(t)) return;
+    var hr = headRow(t); if (!hr) return;
+    t.__tt = true;
+    var tid = tableId(t, i);
+    Array.prototype.forEach.call(hr.cells, function (th, ci) {
+      if (th.__tt) return; th.__tt = true;
+      th.classList.add('tt-th');
+      // لا نكسر sticky: نضبط relative فقط لو العمود static (بدون سياق تموضع)
+      if (getComputedStyle(th).position === 'static') th.style.position = 'relative';
+      var sv = localStorage.getItem(keyFor(tid, ci));
+      if (sv) th.style.width = sv + 'px';
+      var g = document.createElement('div');
+      g.className = 'tt-rsz';
+      g.title = 'اسحب لتغيير العرض — دبل كليك للمحاذاة على النص';
+      g.addEventListener('mousedown', function (e) { startResize(e, tid, th, ci); });
+      g.addEventListener('dblclick', function (e) { e.preventDefault(); e.stopPropagation(); autofit(t, tid, th, ci); });
+      g.addEventListener('click', function (e) { e.stopPropagation(); });
+      th.appendChild(g);
+    });
+  }
+  function scan() {
+    var ts = document.querySelectorAll('table');
+    for (var i = 0; i < ts.length; i++) enhance(ts[i], i);
+  }
+  function boot() {
+    scan();
+    try {
+      var mo = new MutationObserver(function () { clearTimeout(window.__ttT); window.__ttT = setTimeout(scan, 300); });
+      mo.observe(document.body, { childList: true, subtree: true });
+    } catch (e) {}
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})();
