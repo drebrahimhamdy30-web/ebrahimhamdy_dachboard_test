@@ -238,7 +238,10 @@ body{padding:0;overflow:hidden;height:100vh;background:var(--bg);display:flex;fl
 <script src="../supabase-config.js?v=brand2"></script>
 <script src="../permissions.js"></script>
 <script>
-const STATUS_LABELS={pending:'جاهز',assigned:'على رحلة',picked:'استلم',delivered:'وصّل',completed:'مكتمل',postponed:'متعذّر',cancelled:'ملغي'};
+const STATUS_LABELS={pending:'جاهز',assigned:'على رحلة',picked:'استلم',delivered:'وصّل',completed:'مكتمل',postponed:'مؤجل',cancelled:'ملغي'};
+// التفرقة داخل «مؤجل»: سبب طيار (غير «أُزيل من الرحلة») = تعذّر توصيل فعلي
+function isFailAttempt(o){ return o && o.status==='postponed' && o.postpone_reason && o.postpone_reason!=='أُزيل من الرحلة'; }
+function stLabel(o){ return isFailAttempt(o) ? 'تعذّر توصيل' : (STATUS_LABELS[o.status]||o.status); }
 const PAY_LABELS={cash:'كاش',visa:'فيزا',transfer:'تحويل',deferred:'آجل'};
 const LATE_MINS=30;
 
@@ -360,7 +363,7 @@ function fmDate(dt){
 function updateCounts(){
   const setOpt=(id,label,n)=>{const e=document.getElementById(id);if(e)e.textContent=`${label} (${n})`;};
   setOpt('opt-all','كل الحالات',allOrders.length);
-  const labels={completed:'مكتمل',delivered:'وصّل',picked:'استلم',assigned:'على رحلة',pending:'جاهز',postponed:'متعذّر',cancelled:'ملغي'};
+  const labels={completed:'مكتمل',delivered:'وصّل',picked:'استلم',assigned:'على رحلة',pending:'جاهز',postponed:'مؤجل',cancelled:'ملغي'};
   Object.entries(labels).forEach(([s,l])=>setOpt('opt-'+s,l,allOrders.filter(o=>o.status===s).length));
   setOpt('opt-late','متأخر',allOrders.filter(o=>isLate(o)).length);
 
@@ -501,7 +504,7 @@ function renderTable(){
       <td data-label="المنطقة">${o.cust_region?`<span class="region-cell">${o.cust_region}</span>`:'—'}</td>
       <td data-label="المبلغ" class="amount-cell">${Math.round(Number(o.total_bill_net||0)).toLocaleString()}</td>
       <td data-label="الدفع"><span class="pay-badge ${pmC}">${pmL}</span></td>
-      <td data-label="الحالة"><span class="status-badge sb-${o.status}">${STATUS_LABELS[o.status]||o.status}</span></td>
+      <td data-label="الحالة"><span class="status-badge sb-${o.status}">${stLabel(o)}</span></td>
       <td data-label="الطيار" style="font-size:.7rem;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.deliveryman||'—'}</td>
       <td data-label="مدة الطيار" class="duration-cell" style="white-space:nowrap" title="من الاستلام للتسليم">${delivDuration}</td>
       <td data-label="إجمالي الطلب" class="duration-cell" style="white-space:nowrap" title="من الإنشاء للتسليم">${duration}</td>
@@ -587,7 +590,7 @@ async function openDetail(id){
     ${o.collected_amount?`<div class="d-row"><span class="d-lbl">المحصل فعلاً</span><strong class="d-val" style="color:#16a34a">${Number(o.collected_amount).toLocaleString()} ج.م</strong></div>`:''}
     <div class="d-row"><span class="d-lbl">طريقة الدفع</span><span class="d-val"><span class="pay-badge pay-${pm||'cash'}">${pmL}</span></span></div>
     <div class="d-row"><span class="d-lbl">عدد الأصناف</span><span class="d-val">${o.count_of_items||'—'}</span></div>
-    <div class="d-row"><span class="d-lbl">الحالة</span><span class="d-val"><span class="status-badge sb-${o.status}">${STATUS_LABELS[o.status]||o.status}</span></span></div>
+    <div class="d-row"><span class="d-lbl">الحالة</span><span class="d-val"><span class="status-badge sb-${o.status}">${stLabel(o)}</span></span></div>
 
     <!-- التوقيتات -->
     <div class="section-hd">التوقيتات</div>
@@ -630,7 +633,7 @@ async function openDetail(id){
         const _d=l.details||{};
         let label=LOG_LABELS[l.event]||l.event;
         // «التأجيل» فعليًا = تعذّر توصيل من الطيار (بسبب) أو تحرير تلقائي عند إنهاء الرحلة
-        if(l.event==='order_postponed') label = _d.released_on_trip_complete ? 'رجع للانتظار (إنهاء الرحلة)' : (_d.reason ? ('تعذّر التوصيل: '+_d.reason) : 'تعذّر التوصيل');
+        if(l.event==='order_postponed') label = _d.released_on_trip_complete ? 'رجع للانتظار (إنهاء الرحلة)' : (_d.reason==='أُزيل من الرحلة' ? 'أُزيل من الرحلة' : (_d.reason ? ('تعذّر التوصيل: '+_d.reason) : 'تأجيل'));
         // سجل مبسّط للموظف: الحدث + بواسطة مين + الوقت — بدون التفاصيل التقنية
         return `<div class="tl-item">
           <div class="tl-dot-col">
@@ -670,7 +673,7 @@ async function openTripOrders(tripId){
           <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.customer_name||'—'}</td>
           <td>${o.cust_region||'—'}</td>
           <td class="amount-cell">${Number(o.total_bill_net||0).toLocaleString()}</td>
-          <td><span class="status-badge sb-${o.status}">${STATUS_LABELS[o.status]||o.status}</span></td>
+          <td><span class="status-badge sb-${o.status}">${stLabel(o)}</span></td>
         </tr>`).join('')}</tbody>
       </table>`;
   }catch(e){body.innerHTML='<div style="padding:1rem;color:var(--red)">تعذّر تحميل الرحلة</div>';console.error(e);}
