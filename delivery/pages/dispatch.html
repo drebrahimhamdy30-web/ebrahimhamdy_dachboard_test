@@ -1034,6 +1034,7 @@ document.getElementById('headerStats').innerHTML=`
 // ===== DRIVERS =====
 let attendanceToday=[];
 let attNames={}; // خريطة أسماء الطيارين لطلبات الحضور (قد يكونوا خارج allDrivers بسبب فلتر الفرع/النشاط)
+let attReqBranch={}; // فرع كل طيار له طلب حضور — لفلترة الطلبات على فرع الشاشة (منع تسريب الفروع)
 
 // اسم الطيار من allDrivers أولاً، ثم من خريطة طلبات الحضور، وإلا "طيار"
 function driverNameOf(id){
@@ -1046,12 +1047,12 @@ async function loadAttendanceData(){
     // جيب آخر 500 سجل حضور (كل الأيام) عشان نعرف آخر حالة لكل طيار — مش بس النهاردة
     const {data}=await db.from('driver_attendance').select('*').order('created_at',{ascending:false}).limit(500);
     attendanceToday=data||[];
-    // هات أسماء طيارين الطلبات المعلّقة اللي مش موجودين في allDrivers (فرع تاني/غير نشط)
-    const reqIds=[...new Set(attendanceToday.filter(r=>r.status.endsWith('_request')).map(r=>r.driver_id))]
-      .filter(id=>id && !allDrivers.some(d=>d.id===id));
+    // هات اسم وفرع كل طيار له طلب معلّق (عشان نفلتر الطلبات على فرع الشاشة ونمنع تسريب الفروع)
+    const reqIds=[...new Set(attendanceToday.filter(r=>r.status.endsWith('_request')).map(r=>r.driver_id))].filter(Boolean);
+    attReqBranch={};
     if(reqIds.length){
-      const {data:drs}=await db.from('drivers').select('id,full_name').in('id',reqIds);
-      (drs||[]).forEach(d=>{attNames[d.id]=d.full_name;});
+      const {data:drs}=await db.from('drivers').select('id,full_name,branch_id').in('id',reqIds);
+      (drs||[]).forEach(d=>{ attNames[d.id]=d.full_name; attReqBranch[d.id]=d.branch_id; });
     }
     renderAttNotif();
   }catch(e){}
@@ -1145,7 +1146,9 @@ function getDriverWorkMins(driverId){
 function fmWorkTime(mins){if(mins<60)return `${mins}د`;return `${Math.floor(mins/60)}س${mins%60}د`;}
 
 function renderAttNotif(){
-  const pending=attendanceToday.filter(r=>r.status.endsWith('_request'));
+  // فلترة طلبات الحضور على فرع الشاشة (الأدمن على «كل الفروع» يشوف الكل)
+  const _attBranch = currentUser?.role==='admin' ? activeBranchId : (currentUser?.branch_id||null);
+  const pending=attendanceToday.filter(r=>r.status.endsWith('_request') && (!_attBranch || attReqBranch[r.driver_id]===_attBranch));
   // رحلات بانتظار موافقة الإنهاء
   const pendingCompleteTrips=activeTrips.filter(t=>t.status==='pending_complete');
   // Update header button
