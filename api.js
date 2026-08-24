@@ -1162,7 +1162,8 @@ async function sbSupBalSaveSettings({ threshold, updated_by }) {
   var st = document.createElement('style');
   st.textContent =
     '.tt-rsz{position:absolute;top:0;left:0;width:9px;height:100%;cursor:col-resize;z-index:20;user-select:none}' +
-    '.tt-rsz:hover{background:rgba(13,148,136,.35)}';
+    '.tt-rsz:hover{background:rgba(13,148,136,.35)}' +
+    '.tt-sort{font-size:.7rem;margin-inline-start:4px;opacity:.3;user-select:none}';
   (document.head || document.documentElement).appendChild(st);
 
   function keyFor(tid, ci) { return 'tt_w::' + PAGE + '::' + tid + '::' + ci; }
@@ -1206,6 +1207,47 @@ async function sbSupBalSaveSettings({ threshold, updated_by }) {
     if (max > 0) { var w = max + 14; th.style.width = w + 'px'; try { localStorage.setItem(keyFor(tid, ci), Math.round(w)); } catch (e) {} }
   }
 
+  // ===== فرز عام بالضغط على الرأس (client-side لصفوف الجدول المعروضة) =====
+  var sortState = (typeof WeakMap !== 'undefined') ? new WeakMap() : null;
+  function ttNum(s) {
+    var t = String(s).replace(/[٠-٩]/g, function (d) { return '٠١٢٣٤٥٦٧٨٩'.indexOf(d); }).replace(/[^\d.\-]/g, '');
+    return t === '' || t === '-' || t === '.' ? null : Number(t);
+  }
+  function sortTable(t, hr, ci, ind) {
+    var tb = t.tBodies[0]; if (!tb) return;
+    var rows = Array.prototype.filter.call(tb.rows, function (r) { return r.cells.length === hr.cells.length; });
+    if (rows.length < 2) return;
+    var st = sortState ? (sortState.get(t) || { col: -1, dir: 0 }) : { col: -1, dir: 0 };
+    var dir = (st.col === ci && st.dir === 1) ? -1 : 1;
+    if (sortState) sortState.set(t, { col: ci, dir: dir });
+    var vals = rows.map(function (r) { return r.cells[ci] ? r.cells[ci].textContent.trim() : ''; });
+    var numeric = vals.every(function (v) { return v === '' || ttNum(v) !== null; }) && vals.some(function (v) { return ttNum(v) !== null; });
+    rows.sort(function (a, b) {
+      var va = a.cells[ci] ? a.cells[ci].textContent.trim() : '', vb = b.cells[ci] ? b.cells[ci].textContent.trim() : '', r;
+      if (numeric) { var na = ttNum(va), nb = ttNum(vb); na = (na == null ? -Infinity : na); nb = (nb == null ? -Infinity : nb); r = na - nb; }
+      else r = va.localeCompare(vb, 'ar');
+      return r * dir;
+    });
+    rows.forEach(function (r) { tb.appendChild(r); });
+    Array.prototype.forEach.call(hr.cells, function (th) { var s = th.querySelector('.tt-sort'); if (s) { s.textContent = '↕'; s.style.opacity = '.3'; } });
+    if (ind) { ind.textContent = dir > 0 ? '▲' : '▼'; ind.style.opacity = '1'; }
+  }
+  function wireSort(t, hr) {
+    if (t.hasAttribute('data-no-sort')) return;
+    // الصفحة بتتحكّم في الفرز بنفسها (onclick على الرؤوس) → منتدخّلش
+    if (Array.prototype.some.call(hr.cells, function (th) { return th.hasAttribute('onclick'); })) return;
+    Array.prototype.forEach.call(hr.cells, function (th, ci) {
+      if (th.querySelector('.tt-sort')) return;
+      th.style.cursor = 'pointer';
+      var ind = document.createElement('span'); ind.className = 'tt-sort'; ind.textContent = '↕';
+      th.appendChild(ind);
+      th.addEventListener('click', function (e) {
+        if (e.target && e.target.classList && e.target.classList.contains('tt-rsz')) return;
+        sortTable(t, hr, ci, ind);
+      });
+    });
+  }
+
   function enhance(t, i) {
     if (t.__tt || skip(t)) return;
     var hr = headRow(t); if (!hr) return;
@@ -1226,6 +1268,7 @@ async function sbSupBalSaveSettings({ threshold, updated_by }) {
       g.addEventListener('click', function (e) { e.stopPropagation(); });
       th.appendChild(g);
     });
+    wireSort(t, hr);   // فرز عام (يتخطّى الجداول اللي بتفرز بنفسها server-side)
   }
   function scan() {
     var ts = document.querySelectorAll('table');
