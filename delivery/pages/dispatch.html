@@ -746,8 +746,8 @@ const SC={pending:'#16a34a',assigned:'#ea580c',picked:'#0891b2',delivered:'#ca8a
 const SL={pending:'جاهز',assigned:'على رحلة',picked:'استلم',delivered:'تم التوصيل',completed:'مكتمل',postponed:'مؤجل',cancelled:'ملغي',failed:'متعذر'};
 // التفرقة داخل «مؤجل»: سبب طيار (غير «أُزيل من الرحلة») = تعذّر توصيل فعلي؛ غير كده = تأجيل/إزالة من رحلة
 function isFailAttempt(o){ return o && o.status==='postponed' && o.postpone_reason && o.postpone_reason!=='أُزيل من الرحلة'; }
-function stLabel(o){ return isFailAttempt(o) ? 'تعذّر توصيل' : (SL[o.status]||o.status); }
-function stColor(o){ return isFailAttempt(o) ? '#dc2626' : (SC[o.status]||'#64748b'); }
+function ordStatusLabel(o){ return isFailAttempt(o) ? 'تعذّر توصيل' : (SL[o.status]||o.status); }
+function ordStatusColor(o){ return isFailAttempt(o) ? '#dc2626' : (SC[o.status]||'#64748b'); }
 const PL={cash:'كاش',visa:'فيزا',transfer:'تحويل',deferred:'آجل',paid:'خالص'};
 // لون حافة الكارت حسب الحالة (خلفية بيضا دايمًا) — أحمر للحالات اللي محتاجة انتباه
 function ocBorder(o, late, owesBal){
@@ -1578,7 +1578,7 @@ async function openDriverPopup(driverId){
         const valHtml = skip
           ? `<span style="color:#dc2626;font-weight:800">${o.status==='failed'?'⚠️ تعذّر':'ملغي'} · لا يُحسب</span>`
           : `<span style="color:#475569">${bill.toLocaleString()}ج</span>`;
-        const stMini = (!skip && stLabel(o)) ? `<span style="color:${stColor(o)};font-weight:800">${stLabel(o)}</span> · ` : '';
+        const stMini = (!skip && ordStatusLabel(o)) ? `<span style="color:${ordStatusColor(o)};font-weight:800">${ordStatusLabel(o)}</span> · ` : '';
         return `<div style="display:flex;justify-content:space-between;gap:.4rem;font-size:.66rem;padding:.16rem 0;border-top:1px dashed #e5e7eb;${skip?'opacity:.75':''}">
           ${nameHtml}
           <span style="white-space:nowrap;color:#475569">${stMini}${valHtml} · ${pmHtml}</span>
@@ -1945,7 +1945,7 @@ function renderOrders(){
       <div class="oc-bottom">
         <span class="oc-amount">${Number(o.total_bill_net||0).toLocaleString()} ج</span>
         ${['delivered','completed'].includes(o.status)?`<span class="oc-pay ${pmC}" title="طريقة التحصيل">${pmL}</span>`:''}
-        <span class="oc-st ${stC}">${stLabel(o)}</span>
+        <span class="oc-st ${stC}">${ordStatusLabel(o)}</span>
         ${billItemsCard(o)}
       </div>
       ${owesBal?`<div style="font-size:.66rem;color:#fff;background:#dc2626;padding:.16rem .45rem;border-radius:5px;margin-bottom:.28rem;font-weight:800">💰 رصيد مستحق: ${_bal.toLocaleString()} ج</div>`
@@ -2375,7 +2375,7 @@ function openTransfer(tripId, e, onlyOrderId){
           <span style="color:var(--text-muted);margin-right:.3rem">${o.customer_name||'—'}</span>
         </span>
         <span style="font-size:.68rem;font-weight:800;flex-shrink:0;color:${o.status==='picked'?'#2563eb':'#b45309'}">
-          ${stLabel(o)}
+          ${ordStatusLabel(o)}
         </span>
       </label>`).join('')}
     ${single?'':`<div id="tr-count" style="margin-top:.5rem;font-weight:800;color:var(--primary)">${orders.length} طلب محدد</div>`}`;
@@ -2870,7 +2870,7 @@ function openTripOrderActions(orderId, tripId){
     <div style="display:flex;gap:.5rem;align-items:center;margin-top:.3rem">
       <strong>${Number(o.total_bill_net||0).toLocaleString()} ج.م</strong>
       ${pm?`<span class="oc-pay p-${pm}">${PL[pm]}</span>`:''}
-      <span class="oc-st s-${o.status}">${stLabel(o)}</span>
+      <span class="oc-st s-${o.status}">${ordStatusLabel(o)}</span>
     </div>`;
 
   // Show/hide buttons based on status
@@ -3044,7 +3044,7 @@ function openDetail(id){
     <div class="d-row"><span class="d-lbl">المبلغ</span><strong class="d-val">${Number(o.total_bill_net||0).toLocaleString()} ج.م</strong></div>
     ${o.collected_amount?`<div class="d-row"><span class="d-lbl">المحصل</span><strong class="d-val" style="color:var(--green)">${Number(o.collected_amount).toLocaleString()} ج</strong></div>`:''}
     <div class="d-row"><span class="d-lbl">طريقة الدفع</span><span class="d-val">${pmL}</span></div>
-    <div class="d-row"><span class="d-lbl">الحالة</span><span class="d-val">${stLabel(o)}</span></div>${o.perf_rating?`<div class="d-row"><span class="d-lbl">أداء الطيار</span><span class="d-val">فعلي ${o.actual_minutes} / متوقع ${o.expected_minutes} د · <strong style="color:${o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.perf_rating}</strong></span></div>`:''}${o.sla_rating?`<div class="d-row"><span class="d-lbl">أداء الفرع</span><span class="d-val">فعلي ${o.sla_actual_minutes} / المسموح ${o.sla_minutes} د · <strong style="color:${o.sla_rating==='ممتاز'?'#16a34a':o.sla_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.sla_rating}</strong></span></div>`:''}
+    <div class="d-row"><span class="d-lbl">الحالة</span><span class="d-val">${ordStatusLabel(o)}</span></div>${o.perf_rating?`<div class="d-row"><span class="d-lbl">أداء الطيار</span><span class="d-val">فعلي ${o.actual_minutes} / متوقع ${o.expected_minutes} د · <strong style="color:${o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.perf_rating}</strong></span></div>`:''}${o.sla_rating?`<div class="d-row"><span class="d-lbl">أداء الفرع</span><span class="d-val">فعلي ${o.sla_actual_minutes} / المسموح ${o.sla_minutes} د · <strong style="color:${o.sla_rating==='ممتاز'?'#16a34a':o.sla_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.sla_rating}</strong></span></div>`:''}
     <div class="d-row"><span class="d-lbl">الطيار</span><span class="d-val">${o.deliveryman||'—'}</span></div>
     <div class="d-row"><span class="d-lbl">الموظف</span><span class="d-val">${o.employee_name||'—'}</span></div>
     <div class="d-row"><span class="d-lbl">الأصناف</span><span class="d-val">${o.count_of_items||0}</span></div>
@@ -3176,7 +3176,7 @@ if(o.delivered_at){
     <div class="d-row"><span class="d-lbl">المنطقة</span><span class="d-val">${o.cust_region||'—'}</span></div>
     <div class="d-row"><span class="d-lbl">المبلغ</span><strong class="d-val">${Number(o.total_bill_net||0).toLocaleString()} ج.م</strong></div>
     <div class="d-row"><span class="d-lbl">طريقة الدفع</span><span class="d-val">${pmL}</span></div>
-    <div class="d-row"><span class="d-lbl">الحالة</span><span class="d-val">${stLabel(o)}</span></div>${o.perf_rating?`<div class="d-row"><span class="d-lbl">أداء الطيار</span><span class="d-val">فعلي ${o.actual_minutes} / متوقع ${o.expected_minutes} د · <strong style="color:${o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.perf_rating}</strong></span></div>`:''}${o.sla_rating?`<div class="d-row"><span class="d-lbl">أداء الفرع</span><span class="d-val">فعلي ${o.sla_actual_minutes} / المسموح ${o.sla_minutes} د · <strong style="color:${o.sla_rating==='ممتاز'?'#16a34a':o.sla_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.sla_rating}</strong></span></div>`:''}
+    <div class="d-row"><span class="d-lbl">الحالة</span><span class="d-val">${ordStatusLabel(o)}</span></div>${o.perf_rating?`<div class="d-row"><span class="d-lbl">أداء الطيار</span><span class="d-val">فعلي ${o.actual_minutes} / متوقع ${o.expected_minutes} د · <strong style="color:${o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.perf_rating}</strong></span></div>`:''}${o.sla_rating?`<div class="d-row"><span class="d-lbl">أداء الفرع</span><span class="d-val">فعلي ${o.sla_actual_minutes} / المسموح ${o.sla_minutes} د · <strong style="color:${o.sla_rating==='ممتاز'?'#16a34a':o.sla_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.sla_rating}</strong></span></div>`:''}
     <div class="d-row"><span class="d-lbl">الطيار</span><span class="d-val">${o.deliveryman||'—'}</span></div>
     <div class="d-row"><span class="d-lbl">الموظف</span><span class="d-val">${o.employee_name||'—'}</span></div>
     <div class="d-row"><span class="d-lbl">الأصناف</span><span class="d-val">${o.count_of_items||0}</span></div>
