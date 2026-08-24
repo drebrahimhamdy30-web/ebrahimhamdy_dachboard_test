@@ -81,6 +81,8 @@
     .ord-req { font-weight:800;color:#b45309;font-size:0.9rem; }
     /* صنف نشط شهر واحد فقط = معدل غير موثوق → السطر كله أحمر للتنبيه */
     #tab-orders tr.ord-onemonth td { color:#dc2626 !important; }
+    /* صنف كان في الأرشيف ورجع = السطر كله أخضر (يغلب الأحمر عند التعارض) */
+    #tab-orders tr.ord-exarchived td { color:#15803d !important; }
     .ord-surp { font-size:0.72rem;color:#15803d;font-weight:700;line-height:1.5; }
     .ord-actbtn { border:none;border-radius:6px;padding:4px 8px;font-family:inherit;font-size:0.7rem;font-weight:700;cursor:pointer;white-space:nowrap; }
     .ord-tr { background:#16a34a;color:#fff; }
@@ -502,7 +504,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const w = document.getElementById('ord-wh').value;
       const co = document.getElementById('ord-company').value;
       const surpOnly = document.getElementById('ord-surp-only').checked;
-      let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,net_required,surplus_mamora,surplus_san,surplus_bishr,surplus_other,best_store,best_price,best_disc,active_months'
+      let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,net_required,surplus_mamora,surplus_san,surplus_bishr,surplus_other,best_store,best_price,best_disc,active_months,ex_archived'
         + '&branch=eq.' + encodeURIComponent(ordBranch) + '&order=required.desc,itm_name.asc&limit=' + ORD_SIZE + '&offset=' + offset;
       if (q) { const e = encodeURIComponent(q); url += '&or=(itm_name.ilike.*' + e + '*,itm_code.eq.' + e + ')'; }
       if (w === '__none__') url += '&best_store=is.null';       // بدون مخزن متاح
@@ -672,7 +674,10 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           const chk = '<input type="checkbox" ' + (ordSelCodes.has(r.itm_code) ? 'checked ' : '') + (canOrder ? '' : 'disabled title="المشتريات فقط" ') + 'onchange="ordSelToggle(\'' + cc + '\',this.checked)">';
           const arch = canOrder ? '<button class="ord-actbtn" style="background:#fee2e2;color:#b91c1c" title="أرشفة الصنف" onclick="archiveItem(' + r.id + ')"><i class="fas fa-box-archive"></i></button>' : '';
           const oneMonth = Number(r.active_months) === 1;
-          return '<tr id="ord-row-' + r.id + '"' + (oneMonth ? ' class="ord-onemonth" title="نشط شهر واحد فقط — المعدل غير موثوق، راجع قبل الطلب"' : '') + '>'
+          const exArch = r.ex_archived === true;
+          const rowCls = [exArch ? 'ord-exarchived' : '', oneMonth ? 'ord-onemonth' : ''].filter(Boolean).join(' ');
+          const rowTtl = exArch ? 'كان في الأرشيف — رجع بعد إلغاء الأرشفة' : (oneMonth ? 'نشط شهر واحد فقط — المعدل غير موثوق، راجع قبل الطلب' : '');
+          return '<tr id="ord-row-' + r.id + '"' + (rowCls ? ' class="' + rowCls + '"' : '') + (rowTtl ? ' title="' + rowTtl + '"' : '') + '>'
             + '<td data-col="sel">' + chk + '</td>'
             + '<td data-col="code" class="cr-code">' + esc(r.itm_code) + '</td>'
             + '<td data-col="name" style="text-align:right;font-weight:600;">' + esc(r.itm_name) + '</td>'
