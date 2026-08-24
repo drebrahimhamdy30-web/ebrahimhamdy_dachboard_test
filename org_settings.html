@@ -6,7 +6,7 @@
   <title>إعدادات المؤسسة - Phalix</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-  <script src="api.js?v=tt20260824c"></script>
+  <script src="api.js?v=tt20260824d"></script>
   <style>
     :root{ --primary:#0d9488; --primary-dark:#0f766e; --primary-light:#ccfbf1; }
     .container { max-width:820px !important; margin:0 auto; }
@@ -37,6 +37,10 @@
     .os-pv-badge { padding:3px 12px; border-radius:20px; font-weight:800; font-size:0.75rem; }
     .os-pv-th { padding:6px 14px; color:#fff; font-weight:700; font-size:0.78rem; border-radius:6px; }
 
+    .os-branch-row { display:grid; grid-template-columns:1fr 1fr auto; gap:8px; margin-bottom:8px; align-items:center; }
+    .os-branch-row input { padding:8px 10px; border:1.5px solid var(--border); border-radius:8px; font-family:var(--font); font-size:0.85rem; background:var(--surface); color:var(--text-primary); outline:none; }
+    .os-branch-row input:focus { border-color:var(--primary); }
+    .os-branch-row .del { border:none; background:none; color:var(--danger); cursor:pointer; font-size:0.95rem; padding:6px 8px; }
     .os-actions { display:flex; gap:10px; justify-content:flex-end; }
     .os-denied { text-align:center; padding:60px 20px; color:var(--text-muted); }
     .os-msg { font-size:0.82rem; font-weight:700; }
@@ -95,6 +99,14 @@
         </div>
       </div>
 
+      <!-- الفروع -->
+      <div class="os-card">
+        <h3><i class="fas fa-code-branch"></i> الفروع</h3>
+        <div id="os-branches"></div>
+        <button class="btn btn-sm" style="background:var(--surface-3);margin-top:8px" onclick="addBranch()"><i class="fas fa-plus"></i> إضافة فرع</button>
+        <div style="font-size:.74rem;color:var(--text-muted);margin-top:8px">«الأسماء البديلة» = أسماء الفرع كما تأتي من مصادر أخرى (مثل اسم المخزن)، مفصولة بفاصلة. ⚠️ تغيير أسماء الفروع في نظام قائم يحتاج ترحيل بياناته.</div>
+      </div>
+
       <div class="os-actions">
         <span id="save-msg" class="os-msg" style="align-self:center;margin-inline-end:auto"></span>
         <button class="btn btn-primary" onclick="saveSettings()"><i class="fas fa-check"></i> حفظ التغييرات</button>
@@ -109,6 +121,20 @@
     const isAdmin = (localStorage.getItem('userRole') || '').trim() === 'admin';
     const me = (localStorage.getItem('userName') || '').trim();
     let pendingLogoUrl = null;
+    let branchesState = [];
+
+    // ===== الفروع =====
+    function escAttr(s){ return String(s==null?'':s).replace(/"/g,'&quot;'); }
+    function renderBranches(){
+      document.getElementById('os-branches').innerHTML = branchesState.map(function(b,i){
+        return '<div class="os-branch-row">'
+          + '<input type="text" placeholder="اسم الفرع" value="'+escAttr(b.name)+'" oninput="branchesState['+i+'].name=this.value">'
+          + '<input type="text" placeholder="أسماء بديلة (بفاصلة)" value="'+escAttr((b.aliases||[]).join(', '))+'" oninput="branchesState['+i+'].aliases=this.value.split(\',\').map(function(s){return s.trim();}).filter(Boolean)">'
+          + '<button class="del" title="حذف" onclick="branchesState.splice('+i+',1);renderBranches()"><i class="fas fa-trash"></i></button>'
+          + '</div>';
+      }).join('') || '<div style="color:var(--text-muted);font-size:.8rem">لا فروع — اضغط «إضافة فرع»</div>';
+    }
+    function addBranch(){ branchesState.push({ name:'', aliases:[] }); renderBranches(); }
 
     // ===== أدوات ألوان =====
     function hx(h){ h=(h||'').replace('#',''); if(h.length===3) h=h.split('').map(c=>c+c).join(''); return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]; }
@@ -179,6 +205,8 @@
         setColor('dark',    d.brand_primary_dark || '#0f766e');
         setColor('light',   d.brand_primary_light || '#ccfbf1');
         document.getElementById('c-primary-t').value = d.brand_primary || '#0d9488';
+        branchesState = Array.isArray(d.branches) ? JSON.parse(JSON.stringify(d.branches)) : [];
+        renderBranches();
         preview();
       } catch(e){}
     }
@@ -191,6 +219,7 @@
         brand_primary: norm(document.getElementById('c-primary-t').value),
         brand_primary_dark: norm(document.getElementById('c-dark-t').value),
         brand_primary_light: norm(document.getElementById('c-light-t').value),
+        branches: branchesState.filter(function(b){ return (b.name||'').trim(); }).map(function(b){ return { name:b.name.trim(), aliases:(b.aliases||[]).filter(Boolean) }; }),
         updated_at: new Date().toISOString()
       };
       if (pendingLogoUrl) rec.logo_url = pendingLogoUrl;
