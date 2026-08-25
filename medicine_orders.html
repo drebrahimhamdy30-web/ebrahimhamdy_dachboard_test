@@ -273,6 +273,11 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
             <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:4px">لا يُحتسب فائض إلا إذا كان رصيد الفرع ≥ هذا الرقم (يمنع اعتبار آخر وحدة فائضًا). (الافتراضي 2)</div>
             <input type="number" step="any" id="ps-mss" class="form-input" style="max-width:160px">
           </div>
+          <div class="cr-field">
+            <label style="font-weight:700">مهلة إخفاء الصنف بعد طلب تحويله (ساعات)</label>
+            <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:4px">لما تطلب تحويل صنف، بيتخفي من الطلبيات. لو التحويل ماتحسمش (غير متوفر/تم) خلال المهلة دي، الصنف يرجع يظهر تلقائيًا. (الافتراضي 24)</div>
+            <input type="number" step="1" min="1" id="ps-thh" class="form-input" style="max-width:160px">
+          </div>
           <div><button class="btn btn-primary" onclick="saveSettings()"><i class="fas fa-save"></i> حفظ الإعدادات</button> <span id="ps-msg" style="margin-right:8px"></span></div>
         </div>
         <div style="max-width:560px;margin-top:22px;border-top:1px solid var(--surface-3);padding-top:16px">
@@ -399,11 +404,12 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     }
     async function loadSettings() {
       try {
-        const r = await fetch(REST + 'purchase_settings?id=eq.1&select=min_immediate,reorder_ratio,min_stock_surplus', { headers: H });
+        const r = await fetch(REST + 'purchase_settings?id=eq.1&select=min_immediate,reorder_ratio,min_stock_surplus,transfer_hide_hours', { headers: H });
         const j = await r.json(); const s = (j && j[0]) || {};
         document.getElementById('ps-min').value = s.min_immediate ?? 3;
         document.getElementById('ps-ratio').value = s.reorder_ratio ?? 0.5;
         document.getElementById('ps-mss').value = s.min_stock_surplus ?? 2;
+        document.getElementById('ps-thh').value = s.transfer_hide_hours ?? 24;
       } catch (e) {}
       loadWhPriority();
       loadBranchStores();
@@ -474,6 +480,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         min_immediate: Number(document.getElementById('ps-min').value),
         reorder_ratio: Number(document.getElementById('ps-ratio').value),
         min_stock_surplus: Number(document.getElementById('ps-mss').value),
+        transfer_hide_hours: Math.max(1, Number(document.getElementById('ps-thh').value) || 24),
         updated_at: new Date().toISOString()
       };
       const msg = document.getElementById('ps-msg');
@@ -491,6 +498,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     let branchReps = {};
     let ordSelCodes = new Set();  // أكواد «تحت الطلب» للفرع الحالي (محفوظة في قاعدة البيانات)
     let ordSelStock = {};         // رصيد الصنف وقت تعليمه «تحت الطلب» (لكشف الوصول الجزئي)
+    let ordTransferPending = new Set();  // أكواد أصنافها اتطلبت تحويل (تتخفي من الطلبيات حتى «غير متوفر» أو انتهاء المهلة)
+    let ordHideHours = 24;               // مهلة إخفاء الصنف بعد طلب التحويل (من إعدادات المشتريات)
     let ordSelBranch = null;      // آخر فرع اتحمّلت تحديداته
     const ordWhChoice = {};     // المخزن المختار لكل صف (id → {store,price,disc,net,av})
     const BR_LIST = [['المعمورة','surplus_mamora'],['سان ستيفانو','surplus_san'],['سيدى بشر','surplus_bishr']];
@@ -516,6 +525,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       else if (w) url += '&best_store=eq.' + encodeURIComponent(w);
       if (co) url += '&company=eq.' + encodeURIComponent(co);
       if (surpOnly) url += '&surplus_other=gt.0';
+      // إخفاء الأصناف اللي اتطلبت تحويل (لسه في المهلة)
+      if (ordTransferPending.size) url += '&itm_code=not.in.(' + [...ordTransferPending].map(c => '"' + String(c).replace(/"/g, '') + '"').join(',') + ')';
       url += ordExtraFilters();
       return url;
     }
@@ -685,6 +696,16 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         ordSelCodes = new Set(all.map(x => x.itm_code));
         ordSelStock = {}; all.forEach(x => { ordSelStock[x.itm_code] = x.stock_at_order; });
       } catch (e) { ordSelCodes = new Set(); ordSelStock = {}; }
+      // مهلة الإخفاء + الأصناف المعلّقة بتحويل (غير المنتهية) للفرع الحالي
+      try {
+        const ps = await (await fetch(REST + 'purchase_settings?id=eq.1&select=transfer_hide_hours', { headers: H })).json();
+        ordHideHours = (ps && ps[0] && ps[0].transfer_hide_hours) || 24;
+      } catch (e) { ordHideHours = 24; }
+      try {
+        const cutoff = new Date(Date.now() - ordHideHours * 3600000).toISOString();
+        const tp = await (await fetch(REST + 'order_transfer_pending?select=itm_code&branch=eq.' + encodeURIComponent(ordBranch) + '&requested_at=gte.' + cutoff, { headers: H })).json();
+        ordTransferPending = new Set((tp || []).map(x => x.itm_code));
+      } catch (e) { ordTransferPending = new Set(); }
       ordSelBranch = ordBranch;
     }
     async function loadOrders() {
@@ -778,8 +799,9 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       try {
         await fetch(REST + 'order_selections?itm_code=neq.__none__', { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });
         await fetch(REST + 'order_store_override?itm_code=neq.__none__', { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });   // مسح ارتباطات المخازن
+        await fetch(REST + 'order_transfer_pending?itm_code=neq.__none__', { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });   // مسح إخفاء التحويلات المعلّقة
         await fetch(REST + 'rpc/refresh_purchase_orders', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' });   // إعادة التوزيع الطبيعي
-        ordSelCodes = new Set(); ordSelStock = {}; ordSelBranch = null; ordPage = 1; await loadOrders();
+        ordSelCodes = new Set(); ordSelStock = {}; ordTransferPending = new Set(); ordSelBranch = null; ordPage = 1; await loadOrders();
         toast('تم بدء يوم جديد — اتمسح تحت الطلب وارتباطات المخازن ✓');
       } catch (e) { alert('تعذّر المسح: ' + e.message); }
       finally { if (btn) btn.disabled = false; }
@@ -889,8 +911,14 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         const out = await sbTaskInsert({ type:'تحويل', user: branchReps[ordBranch] || ordBranch, target_branch: srcBranch,
           item_code: r.itm_code, item: r.itm_name, qty: qty, note: 'من شاشة الطلبيات — تحويل إلى ' + ordBranch });
         if (!out || !out.ok) throw new Error('فشل الإرسال');
-        msg.innerHTML = '<span class="msg-ok">تم إرسال طلب التحويل ✓ (يظهر في شاشة التحويلات)</span>';
-        setTimeout(closeTransfer, 1200);
+        // اخفي الصنف من الطلبيات حتى يتم التحويل / يطلع «غير متوفر» / تنتهي مهلة الإخفاء
+        try {
+          await fetch(REST + 'order_transfer_pending?on_conflict=branch,itm_code', { method:'POST', headers:{ ...H, 'Content-Type':'application/json', 'Prefer':'resolution=merge-duplicates,return=minimal' },
+            body: JSON.stringify({ branch: ordBranch, itm_code: r.itm_code, qty: qty, requested_at: new Date().toISOString() }) });
+          ordTransferPending.add(r.itm_code);
+        } catch (e) {}
+        msg.innerHTML = '<span class="msg-ok">تم إرسال طلب التحويل ✓ — الصنف اتخفى من الطلبيات</span>';
+        setTimeout(() => { closeTransfer(); loadOrders(); }, 1000);
       } catch (e) { msg.innerHTML = '<span class="msg-err">' + e.message + '</span>'; }
       finally { btn.disabled = false; }
     }
