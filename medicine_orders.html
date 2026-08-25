@@ -13,6 +13,7 @@
     .mo-tabs { display:flex;gap:6px;border-bottom:2px solid var(--surface-3);margin-bottom:14px;flex-wrap:wrap; }
     .mo-tab { border:none;background:none;padding:9px 16px;font-family:inherit;font-size:0.85rem;font-weight:700;color:var(--text-muted);cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px; }
     .mo-tab.active { color:var(--primary);border-bottom-color:var(--primary); }
+    .ni-badge { display:inline-block;background:#dc2626;color:#fff;font-size:0.68rem;font-weight:800;min-width:18px;padding:1px 6px;border-radius:10px;margin-inline-start:4px;vertical-align:middle; }
     .cr-filters { display:grid; grid-template-columns:1fr auto auto; gap:10px; align-items:end; margin-bottom:12px; }
     @media(max-width:760px){ .cr-filters{ grid-template-columns:1fr; } }
     .cr-field label { font-size:0.72rem;font-weight:700;color:var(--text-secondary);margin-bottom:3px;display:block; }
@@ -124,6 +125,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         <button class="mo-tab" id="tabbtn-exceptional" style="display:none" onclick="showTab('exceptional')">الأصناف الاستثنائية</button>
         <button class="mo-tab" id="tabbtn-tiers" style="display:none" onclick="showTab('tiers')">شرائح كمية الطلب</button>
         <button class="mo-tab" id="tabbtn-archive" style="display:none" onclick="showTab('archive')">الأرشيف</button>
+        <button class="mo-tab" id="tabbtn-newitems" style="display:none" onclick="showTab('newitems')">أصناف جديدة <span id="ni-badge" class="ni-badge" style="display:none">0</span></button>
         <button class="mo-tab" id="tabbtn-settings" style="display:none" onclick="showTab('settings')">إعدادات المشتريات</button>
       </div>
 
@@ -255,6 +257,11 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         <input type="text" class="form-input et-search" id="et-search-archive" placeholder="🔍 بحث بالكود أو الملاحظة..." oninput="filterEditTable('archive')" style="max-width:260px;margin-bottom:10px">
         <div class="cr-wrap" id="et-wrap-archive"></div>
       </div>
+      <div id="tab-newitems" style="display:none">
+        <div class="et-note">أصناف <b>ظهرت جديدة على المخزون</b> (كودها ما كانش موجود قبل كده). كوّدها في المخازن، وبعدين اضغط <b>«تم»</b> عشان تختفي من هنا. العدد: <span id="ni-count">—</span>.</div>
+        <input type="text" class="form-input et-search" id="ni-search" placeholder="🔍 بحث بالكود أو الاسم..." oninput="renderNewItems()" style="max-width:280px;margin-bottom:10px">
+        <div class="cr-wrap" id="ni-wrap"></div>
+      </div>
       <div id="tab-settings" style="display:none">
         <div class="et-note">إعدادات منطق الطلب — تؤثر مباشرةً على تبويب «الطلبيات».</div>
         <div style="max-width:560px;display:grid;gap:14px">
@@ -385,7 +392,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     const BR = { mamora:'المعمورة', san:'سان ستيفانو', bishr:'سيدى بشر' };
     const esc = s => String(s==null?'':s).replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
-    const TABS = ['rate','orders','replace','exceptional','tiers','archive','settings'];
+    const TABS = ['rate','orders','replace','exceptional','tiers','archive','newitems','settings'];
     function showTab(t) {
       TABS.forEach(x => {
         const pane = document.getElementById('tab-' + x), btn = document.getElementById('tabbtn-' + x);
@@ -393,6 +400,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         if (btn) btn.classList.toggle('active', x===t);
       });
       if (['replace','exceptional','tiers','archive'].includes(t)) loadEditTable(t);
+      if (t === 'newitems') loadNewItems();
       if (t === 'settings') loadSettings();
       if (t === 'orders' && !ordLoaded) { ordLoaded = true; loadOrders(); }
     }
@@ -1329,13 +1337,69 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       } catch (e) { alert('تعذّر الحذف: ' + e.message); }
     }
 
+    // ============== تاب الأصناف الجديدة (New Items) ================
+    let niData = [];
+    const niQ = v => { const n = Number(v||0); return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/,''); };
+    async function loadNewItems() {
+      const wrap = document.getElementById('ni-wrap'); if (wrap) wrap.innerHTML = '<div class="loading-overlay">⏳ جارٍ التحميل...</div>';
+      try {
+        const r = await fetch(REST + 'rpc/get_new_items', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' });
+        const j = await r.json(); niData = Array.isArray(j) ? j : [];
+      } catch (e) { niData = []; if (wrap) wrap.innerHTML = '<div class="et-note">تعذّر التحميل.</div>'; return; }
+      updateNiBadge(); renderNewItems();
+    }
+    function updateNiBadge() {
+      const n = niData.length;
+      const b = document.getElementById('ni-badge'); if (b) { b.textContent = n; b.style.display = n ? 'inline-block' : 'none'; }
+      const c = document.getElementById('ni-count'); if (c) c.textContent = n;
+    }
+    async function refreshNewItemsBadge() { await loadNewItems(); }
+    function renderNewItems() {
+      const wrap = document.getElementById('ni-wrap'); if (!wrap) return;
+      const q = (document.getElementById('ni-search').value || '').trim().toLowerCase();
+      let rows = niData;
+      if (q) rows = rows.filter(r => (r.itm_code||'').toLowerCase().includes(q) || (r.n||'').toLowerCase().includes(q));
+      if (!rows.length) { wrap.innerHTML = '<div class="et-note" style="text-align:center">' + (niData.length ? 'لا نتائج للبحث.' : '🎉 مفيش أصناف جديدة محتاجة تكويد حاليًا.') + '</div>'; return; }
+      const th = ['الكود','الاسم','الشركة','المعمورة','سان ستيفانو','سيدى بشر','سعر مخزن؟','إجراء'];
+      let h = '<table class="cr-table"><thead><tr>' + th.map(t => '<th>' + t + '</th>').join('') + '</tr></thead><tbody>';
+      rows.forEach(r => {
+        const code = esc(r.itm_code||'');
+        const store = r.has_store
+          ? '<span style="color:#0d9488;font-weight:700">✓ له سعر</span>'
+          : '<span style="color:#dc2626;font-weight:700">لا يوجد</span>';
+        h += '<tr>'
+          + '<td style="font-weight:700;white-space:nowrap">' + code + '</td>'
+          + '<td>' + esc(r.n||'') + '</td>'
+          + '<td style="color:var(--text-muted)">' + esc(r.co||'') + '</td>'
+          + '<td style="text-align:center">' + niQ(r.m_q) + '</td>'
+          + '<td style="text-align:center">' + niQ(r.s_q) + '</td>'
+          + '<td style="text-align:center">' + niQ(r.b_q) + '</td>'
+          + '<td style="text-align:center">' + store + '</td>'
+          + '<td style="text-align:center"><button class="btn btn-sm" style="background:#0d9488;color:#fff;border:none;padding:4px 14px;border-radius:8px;cursor:pointer;font-weight:700" onclick="markCoded(\'' + code.replace(/'/g,"\\'") + '\', this)">تم ✓</button></td>'
+          + '</tr>';
+      });
+      h += '</tbody></table>';
+      wrap.innerHTML = h;
+    }
+    async function markCoded(code, btn) {
+      if (btn) { btn.disabled = true; btn.textContent = '...'; }
+      try {
+        const by = (localStorage.getItem('userName') || localStorage.getItem('userBranch') || 'coded');
+        const r = await fetch(REST + 'rpc/mark_item_coded', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body: JSON.stringify({ p_code: code, p_by: by }) });
+        if (!r.ok) throw new Error('fail');
+        niData = niData.filter(x => x.itm_code !== code);
+        updateNiBadge(); renderNewItems();
+      } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'تم ✓'; } alert('تعذّر الحفظ، حاول تاني.'); }
+    }
+
     (function () {
       const role = (localStorage.getItem('userRole') || '').toLowerCase();
       canOrder = (role === 'pharmacist' || role === 'admin');   // تعديل «تحت الطلب»/الأرشفة/التحديث = المشتريات (والأدمن) فقط
       if (role === 'admin' || role === 'manager' || role === 'pharmacist') {   // إدارة الجداول المرجعية
         canEdit = true;
         document.getElementById('mo-months').style.display = 'block';
-        ['replace','exceptional','tiers','archive','settings'].forEach(t => document.getElementById('tabbtn-' + t).style.display = 'inline-block');
+        ['replace','exceptional','tiers','archive','newitems','settings'].forEach(t => document.getElementById('tabbtn-' + t).style.display = 'inline-block');
+        refreshNewItemsBadge();
       }
       if (canOrder) {
         document.getElementById('ord-refresh').style.display = 'inline-flex';
