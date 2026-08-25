@@ -878,15 +878,29 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       src.dataset.id = id;
       document.getElementById('tr-msg').innerHTML = '';
       document.getElementById('tr-bg').classList.add('open');
-      // رصيد الصنف في كل فرع
-      if (!r._stock) {
-        try { const j = await (await fetch(REST + 'stock_flat?select=m_q,s_q,b_q&itm_code=eq.' + encodeURIComponent(r.itm_code), { headers: H })).json(); r._stock = (j && j[0]) || {}; }
-        catch (e) { r._stock = {}; }
+      // رصيد + معدل الصنف لكل فرع (لايف) — نعيد حساب الفائض لحظيًا فيتطابق مع الرصيد الحقيقي
+      if (!r._live) {
+        try {
+          const [sj, cj, pj] = await Promise.all([
+            fetch(REST + 'stock_flat?select=m_q,s_q,b_q&itm_code=eq.' + encodeURIComponent(r.itm_code), { headers: H }).then(x => x.json()),
+            fetch(REST + 'consumption_flat?select=av_mamora,av_san,av_bishr&code=eq.' + encodeURIComponent(r.itm_code), { headers: H }).then(x => x.json()),
+            fetch(REST + 'purchase_settings?id=eq.1&select=min_stock_surplus', { headers: H }).then(x => x.json())
+          ]);
+          r._live = { stock: (sj && sj[0]) || {}, cons: (cj && cj[0]) || {}, mss: (pj && pj[0] && pj[0].min_stock_surplus) || 2 };
+        } catch (e) { r._live = { stock: {}, cons: {}, mss: 2 }; }
       }
-      const others = BR_LIST.filter(([bn, k]) => bn !== ordBranch && (r[k] || 0) > 0);
-      src.innerHTML = others.map(([bn, k]) => {
-        const st = Number(r._stock[STOCK_KEY[bn]] || 0);
-        return '<option value="' + bn + '" data-sur="' + r[k] + '" data-stock="' + st + '">' + bn + ' — فائض ' + r[k] + '، رصيد ' + st + '</option>';
+      const CONS_KEY = { 'المعمورة': 'av_mamora', 'سان ستيفانو': 'av_san', 'سيدى بشر': 'av_bishr' };
+      const liveSurp = (bn) => {
+        const st = Number(r._live.stock[STOCK_KEY[bn]] || 0);
+        const rate = Number(r._live.cons[CONS_KEY[bn]] || 0);
+        const sur = (st >= r._live.mss && Math.floor(st - rate) > 0) ? Math.floor(st - rate) : 0;
+        return { st, sur };
+      };
+      const others = BR_LIST.filter(([bn]) => bn !== ordBranch && liveSurp(bn).sur > 0);
+      if (!others.length) { src.innerHTML = '<option value="">لا يوجد فائض حالي في الفروع الأخرى</option>'; document.getElementById('tr-hint') && (document.getElementById('tr-hint').innerHTML = ''); return; }
+      src.innerHTML = others.map(([bn]) => {
+        const { st, sur } = liveSurp(bn);
+        return '<option value="' + bn + '" data-sur="' + sur + '" data-stock="' + st + '">' + bn + ' — فائض ' + sur + '، رصيد ' + numv(st) + '</option>';
       }).join('');
       trSrcChanged();
     }
@@ -894,10 +908,10 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const src = document.getElementById('tr-src'); const opt = src.options[src.selectedIndex];
       const r = ordById[src.dataset.id]; if (!r || !opt) return;
       const sur = parseInt(opt.getAttribute('data-sur')) || 0;
-      const st = parseInt(opt.getAttribute('data-stock')) || 0;
+      const st = Number(opt.getAttribute('data-stock')) || 0;
       document.getElementById('tr-qty').value = Math.max(1, Math.min(r.required, sur));
       const hint = document.getElementById('tr-hint');
-      if (hint) hint.innerHTML = 'رصيد الصنف في <b>' + opt.value + '</b> = ' + st + ' · الفائض = ' + sur + '. لو حوّلت أقل من الفائض تسيب الباقي للفرع.';
+      if (hint) hint.innerHTML = 'رصيد الصنف في <b>' + opt.value + '</b> = ' + numv(st) + ' · الفائض = ' + sur + '. لو حوّلت أقل من الفائض تسيب الباقي للفرع.';
     }
     function closeTransfer() { document.getElementById('tr-bg').classList.remove('open'); }
     async function confirmTransfer() {
