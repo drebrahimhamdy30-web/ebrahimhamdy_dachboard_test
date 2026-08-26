@@ -450,6 +450,34 @@ async function addTransfer(){
   finally{ SAVING=false; }
 }
 
+// حذف تحويل الشيفت الحالي — أدمن فقط (RPC محروس سيرفريًا بـ authJwt)؛ القيمة ترجع للصافي
+async function deleteTransfer(id){
+  if(SAVING)return;
+  if(!IS_ADMIN){ toast('غير مصرّح — الأدمن فقط','err'); return; }
+  if(!confirm('تأكيد حذف تحويل الشيفت الحالي؟\nالقيمة هترجع تتحسب في الصافي.'))return;
+  SAVING=true;
+  try{
+    const jwt=localStorage.getItem('authJwt')||SB_KEY;
+    const r=await fetch(SB_URL+'/rest/v1/rpc/delete_current_wallet_transfer',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+jwt},
+      body:JSON.stringify({p_id:id})
+    });
+    const j=await r.json().catch(()=>null);
+    if(r.ok && j && j.ok){
+      await loadTransfers(); render();
+      toast('تم حذف التحويل ✓');
+    } else if(j && j.reason==='not_current'){
+      toast('لا يمكن الحذف — التحويل مُرحّل/مورّد','err');
+    } else if(r.status===403 || r.status===401 || (j && j.message && /مصرّح|permission/i.test(j.message))){
+      toast('غير مصرّح — الأدمن فقط','err');
+    } else {
+      toast('فشل حذف التحويل','err');
+    }
+  }catch(e){ toast('فشل حذف التحويل','err'); }
+  finally{ SAVING=false; }
+}
+
 function hasClosing(m){
   const v=VALUES[m.id]||{};
   return v.closing!==''&&v.closing!=null;
@@ -552,10 +580,14 @@ function refreshNet(mId){
 }
 
 function trRow(t,isOld){
+  const canDel = IS_ADMIN && !isOld;   // الأدمن فقط يحذف تحويل الشيفت الحالي
   return `<div class="tr-row${isOld?' old':''}">
     <div class="tr-top">
       <b>${esc(t.display_name)}</b>
-      <b style="color:${isOld?'var(--muted)':'var(--wal-c)'};font-variant-numeric:tabular-nums;">${fmt(t.amount)} ج</b>
+      <span style="display:flex;align-items:center;gap:8px;">
+        <b style="color:${isOld?'var(--muted)':'var(--wal-c)'};font-variant-numeric:tabular-nums;">${fmt(t.amount)} ج</b>
+        ${canDel?`<button title="حذف التحويل (يرجع للصافي)" onclick="deleteTransfer(${t.id})" style="background:none;border:none;color:#b91c1c;cursor:pointer;font-size:0.9rem;padding:2px 4px;"><i class="fas fa-trash-can"></i></button>`:''}
+      </span>
     </div>
     <div class="tr-sub">
       ${t.note?esc(t.note):(REASON_LABEL[t.reason]||esc(t.reason)||'—')}<br>
@@ -615,7 +647,9 @@ function renderTransfers(wal){
           </div>
         </div>`:''}
         <div style="margin-top:10px;font-size:0.68rem;color:var(--muted);text-align:center;line-height:1.6;">
-          <i class="fas fa-lock"></i> لا يمكن حذف التحويل — التوريد من صفحة المحاسب.
+          ${IS_ADMIN
+            ? '<i class="fas fa-user-shield"></i> الأدمن يقدر يحذف تحويل الشيفت الحالي (يرجع للصافي). التوريد من صفحة المحاسب.'
+            : '<i class="fas fa-lock"></i> لا يمكن حذف التحويل — التوريد من صفحة المحاسب.'}
         </div>
       </div>
     </div>`;
