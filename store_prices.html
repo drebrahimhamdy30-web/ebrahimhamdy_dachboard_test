@@ -240,7 +240,18 @@
     let canEdit = false;   // صلاحية تعديل الأكواد (أدمن/مدير)
     let rowById = {};      // صفوف الصفحة الحالية بالـ id
 
-    const H = { 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + SB_ANON_API };
+    // توكن المستخدم لو موجود وصالح → الصفحة تشتغل كـauthenticated عشان الـRPCs المحروسة بالدور
+    // (store_rename / store_delete / upload_store_sheet). لو ناقص أو منتهي نرجع لمفتاح anon
+    // عشان القراءة والعرض مايقعوش — وساعتها أزرار الإدارة بس هي اللي هترفض برسالة واضحة.
+    const SP_AUTH = (function () {
+      const t = localStorage.getItem('authJwt');
+      try {
+        const p = t && JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        if (p && p.exp * 1000 > Date.now() + 60000) return t;
+      } catch (e) {}
+      return SB_ANON_API;
+    })();
+    const H = { 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + SP_AUTH };
     const num = v => (v === null || v === undefined || v === '') ? '—' : (Math.round(Number(v) * 100) / 100);
     // التكلفة الصافية = السعر بعد الخصم
     const netCost = r => {
