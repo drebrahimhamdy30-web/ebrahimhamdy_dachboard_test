@@ -264,7 +264,7 @@
       const noCodeOnly = (!wc && nc);
       let url = SB_URL_API + '/rest/v1/v_store_item_prices?select=id,item_name,code,store,price,discount_perc,available,updated_at,sim,best_code,best_name'
         + '&limit=' + SP_SIZE + '&offset=' + offset
-        + '&order=' + (spSortCol ? (spSortCol + '.' + spSortDir + '.nullslast') : (noCodeOnly ? 'sim.desc.nullslast,item_name.asc' : 'item_name.asc'));  // فرز المستخدم أو الافتراضي
+        + '&order=' + (spSortCol ? (spSortCol + '.' + spSortDir + '.nullslast') : 'item_name.asc');  // فرز المستخدم أو الافتراضي (الاقتراح يُحسب لايف)
       if (q) {
         // بحث ذكي: نقسّم النص لكلمات، وكل كلمة لازم توجد في الاسم بأي ترتيب (يتحمّل نسيان كلمة قبل كلمة)
         const toks = q.split(/\s+/).filter(Boolean);
@@ -297,14 +297,10 @@
           let codeTd;
           if (canEdit) {
             const disp = r.code ? '<span class="sp-code">' + r.code + '</span>' : '<span class="sp-nocode">بدون كود</span>';
+            // الاقتراح يُحسب لايف للصفحة المفتوحة (متزامن مع نافذة الاقتراح، غير مخزَّن)
             let sugg = '';
-            if (!r.code && r.best_code) {
-              const pct = Math.round((r.sim || 0) * 100);
-              const cls = pct >= 70 ? 'sp-sim-hi' : (pct >= 45 ? 'sp-sim-mid' : 'sp-sim-lo');
-              sugg = '<div class="sp-sugg-line">اقتراح: <b>' + r.best_code + '</b> '
-                + '<span class="' + cls + '">' + pct + '%</span> '
-                + '<button class="sp-accept" onclick="saveCode(' + r.id + ',\'' + String(r.best_code).replace(/'/g, "\\'") + '\')">اعتمد</button>'
-                + '<div class="sp-sugg-name">' + (r.best_name || '').replace(/</g, '&lt;') + '</div></div>';
+            if (!r.code) {
+              sugg = '<div class="sp-sugg-line" id="sugg-' + r.id + '"><span style="color:var(--text-muted);font-size:0.72rem">⏳ جارٍ الاقتراح…</span></div>';
             }
             codeTd = '<td class="sp-code-td" onclick="event.stopPropagation()">'
               + '<span class="sp-code-cell" id="code-' + r.id + '" title="اضغط لتعديل الكود" onclick="editCode(' + r.id + ')">' + disp + '</span>'
@@ -325,10 +321,45 @@
             + '</tr>';
         }).join('');
         renderPager();
+        if (canEdit) fillSuggestions(rows);   // اقتراحات لايف للصفحة (async، مش مخزَّن)
       } catch (e) {
         body.innerHTML = '<tr><td colspan="7" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>';
         console.error(e);
       } finally { spBusy = false; }
+    }
+
+    // حساب اقتراح الكود لايف لصفوف الصفحة غير المكوّدة — نفس دالة نافذة الاقتراح (متزامن دائمًا)
+    function suggLineHtml(id, m) {
+      if (!m || !m.best_code) return '<div class="sp-sugg-line" id="sugg-' + id + '"><span style="color:var(--text-muted);font-size:0.7rem">لا يوجد اقتراح مطابق</span></div>';
+      const pct = Math.round((m.sim || 0) * 100);
+      const cls = pct >= 70 ? 'sp-sim-hi' : (pct >= 45 ? 'sp-sim-mid' : 'sp-sim-lo');
+      return '<div class="sp-sugg-line" id="sugg-' + id + '">اقتراح: <b>' + m.best_code + '</b> '
+        + '<span class="' + cls + '">' + pct + '%</span> '
+        + '<button class="sp-accept" onclick="saveCode(' + id + ',\'' + String(m.best_code).replace(/'/g, "\\'") + '\')">اعتمد</button>'
+        + '<div class="sp-sugg-name">' + String(m.best_name || '').replace(/</g, '&lt;') + '</div></div>';
+    }
+    async function fillSuggestions(rows) {
+      const uncoded = (rows || []).filter(r => !r.code && r.item_name);
+      if (!uncoded.length) return;
+      const CHUNK = 10;
+      for (let i = 0; i < uncoded.length; i += CHUNK) {
+        const slice = uncoded.slice(i, i + CHUNK);
+        const names = [...new Set(slice.map(r => r.item_name))];
+        let results = [];
+        try {
+          const res = await fetch(SB_URL_API + '/rest/v1/rpc/suggest_codes_for_names', {
+            method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ p_names: names })
+          });
+          results = await res.json();
+        } catch (e) { results = []; }
+        const byName = {};
+        (Array.isArray(results) ? results : []).forEach(x => { byName[x.item_name] = x; });
+        slice.forEach(r => {
+          const el = document.getElementById('sugg-' + r.id);
+          if (el) el.outerHTML = suggLineHtml(r.id, byName[r.item_name]);
+        });
+      }
     }
 
     function renderPager() {
