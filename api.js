@@ -149,7 +149,7 @@ const SB_MISSING_URL  = `${SB_URL_API}/rest/v1/missing_items`;
 
 // إدراج فاتورة تعاقد — بيفحص الحظر الأول (لو العميل عنده أي صف status='block')
 // بيرجّع { ok, blocked }
-async function sbContractInsert({ branch, cust_code, total_amount, notes }) {
+async function sbContractInsert({ branch, cust_code, total_amount, notes, customer_code, customer_name }) {
   try {
     const chk = await fetch(
       `${SB_CONTRACT_URL}?select=id&cust_code=eq.${encodeURIComponent(cust_code || '')}&status=eq.block&limit=1`,
@@ -165,6 +165,8 @@ async function sbContractInsert({ branch, cust_code, total_amount, notes }) {
       body: JSON.stringify({
         branch:       branch || null,
         cust_code:    cust_code || null,
+        customer_code: customer_code || null,
+        customer_name: customer_name || null,
         total_amount: (total_amount != null ? String(total_amount) : null),
         notes:        notes || null,
         status:       'unpaid'

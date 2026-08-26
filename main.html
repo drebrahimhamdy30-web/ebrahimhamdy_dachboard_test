@@ -348,6 +348,27 @@
             <input type="text" id="contract-cust-code" class="form-input" placeholder="أدخل رقم القيد">
           </div>
         </div>
+        <div class="grid-code-name">
+          <div class="field-group">
+            <label><i class="fas fa-user-tag" style="margin-left:5px;"></i> كود العميل</label>
+            <div class="field-icon-wrap">
+              <i class="fas fa-user-tag field-icon"></i>
+              <input type="text" id="contract-customer-code" class="form-input" inputmode="numeric"
+                oninput="this.value=this.value.replace(/[^0-9]/g,''); if(this.value.length>5)this.value=this.value.slice(0,5); clearContractCustomerName();"
+                onchange="const v=parseInt(this.value); if(this.value && v>40000){ alert('كود العميل يجب أن يكون بين 1 و 40000'); this.value=''; }"
+                onblur="lookupContractCustomer()" placeholder="كود العميل (للاسم)">
+            </div>
+            <div class="lookup-loading" id="contract-customer-loading">⏳ جاري البحث...</div>
+            <div class="lookup-found"  id="contract-customer-found">✅ تم العثور على العميل</div>
+          </div>
+          <div class="field-group">
+            <label><i class="fas fa-user" style="margin-left:5px;"></i> اسم العميل</label>
+            <div class="field-icon-wrap">
+              <i class="fas fa-user field-icon"></i>
+              <input type="text" id="contract-customer-name" class="form-input" placeholder="يتعبّى من الكود أو اكتبه">
+            </div>
+          </div>
+        </div>
         <div class="field-group">
           <label><i class="fas fa-money-bill-wave" style="margin-left:5px;"></i> إجمالي قيمة الفاتورة</label>
           <div class="field-icon-wrap">
@@ -422,7 +443,7 @@
 
   <div class="success-toast" id="toast">✅ تم الإرسال بنجاح!</div>
 
-  <script src="api.js?v=tt20260824d"></script>
+  <script src="api.js?v=tt20260826"></script>
   <script>
     let activeUser  = null;
     let userBranch  = '';
@@ -511,6 +532,33 @@
           foundEl.classList.add('show');
         }
       } catch(e) { console.log('customer lookup failed:', e); }
+      finally { loadEl.classList.remove('show'); }
+    }
+
+    // نفس البحث لكن لحقول قسم فاتورة التعاقد
+    function clearContractCustomerName() {
+      const nameEl = document.getElementById('contract-customer-name');
+      if (nameEl) { nameEl.value = ''; nameEl.readOnly = false; nameEl.classList.remove('readonly-field'); }
+      const f = document.getElementById('contract-customer-found'); if (f) f.classList.remove('show');
+    }
+    async function lookupContractCustomer() {
+      const code = document.getElementById('contract-customer-code').value.trim();
+      if (!code) return;
+      const nameEl  = document.getElementById('contract-customer-name');
+      const loadEl  = document.getElementById('contract-customer-loading');
+      const foundEl = document.getElementById('contract-customer-found');
+      if (nameEl.value.trim()) return;
+      loadEl.classList.add('show'); foundEl.classList.remove('show');
+      try {
+        const resp = await fetch(FETCH_URL + '?type=customer_lookup&code=' + encodeURIComponent(code));
+        const raw  = await resp.json();
+        const item = Array.isArray(raw) ? raw[0] : raw;
+        const name = item?.cust_name || item?.data?.[0]?.cust_name || '';
+        if (name) {
+          nameEl.value = name; nameEl.readOnly = true;
+          nameEl.classList.add('readonly-field'); foundEl.classList.add('show');
+        }
+      } catch(e) { console.log('contract customer lookup failed:', e); }
       finally { loadEl.classList.remove('show'); }
     }
 
@@ -814,10 +862,12 @@
       try {
         // فاتورة التعاقد: بتتكتب مباشرة في جدول contracts على Supabase (بدل n8n)
         const res = await sbContractInsert({
-          branch:       userBranch,
-          cust_code:    custCode,
-          total_amount: amount,
-          notes:        document.getElementById('contract-notes').value.trim()
+          branch:        userBranch,
+          cust_code:     custCode,
+          customer_code: document.getElementById('contract-customer-code').value.trim(),
+          customer_name: document.getElementById('contract-customer-name').value.trim(),
+          total_amount:  amount,
+          notes:         document.getElementById('contract-notes').value.trim()
         });
         if (res.blocked) {
           document.getElementById('block-alert').classList.add('show');
@@ -827,6 +877,8 @@
           document.getElementById('contract-cust-code').value = '';
           document.getElementById('contract-amount').value    = '';
           document.getElementById('contract-notes').value     = '';
+          document.getElementById('contract-customer-code').value = '';
+          clearContractCustomerName();
         } else { alert('فشل الحفظ ❌'); }
       } catch(e) { alert('خطأ في الاتصال'); }
       finally {
