@@ -46,9 +46,10 @@
         <table>
           <thead>
             <tr>
-              <th>التاريخ</th>
+              <th>التاريخ والوقت</th>
               <th>الفرع</th>
               <th>رقم القيد</th>
+              <th>اسم العميل</th>
               <th>إجمالي الفاتورة</th>
               <th>ملاحظات</th>
               <th>الحالة</th>
@@ -69,6 +70,7 @@
 // بعد ✅
 let activeUser = null;
 let rawData = [];
+let NAME_BY_CODE = {};   // كود العميل -> اسمه (يُجلب دفعة واحدة)
 
 checkAuth().then(user => {
   activeUser = user;
@@ -77,15 +79,32 @@ checkAuth().then(user => {
 
     async function loadContracts() {
       const tbody = document.getElementById('table-body');
-      tbody.innerHTML = '<tr class="loading-row"><td colspan="7">⏳ جاري جلب البيانات...</td></tr>';
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="8">⏳ جاري جلب البيانات...</td></tr>';
       try {
         const response = await fetchContracts();
 rawData = response;
+        await loadCustomerNames();
         renderStats();
         applyFilter();
       } catch(e) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:30px;">❌ خطأ في الاتصال</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ خطأ في الاتصال</td></tr>';
       }
+    }
+
+    // جلب أسماء العملاء لكل الأكواد دفعة واحدة (من الفواتير/المبيعات/الطلبات)
+    async function loadCustomerNames() {
+      try {
+        const codes = [...new Set(rawData.map(i => i.cust_code).filter(Boolean).map(String))];
+        if (!codes.length) { NAME_BY_CODE = {}; return; }
+        const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_customer_names`, {
+          method: 'POST',
+          headers: { ...SB_TASK_HEADERS, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ p_codes: codes })
+        });
+        const rows = await r.json();
+        NAME_BY_CODE = {};
+        (Array.isArray(rows) ? rows : []).forEach(x => { NAME_BY_CODE[String(x.cust_code)] = x.name; });
+      } catch (e) { NAME_BY_CODE = {}; }
     }
 
     function renderStats() {
@@ -129,20 +148,26 @@ rawData = response;
     function renderTable(items) {
       const tbody = document.getElementById('table-body');
       if (items.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد فواتير تطابق الفلتر</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد فواتير تطابق الفلتر</td></tr>';
         return;
       }
 
       tbody.innerHTML = items.map(item => {
         const isPaid = (item.status === 'paid');
-        const dateStr = item.createdAt ? new Date(item.createdAt).toLocaleDateString('ar-EG') : '---';
+        const dt = item.createdAt ? new Date(item.createdAt) : null;
+        const dateStr = dt
+          ? dt.toLocaleDateString('ar-EG', { timeZone:'Africa/Cairo' }) + ' · ' +
+            dt.toLocaleTimeString('ar-EG', { timeZone:'Africa/Cairo', hour:'2-digit', minute:'2-digit' })
+          : '---';
         const amount  = parseFloat(item.total_amount || 0).toLocaleString('ar-EG');
+        const custName = NAME_BY_CODE[String(item.cust_code)] || '—';
 
         return `
           <tr class="${isPaid ? 'row-done' : ''}">
-            <td style="font-size:0.78rem;">${dateStr}</td>
+            <td style="font-size:0.78rem;white-space:nowrap;">${dateStr}</td>
             <td><span class="branch-tag">${item.branch || '---'}</span></td>
             <td><code style="font-size:0.82rem;color:var(--text-secondary);">${item.cust_code || '---'}</code></td>
+            <td style="font-size:0.82rem;">${custName}</td>
             <td><b style="color:var(--accent-dark);">${amount} ج</b></td>
             <td style="font-size:0.82rem;color:var(--text-secondary);text-align:right;max-width:180px;">
               ${item.notes || '---'}
