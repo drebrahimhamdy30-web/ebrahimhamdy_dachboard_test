@@ -157,13 +157,16 @@
     </div>
   </div>
 
-  <script src="api.js?v=tt20260824d"></script>
+  <script src="api.js?v=tt20260826"></script>
   <script>
     let ACTIVE = 'overview';
     let USER = '';
     let SCOPED_STORE = null;   // لو مدير فرع: يتقفل على فرعه
     let OV_HOURS = [];         // فواتير كل ساعة (مجموع الفترة) — لحساب جدول الموظفين
     let OV_ACTIVE_DAYS = 0;    // عدد أيام العمل في الفترة (لحساب المتوسط اليومي)
+    let OV_DEL_HOURS = [];     // طلبات التوصيل كل ساعة — لحساب جدول الطيارين
+    let OV_DEL_DAYS = 0;       // أيام التوصيل الفعلية في الفترة
+    let OV_MPO = Math.max(1, Number(localStorage.getItem('ovMinPerOrder')) || 20);  // دقائق/طلب توصيل (إعداد قابل للتغيير)
 
     // الفروع الثلاثة (store_name الحقيقي + الاسم المعروض)
     const BRANCHES = [
@@ -292,6 +295,14 @@
       // أيام العمل الفعلية في الفترة — عشان نحوّل مجموع الساعة لمتوسط يومي (لجدول الموظفين)
       const activeDays = ((await sbSalesActiveDays(mr.from, mr.to, fltStore()))||{}).active_days || 0;
       OV_HOURS = data; OV_ACTIVE_DAYS = activeDays;
+      // ===== طلبات التوصيل بالساعة =====
+      const delRaw = await sbDeliveryByHour(mr.from, mr.to, fltStore());
+      const byHrDel = {};
+      (delRaw||[]).forEach(h=>{ byHrDel[Number(h.hr)] = Number(h.orders)||0; });
+      const delData = [];
+      for(let i=0;i<24;i++){ const hr=(9+i)%24; delData.push({ hr, orders: byHrDel[hr]||0 }); }
+      OV_DEL_HOURS = delData;
+      OV_DEL_DAYS = ((await sbDeliveryActiveDays(mr.from, mr.to, fltStore()))||{}).active_days || 0;
       const hrLabel = hr => (hr%12===0?12:hr%12)+(hr<12?'ص':'م');
       const maxB = Math.max(1, ...data.map(d=>d.bills));
       const peak = data.reduce((a,b)=> b.bills>a.bills?b:a, {hr:9,bills:0});
@@ -302,6 +313,17 @@
         return `<div class="ov-hbar${isPeak?' peak':''}" title="${hrLabel(d.hr)} — ${d.bills} فاتورة إجمالي · متوسط ${avg.toFixed(1)}/يوم">
           <div class="ov-hbar-cap">${avg>=1?Math.round(avg):''}</div>
           <div class="ov-hbar-fill" style="height:${Math.round(d.bills/maxB*100)}%"></div>
+          <div class="ov-hbar-lbl">${hrLabel(d.hr)}</div></div>`;
+      }).join('');
+      // أعمدة طلبات التوصيل (نفس ستايل ساعات الذروة)
+      const maxD = Math.max(1, ...delData.map(d=>d.orders));
+      const delDays = OV_DEL_DAYS;
+      const delBars = delData.map(d=>{
+        const isPeak = d.orders===maxD && maxD>0;
+        const avg = delDays>0 ? d.orders/delDays : 0;
+        return `<div class="ov-hbar${isPeak?' peak':''}" title="${hrLabel(d.hr)} — ${d.orders} طلب إجمالي · متوسط ${avg.toFixed(1)}/يوم">
+          <div class="ov-hbar-cap">${avg>=1?Math.round(avg):''}</div>
+          <div class="ov-hbar-fill" style="height:${Math.round(d.orders/maxD*100)}%"></div>
           <div class="ov-hbar-lbl">${hrLabel(d.hr)}</div></div>`;
       }).join('');
       // ===== الخصومات =====
@@ -354,11 +376,29 @@
 
         <div class="ov-card">
           <div class="ov-card-head">
-            <div class="ov-card-title"><i class="fas fa-user-clock"></i> الموظفون المطلوبون حسب الفترة</div>
-            <div class="ov-staff-ctrl">كل فاتورة ≈
-              <input id="minPerBill" type="number" min="1" max="60" value="7" oninput="renderStaffTable()"> دقيقة</div>
+            <div class="ov-card-title"><i class="fas fa-motorcycle"></i> ساعات ذروة التوصيل</div>
+            <div class="ov-card-sub">طلبات التوصيل فقط · الرقم فوق العمود = متوسط الطلبات/يوم · الأخضر = الذروة</div>
           </div>
-          <div id="staffTable"></div>
+          <div class="ov-hours">${delBars||'<div class="empty-tab">لا يوجد بيانات</div>'}</div>
+        </div>
+
+        <div class="ov-grid2">
+          <div class="ov-card">
+            <div class="ov-card-head">
+              <div class="ov-card-title"><i class="fas fa-user-clock"></i> الموظفون المطلوبون حسب الفترة</div>
+              <div class="ov-staff-ctrl">كل فاتورة ≈
+                <input id="minPerBill" type="number" min="1" max="60" value="7" oninput="renderStaffTable()"> دقيقة</div>
+            </div>
+            <div id="staffTable"></div>
+          </div>
+          <div class="ov-card">
+            <div class="ov-card-head">
+              <div class="ov-card-title"><i class="fas fa-motorcycle"></i> الطيارين المطلوبون حسب الفترة</div>
+              <div class="ov-staff-ctrl">كل طلب ≈
+                <input id="minPerOrder" type="number" min="1" max="120" value="${OV_MPO}" oninput="onMpoChange(this.value)"> دقيقة</div>
+            </div>
+            <div id="driverTable"></div>
+          </div>
         </div>
 
         <div class="ov-grid2">
@@ -373,6 +413,37 @@
         </div>
       `;
       renderStaffTable();
+      renderDriverTable();
+    }
+
+    // جدول الطيارين المطلوبين لكل ساعة — نفس منطق الموظفين لكن على طلبات التوصيل
+    // المطلوب = ⌈ متوسط الطلبات/الساعة × دقائق_الطلب ÷ 60 ⌉
+    function onMpoChange(v){ OV_MPO = Math.max(1, Number(v)||20); localStorage.setItem('ovMinPerOrder', OV_MPO); renderDriverTable(); }
+    function renderDriverTable(){
+      const el = document.getElementById('driverTable'); if(!el) return;
+      const mpo  = Math.max(1, Number((document.getElementById('minPerOrder')||{}).value) || OV_MPO);
+      const days = OV_DEL_DAYS || 0;
+      const hrLabel = hr => (hr%12===0?12:hr%12)+(hr<12?'ص':'م');
+      if(!days || !OV_DEL_HOURS.some(d=>d.orders>0)){ el.innerHTML='<div class="empty-tab">لا يوجد بيانات كافية</div>'; return; }
+      const rows = OV_DEL_HOURS.map(d=>{
+        const avg = days>0 ? d.orders/days : 0;
+        return { hr:d.hr, avg, drivers: Math.ceil(avg*mpo/60) };
+      });
+      const maxDrv = Math.max(1, ...rows.map(r=>r.drivers));
+      const totNeeded = rows.reduce((s,r)=>s+r.drivers,0);
+      el.innerHTML = `<table class="ov-staff-table"><thead><tr>
+          <th>الفترة</th><th>متوسط الطلبات/الساعة</th><th>الطيارون المطلوبون</th></tr></thead><tbody>
+        ${rows.map(r=>{ const hot=r.drivers===maxDrv && maxDrv>0;
+          return `<tr class="${hot?'peak':''}">
+            <td style="font-weight:700;white-space:nowrap">${hrLabel(r.hr)} – ${hrLabel((r.hr+1)%24)}</td>
+            <td>${r.avg.toFixed(1)}</td>
+            <td><span class="ov-badge${hot?' hi':''}">${r.drivers}</span>${hot?' <i class="fas fa-fire" style="color:#ea580c"></i>':''}</td>
+          </tr>`;}).join('')}
+        </tbody>
+        <tfoot><tr style="border-top:2px solid var(--border);font-weight:800">
+          <td>إجمالي ساعات-الطيار / يوم</td><td></td><td style="color:#2563eb;font-weight:900">${totNeeded}</td></tr></tfoot>
+      </table>
+      <div style="font-size:0.72rem;color:var(--text-muted);margin:8px 2px 0">💡 «الطيارون المطلوبون» = العدد اللازم في نفس الوقت خلال الساعة لخدمة متوسط طلبات التوصيل. الصف المميّز = ذروة التوصيل.</div>`;
     }
 
     // جدول الموظفين المطلوبين لكل ساعة:
