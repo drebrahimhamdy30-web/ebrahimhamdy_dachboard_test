@@ -43,9 +43,15 @@
     .ig-field{ margin-bottom:12px; }
     .ig-field label{ display:block;font-size:0.76rem;font-weight:800;color:var(--text-secondary);margin-bottom:4px; }
     .ig-grid2{ display:grid;grid-template-columns:120px 1fr;gap:10px; }
-    .prm{ display:grid;grid-template-columns:auto 1fr 1fr auto;gap:6px;align-items:center;margin-bottom:6px; }
+    .prm{ display:grid;grid-template-columns:auto 1fr 1fr 88px auto;gap:6px;align-items:center;margin-bottom:6px; }
     .prm input[type=text]{ font-family:ui-monospace,monospace;direction:ltr; }
+    .prm .pv.is-expr{ color:#0369a1;background:#f0f9ff;border-color:#7dd3fc; }
+    .prm .pmode{ font-size:0.72rem;padding:4px;font-weight:700; }
     .prm-del{ border:none;background:none;color:var(--danger);cursor:pointer;font-size:0.9rem; }
+    .expr-help{ font-size:0.68rem;color:var(--text-muted);line-height:1.8;margin-top:6px; }
+    .expr-help code{ background:var(--surface-2);border:1px solid var(--border);border-radius:5px;padding:0 5px;direction:ltr;display:inline-block;color:#0369a1; }
+    .prm-prev{ font-size:0.7rem;color:#15803d;font-family:ui-monospace,monospace;direction:ltr;text-align:left;margin:-2px 0 8px 30px;min-height:14px; }
+    .prm-prev.err{ color:var(--danger); }
     .prm-add{ border:1.5px dashed var(--border);background:none;color:var(--primary-dark);border-radius:8px;padding:6px;font-family:inherit;font-size:0.76rem;font-weight:700;cursor:pointer;width:100%; }
     .body-wrap{ display:none; } .body-wrap.show{ display:block; }
   </style>
@@ -99,9 +105,17 @@
           <div><label>ملاحظات</label><input type="text" id="f-notes" class="form-input" placeholder="اختياري"></div>
         </div>
         <div class="ig-field">
-          <label>الباراميترز (Query) — زي HTTP node في n8n</label>
+          <label>الباراميترز — كل قيمة: <b>ثابت</b> أو <b>تعبير</b> (زي n8n)</label>
           <div id="f-params"></div>
           <button class="prm-add" onclick="addParam()"><i class="fas fa-plus"></i> إضافة باراميتر</button>
+          <div class="expr-help">
+            في وضع «تعبير» استخدم <code>{{ }}</code> بنمط n8n · أمثلة:
+            <code>{{ $now.format('yyyy-MM-dd HH:mm:ss') }}</code>
+            <code>{{ $now.minus({day:1}).format('yyyy-MM-dd HH:mm:ss') }}</code>
+            <code>{{ $today.format('yyyy-MM-dd') }}</code>
+            <code>{{ $branch }}</code>
+            · متاح: <code>$now</code> <code>$today</code> <code>$branch</code> · دوال: <code>.minus/.plus({day|hour|minute|month..:N})</code> <code>.startOf/.endOf('day')</code> <code>.format('...')</code>
+          </div>
         </div>
         <div class="ig-field body-wrap" id="f-body-wrap">
           <label>Body (JSON) — لـ POST/PATCH · لو فاضي بتتبعت الباراميترز فوق كـ JSON body</label>
@@ -132,6 +146,35 @@
       if(!j) return null;
       try{ const p=JSON.parse(atob(j.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); if(p.exp*1000>Date.now()+30000) return j; }catch(e){}
       return null;
+    }
+
+    // ===== مُقيّم التعبيرات (نمط n8n / Luxon مُبسّط، بتوقيت القاهرة) =====
+    function _cairoFields(ms){
+      const s=new Date(ms).toLocaleString('en-GB',{timeZone:'Africa/Cairo',hour12:false});
+      const [dm,tm]=s.split(', '); const [d,mo,y]=dm.split('/'); const [H,Mi,S]=tm.split(':');
+      return {y,mo,d,H,Mi,S};
+    }
+    function _cairoOffset(ms){ const f=_cairoFields(ms); return Date.UTC(+f.y,+f.mo-1,+f.d,+f.H,+f.Mi,+f.S)-ms; }
+    function _cairoToEpoch(y,mo,d,H,Mi,S){ const g=Date.UTC(y,mo-1,d,H,Mi,S); return g-_cairoOffset(g); }
+    function _durMs(o){
+      const u={year:31557600000,years:31557600000,month:2629800000,months:2629800000,week:604800000,weeks:604800000,day:86400000,days:86400000,hour:3600000,hours:3600000,minute:60000,minutes:60000,second:1000,seconds:1000};
+      let ms=0; for(const k in (o||{})) ms+=(Number(o[k])||0)*(u[k]||0); return ms;
+    }
+    function DT(ms){ return {
+      ms,
+      minus(o){ return DT(ms-_durMs(o)); },
+      plus(o){ return DT(ms+_durMs(o)); },
+      startOf(u){ const f=_cairoFields(ms); if(u==='day')return DT(_cairoToEpoch(+f.y,+f.mo,+f.d,0,0,0)); if(u==='month')return DT(_cairoToEpoch(+f.y,+f.mo,1,0,0,0)); return DT(ms); },
+      endOf(u){ const f=_cairoFields(ms); if(u==='day')return DT(_cairoToEpoch(+f.y,+f.mo,+f.d,23,59,59)); return DT(ms); },
+      format(pat){ const f=_cairoFields(ms); return String(pat||'yyyy-MM-dd HH:mm:ss').replace(/yyyy/g,f.y).replace(/MM/g,f.mo).replace(/dd/g,f.d).replace(/HH/g,f.H).replace(/mm/g,f.Mi).replace(/ss/g,f.S); },
+      toString(){ return this.format('yyyy-MM-dd HH:mm:ss'); }
+    };}
+    function evalExprInner(inner, ctx){
+      const $now=DT(Date.now()); const $today=$now.startOf('day'); const $branch=(ctx&&ctx.branch)||'';
+      return new Function('$now','$today','$branch','$json','return ('+inner+')')($now,$today,$branch,{});
+    }
+    function resolveTemplate(tmpl, ctx){
+      return String(tmpl).replace(/\{\{([\s\S]*?)\}\}/g,(_m,inner)=>{ try{ return String(evalExprInner(inner.trim(),ctx)); }catch(e){ return '{{ERR}}'; } });
     }
 
     // ===== تحميل + عرض العناوين =====
@@ -172,11 +215,14 @@
       bodyEl.innerHTML='<div style="color:var(--text-muted);font-size:0.8rem;padding:6px 0;"><i class="fas fa-spinner fa-spin"></i> جارٍ الاستدعاء لفرع '+esc(branch)+'…</div>';
       const jwt=authToken();
       if(!jwt){ bodyEl.innerHTML='<div class="res-bad" style="font-size:0.82rem;">لازم تسجّل دخول من جديد (توكن منتهي) — الدالة بتتطلب موظف مسجّل.</div>'; return; }
+      // حلّ التعبيرات وقت النداء (ثابت يتبعت كما هو، تعبير يتحسب)
+      const rparams=(e.params||[]).map(p=>({ key:p.key, enabled:p.enabled, value:(p.mode==='expr'?resolveTemplate(p.value,{branch}):p.value) }));
+      const rbody = e.body ? resolveTemplate(e.body,{branch}) : null;
       try{
         const r=await fetch(FN+'eplus_proxy',{
           method:'POST',
           headers:{ apikey:SB_KEY, Authorization:'Bearer '+jwt, 'Content-Type':'application/json' },
-          body:JSON.stringify({ branch, path:e.path, method:(e.method||'GET'), params:e.params||[], body:e.body||null, preview:true, previewN:50 })
+          body:JSON.stringify({ branch, path:e.path, method:(e.method||'GET'), params:rparams, body:rbody, preview:true, previewN:50 })
         });
         const j=await r.json();
         if(j && j.error==='secret_not_set'){ document.getElementById('ig-setup').style.display='block'; }
@@ -205,15 +251,36 @@
     }
 
     // ===== إضافة/تعديل =====
-    function paramRow(p){ p=p||{key:'',value:'',enabled:true};
-      const div=document.createElement('div'); div.className='prm';
-      div.innerHTML=`<input type="checkbox" ${p.enabled!==false?'checked':''} title="مفعّل">
+    function paramRow(p){ p=p||{key:'',value:'',enabled:true,mode:'fixed'};
+      const isE=p.mode==='expr';
+      const wrap=document.createElement('div'); wrap.className='prm-wrap';
+      wrap.innerHTML=`<div class="prm">
+        <input type="checkbox" ${p.enabled!==false?'checked':''} title="مفعّل">
         <input type="text" class="form-input pk" placeholder="key" value="${esc(p.key||'')}">
-        <input type="text" class="form-input pv" placeholder="value" value="${esc(p.value||'')}">
-        <button class="prm-del" onclick="this.parentElement.remove()"><i class="fas fa-xmark"></i></button>`;
-      return div;
+        <input type="text" class="form-input pv ${isE?'is-expr':''}" placeholder="${isE?"{{ $now.format('yyyy-MM-dd') }}":'value'}" value="${esc(p.value||'')}" oninput="prmPrev(this)">
+        <select class="form-select pmode" onchange="prmMode(this)"><option value="fixed" ${!isE?'selected':''}>ثابت</option><option value="expr" ${isE?'selected':''}>تعبير</option></select>
+        <button class="prm-del" onclick="this.closest('.prm-wrap').remove()"><i class="fas fa-xmark"></i></button>
+      </div>
+      <div class="prm-prev"${isE?'':' style="display:none"'}></div>`;
+      return wrap;
     }
-    function addParam(p){ document.getElementById('f-params').appendChild(paramRow(p)); }
+    function addParam(p){ const w=paramRow(p); document.getElementById('f-params').appendChild(w); const pv=w.querySelector('.pv'); if(pv.classList.contains('is-expr')) prmPrev(pv); }
+    function prmMode(sel){
+      const wrap=sel.closest('.prm-wrap'), pv=wrap.querySelector('.pv'), prev=wrap.querySelector('.prm-prev'), isE=sel.value==='expr';
+      pv.classList.toggle('is-expr',isE);
+      pv.placeholder = isE ? "{{ $now.format('yyyy-MM-dd') }}" : 'value';
+      prev.style.display = isE ? '' : 'none';
+      if(isE) prmPrev(pv);
+    }
+    function prmPrev(input){
+      const wrap=input.closest('.prm-wrap'), prev=wrap.querySelector('.prm-prev');
+      if(wrap.querySelector('.pmode').value!=='expr'){ prev.style.display='none'; return; }
+      prev.style.display=''; const v=input.value.trim();
+      if(!v){ prev.textContent=''; return; }
+      const branch=document.getElementById('ig-branch').value;
+      try{ prev.classList.remove('err'); prev.textContent='= '+resolveTemplate(v,{branch}); }
+      catch(e){ prev.classList.add('err'); prev.textContent='خطأ في التعبير'; }
+    }
     function toggleBody(){ const m=document.getElementById('f-method').value; document.getElementById('f-body-wrap').classList.toggle('show', m==='POST'||m==='PATCH'); }
     function openEdit(id){
       const e = id!=null ? EPS.find(x=>x.id===id) : null;
@@ -233,10 +300,11 @@
     }
     function closeEdit(){ document.getElementById('ig-modal-bg').classList.remove('open'); }
     function collectParams(){
-      return [...document.querySelectorAll('#f-params .prm')].map(r=>({
-        key:r.querySelector('.pk').value.trim(),
-        value:r.querySelector('.pv').value,
-        enabled:r.querySelector('input[type=checkbox]').checked
+      return [...document.querySelectorAll('#f-params .prm-wrap')].map(w=>({
+        key:w.querySelector('.pk').value.trim(),
+        value:w.querySelector('.pv').value,
+        enabled:w.querySelector('input[type=checkbox]').checked,
+        mode:w.querySelector('.pmode').value
       })).filter(p=>p.key);
     }
     async function saveEndpoint(){
