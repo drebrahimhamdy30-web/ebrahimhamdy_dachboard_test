@@ -261,8 +261,8 @@
         : '';
       const next = (on && e.next_run_at) ? `<span class="sc-next">التالي: ${fmtDT(e.next_run_at)}</span>` : '';
       const btns = IS_ADMIN
-        ? `<button class="ep-btn ${on?'b-del':'b-test'}" style="padding:3px 10px" onclick="toggleSched(${e.id},${on?0:1})">${on?'إيقاف':'تشغيل'}</button>`
-          + (on?`<button class="ep-btn b-edit" style="padding:3px 10px" onclick="runNow(${e.id})"><i class="fas fa-bolt"></i> شغّل الآن</button>`:'')
+        ? `<button class="ep-btn ${on?'b-del':'b-test'}" style="padding:3px 10px" onclick="toggleSched(${e.id},${on?0:1})">${on?'إيقاف الجدولة':'فعّل الجدولة'}</button>`
+          + `<button class="ep-btn b-test" style="padding:3px 10px;background:#7c3aed" onclick="runNow(${e.id})"><i class="fas fa-bolt"></i> شغّل الآن</button>`
         : '';
       return `<div class="ep-sched">${chip}${last}${next}<span style="flex:1"></span>${btns}</div>`;
     }
@@ -271,8 +271,25 @@
       try{ await fetch(REST+'integration_endpoints?id=eq.'+id,{method:'PATCH',headers:{...H,Prefer:'return=minimal'},body:JSON.stringify(patch)}); await load(); }catch(e){ alert('فشل'); }
     }
     async function runNow(id){
-      try{ await fetch(REST+'integration_endpoints?id=eq.'+id,{method:'PATCH',headers:{...H,Prefer:'return=minimal'},body:JSON.stringify({next_run_at:new Date().toISOString()})});
-        await load(); alert('اتحدّد يشتغل في الدقيقة الجاية.'); }catch(e){ alert('فشل'); }
+      const jwt=authToken(); if(!jwt){ alert('لازم تسجّل دخول من جديد (توكن منتهي)'); return; }
+      const destTable=(EPS.find(x=>x.id===id)||{}).dest_table||'—';
+      const bodyEl=document.getElementById('epb-'+id); if(bodyEl){ bodyEl.classList.add('open'); bodyEl.innerHTML='<div style="color:var(--text-muted);font-size:0.8rem;padding:6px 0;"><i class="fas fa-spinner fa-spin"></i> جارٍ التشغيل اليدوي الآن…</div>'; }
+      let html='';
+      try{
+        const r=await fetch(FN+'eplus_sync',{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+jwt,'Content-Type':'application/json'},body:JSON.stringify({endpoint_id:id})});
+        const j=await r.json();
+        if(j && j.error==='secret_not_set'){ document.getElementById('ig-setup').style.display='block'; }
+        const res=(j&&j.results&&j.results[0])||null;
+        if(j&&j.ok&&res){
+          html = res.status==='success'
+            ? `<div class="res-ok" style="font-size:0.86rem">نجح ✓ — تم تخزين/تحديث <b>${res.upserted||0}</b> صف في <b>${esc(destTable)}</b>.</div>`
+            : `<div class="res-bad" style="font-size:0.86rem">فشل: ${esc(res.error||'')}</div>`;
+        } else {
+          html = `<div class="res-bad" style="font-size:0.86rem">${esc((j&&(j.hint||j.error))||'فشل التشغيل')}</div>`;
+        }
+      }catch(e){ html='<div class="res-bad" style="font-size:0.86rem">فشل الاتصال</div>'; }
+      await load();
+      const el2=document.getElementById('epb-'+id); if(el2){ el2.classList.add('open'); el2.innerHTML=html; }
     }
 
     // ===== اختبار عبر eplus_proxy =====
