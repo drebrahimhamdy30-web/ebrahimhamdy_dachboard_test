@@ -28,6 +28,12 @@
     .b-test{ background:var(--primary);color:#fff; }
     .b-edit{ background:var(--surface-3);color:var(--text-primary); }
     .b-del{ background:none;color:var(--danger); }
+    .ep-sched{ display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:8px 14px;border-top:1px solid var(--surface-3);background:var(--surface-2);font-size:0.74rem; }
+    .sc-on{ color:var(--primary-dark);font-weight:800; }
+    .sc-off{ color:var(--text-muted);font-weight:700; }
+    .sc-ok{ color:#15803d;font-weight:700; }
+    .sc-bad{ color:#b91c1c;font-weight:800; }
+    .sc-next{ color:var(--text-secondary); }
     .ep-body{ border-top:1px solid var(--surface-3);padding:0 14px;max-height:0;overflow:hidden;transition:max-height .2s; }
     .ep-body.open{ max-height:2000px;padding:12px 14px; }
     .res-meta{ display:flex;flex-wrap:wrap;gap:14px;font-size:0.78rem;margin-bottom:8px; }
@@ -121,6 +127,20 @@
           <label>Body (JSON) — لـ POST/PATCH · لو فاضي بتتبعت الباراميترز فوق كـ JSON body</label>
           <textarea id="f-body" class="form-input" rows="4" placeholder='{"key":"value"}' style="font-family:ui-monospace,monospace;direction:ltr;"></textarea>
         </div>
+
+        <div class="ig-field" style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px;">
+          <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;color:var(--text-primary);">
+            <input type="checkbox" id="f-sched" style="width:16px;height:16px;accent-color:var(--primary);"> ⏱️ تشغيل تلقائي مجدول
+          </label>
+          <div class="ig-grid2" style="margin-top:8px;">
+            <div><label>يشتغل كل (دقيقة)</label><input type="number" id="f-interval" class="form-input" min="1" placeholder="60"></div>
+            <div><label>عند الفشل يعيد كل (دقيقة)</label><input type="number" id="f-retry" class="form-input" min="1" value="5"></div>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:0.8rem;font-weight:600;color:var(--text-secondary);">
+            <input type="checkbox" id="f-allbranches" checked style="width:15px;height:15px;accent-color:var(--primary);"> يشتغل لكل الفروع
+          </label>
+        </div>
+
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px;">
           <button class="ep-btn b-edit" onclick="closeEdit()">إلغاء</button>
           <button class="ep-btn b-test" onclick="saveEndpoint()"><i class="fas fa-save"></i> حفظ</button>
@@ -202,9 +222,34 @@
               <button class="ep-btn b-del" onclick="delEndpoint(${e.id})"><i class="fas fa-trash-can"></i></button>`:''}
             </span>
           </div>
+          ${schedHtml(e)}
           <div class="ep-body" id="epb-${e.id}"></div>
         </div>`;
       }).join('');
+    }
+    function fmtDT(s){ return s ? new Date(s).toLocaleString('ar-EG',{timeZone:'Africa/Cairo',hour12:true,dateStyle:'short',timeStyle:'short'}) : '—'; }
+    function schedHtml(e){
+      const on=e.sched_enabled;
+      const chip = on ? `<span class="sc-on">⏱️ مجدول كل ${e.interval_minutes||'?'} د</span>` : `<span class="sc-off">موقوف</span>`;
+      const last = e.last_status
+        ? (e.last_status==='success'
+            ? `<span class="sc-ok">آخر سحبة ✓ ${fmtDT(e.last_run_at)}</span>`
+            : `<span class="sc-bad">فشل${e.fail_count?(' ×'+e.fail_count):''} — إعادة كل ${e.retry_minutes} د</span>`)
+        : '';
+      const next = (on && e.next_run_at) ? `<span class="sc-next">التالي: ${fmtDT(e.next_run_at)}</span>` : '';
+      const btns = IS_ADMIN
+        ? `<button class="ep-btn ${on?'b-del':'b-test'}" style="padding:3px 10px" onclick="toggleSched(${e.id},${on?0:1})">${on?'إيقاف':'تشغيل'}</button>`
+          + (on?`<button class="ep-btn b-edit" style="padding:3px 10px" onclick="runNow(${e.id})"><i class="fas fa-bolt"></i> شغّل الآن</button>`:'')
+        : '';
+      return `<div class="ep-sched">${chip}${last}${next}<span style="flex:1"></span>${btns}</div>`;
+    }
+    async function toggleSched(id,on){
+      const patch = on ? { sched_enabled:true, next_run_at:new Date().toISOString() } : { sched_enabled:false, next_run_at:null };
+      try{ await fetch(REST+'integration_endpoints?id=eq.'+id,{method:'PATCH',headers:{...H,Prefer:'return=minimal'},body:JSON.stringify(patch)}); await load(); }catch(e){ alert('فشل'); }
+    }
+    async function runNow(id){
+      try{ await fetch(REST+'integration_endpoints?id=eq.'+id,{method:'PATCH',headers:{...H,Prefer:'return=minimal'},body:JSON.stringify({next_run_at:new Date().toISOString()})});
+        await load(); alert('اتحدّد يشتغل في الدقيقة الجاية.'); }catch(e){ alert('فشل'); }
     }
 
     // ===== اختبار عبر eplus_proxy =====
@@ -292,6 +337,10 @@
       document.getElementById('f-method').value = e?(e.method||'GET'):'GET';
       document.getElementById('f-notes').value = e?(e.notes||''):'';
       document.getElementById('f-body').value = e?(e.body||''):'';
+      document.getElementById('f-sched').checked = !!(e&&e.sched_enabled);
+      document.getElementById('f-interval').value = (e&&e.interval_minutes)||'';
+      document.getElementById('f-retry').value = (e&&e.retry_minutes)||5;
+      document.getElementById('f-allbranches').checked = e ? e.run_branches!==false : true;
       const pc=document.getElementById('f-params'); pc.innerHTML='';
       const params = (e && Array.isArray(e.params) && e.params.length) ? e.params : [{key:'',value:'',enabled:true}];
       params.forEach(p=>addParam(p));
@@ -313,12 +362,19 @@
       const path=document.getElementById('f-path').value.trim();
       if(!name){ alert('اكتب الاسم'); return; }
       if(!path.startsWith('/')){ alert('المسار لازم يبدأ بـ /'); return; }
+      const sched=document.getElementById('f-sched').checked;
+      const interval=parseInt(document.getElementById('f-interval').value)||null;
       const payload={
         name, category:document.getElementById('f-cat').value.trim()||null,
         path, method:document.getElementById('f-method').value,
         params:collectParams(),
         body:document.getElementById('f-method').value!=='GET' ? (document.getElementById('f-body').value.trim()||null) : null,
         notes:document.getElementById('f-notes').value.trim()||null,
+        sched_enabled:sched,
+        interval_minutes:interval,
+        retry_minutes:parseInt(document.getElementById('f-retry').value)||5,
+        run_branches:document.getElementById('f-allbranches').checked,
+        next_run_at: sched ? new Date().toISOString() : null,   // يبدأ قريب
         updated_at:new Date().toISOString()
       };
       try{
