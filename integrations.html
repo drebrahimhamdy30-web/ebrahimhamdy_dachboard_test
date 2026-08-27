@@ -59,6 +59,11 @@
     .prm-prev{ font-size:0.7rem;color:#15803d;font-family:ui-monospace,monospace;direction:ltr;text-align:left;margin:-2px 0 8px 30px;min-height:14px; }
     .prm-prev.err{ color:var(--danger); }
     .prm-add{ border:1.5px dashed var(--border);background:none;color:var(--primary-dark);border-radius:8px;padding:6px;font-family:inherit;font-size:0.76rem;font-weight:700;cursor:pointer;width:100%; }
+    .mrow{ display:grid;grid-template-columns:1fr auto 1fr 92px auto;gap:6px;align-items:center;margin-bottom:6px; }
+    .mrow input{ font-family:ui-monospace,monospace;direction:ltr;font-size:0.78rem; }
+    .mrow .arr{ color:var(--text-muted);font-weight:800; }
+    .mrow .mtype{ font-size:0.72rem;padding:4px; }
+    .dest-msg{ font-size:0.76rem;font-weight:700;margin-top:6px; }
     .body-wrap{ display:none; } .body-wrap.show{ display:block; }
   </style>
 </head>
@@ -139,6 +144,24 @@
           <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:0.8rem;font-weight:600;color:var(--text-secondary);">
             <input type="checkbox" id="f-allbranches" checked style="width:15px;height:15px;accent-color:var(--primary);"> يشتغل لكل الفروع
           </label>
+        </div>
+
+        <div class="ig-field" style="border-top:1px solid var(--border);padding-top:12px;">
+          <label style="font-size:0.85rem;color:var(--text-primary);">🗄️ الوجهة — تخزين في جدول (Mapping)</label>
+          <div class="ig-grid2" style="margin-top:8px;">
+            <div><label>اسم الجدول</label><input type="text" id="f-dest" class="form-input" placeholder="eplus_expenses" style="direction:ltr;font-family:ui-monospace,monospace;"></div>
+            <div><label>مفتاح التحديث (upsert)</label><input type="text" id="f-destkey" class="form-input" placeholder="doc_code,branch" style="direction:ltr;font-family:ui-monospace,monospace;"></div>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:0.8rem;font-weight:600;color:var(--text-secondary);">
+            <input type="checkbox" id="f-destbranch" checked style="width:15px;height:15px;accent-color:var(--primary);"> أضف عمود الفرع تلقائيًا
+          </label>
+          <button class="prm-add" style="margin-bottom:8px" onclick="suggestFields()"><i class="fas fa-wand-magic-sparkles"></i> جلب عيّنة واقتراح الحقول تلقائيًا</button>
+          <div id="f-map"></div>
+          <button class="prm-add" onclick="addMap()"><i class="fas fa-plus"></i> إضافة حقل</button>
+          <div style="display:flex;align-items:center;gap:8px;justify-content:flex-end;margin-top:8px;">
+            <span id="dest-msg" class="dest-msg"></span>
+            <button class="ep-btn b-edit" onclick="createDestTable()"><i class="fas fa-database"></i> إنشاء/تحديث الجدول</button>
+          </div>
         </div>
 
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px;">
@@ -341,6 +364,12 @@
       document.getElementById('f-interval').value = (e&&e.interval_minutes)||'';
       document.getElementById('f-retry').value = (e&&e.retry_minutes)||5;
       document.getElementById('f-allbranches').checked = e ? e.run_branches!==false : true;
+      document.getElementById('f-dest').value = (e&&e.dest_table)||'';
+      document.getElementById('f-destkey').value = (e&&e.dest_key)||'';
+      document.getElementById('f-destbranch').checked = e ? e.dest_add_branch!==false : true;
+      document.getElementById('dest-msg').textContent='';
+      const mc=document.getElementById('f-map'); mc.innerHTML='';
+      ((e&&Array.isArray(e.field_map)&&e.field_map)||[]).forEach(fm=>addMap(fm));
       const pc=document.getElementById('f-params'); pc.innerHTML='';
       const params = (e && Array.isArray(e.params) && e.params.length) ? e.params : [{key:'',value:'',enabled:true}];
       params.forEach(p=>addParam(p));
@@ -356,6 +385,58 @@
         mode:w.querySelector('.pmode').value
       })).filter(p=>p.key);
     }
+    // ===== ربط الحقول بجدول الوجهة (Mapping) =====
+    function mapRow(fm){ fm=fm||{src:'',dst:'',type:'text'};
+      const div=document.createElement('div'); div.className='mrow';
+      div.innerHTML=`<input type="text" class="form-input msrc" placeholder="حقل eplus" value="${esc(fm.src||'')}">
+        <span class="arr">→</span>
+        <input type="text" class="form-input mdst" placeholder="عمود الجدول" value="${esc(fm.dst||'')}">
+        <select class="form-select mtype">${['text','numeric','timestamp','date','int','bool'].map(t=>`<option ${(''+fm.type)===t?'selected':''}>${t}</option>`).join('')}</select>
+        <button class="prm-del" onclick="this.closest('.mrow').remove()"><i class="fas fa-xmark"></i></button>`;
+      return div;
+    }
+    function addMap(fm){ document.getElementById('f-map').appendChild(mapRow(fm)); }
+    function collectMap(){
+      return [...document.querySelectorAll('#f-map .mrow')].map(r=>({
+        src:r.querySelector('.msrc').value.trim(), dst:r.querySelector('.mdst').value.trim(), type:r.querySelector('.mtype').value
+      })).filter(m=>m.src&&m.dst);
+    }
+    function sanitizeCol(k){ return String(k).toLowerCase().replace(/[^a-z0-9_]/g,'_').replace(/^([0-9])/,'c$1').slice(0,40)||'col'; }
+    function guessType(v){ if(typeof v==='number')return 'numeric'; if(typeof v==='boolean')return 'bool'; if(typeof v==='string'&&/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(v))return 'timestamp'; if(typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v))return 'date'; return 'text'; }
+    async function suggestFields(){
+      const branch=document.getElementById('ig-branch').value;
+      const jwt=authToken(); if(!jwt){ alert('سجّل دخول من جديد (توكن منتهي)'); return; }
+      const method=document.getElementById('f-method').value, path=document.getElementById('f-path').value.trim();
+      const rparams=collectParams().map(p=>({key:p.key,enabled:p.enabled,value:p.mode==='expr'?resolveTemplate(p.value,{branch}):p.value}));
+      const rbody=document.getElementById('f-body').value.trim();
+      const msg=document.getElementById('dest-msg'); msg.textContent='⏳ جلب عيّنة…'; msg.style.color='var(--text-muted)';
+      try{
+        const r=await fetch(FN+'eplus_proxy',{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+jwt,'Content-Type':'application/json'},body:JSON.stringify({branch,path,method,params:rparams,body:(method!=='GET'&&rbody)?resolveTemplate(rbody,{branch}):null,preview:true,previewN:1})});
+        const j=await r.json();
+        let data=null; try{ data=JSON.parse(j.output); }catch(_){}
+        const row=data&&Array.isArray(data.Data)&&data.Data[0];
+        if(!row){ msg.textContent='مفيش بيانات في العيّنة (جرّب باراميترز)'; msg.style.color='var(--danger)'; return; }
+        document.getElementById('f-map').innerHTML='';
+        Object.keys(row).forEach(k=>addMap({src:k,dst:sanitizeCol(k),type:guessType(row[k])}));
+        msg.textContent='تم اقتراح '+Object.keys(row).length+' حقل ✓'; msg.style.color='#15803d';
+      }catch(e){ msg.textContent='فشل الجلب'; msg.style.color='var(--danger)'; }
+    }
+    async function createDestTable(){
+      const table=document.getElementById('f-dest').value.trim(), key=document.getElementById('f-destkey').value.trim();
+      const addBranch=document.getElementById('f-destbranch').checked, cols=collectMap();
+      const msg=document.getElementById('dest-msg');
+      if(!/^eplus_[a-z0-9_]+$/.test(table)){ msg.textContent='اسم الجدول لازم يبدأ بـeplus_'; msg.style.color='var(--danger)'; return; }
+      if(!cols.length){ msg.textContent='ضيف حقول الأول'; msg.style.color='var(--danger)'; return; }
+      const jwt=authToken(); if(!jwt){ alert('سجّل دخول من جديد'); return; }
+      msg.textContent='⏳ إنشاء…'; msg.style.color='var(--text-muted)';
+      try{
+        const r=await fetch(REST+'rpc/ensure_integration_table',{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+jwt,'Content-Type':'application/json'},body:JSON.stringify({p_table:table,p_columns:cols,p_key:key,p_add_branch:addBranch})});
+        const j=await r.json();
+        if(r.ok && j && j.ok){ msg.textContent='الجدول جاهز: '+j.table+' ✓'; msg.style.color='#15803d'; }
+        else { msg.textContent=(j&&(j.message||j.error))||'فشل الإنشاء'; msg.style.color='var(--danger)'; }
+      }catch(e){ msg.textContent='فشل الإنشاء'; msg.style.color='var(--danger)'; }
+    }
+
     async function saveEndpoint(){
       const id=document.getElementById('f-id').value;
       const name=document.getElementById('f-name').value.trim();
@@ -374,6 +455,10 @@
         interval_minutes:interval,
         retry_minutes:parseInt(document.getElementById('f-retry').value)||5,
         run_branches:document.getElementById('f-allbranches').checked,
+        dest_table:document.getElementById('f-dest').value.trim()||null,
+        dest_key:document.getElementById('f-destkey').value.trim()||null,
+        dest_add_branch:document.getElementById('f-destbranch').checked,
+        field_map:collectMap(),
         next_run_at: sched ? new Date().toISOString() : null,   // يبدأ قريب
         updated_at:new Date().toISOString()
       };
