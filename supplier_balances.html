@@ -455,11 +455,12 @@
       const q = (state.movFilter || '').trim().toLowerCase();
       const bf = state.movBranch || '';
       const unrev = state.movUnrev !== false;   // الافتراضي: غير المراجَعة فقط
+      const hasNote = !!state.movHasNote;
       const sf = state.movSupplier || '';
       const fr = rows.filter(x =>
         (!bf || x.branch === bf) &&
         (!sf || String(x.supplier_code || '') === sf) &&
-        (!unrev || !x.reviewed) &&
+        (hasNote ? (x.review_note && String(x.review_note).trim()) : (!unrev || !x.reviewed)) &&
         (!q || String(x.supplier_code || '').includes(q) || String(x.supplier_name || '').toLowerCase().includes(q)));
       const money = n => (Number(n) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
       const brs = [...new Set(rows.map(x => x.branch).filter(Boolean))];
@@ -474,6 +475,7 @@
           <select id="movsup"><option value="">كل الموردين</option>${sups.map(([code, name]) => `<option value="${esc(code)}" ${sf === code ? 'selected' : ''}>${esc(name)} (${esc(code)})</option>`).join('')}</select>
           <input type="text" id="movq" class="grow" placeholder="بحث سريع…" value="${esc(state.movFilter || '')}">
           <label style="display:flex;align-items:center;gap:5px;font-size:.8rem;white-space:nowrap"><input type="checkbox" id="movunrev" ${unrev ? 'checked' : ''}> غير المراجَعة فقط</label>
+          <label style="display:flex;align-items:center;gap:5px;font-size:.8rem;white-space:nowrap"><input type="checkbox" id="movhasnote" ${hasNote ? 'checked' : ''}> عليها ملاحظات</label>
         </div>`;
       if (!fr.length) { out += '<div class="empty">مفيش حركات موردين في البيانات الحالية.</div></div>'; return out; }
       out += `<div class="table-wrap"><table><thead><tr>
@@ -488,22 +490,37 @@
           <td style="font-weight:700">${money(x.value)}</td>
           <td>${esc(x.source || '')}</td>
           <td style="color:var(--muted)">${esc(x.doc_notes || '')}</td>
-          <td style="white-space:nowrap">${x.reviewed
-            ? `<span style="color:var(--green,#16a34a);font-weight:700">✓ ${esc(x.reviewed_by || '')}</span> <button data-mov-unmark data-src="${esc(x.source)}" data-doc="${esc(x.doc_code)}" data-br="${esc(x.branch)}" title="تراجع" style="border:none;background:none;color:var(--muted);cursor:pointer;font-weight:800">✕</button>`
-            : `<button class="btn ghost" data-mov-mark data-src="${esc(x.source)}" data-doc="${esc(x.doc_code)}" data-br="${esc(x.branch)}" style="padding:.25rem .7rem;font-size:.75rem">تم ✓</button>`}</td>
+          <td style="min-width:230px">
+            <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
+              <input class="movnote" data-src="${esc(x.source)}" data-doc="${esc(x.doc_code)}" data-br="${esc(x.branch)}" ${x.reviewed ? 'data-mov-note' : ''} placeholder="ملاحظة المراجع" value="${esc(x.review_note || '')}" style="flex:1 1 120px;min-width:110px;border:1px solid var(--border);border-radius:8px;padding:.35rem .5rem;font-family:inherit;font-size:.78rem;background:#fff;color:var(--text)">
+              ${x.reviewed
+                ? `<span style="color:var(--green,#16a34a);font-weight:700;white-space:nowrap;font-size:.75rem">✓ ${esc(x.reviewed_by || '')}</span> <button data-mov-unmark data-src="${esc(x.source)}" data-doc="${esc(x.doc_code)}" data-br="${esc(x.branch)}" title="تراجع" style="border:none;background:none;color:var(--muted);cursor:pointer;font-weight:800">✕</button>`
+                : `<button class="btn ghost" data-mov-mark data-src="${esc(x.source)}" data-doc="${esc(x.doc_code)}" data-br="${esc(x.branch)}" style="padding:.3rem .7rem;font-size:.75rem;white-space:nowrap">تم ✓</button>`}
+            </div>
+          </td>
         </tr>`).join('')}
       </tbody></table></div></div>`;
       return out;
     }
-    async function markMov(src, doc, br) {
+    async function markMov(src, doc, br, note) {
       try {
         await fetch(SB_URL_API + '/rest/v1/supplier_movement_reviews', {
           method: 'POST',
           headers: { apikey: SB_ANON_API, Authorization: 'Bearer ' + SB_ANON_API, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' },
-          body: JSON.stringify({ source: src, doc_code: doc, branch: br, reviewed_by: WHO, reviewed_at: new Date().toISOString() })
+          body: JSON.stringify({ source: src, doc_code: doc, branch: br, reviewed_by: WHO, reviewed_at: new Date().toISOString(), review_note: note || null })
         });
         await loadMovements(); render();
       } catch (e) { toast('فشل حفظ المراجعة', true); }
+    }
+    async function updateMovNote(src, doc, br, note) {
+      try {
+        await fetch(SB_URL_API + '/rest/v1/supplier_movement_reviews?source=eq.' + encodeURIComponent(src) + '&doc_code=eq.' + encodeURIComponent(doc) + '&branch=eq.' + encodeURIComponent(br), {
+          method: 'PATCH',
+          headers: { apikey: SB_ANON_API, Authorization: 'Bearer ' + SB_ANON_API, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+          body: JSON.stringify({ review_note: note || null })
+        });
+        await loadMovements(); render();
+      } catch (e) { toast('فشل حفظ الملاحظة', true); }
     }
     async function unmarkMov(src, doc, br) {
       try {
@@ -528,8 +545,14 @@
       if (movq) movq.oninput = e => { state.movFilter = e.target.value; const pos = e.target.selectionStart; render(); const n = document.getElementById('movq'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } };
       const movunrev = document.getElementById('movunrev');
       if (movunrev) movunrev.onchange = e => { state.movUnrev = e.target.checked; render(); };
-      document.querySelectorAll('[data-mov-mark]').forEach(el => el.onclick = () => markMov(el.dataset.src, el.dataset.doc, el.dataset.br));
+      const movhasnote = document.getElementById('movhasnote');
+      if (movhasnote) movhasnote.onchange = e => { state.movHasNote = e.target.checked; render(); };
+      document.querySelectorAll('[data-mov-mark]').forEach(el => el.onclick = () => {
+        const cell = el.closest('td'); const ni = cell && cell.querySelector('.movnote');
+        markMov(el.dataset.src, el.dataset.doc, el.dataset.br, ni ? ni.value : '');
+      });
       document.querySelectorAll('[data-mov-unmark]').forEach(el => el.onclick = () => unmarkMov(el.dataset.src, el.dataset.doc, el.dataset.br));
+      document.querySelectorAll('[data-mov-note]').forEach(el => el.onchange = () => updateMovNote(el.dataset.src, el.dataset.doc, el.dataset.br, el.value));
 
       const branch = active;
       const ta = document.getElementById('ta');
