@@ -295,10 +295,11 @@
         const n = r ? (r.changed || []).filter(x => !ex.has(String(x.code))).length + (r.added || []).filter(x => !ex.has(String(x.code))).length : 0;
         return `<button class="tab ${active === b ? 'active' : ''}" data-tab="${esc(b)}">${esc(b)}${n ? `<span class="dot">${n}</span>` : ''}</button>`;
       }).join('');
+      tabs += `<button class="tab ${active === 'mov' ? 'active' : ''}" data-tab="mov"><i class="fas fa-right-left"></i> مصروفات الموردين</button>`;
       tabs += `<button class="tab ${active === 'ex' ? 'active' : ''}" data-tab="ex">الاستثناءات<span class="dot">${state.exclusions.length}</span></button>`;
       tabs += `<button class="tab ${active === 'set' ? 'active' : ''}" data-tab="set">الإعدادات</button>`;
 
-      const body = active === 'ex' ? viewExclusions() : active === 'set' ? viewSettings()
+      const body = active === 'mov' ? viewMovements() : active === 'ex' ? viewExclusions() : active === 'set' ? viewSettings()
         : state.branches.length ? viewBranch(active)
         : '<div class="empty">مفيش فرع متاح لدورك.</div>';
 
@@ -438,12 +439,71 @@
     }
 
     // ===== ربط الأحداث =====
+    // ===== تاب مصروفات الموردين (وارد/منصرف من eplus) =====
+    async function loadMovements() {
+      try {
+        const r = await fetch(SB_URL_API + '/rest/v1/v_supplier_movements?select=*&order=doc_date.desc&limit=2000',
+          { headers: { apikey: SB_ANON_API, Authorization: 'Bearer ' + SB_ANON_API } });
+        state.movements = await r.json();
+        if (!Array.isArray(state.movements)) state.movements = [];
+      } catch (e) { state.movements = []; }
+    }
+    function viewMovements() {
+      const rows = state.movements || [];
+      const q = (state.movFilter || '').trim().toLowerCase();
+      const bf = state.movBranch || '';
+      const fr = rows.filter(x =>
+        (!bf || x.branch === bf) &&
+        (!q || String(x.supplier_code || '').includes(q) || String(x.supplier_name || '').toLowerCase().includes(q)));
+      const money = n => (Number(n) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
+      const totMon = fr.filter(x => x.direction === 'منصرف').reduce((s, x) => s + (Number(x.value) || 0), 0);
+      const totWar = fr.filter(x => x.direction === 'وارد').reduce((s, x) => s + (Number(x.value) || 0), 0);
+      const suppliers = new Set(fr.map(x => String(x.supplier_code || ''))).size;
+      const brs = [...new Set(rows.map(x => x.branch).filter(Boolean))];
+      const dt = s => s ? new Date(s).toLocaleString('ar-EG', { timeZone: 'Africa/Cairo', dateStyle: 'short', timeStyle: 'short' }) : '—';
+      let out = `<div class="card">
+        <h2><i class="fas fa-right-left"></i> مصروفات الموردين — الوارد والمنصرف</h2>
+        <p class="hint">كل الحركات اللي طرفها مورد (النوع «مورد» في eplus)، من المصروفات والتوريدات. بتتحدّث تلقائيًا من الربط بـeplus.</p>
+        <div class="chips">
+          <div class="chip c-down"><b>${money(totMon)}</b><span>إجمالي المنصرف (دفعنا للموردين)</span></div>
+          <div class="chip c-up"><b>${money(totWar)}</b><span>إجمالي الوارد (من الموردين)</span></div>
+          <div class="chip"><b>${money(totMon - totWar)}</b><span>الصافي</span></div>
+          <div class="chip"><b>${suppliers}</b><span>عدد الموردين</span></div>
+          <div class="chip"><b>${fr.length}</b><span>عدد الحركات</span></div>
+        </div>
+        <div class="row">
+          <select id="movbr"><option value="">كل الفروع</option>${brs.map(b => `<option value="${esc(b)}" ${bf === b ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select>
+          <input type="text" id="movq" class="grow" placeholder="ابحث باسم أو كود المورد…" value="${esc(state.movFilter || '')}">
+        </div>`;
+      if (!fr.length) { out += '<div class="empty">مفيش حركات موردين في البيانات الحالية.</div></div>'; return out; }
+      out += `<div class="table-wrap"><table><thead><tr>
+          <th>التاريخ</th><th>الفرع</th><th>المورد</th><th>الكود</th><th>النوع</th><th>القيمة</th><th>المصدر</th><th>ملاحظات</th>
+        </tr></thead><tbody>
+        ${fr.map(x => `<tr>
+          <td style="white-space:nowrap">${dt(x.doc_date)}</td>
+          <td>${esc(x.branch || '')}</td>
+          <td>${esc(x.supplier_name || '—')}</td>
+          <td>${esc(x.supplier_code || '')}</td>
+          <td style="font-weight:800;color:${x.direction === 'منصرف' ? 'var(--red,#dc2626)' : 'var(--green,#16a34a)'}">${esc(x.direction)}</td>
+          <td style="font-weight:700">${money(x.value)}</td>
+          <td>${esc(x.source || '')}</td>
+          <td style="color:var(--muted)">${esc(x.doc_notes || '')}</td>
+        </tr>`).join('')}
+      </tbody></table></div></div>`;
+      return out;
+    }
+
     function bind() {
       document.querySelectorAll('[data-tab]').forEach(el => el.onclick = async () => {
         active = el.dataset.tab;
         if (state.branches.includes(active) && !state.cache[active]) { await loadBranch(active); }
+        if (active === 'mov' && !state.movements) { await loadMovements(); }
         render();
       });
+      const movbr = document.getElementById('movbr');
+      if (movbr) movbr.onchange = e => { state.movBranch = e.target.value; render(); };
+      const movq = document.getElementById('movq');
+      if (movq) movq.oninput = e => { state.movFilter = e.target.value; const pos = e.target.selectionStart; render(); const n = document.getElementById('movq'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } };
 
       const branch = active;
       const ta = document.getElementById('ta');
