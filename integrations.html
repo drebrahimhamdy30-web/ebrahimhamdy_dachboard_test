@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>الربط بالمصادر (eplus) - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    :root{ --primary:#0d9488; --primary-dark:#0f766e; }
+    .container{ max-width:1100px; }
+    .ig-bar{ display:flex;flex-wrap:wrap;gap:12px;align-items:end;justify-content:space-between;margin-bottom:14px; }
+    .ig-branch{ display:flex;align-items:center;gap:8px;background:var(--surface-2);border:1.5px solid var(--border);border-radius:10px;padding:6px 12px; }
+    .ig-branch label{ font-size:0.78rem;font-weight:800;color:var(--text-secondary);margin:0; }
+    .ig-branch select{ border:none;background:none;font-family:inherit;font-weight:700;font-size:0.85rem;color:var(--primary-dark);cursor:pointer; }
+    .ig-note{ background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px;padding:11px 14px;font-size:0.8rem;color:#92400e;line-height:1.7;margin-bottom:14px; }
+    .ig-note code{ background:#fff7ed;border:1px solid #fcd9a8;border-radius:5px;padding:1px 6px;font-family:ui-monospace,monospace;direction:ltr;display:inline-block; }
+    .ep-list{ display:grid;gap:10px; }
+    .ep{ border:1px solid var(--border);border-radius:12px;background:var(--surface);overflow:hidden; }
+    .ep-head{ display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px 14px; }
+    .ep-name{ font-weight:800;font-size:0.92rem;flex:1;min-width:160px; }
+    .ep-cat{ font-size:0.68rem;font-weight:700;color:var(--primary-dark);background:var(--primary-light,#ccfbf1);border-radius:999px;padding:2px 9px; }
+    .ep-method{ font-family:ui-monospace,monospace;font-size:0.7rem;font-weight:800;border-radius:6px;padding:2px 7px;color:#fff; }
+    .m-GET{ background:#16a34a; } .m-POST{ background:#2563eb; }
+    .ep-path{ font-family:ui-monospace,monospace;font-size:0.76rem;color:var(--text-secondary);direction:ltr;unicode-bidi:isolate;word-break:break-all; }
+    .ep-actions{ display:flex;gap:6px; }
+    .ep-btn{ border:none;border-radius:8px;padding:6px 12px;font-family:inherit;font-size:0.76rem;font-weight:700;cursor:pointer; }
+    .b-test{ background:var(--primary);color:#fff; }
+    .b-edit{ background:var(--surface-3);color:var(--text-primary); }
+    .b-del{ background:none;color:var(--danger); }
+    .ep-body{ border-top:1px solid var(--surface-3);padding:0 14px;max-height:0;overflow:hidden;transition:max-height .2s; }
+    .ep-body.open{ max-height:2000px;padding:12px 14px; }
+    .res-meta{ display:flex;flex-wrap:wrap;gap:14px;font-size:0.78rem;margin-bottom:8px; }
+    .res-meta b{ font-variant-numeric:tabular-nums; }
+    .res-ok{ color:#15803d;font-weight:800; } .res-bad{ color:#b91c1c;font-weight:800; }
+    .res-out{ background:#0b1120;color:#a5f3fc;border-radius:8px;padding:12px;font-family:ui-monospace,monospace;font-size:0.72rem;line-height:1.6;direction:ltr;text-align:left;white-space:pre-wrap;word-break:break-word;max-height:360px;overflow:auto; }
+    /* modal */
+    .ig-modal-bg{ display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:9999;align-items:flex-start;justify-content:center;padding:24px 12px;overflow:auto; }
+    .ig-modal-bg.open{ display:flex; }
+    .ig-modal{ background:var(--surface);border-radius:14px;max-width:640px;width:100%;box-shadow:var(--shadow-lg); }
+    .ig-modal-hd{ padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center; }
+    .ig-modal-bd{ padding:16px; }
+    .ig-field{ margin-bottom:12px; }
+    .ig-field label{ display:block;font-size:0.76rem;font-weight:800;color:var(--text-secondary);margin-bottom:4px; }
+    .ig-grid2{ display:grid;grid-template-columns:120px 1fr;gap:10px; }
+    .prm{ display:grid;grid-template-columns:auto 1fr 1fr auto;gap:6px;align-items:center;margin-bottom:6px; }
+    .prm input[type=text]{ font-family:ui-monospace,monospace;direction:ltr; }
+    .prm-del{ border:none;background:none;color:var(--danger);cursor:pointer;font-size:0.9rem; }
+    .prm-add{ border:1.5px dashed var(--border);background:none;color:var(--primary-dark);border-radius:8px;padding:6px;font-family:inherit;font-size:0.76rem;font-weight:700;cursor:pointer;width:100%; }
+    .body-wrap{ display:none; } .body-wrap.show{ display:block; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="page-header">
+        <div class="page-title"><i class="fas fa-plug"></i> الربط بالمصادر (eplus)</div>
+        <button class="ep-btn b-test" onclick="openEdit(null)"><i class="fas fa-plus"></i> إضافة عنوان</button>
+      </div>
+
+      <div class="ig-note" id="ig-setup" style="display:none">
+        <b>لسه محتاج تظبط الأسرار مرة واحدة:</b> من لوحة Supabase → Edge Functions → <code>eplus_proxy</code> → Secrets، أضف سرًّا اسمه
+        <code>EPLUS_BRANCHES</code> بقيمة JSON فيها base وكريدنشيال كل فرع، مثلًا:<br>
+        <code>{"المعمورة":{"base":"https://eplus.ebrahimhamdy.com","basic":"user:pass"},"سان ستيفانو":{"base":"https://...","basic":"user:pass"},"سيدى بشر":{"base":"https://...","basic":"user:pass"}}</code>
+      </div>
+
+      <div class="ig-bar">
+        <div class="ig-branch">
+          <label><i class="fas fa-store"></i> الفرع (base):</label>
+          <select id="ig-branch"></select>
+        </div>
+        <div style="font-size:0.78rem;color:var(--text-muted);">المسارات ثابتة لكل الفروع · الـ base بيتغيّر حسب الفرع</div>
+      </div>
+
+      <div class="ep-list" id="ep-list"><div style="padding:20px;color:var(--text-muted);">جارٍ التحميل…</div></div>
+    </div>
+  </div>
+
+  <!-- modal تعديل/إضافة -->
+  <div class="ig-modal-bg" id="ig-modal-bg">
+    <div class="ig-modal">
+      <div class="ig-modal-hd">
+        <b id="ig-modal-title">إضافة عنوان</b>
+        <button class="ep-btn b-del" onclick="closeEdit()"><i class="fas fa-xmark"></i></button>
+      </div>
+      <div class="ig-modal-bd">
+        <input type="hidden" id="f-id">
+        <div class="ig-field"><label>الاسم</label><input type="text" id="f-name" class="form-input" placeholder="مثلاً: إمدادات الخزينة"></div>
+        <div class="ig-field ig-grid2">
+          <div><label>التصنيف</label><input type="text" id="f-cat" class="form-input" placeholder="خزينة"></div>
+          <div><label>المسار (Path)</label><input type="text" id="f-path" class="form-input" placeholder="/api/CashSupplies/SearchCashSupplies" style="font-family:ui-monospace,monospace;direction:ltr;"></div>
+        </div>
+        <div class="ig-field ig-grid2">
+          <div><label>الطريقة</label>
+            <select id="f-method" class="form-select" onchange="toggleBody()">
+              <option value="GET">GET</option><option value="POST">POST</option>
+            </select>
+          </div>
+          <div><label>ملاحظات</label><input type="text" id="f-notes" class="form-input" placeholder="اختياري"></div>
+        </div>
+        <div class="ig-field">
+          <label>الباراميترز (Query) — زي HTTP node في n8n</label>
+          <div id="f-params"></div>
+          <button class="prm-add" onclick="addParam()"><i class="fas fa-plus"></i> إضافة باراميتر</button>
+        </div>
+        <div class="ig-field body-wrap" id="f-body-wrap">
+          <label>Body (JSON) — لـ POST</label>
+          <textarea id="f-body" class="form-input" rows="4" placeholder='{"key":"value"}' style="font-family:ui-monospace,monospace;direction:ltr;"></textarea>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px;">
+          <button class="ep-btn b-edit" onclick="closeEdit()">إلغاء</button>
+          <button class="ep-btn b-test" onclick="saveEndpoint()"><i class="fas fa-save"></i> حفظ</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SB_URL='https://rxtjoqulmgkkcohmgzgi.supabase.co';
+    const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
+    const REST=SB_URL+'/rest/v1/';
+    const FN=SB_URL+'/functions/v1/';
+    const H={ apikey:SB_KEY, Authorization:'Bearer '+SB_KEY, 'Content-Type':'application/json' };
+    const BRANCHES=['المعمورة','سان ستيفانو','سيدى بشر'];
+    const ROLE=(localStorage.getItem('userRole')||'').toLowerCase();
+    const IS_ADMIN = ROLE==='admin';
+    let EPS=[];
+
+    function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function authToken(){
+      const j=localStorage.getItem('authJwt');
+      if(!j) return null;
+      try{ const p=JSON.parse(atob(j.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); if(p.exp*1000>Date.now()+30000) return j; }catch(e){}
+      return null;
+    }
+
+    // ===== تحميل + عرض العناوين =====
+    async function load(){
+      try{
+        const r=await fetch(REST+'integration_endpoints?select=*&order=sort_order.asc,id.asc',{headers:H});
+        EPS=await r.json(); if(!Array.isArray(EPS)) EPS=[];
+      }catch(e){ EPS=[]; }
+      render();
+    }
+    function render(){
+      const box=document.getElementById('ep-list');
+      if(!EPS.length){ box.innerHTML='<div style="padding:20px;color:var(--text-muted);text-align:center;">لا توجد عناوين — أضف أول عنوان.</div>'; return; }
+      box.innerHTML=EPS.map(e=>{
+        const m=(e.method||'GET').toUpperCase();
+        return `<div class="ep" id="ep-${e.id}">
+          <div class="ep-head">
+            <span class="ep-method m-${m}">${m}</span>
+            <span class="ep-name">${esc(e.name)}</span>
+            ${e.category?`<span class="ep-cat">${esc(e.category)}</span>`:''}
+            <span class="ep-path">${esc(e.path)}</span>
+            <span class="ep-actions">
+              <button class="ep-btn b-test" onclick="runTest(${e.id})"><i class="fas fa-play"></i> اختبار</button>
+              ${IS_ADMIN?`<button class="ep-btn b-edit" onclick="openEdit(${e.id})">تعديل</button>
+              <button class="ep-btn b-del" onclick="delEndpoint(${e.id})"><i class="fas fa-trash-can"></i></button>`:''}
+            </span>
+          </div>
+          <div class="ep-body" id="epb-${e.id}"></div>
+        </div>`;
+      }).join('');
+    }
+
+    // ===== اختبار عبر eplus_proxy =====
+    async function runTest(id){
+      const e=EPS.find(x=>x.id===id); if(!e) return;
+      const branch=document.getElementById('ig-branch').value;
+      const bodyEl=document.getElementById('epb-'+id); bodyEl.classList.add('open');
+      bodyEl.innerHTML='<div style="color:var(--text-muted);font-size:0.8rem;padding:6px 0;"><i class="fas fa-spinner fa-spin"></i> جارٍ الاستدعاء لفرع '+esc(branch)+'…</div>';
+      const jwt=authToken();
+      if(!jwt){ bodyEl.innerHTML='<div class="res-bad" style="font-size:0.82rem;">لازم تسجّل دخول من جديد (توكن منتهي) — الدالة بتتطلب موظف مسجّل.</div>'; return; }
+      try{
+        const r=await fetch(FN+'eplus_proxy',{
+          method:'POST',
+          headers:{ apikey:SB_KEY, Authorization:'Bearer '+jwt, 'Content-Type':'application/json' },
+          body:JSON.stringify({ branch, path:e.path, method:(e.method||'GET'), params:e.params||[], body:e.body||null, preview:true, previewN:50 })
+        });
+        const j=await r.json();
+        if(j && j.error==='secret_not_set'){ document.getElementById('ig-setup').style.display='block'; }
+        renderResult(bodyEl, j, e, branch);
+      }catch(err){ bodyEl.innerHTML='<div class="res-bad" style="font-size:0.82rem;">فشل الاتصال: '+esc(err.message)+'</div>'; }
+    }
+    function renderResult(box, j, e, branch){
+      if(!j){ box.innerHTML='<div class="res-bad">لا يوجد رد</div>'; return; }
+      const okCls=j.ok?'res-ok':'res-bad';
+      let meta=`<div class="res-meta">
+        <span class="${okCls}">${j.ok?'نجح ✓':'فشل ✕'} ${j.status?('· '+j.status):''}</span>
+        ${j.branch?`<span>الفرع: <b>${esc(j.branch)}</b></span>`:''}
+        ${j.time_ms!=null?`<span>الزمن: <b>${(j.time_ms/1000).toFixed(2)}s</b></span>`:''}
+        ${j.all_records!=null?`<span>إجمالي السجلات: <b>${Number(j.all_records).toLocaleString('en')}</b></span>`:''}
+        ${j.returned!=null?`<span>معروض (عيّنة): <b>${j.returned}</b></span>`:''}
+        ${j.size_bytes!=null?`<span>الحجم: <b>${(j.size_bytes/1024).toFixed(0)} KB</b></span>`:''}
+      </div>`;
+      let out = j.output!=null ? j.output : JSON.stringify(j,null,2);
+      try{ out=JSON.stringify(JSON.parse(out),null,2); }catch(_){}
+      box.innerHTML=meta+'<div class="res-out">'+esc(out)+'</div>';
+      // حفظ عيّنة + آخر اختبار (best-effort)
+      if(j.ok && IS_ADMIN){
+        fetch(REST+'integration_endpoints?id=eq.'+e.id,{ method:'PATCH', headers:{...H,Prefer:'return=minimal'},
+          body:JSON.stringify({ all_records:j.all_records??null, last_tested_at:new Date().toISOString() }) }).catch(()=>{});
+      }
+    }
+
+    // ===== إضافة/تعديل =====
+    function paramRow(p){ p=p||{key:'',value:'',enabled:true};
+      const div=document.createElement('div'); div.className='prm';
+      div.innerHTML=`<input type="checkbox" ${p.enabled!==false?'checked':''} title="مفعّل">
+        <input type="text" class="form-input pk" placeholder="key" value="${esc(p.key||'')}">
+        <input type="text" class="form-input pv" placeholder="value" value="${esc(p.value||'')}">
+        <button class="prm-del" onclick="this.parentElement.remove()"><i class="fas fa-xmark"></i></button>`;
+      return div;
+    }
+    function addParam(p){ document.getElementById('f-params').appendChild(paramRow(p)); }
+    function toggleBody(){ document.getElementById('f-body-wrap').classList.toggle('show', document.getElementById('f-method').value==='POST'); }
+    function openEdit(id){
+      const e = id!=null ? EPS.find(x=>x.id===id) : null;
+      document.getElementById('ig-modal-title').textContent = e?'تعديل عنوان':'إضافة عنوان';
+      document.getElementById('f-id').value = e?e.id:'';
+      document.getElementById('f-name').value = e?e.name:'';
+      document.getElementById('f-cat').value = e?(e.category||''):'';
+      document.getElementById('f-path').value = e?e.path:'';
+      document.getElementById('f-method').value = e?(e.method||'GET'):'GET';
+      document.getElementById('f-notes').value = e?(e.notes||''):'';
+      document.getElementById('f-body').value = e?(e.body||''):'';
+      const pc=document.getElementById('f-params'); pc.innerHTML='';
+      const params = (e && Array.isArray(e.params) && e.params.length) ? e.params : [{key:'',value:'',enabled:true}];
+      params.forEach(p=>addParam(p));
+      toggleBody();
+      document.getElementById('ig-modal-bg').classList.add('open');
+    }
+    function closeEdit(){ document.getElementById('ig-modal-bg').classList.remove('open'); }
+    function collectParams(){
+      return [...document.querySelectorAll('#f-params .prm')].map(r=>({
+        key:r.querySelector('.pk').value.trim(),
+        value:r.querySelector('.pv').value,
+        enabled:r.querySelector('input[type=checkbox]').checked
+      })).filter(p=>p.key);
+    }
+    async function saveEndpoint(){
+      const id=document.getElementById('f-id').value;
+      const name=document.getElementById('f-name').value.trim();
+      const path=document.getElementById('f-path').value.trim();
+      if(!name){ alert('اكتب الاسم'); return; }
+      if(!path.startsWith('/')){ alert('المسار لازم يبدأ بـ /'); return; }
+      const payload={
+        name, category:document.getElementById('f-cat').value.trim()||null,
+        path, method:document.getElementById('f-method').value,
+        params:collectParams(),
+        body:document.getElementById('f-method').value==='POST' ? (document.getElementById('f-body').value.trim()||null) : null,
+        notes:document.getElementById('f-notes').value.trim()||null,
+        updated_at:new Date().toISOString()
+      };
+      try{
+        if(id){ await fetch(REST+'integration_endpoints?id=eq.'+id,{method:'PATCH',headers:{...H,Prefer:'return=minimal'},body:JSON.stringify(payload)}); }
+        else  { await fetch(REST+'integration_endpoints',{method:'POST',headers:{...H,Prefer:'return=minimal'},body:JSON.stringify(payload)}); }
+        closeEdit(); await load();
+      }catch(e){ alert('فشل الحفظ'); }
+    }
+    async function delEndpoint(id){
+      if(!confirm('تأكيد حذف العنوان؟')) return;
+      try{ await fetch(REST+'integration_endpoints?id=eq.'+id,{method:'DELETE',headers:H}); await load(); }catch(e){ alert('فشل الحذف'); }
+    }
+
+    // ===== init =====
+    (function(){
+      const bs=document.getElementById('ig-branch');
+      const ub=(localStorage.getItem('userBranch')||'').trim();
+      bs.innerHTML=BRANCHES.map(b=>`<option value="${b}" ${b===ub?'selected':''}>${b}</option>`).join('');
+      if(!IS_ADMIN){ const a=document.querySelector('.page-header .b-test'); if(a) a.style.display='none'; }
+      load();
+    })();
+  </script>
+</body>
+</html>
