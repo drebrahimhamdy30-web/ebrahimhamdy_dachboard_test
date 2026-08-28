@@ -116,11 +116,11 @@
           <div><label>ملاحظات</label><input type="text" id="f-notes" class="form-input" placeholder="اختياري"></div>
         </div>
         <div class="ig-field">
-          <label>الباراميترز — كل قيمة: <b>ثابت</b> أو <b>تعبير</b> (زي n8n)</label>
+          <label>Parameters — كل قيمة <b>Fixed</b> أو <b>Expression</b> (زي n8n HTTP node)</label>
           <div id="f-params"></div>
           <button class="prm-add" onclick="addParam()"><i class="fas fa-plus"></i> إضافة باراميتر</button>
           <div class="expr-help">
-            في وضع «تعبير» استخدم <code>{{ }}</code> بنمط n8n · أمثلة:
+            في وضع «Expression» استخدم <code>{{ }}</code> بنمط n8n · أمثلة:
             <code>{{ $now.format('yyyy-MM-dd HH:mm:ss') }}</code>
             <code>{{ $now.minus({day:1}).format('yyyy-MM-dd HH:mm:ss') }}</code>
             <code>{{ $today.format('yyyy-MM-dd') }}</code>
@@ -140,6 +140,10 @@
           <div class="ig-grid2" style="margin-top:8px;">
             <div><label>يشتغل كل (دقيقة)</label><input type="number" id="f-interval" class="form-input" min="1" placeholder="60"></div>
             <div><label>عند الفشل يعيد كل (دقيقة)</label><input type="number" id="f-retry" class="form-input" min="1" value="5"></div>
+          </div>
+          <div style="margin-top:8px;">
+            <label>أو يوميًا الساعة (بتوقيت القاهرة — يتجاوز «كل X دقيقة»)</label>
+            <input type="time" id="f-dailyat" class="form-input" style="max-width:160px">
           </div>
           <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:0.8rem;font-weight:600;color:var(--text-secondary);">
             <input type="checkbox" id="f-allbranches" checked style="width:15px;height:15px;accent-color:var(--primary);"> يشتغل لكل الفروع
@@ -253,7 +257,7 @@
     function fmtDT(s){ return s ? new Date(s).toLocaleString('ar-EG',{timeZone:'Africa/Cairo',hour12:true,dateStyle:'short',timeStyle:'short'}) : '—'; }
     function schedHtml(e){
       const on=e.sched_enabled;
-      const chip = on ? `<span class="sc-on">⏱️ مجدول كل ${e.interval_minutes||'?'} د</span>` : `<span class="sc-off">موقوف</span>`;
+      const chip = on ? `<span class="sc-on">⏱️ ${e.daily_at ? ('يوميًا الساعة '+e.daily_at) : ('مجدول كل '+(e.interval_minutes||'?')+' د')}</span>` : `<span class="sc-off">موقوف</span>`;
       const last = e.last_status
         ? (e.last_status==='success'
             ? `<span class="sc-ok">آخر سحبة ✓ ${fmtDT(e.last_run_at)}</span>`
@@ -341,9 +345,9 @@
       const wrap=document.createElement('div'); wrap.className='prm-wrap';
       wrap.innerHTML=`<div class="prm">
         <input type="checkbox" ${p.enabled!==false?'checked':''} title="مفعّل">
-        <input type="text" class="form-input pk" placeholder="key" value="${esc(p.key||'')}">
-        <input type="text" class="form-input pv ${isE?'is-expr':''}" placeholder="${isE?"{{ $now.format('yyyy-MM-dd') }}":'value'}" value="${esc(p.value||'')}" oninput="prmPrev(this)">
-        <select class="form-select pmode" onchange="prmMode(this)"><option value="fixed" ${!isE?'selected':''}>ثابت</option><option value="expr" ${isE?'selected':''}>تعبير</option></select>
+        <input type="text" class="form-input pk" placeholder="Name" style="direction:ltr" value="${esc(p.key||'')}">
+        <input type="text" class="form-input pv ${isE?'is-expr':''}" style="direction:ltr" placeholder="${isE?"{{ $now.format('yyyy-MM-dd') }}":'Value'}" value="${esc(p.value||'')}" oninput="prmPrev(this)">
+        <select class="form-select pmode" onchange="prmMode(this)"><option value="fixed" ${!isE?'selected':''}>Fixed</option><option value="expr" ${isE?'selected':''}>Expression</option></select>
         <button class="prm-del" onclick="this.closest('.prm-wrap').remove()"><i class="fas fa-xmark"></i></button>
       </div>
       <div class="prm-prev"${isE?'':' style="display:none"'}></div>`;
@@ -353,7 +357,7 @@
     function prmMode(sel){
       const wrap=sel.closest('.prm-wrap'), pv=wrap.querySelector('.pv'), prev=wrap.querySelector('.prm-prev'), isE=sel.value==='expr';
       pv.classList.toggle('is-expr',isE);
-      pv.placeholder = isE ? "{{ $now.format('yyyy-MM-dd') }}" : 'value';
+      pv.placeholder = isE ? "{{ $now.format('yyyy-MM-dd') }}" : 'Value';
       prev.style.display = isE ? '' : 'none';
       if(isE) prmPrev(pv);
     }
@@ -379,6 +383,7 @@
       document.getElementById('f-body').value = e?(e.body||''):'';
       document.getElementById('f-sched').checked = !!(e&&e.sched_enabled);
       document.getElementById('f-interval').value = (e&&e.interval_minutes)||'';
+      document.getElementById('f-dailyat').value = (e&&e.daily_at)||'';
       document.getElementById('f-retry').value = (e&&e.retry_minutes)||5;
       document.getElementById('f-allbranches').checked = e ? e.run_branches!==false : true;
       document.getElementById('f-dest').value = (e&&e.dest_table)||'';
@@ -461,7 +466,8 @@
       if(!name){ alert('اكتب الاسم'); return; }
       if(!path.startsWith('/')){ alert('المسار لازم يبدأ بـ /'); return; }
       const sched=document.getElementById('f-sched').checked;
-      const interval=parseInt(document.getElementById('f-interval').value)||null;
+      const dailyAt=document.getElementById('f-dailyat').value||null;
+      const interval=dailyAt?null:(parseInt(document.getElementById('f-interval').value)||null);
       const payload={
         name, category:document.getElementById('f-cat').value.trim()||null,
         path, method:document.getElementById('f-method').value,
@@ -470,6 +476,7 @@
         notes:document.getElementById('f-notes').value.trim()||null,
         sched_enabled:sched,
         interval_minutes:interval,
+        daily_at:dailyAt,
         retry_minutes:parseInt(document.getElementById('f-retry').value)||5,
         run_branches:document.getElementById('f-allbranches').checked,
         dest_table:document.getElementById('f-dest').value.trim()||null,
