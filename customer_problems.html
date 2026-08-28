@@ -51,7 +51,10 @@
       </div>
       <div class="ins-note">قاعدة تعليمات للموظفين مقسّمة بالأقسام. أي مشكلة بتقابلنا بنحوّلها لتعليمة واضحة هنا يقرأها الموظف المختص.</div>
 
-      <div class="ins-bar"><input type="text" class="q" id="q" placeholder="🔍 بحث في كل التعليمات…"></div>
+      <div class="ins-bar">
+        <input type="text" class="q" id="q" placeholder="🔍 بحث في كل التعليمات…">
+        <button class="btn ghost" onclick="exportPdf()"><i class="fas fa-file-pdf"></i> تصدير PDF للقسم</button>
+      </div>
       <div class="cats" id="cats"></div>
       <div id="list"><div class="empty"><i class="fas fa-spinner fa-spin"></i> جارٍ التحميل…</div></div>
     </div>
@@ -91,7 +94,7 @@
 
     async function load(){
       try{
-        const r = await fetch(REST + 'instructions?select=*&order=pinned.desc,sort_order.asc,id.desc', { headers: H });
+        const r = await fetch(REST + 'instructions?select=*&order=pinned.desc,created_at.desc', { headers: H });
         INS = await r.json(); if(!Array.isArray(INS)) INS = [];
       }catch(e){ INS = []; }
       renderCats(); render();
@@ -165,6 +168,26 @@
     }
     async function togglePin(id,on){
       try{ await fetch(REST+'instructions?id=eq.'+id, { method:'PATCH', headers:{...H,Prefer:'return=minimal'}, body: JSON.stringify({ pinned: !!on }) }); await load(); }catch(e){}
+    }
+
+    function exportPdf(){
+      const rows = INS.filter(x=>x.category===CAT);
+      if(!rows.length){ alert('مفيش تعليمات في القسم ده'); return; }
+      const html = `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8"><title>تعليمات ${esc(CAT)}</title>
+        <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;800&display=swap" rel="stylesheet">
+        <style>@page{margin:16mm} *{box-sizing:border-box} body{font-family:'Cairo',sans-serif;color:#111;margin:0}
+          h1{font-size:22px;color:#0f766e;border-bottom:2.5px solid #0d9488;padding-bottom:10px;margin:0 0 6px}
+          .sub{font-size:11px;color:#888;margin-bottom:16px}
+          .ins{margin:0 0 15px;padding:0 0 13px;border-bottom:1px dashed #ddd;page-break-inside:avoid}
+          .t{font-weight:800;font-size:15px} .b{white-space:pre-wrap;line-height:1.9;font-size:13px;margin-top:5px}
+          .m{font-size:10px;color:#999;margin-top:6px}</style></head>
+        <body><h1>تعليمات — ${esc(CAT)}</h1>
+        <div class="sub">عدد التعليمات: ${rows.length} · ${new Date().toLocaleDateString('ar-EG',{timeZone:'Africa/Cairo'})}</div>
+        ${rows.map(x=>`<div class="ins"><div class="t">${x.pinned?'📌 ':''}${esc(x.title)}</div>${x.body?`<div class="b">${esc(x.body)}</div>`:''}<div class="m">${esc(x.updated_by||x.created_by||'')} · ${dt(x.updated_at||x.created_at)}</div></div>`).join('')}
+        <scr`+`ipt>window.onload=function(){setTimeout(function(){window.print();},350);};</scr`+`ipt></body></html>`;
+      const w = window.open('','_blank');
+      if(!w){ alert('اسمح بالنوافذ المنبثقة عشان يطلع الـPDF'); return; }
+      w.document.write(html); w.document.close();
     }
 
     (async function(){
