@@ -253,6 +253,11 @@
                 <span class="filter-label">الرصيد الزائد ≥ <span class="help-ic">؟<span class="tip">لا يعرض إلا الأصناف التي فائضها هذا الرقم على الأقل.</span></span></span>
                 <input type="number" id="over-min" value="1" min="0" step="1" style="width:auto;min-width:90px" oninput="renderOverstock()">
               </div>
+              <div class="mini-field auto">
+                <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;font-weight:600;cursor:pointer;margin-top:20px;white-space:nowrap">
+                  <input type="checkbox" id="over-showex" onchange="renderOverstock()"> إظهار المستثناة <span id="over-ex-count" style="color:var(--text-muted)"></span>
+                </label>
+              </div>
             </div>
 
             <div class="settings-strip" id="lookup-config-wrap" style="display:none;">
@@ -1094,6 +1099,29 @@
     const OVER_PAGE = 50;
     var overPage = 1;
     var overResults = [];
+    var overExcl = null;   // Set أكواد الأصناف المستثناة
+
+    async function loadOverExcl(){
+      if(overExcl) return;
+      overExcl = new Set();
+      try{
+        var r = await fetch(SB_URL_API+'/rest/v1/overstock_exclusions?select=code', { headers:{ apikey:SB_ANON_API, Authorization:'Bearer '+SB_ANON_API } });
+        var j = await r.json(); (Array.isArray(j)?j:[]).forEach(function(x){ overExcl.add(String(x.code)); });
+      }catch(e){}
+    }
+    async function excludeItem(code){
+      var row = (overResults||[]).find(function(r){ return String(r.code)===String(code); });
+      try{
+        await fetch(SB_URL_API+'/rest/v1/overstock_exclusions', { method:'POST', headers:{ apikey:SB_ANON_API, Authorization:'Bearer '+SB_ANON_API, 'Content-Type':'application/json', Prefer:'resolution=merge-duplicates' }, body: JSON.stringify({ code:String(code), note:(row&&row.name)||null, created_by:(localStorage.getItem('fullName')||localStorage.getItem('activeUser')||'') }) });
+        overExcl.add(String(code)); renderOverstock();
+      }catch(e){ alert('فشل استثناء الصنف'); }
+    }
+    async function unexcludeItem(code){
+      try{
+        await fetch(SB_URL_API+'/rest/v1/overstock_exclusions?code=eq.'+encodeURIComponent(code), { method:'DELETE', headers:{ apikey:SB_ANON_API, Authorization:'Bearer '+SB_ANON_API } });
+        overExcl.delete(String(code)); renderOverstock();
+      }catch(e){ alert('فشل إلغاء الاستثناء'); }
+    }
 
     async function renderOverstock(){
       var cont = document.getElementById('result-container');
@@ -1102,6 +1130,7 @@
         var ok = await loadStockData(true);
         if(!ok){ cont.innerHTML='<div class="loading-overlay" style="color:var(--danger)">❌ فشل تحميل المخزون</div>'; return; }
       }
+      await loadOverExcl();
       var days  = parseFloat(document.getElementById('over-days').value)||120;
       var scope = document.getElementById('over-scope').value;
       var minEx = parseFloat(document.getElementById('over-min').value)||0;
@@ -1122,6 +1151,10 @@
         if(excess < minEx || excess <= 0) return;
         rows.push({code:code, name:it.name, avg:avg, required:required, stock:stock, excess:excess, price:price, exVal:excess*price});
       });
+      var showEx = document.getElementById('over-showex') && document.getElementById('over-showex').checked;
+      rows.forEach(function(r){ r.excluded = overExcl.has(String(r.code)); });
+      var exCountEl = document.getElementById('over-ex-count'); if(exCountEl) exCountEl.textContent = overExcl.size ? '('+overExcl.size+')' : '';
+      if(!showEx) rows = rows.filter(function(r){ return !r.excluded; });
       rows.sort(function(a,b){ return b.excess - a.excess; });
       overResults = rows;
       renderOverstockTable();
@@ -1146,13 +1179,13 @@
         '<div class="summary-item">إجمالي الرصيد الزائد: <b>'+Math.round(totExcess)+'</b></div>'+
         '<div class="summary-item">قيمة الزائد: <b>'+Math.round(totExVal).toLocaleString('en-US')+'</b> ج</div>'+
         '<div class="summary-item">النطاق: <b>'+scopeLbl+'</b></div></div>';
-      html += '<div class="res-wrap"><table class="res-table" style="min-width:820px"><thead><tr>'+
+      html += '<div class="res-wrap"><table class="res-table" style="min-width:920px"><thead><tr>'+
         '<th style="text-align:right">الصنف</th><th>كود الصنف</th><th>معدل الاستهلاك (شهري)</th>'+
         '<th>كمية التوفير المطلوبة</th><th>إجمالي الرصيد</th><th>الرصيد الزائد</th>'+
-        '<th>سعر البيع</th><th>قيمة الزائد</th></tr></thead><tbody>';
+        '<th>سعر البيع</th><th>قيمة الزائد</th><th>إجراء</th></tr></thead><tbody>';
       pageRows.forEach(function(r){
-        html += '<tr>'+
-          '<td class="name-cell" style="text-align:right"><b>'+(r.name||'—')+'</b></td>'+
+        html += '<tr'+(r.excluded?' style="opacity:.55"':'')+'>'+
+          '<td class="name-cell" style="text-align:right"><b>'+(r.name||'—')+'</b>'+(r.excluded?' <span style="font-size:0.68rem;color:var(--text-muted)">(مستثنى)</span>':'')+'</td>'+
           '<td><code style="font-size:0.8rem;color:var(--text-secondary)">'+r.code+'</code></td>'+
           '<td>'+r1(r.avg)+'</td>'+
           '<td>'+Math.round(r.required)+'</td>'+
@@ -1160,6 +1193,10 @@
           '<td style="font-weight:800;color:var(--danger)">'+Math.round(r.excess)+'</td>'+
           '<td>'+r1(r.price)+'</td>'+
           '<td style="font-weight:700;color:var(--accent-dark)">'+Math.round(r.exVal).toLocaleString('en-US')+'</td>'+
+          '<td style="text-align:center">'+(r.excluded
+            ? '<button onclick="unexcludeItem(\''+r.code+'\')" style="border:1px solid var(--border);background:#fff;color:var(--accent-dark);border-radius:7px;padding:2px 10px;font-family:inherit;font-size:0.72rem;font-weight:700;cursor:pointer">إلغاء الاستثناء</button>'
+            : '<button onclick="excludeItem(\''+r.code+'\')" style="border:none;background:#fee2e2;color:#b91c1c;border-radius:7px;padding:2px 10px;font-family:inherit;font-size:0.72rem;font-weight:700;cursor:pointer">استثناء</button>')+
+          '</td>'+
         '</tr>';
       });
       html += '</tbody></table></div>';
