@@ -138,11 +138,20 @@
             <input type="checkbox" id="f-sched" style="width:16px;height:16px;accent-color:var(--primary);"> ⏱️ تشغيل تلقائي مجدول
           </label>
           <div class="ig-grid2" style="margin-top:8px;">
-            <div><label>يشتغل كل (دقيقة)</label><input type="number" id="f-interval" class="form-input" min="1" placeholder="60"></div>
+            <div><label>نوع الجدولة</label>
+              <select id="f-sched-type" class="form-select" onchange="schedTypeChange()">
+                <option value="interval">كل فترة محددة</option>
+                <option value="daily">يوميًا في وقت محدد</option>
+              </select>
+            </div>
             <div><label>عند الفشل يعيد كل (دقيقة)</label><input type="number" id="f-retry" class="form-input" min="1" value="5"></div>
           </div>
-          <div style="margin-top:8px;">
-            <label>أو يوميًا الساعة (بتوقيت القاهرة — يتجاوز «كل X دقيقة»)</label>
+          <div id="f-interval-wrap" style="margin-top:8px;">
+            <label>يشتغل كل (دقيقة)</label>
+            <input type="number" id="f-interval" class="form-input" min="1" placeholder="60" style="max-width:160px">
+          </div>
+          <div id="f-daily-wrap" style="margin-top:8px;display:none;">
+            <label>الساعة يوميًا (بتوقيت القاهرة)</label>
             <input type="time" id="f-dailyat" class="form-input" style="max-width:160px">
           </div>
           <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:0.8rem;font-weight:600;color:var(--text-secondary);">
@@ -371,6 +380,11 @@
       catch(e){ prev.classList.add('err'); prev.textContent='خطأ في التعبير'; }
     }
     function toggleBody(){ const m=document.getElementById('f-method').value; document.getElementById('f-body-wrap').classList.toggle('show', m==='POST'||m==='PATCH'); }
+    function schedTypeChange(){
+      const t=document.getElementById('f-sched-type').value;
+      document.getElementById('f-interval-wrap').style.display = t==='interval' ? '' : 'none';
+      document.getElementById('f-daily-wrap').style.display = t==='daily' ? '' : 'none';
+    }
     function openEdit(id){
       const e = id!=null ? EPS.find(x=>x.id===id) : null;
       document.getElementById('ig-modal-title').textContent = e?'تعديل عنوان':'إضافة عنوان';
@@ -385,6 +399,8 @@
       document.getElementById('f-interval').value = (e&&e.interval_minutes)||'';
       document.getElementById('f-dailyat').value = (e&&e.daily_at)||'';
       document.getElementById('f-retry').value = (e&&e.retry_minutes)||5;
+      document.getElementById('f-sched-type').value = (e&&e.daily_at) ? 'daily' : 'interval';
+      schedTypeChange();
       document.getElementById('f-allbranches').checked = e ? e.run_branches!==false : true;
       document.getElementById('f-dest').value = (e&&e.dest_table)||'';
       document.getElementById('f-destkey').value = (e&&e.dest_key)||'';
@@ -466,8 +482,9 @@
       if(!name){ alert('اكتب الاسم'); return; }
       if(!path.startsWith('/')){ alert('المسار لازم يبدأ بـ /'); return; }
       const sched=document.getElementById('f-sched').checked;
-      const dailyAt=document.getElementById('f-dailyat').value||null;
-      const interval=dailyAt?null:(parseInt(document.getElementById('f-interval').value)||null);
+      const schedType=document.getElementById('f-sched-type').value;
+      const dailyAt=schedType==='daily' ? (document.getElementById('f-dailyat').value||null) : null;
+      const interval=schedType==='interval' ? (parseInt(document.getElementById('f-interval').value)||null) : null;
       const payload={
         name, category:document.getElementById('f-cat').value.trim()||null,
         path, method:document.getElementById('f-method').value,
