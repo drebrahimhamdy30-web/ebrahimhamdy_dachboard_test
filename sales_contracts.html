@@ -6,11 +6,26 @@
   <title>فواتير التعاقد - Phalix</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    .sc-tab { padding:9px 18px; border:none; background:none; font-family:var(--font,inherit); font-size:0.9rem; font-weight:700; color:var(--text-secondary); cursor:pointer; border-bottom:3px solid transparent; margin-bottom:-2px; }
+    .sc-tab.active { color:var(--primary-dark,#0f766e); border-bottom-color:var(--primary,#0d9488); }
+    .sc-tabs { display:flex; gap:6px; border-bottom:2px solid var(--border); margin-bottom:16px; flex-wrap:wrap; }
+    .sc-pick-item { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 11px; border:1px solid var(--border); border-radius:8px; margin-bottom:7px; background:var(--surface); }
+    .sc-pick-item.best { border-color:#0d9488; background:#f0fdfa; }
+    .sc-mini { font-size:.72rem; color:var(--text-muted); }
+    .sc-badge-ok { background:#dcfce7; color:#15803d; border-radius:20px; padding:2px 9px; font-size:.72rem; font-weight:800; }
+  </style>
 </head>
 <body>
   <div class="nav-bar"></div>
   <div class="container">
     <div class="card">
+      <div class="sc-tabs">
+        <button class="sc-tab active" id="tab-btn-invoices" onclick="scTab('invoices')">📄 الفواتير</button>
+        <button class="sc-tab" id="tab-btn-returns" onclick="scTab('returns')">🔄 مرتجعات التعاقد</button>
+      </div>
+
+      <div id="pane-invoices">
       <div class="page-header">
         <div class="page-title">
           <i class="fas fa-file-invoice"></i> فواتير التعاقد
@@ -65,6 +80,48 @@
         </table>
       </div>
       <div id="pager" style="margin-top:14px"></div>
+      </div><!-- /pane-invoices -->
+
+      <div id="pane-returns" style="display:none;">
+        <div class="page-header">
+          <div class="page-title"><i class="fas fa-rotate-left"></i> مرتجعات التعاقد</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <span id="ret-stats" class="sc-mini"></span>
+            <div class="field-icon-wrap" style="min-width:220px;">
+              <i class="fas fa-search field-icon"></i>
+              <input type="text" id="ret-search" class="form-input" placeholder="بحث برقم المرتجع أو العميل..." oninput="retPage=1; renderReturns()" style="padding-right:34px;">
+            </div>
+            <select id="ret-filter" class="form-select" style="width:auto;" onchange="retPage=1; renderReturns()">
+              <option value="unmatched">بدون فاتورة</option>
+              <option value="all">الكل</option>
+              <option value="matched">تم ربطها</option>
+            </select>
+            <button class="btn btn-primary" onclick="loadReturns()"><i class="fas fa-sync-alt"></i> تحديث</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>رقم المرتجع</th><th>التاريخ</th><th>كود العميل</th><th>اسم العميل</th><th>الفرع</th><th>القيمة</th><th>أصناف</th><th>الفاتورة المقابلة</th><th>إجراء</th>
+            </tr></thead>
+            <tbody id="ret-body"><tr class="loading-row"><td colspan="9">⏳ اضغط التبويب لتحميل المرتجعات...</td></tr></tbody>
+          </table>
+        </div>
+        <div id="ret-pager" style="margin-top:14px"></div>
+      </div><!-- /pane-returns -->
+    </div>
+  </div>
+
+  <!-- Modal اختيار فاتورة البيع المقابلة للمرتجع -->
+  <div id="picker-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:99999;align-items:center;justify-content:center;padding:16px;">
+    <div class="card" style="width:100%;max-width:660px;max-height:92vh;overflow:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <b id="pick-title">اختر فاتورة البيع المقابلة</b>
+        <button class="btn" style="background:var(--surface-3)" onclick="closePicker()">✕</button>
+      </div>
+      <div id="pick-ret-info" class="sc-mini" style="margin-bottom:10px;line-height:1.7;"></div>
+      <input type="text" id="pick-search" class="form-input" placeholder="بحث برقم الفاتورة أو الاسم..." style="margin-bottom:12px;">
+      <div id="pick-list"><div class="sc-mini">⏳ جاري التحميل...</div></div>
     </div>
   </div>
 
@@ -261,6 +318,163 @@
         const r = await fetch(CI_URL+'?id=eq.'+encodeURIComponent(p.id), {method:'PATCH', headers:CI_HW, body:JSON.stringify(patch)});
         return r.ok;
       }catch(e){ return false; }
+    }
+
+    // ===== مرتجعات التعاقد =====
+    const RPC = SB_URL_CI + '/rest/v1/rpc/';
+    let RETURNS = [], retPage = 1; const RET_PAGE_SIZE = 30;
+    let retsLoaded = false, pickCurrent = null, pickTimer = null;
+
+    function scTab(which){
+      const inv = which === 'invoices';
+      document.getElementById('pane-invoices').style.display = inv ? '' : 'none';
+      document.getElementById('pane-returns').style.display  = inv ? 'none' : '';
+      document.getElementById('tab-btn-invoices').classList.toggle('active', inv);
+      document.getElementById('tab-btn-returns').classList.toggle('active', !inv);
+      if (!inv && !retsLoaded) loadReturns();
+    }
+    function retEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function retFmtDate(s){ if(!s) return '—'; const d=new Date(s); return d.toLocaleDateString('ar-EG',{timeZone:'Africa/Cairo',day:'numeric',month:'numeric',year:'numeric'})+' '+d.toLocaleTimeString('ar-EG',{timeZone:'Africa/Cairo',hour:'2-digit',minute:'2-digit'}); }
+
+    async function loadReturns(){
+      retsLoaded = true;
+      const body = document.getElementById('ret-body');
+      body.innerHTML = '<tr class="loading-row"><td colspan="9">⏳ جاري جلب المرتجعات...</td></tr>';
+      try {
+        const r = await fetch(RPC + 'get_contract_returns', { method:'POST', headers:CI_H, body: JSON.stringify({ p_branch: userBranch || '' }) });
+        RETURNS = await r.json();
+        if (!Array.isArray(RETURNS)) RETURNS = [];
+        retPage = 1;
+        renderReturns();
+      } catch(e){
+        body.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل جلب المرتجعات</td></tr>';
+      }
+    }
+
+    function renderReturns(){
+      const body = document.getElementById('ret-body');
+      const flt = document.getElementById('ret-filter').value;
+      const q = document.getElementById('ret-search').value.trim().toLowerCase();
+      let data = RETURNS.filter(r=>{
+        if (flt==='matched' && !r.matched_invoice_bill_no) return false;
+        if (flt==='unmatched' && r.matched_invoice_bill_no) return false;
+        return true;
+      });
+      if (q) data = data.filter(r=> [r.return_bill_no, r.cust_code, r.cust_name].some(v=>String(v||'').toLowerCase().includes(q)));
+
+      const matchedCount = RETURNS.filter(r=>r.matched_invoice_bill_no).length;
+      document.getElementById('ret-stats').textContent = `${RETURNS.length} مرتجع · ${matchedCount} مربوط · ${RETURNS.length-matchedCount} متبقّي`;
+
+      if (!data.length){ body.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted)">لا توجد نتائج</td></tr>'; document.getElementById('ret-pager').innerHTML=''; return; }
+
+      const totalPages = Math.max(1, Math.ceil(data.length/RET_PAGE_SIZE));
+      if (retPage>totalPages) retPage=totalPages;
+      const pageItems = data.slice((retPage-1)*RET_PAGE_SIZE, retPage*RET_PAGE_SIZE);
+
+      body.innerHTML = pageItems.map(r=>{
+        const rb = retEsc(r.return_bill_no), br = retEsc(r.return_branch||'');
+        const action = r.matched_invoice_bill_no
+          ? `<span class="sc-badge-ok">✓ ${retEsc(r.matched_invoice_bill_no)}</span> <button class="btn btn-sm" style="background:var(--surface-3);margin-inline-start:6px" onclick="unmatchReturn('${rb}','${br}')">فك</button>`
+          : `<button class="btn btn-primary btn-sm" onclick="openPicker('${rb}','${br}')"><i class="fas fa-link"></i> اختر فاتورة</button>`;
+        return `<tr>
+          <td><code>${rb}</code></td>
+          <td class="sc-mini">${retFmtDate(r.return_date)}</td>
+          <td><code>${retEsc(r.cust_code||'—')}</code></td>
+          <td style="font-weight:600">${retEsc(r.cust_name||'—')}</td>
+          <td><span class="branch-tag">${retEsc(r.return_branch||'—')}</span></td>
+          <td><b style="color:#dc2626">${r.total_value}</b></td>
+          <td>${r.items_count}</td>
+          <td>${r.matched_invoice_bill_no ? `<code>${retEsc(r.matched_invoice_bill_no)}</code>` : '<span class="sc-mini">—</span>'}</td>
+          <td>${action}</td>
+        </tr>`;
+      }).join('');
+
+      let pg='';
+      if (totalPages>1){
+        pg = `<div style="display:flex;gap:6px;justify-content:center;align-items:center;flex-wrap:wrap;">
+          <button class="btn btn-sm" ${retPage<=1?'disabled':''} onclick="retGo(${retPage-1})">‹</button>
+          <span class="sc-mini">صفحة ${retPage} من ${totalPages}</span>
+          <button class="btn btn-sm" ${retPage>=totalPages?'disabled':''} onclick="retGo(${retPage+1})">›</button>
+        </div>`;
+      }
+      document.getElementById('ret-pager').innerHTML = pg;
+    }
+    function retGo(p){ retPage=p; renderReturns(); window.scrollTo({top:0,behavior:'smooth'}); }
+
+    function openPicker(returnBillNo, branch){
+      pickCurrent = RETURNS.find(r=>String(r.return_bill_no)===String(returnBillNo) && String(r.return_branch||'')===String(branch||''));
+      if (!pickCurrent) return;
+      document.getElementById('pick-ret-info').innerHTML =
+        `المرتجع <b>${retEsc(pickCurrent.return_bill_no)}</b> · العميل <b>${retEsc(pickCurrent.cust_name||pickCurrent.cust_code||'—')}</b> · القيمة <b>${pickCurrent.total_value}</b> · ${retFmtDate(pickCurrent.return_date)}<br><span class="sc-mini">اختر فاتورة بيع تعاقد متاحة — هتتعلّم «مقابل مرتجع» تلقائيًا.</span>`;
+      const ps = document.getElementById('pick-search');
+      ps.value = '';
+      ps.oninput = ()=>{ clearTimeout(pickTimer); pickTimer=setTimeout(()=>loadSuggestions(ps.value.trim()), 300); };
+      document.getElementById('picker-modal').style.display = 'flex';
+      loadSuggestions('');
+    }
+    function closePicker(){ document.getElementById('picker-modal').style.display='none'; pickCurrent=null; }
+
+    async function loadSuggestions(search){
+      const box = document.getElementById('pick-list');
+      box.innerHTML = '<div class="sc-mini">⏳ جاري البحث...</div>';
+      try {
+        const r = await fetch(RPC + 'suggest_contract_invoices', { method:'POST', headers:CI_H, body: JSON.stringify({
+          p_cust_code: pickCurrent.cust_code || null,
+          p_cust_name: pickCurrent.cust_name || null,
+          p_return_date: pickCurrent.return_date || null,
+          p_return_value: pickCurrent.total_value || 0,
+          p_search: search || null,
+          p_limit: 40
+        }) });
+        const rows = await r.json();
+        renderSuggestions(Array.isArray(rows)?rows:[]);
+      } catch(e){ box.innerHTML = '<div style="color:var(--danger)">خطأ في جلب الاقتراحات</div>'; }
+    }
+
+    function renderSuggestions(rows){
+      const box = document.getElementById('pick-list');
+      if (!rows.length){ box.innerHTML = '<div class="sc-mini">لا توجد فواتير متاحة مطابقة.</div>'; return; }
+      box.innerHTML = rows.map((x,i)=>{
+        const best = i===0 && x.same_customer;
+        return `<div class="sc-pick-item ${best?'best':''}">
+          <div>
+            <div><b>${retEsc(x.bill_no)}</b> ${best?'<span class="sc-badge-ok">مقترح</span>':''} ${x.same_customer?'<span class="sc-mini">· نفس العميل</span>':''}</div>
+            <div class="sc-mini">${retFmtDate(x.bill_date)} · ${retEsc(x.cust_name_ar||'—')}</div>
+            <div class="sc-mini">القيمة ${x.total_bill} · فرق قيمة ${x.val_diff} · فرق ${x.day_diff} يوم</div>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="chooseInvoice(${x.id},'${retEsc(String(x.bill_no)).replace(/'/g,"\\'")}')">اختيار</button>
+        </div>`;
+      }).join('');
+    }
+
+    async function chooseInvoice(invoiceId, invoiceBillNo){
+      if (!pickCurrent) return;
+      try {
+        const r = await fetch(RPC + 'match_contract_return', { method:'POST', headers:CI_H, body: JSON.stringify({
+          p_return_bill_no: pickCurrent.return_bill_no,
+          p_return_branch: pickCurrent.return_branch || '',
+          p_invoice_id: invoiceId,
+          p_return_value: pickCurrent.total_value || 0,
+          p_user: ciReviewer()
+        }) });
+        const res = await r.json();
+        if (res && res.success===false){ alert('تعذّر الربط: '+(res.error||'')); return; }
+        pickCurrent.matched_invoice_bill_no = invoiceBillNo;
+        closePicker();
+        renderReturns();
+      } catch(e){ alert('تعذّر الربط، حاول تاني'); }
+    }
+
+    async function unmatchReturn(returnBillNo, branch){
+      if (!confirm('فك الربط وإرجاع حالة الفاتورة؟')) return;
+      try {
+        const r = await fetch(RPC + 'unmatch_contract_return', { method:'POST', headers:CI_H, body: JSON.stringify({ p_return_bill_no: returnBillNo, p_return_branch: branch||'' }) });
+        const res = await r.json();
+        if (res && res.success===false){ alert('تعذّر فك الربط: '+(res.error||'')); return; }
+        const row = RETURNS.find(r=>String(r.return_bill_no)===String(returnBillNo) && String(r.return_branch||'')===String(branch||''));
+        if (row){ row.matched_invoice_bill_no=null; row.matched_at=null; }
+        renderReturns();
+      } catch(e){ alert('تعذّر فك الربط'); }
     }
 
     checkAuth().then(user => {
