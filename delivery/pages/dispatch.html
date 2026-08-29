@@ -1424,13 +1424,24 @@ function renderDrivers(){
     leastHardSet=new Set(present.slice(0,2).map(d=>d.id));
   }
 
-const pickedMap={};allOrders.filter(o=>['picked','failed'].includes(o.status)&&o.driver_id).forEach(o=>pickedMap[o.driver_id]=(pickedMap[o.driver_id]||0)+1);
-  const assignedMap={};allOrders.filter(o=>o.status==='assigned'&&o.driver_id).forEach(o=>assignedMap[o.driver_id]=(assignedMap[o.driver_id]||0)+1);
+// عدد طلبات كل طيار = المتبقّي (غير المسلّم) في رحلاته المفتوحة — نفس مصدر الكارت عشان الرقمين يتطابقوا
+  const openTripsByDriver={};
+  activeTrips.forEach(t=>{ (openTripsByDriver[t.driver_id]=openTripsByDriver[t.driver_id]||[]).push(t.id); });
+  const openOrdersOf=did=>{
+    let n=0;
+    (openTripsByDriver[did]||[]).forEach(tid=>{
+      (tripOrdersMap[tid]||[]).forEach(oid=>{
+        const o=allOrders.find(x=>x.id===oid);
+        if(o && !['delivered','completed'].includes(o.status)) n++;
+      });
+    });
+    return n;
+  };
 
   el.innerHTML=displayDrivers.map((d,i)=>{
     const c=DC[i%DC.length];
     const attStatus=getDriverAttStatus(d.id);
-    const onTrip=(pickedMap[d.id]||0)+(assignedMap[d.id]||0);
+    const onTrip=openOrdersOf(d.id);
     const workMins=getDriverWorkMins(d.id);
 
     // تحديد اللون والحالة
