@@ -339,9 +339,12 @@
       } finally { spBusy = false; }
     }
 
+    // خرائط أسماء الاقتراحات: عشان نعرض اسم الصنف المختار برّه بعد الاعتماد/الاختيار
+    const bestSugg = {}, suggModalNames = {};
     // حساب اقتراح الكود لايف لصفوف الصفحة غير المكوّدة — نفس دالة نافذة الاقتراح (متزامن دائمًا)
     function suggLineHtml(id, m) {
       if (!m || !m.best_code) return '<div class="sp-sugg-line" id="sugg-' + id + '"><span style="color:var(--text-muted);font-size:0.7rem">لا يوجد اقتراح مطابق</span></div>';
+      bestSugg[id] = { code: m.best_code, name: m.best_name || '' };
       const pct = Math.round((m.sim || 0) * 100);
       const cls = pct >= 70 ? 'sp-sim-hi' : (pct >= 45 ? 'sp-sim-mid' : 'sp-sim-lo');
       return '<div class="sp-sugg-line" id="sugg-' + id + '">اقتراح: <b>' + m.best_code + '</b> '
@@ -727,10 +730,12 @@
       inp.onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); inp.blur(); } else if (ev.key === 'Escape') { cancel = true; inp.blur(); } };
       inp.onblur = () => { if (cancel) { renderCodeCell(id); } else { saveCode(id, inp.value); } };
     }
-    async function saveCode(id, valRaw) {
+    async function saveCode(id, valRaw, chosenName) {
       const val = (valRaw == null ? '' : String(valRaw)).trim();
       const cur = (rowById[id] && rowById[id].code) ? String(rowById[id].code) : '';
       if (val === cur) { renderCodeCell(id); return; }
+      // لو الاسم مش متمرَّر، نجيبه من خريطة الاقتراح المطابق لنفس الكود
+      if (chosenName == null && bestSugg[id] && String(bestSugg[id].code) === val) chosenName = bestSugg[id].name;
       const span = document.getElementById('code-' + id);
       if (span) span.innerHTML = '<span style="color:var(--text-muted)">…</span>';
       try {
@@ -741,6 +746,12 @@
         if (!res.ok) throw new Error(await res.text());
         if (rowById[id]) rowById[id].code = (val === '' ? null : val);
         renderCodeCell(id);
+        // حدِّث سطر الاقتراح برّه: يعرض الصنف المختار فعليًّا (مش المقترح القديم)
+        const sEl = document.getElementById('sugg-' + id);
+        if (sEl) {
+          if (val !== '' && chosenName) sEl.outerHTML = '<div class="sp-sugg-line" id="sugg-' + id + '"><span style="color:var(--success,#16a34a);font-size:0.72rem">✓ الصنف المختار: ' + String(chosenName).replace(/</g, '&lt;') + '</span></div>';
+          else if (val !== '') sEl.remove();
+        }
       } catch (e) { alert('تعذّر حفظ الكود: ' + e.message); renderCodeCell(id); }
     }
 
@@ -761,6 +772,7 @@
         if (!Array.isArray(list) || !list.length) {
           document.getElementById('sugg-body').innerHTML = '<div style="color:var(--text-muted)">لا توجد اقتراحات — عدّل الكود يدويًّا من خانة الكود.</div>'; return;
         }
+        list.forEach(x => { suggModalNames[String(x.itm_code)] = x.name || ''; });   // نخزّن الاسم لكل كود لعرضه بعد الاختيار
         document.getElementById('sugg-body').innerHTML =
           '<div style="font-size:.75rem;color:var(--text-muted);margin-bottom:8px;">اختر الصنف المطابق من مخزونك ليأخذ كوده:</div>'
           + '<table class="sp-table" style="min-width:auto"><thead><tr><th style="text-align:right">اسم الصنف في المخزون</th><th>الكود</th><th>التشابه</th><th></th></tr></thead><tbody>'
@@ -774,7 +786,7 @@
       } catch (e) { document.getElementById('sugg-body').innerHTML = '<div style="color:var(--danger)">خطأ في جلب الاقتراحات</div>'; }
     }
     function closeSugg() { document.getElementById('sp-sugg-bg').classList.remove('open'); }
-    async function pickSuggest(code) { const id = suggTargetId; closeSugg(); await saveCode(id, code); }
+    async function pickSuggest(code) { const id = suggTargetId; closeSugg(); await saveCode(id, code, suggModalNames[String(code)]); }
 
     // إظهار أزرار الإدارة/الرفع لأصحاب الصلاحية (أدمن/مدير) — الشاشة أصلًا لا تُفتح إلا لهم عبر القشرة
     (function () {
