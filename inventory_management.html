@@ -1005,11 +1005,21 @@
       if(rec) rec.reviewed=reviewed;
       renderPriceChanges();
       try {
-        await fetch(SB_URL_API+'/rest/v1/rpc/review_price_change', {
+        // توكن المستخدم لو موجود وصالح — review_price_change محروسة بالدور فالنداء لازم
+        // يشتغل كـauthenticated. باقي نداءات الصفحة سايبينها زي ما هي.
+        var _t = localStorage.getItem('authJwt'), _auth = SB_ANON_API;
+        try {
+          var _p = _t && JSON.parse(atob(_t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+          if (_p && _p.exp*1000 > Date.now()+60000) _auth = _t;
+        } catch(e2){}
+        var r = await fetch(SB_URL_API+'/rest/v1/rpc/review_price_change', {
           method:'POST',
-          headers:{ apikey:SB_ANON_API, Authorization:'Bearer '+SB_ANON_API, 'Content-Type':'application/json' },
+          headers:{ apikey:SB_ANON_API, Authorization:'Bearer '+_auth, 'Content-Type':'application/json' },
           body: JSON.stringify({ p_id: Number(id), p_reviewed: !!reviewed })
         });
+        // fetch مابيرميش استثناء على 401/403 — لازم نفحص r.ok بنفسنا وإلا التحديث
+        // التفاؤلي هيفضل ظاهر للمستخدم رغم إن الحفظ فشل
+        if(!r.ok) throw new Error(await r.text());
       } catch(e){
         console.error('فشل حفظ المراجعة', e);
         if(rec) rec.reviewed=!reviewed;  // تراجع لو فشل

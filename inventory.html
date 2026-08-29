@@ -1671,11 +1671,21 @@
         return Array.isArray(d) ? d : [];
       } catch (e) { return []; }
     }
+    // توكن المستخدم لو موجود وصالح — resolve_jard_audit محروسة بالدور (admin/inventory)
+    // فالنداء ده لازم يشتغل كـauthenticated. باقي نداءات الصفحة سايبينها زي ما هي.
+    function invUserAuth() {
+      const t = localStorage.getItem('authJwt');
+      try {
+        const p = t && JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        if (p && p.exp * 1000 > Date.now() + 60000) return t;
+      } catch (e) {}
+      return SB_ANON_API;
+    }
     async function sbResolveJard(id, by, resolved) {
       try {
         const r = await fetch(`${SB_URL_API}/rest/v1/rpc/resolve_jard_audit`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + SB_ANON_API },
+          headers: { 'Content-Type': 'application/json', 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + invUserAuth() },
           body: JSON.stringify({ p_id: id, p_by: by || null, p_resolved: resolved !== false })
         });
         return r.ok;
