@@ -341,7 +341,7 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
 <div class="modal-overlay" id="hardTripsModal">
   <div style="background:#fff;border-radius:14px;max-width:480px;width:100%;max-height:82vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3)">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:.9rem 1.1rem;border-bottom:1px solid #e2e8f0">
-      <div style="font-weight:800;font-size:.95rem;color:#0f172a">🧭 رحلات المناطق الصعبة — النهاردة</div>
+      <div style="font-weight:800;font-size:.95rem;color:#0f172a">🧭 رحلات المناطق الصعبة — الشيفت والشهر</div>
       <button onclick="closeModal('hardTripsModal')" style="background:none;border:none;font-size:1.2rem;cursor:pointer;color:#64748b">✕</button>
     </div>
     <div id="hardTripsBody" style="overflow-y:auto;padding:.6rem .8rem"></div>
@@ -1316,23 +1316,33 @@ async function openHardTripsModal(){
   if(!present.length){ body.innerHTML='<div style="text-align:center;padding:2rem;color:#64748b">لا يوجد طيارين حاضرين الآن</div>'; return; }
   const presentSet=new Set(present.map(d=>d.id));
   body.innerHTML='<div style="text-align:center;padding:2rem;color:#64748b">جاري التحميل…</div>';
-  let rows=[];
-  try{ const {data}=await db.rpc('get_hard_trips_today',{p_branch:branchId}); rows=(data||[]).filter(r=>presentSet.has(r.driver_id)); }
+  let rows=[], monthMap={};
+  try{
+    const [today, month]=await Promise.all([
+      db.rpc('get_hard_trips_today',{p_branch:branchId}),
+      db.rpc('get_hard_trips_month',{p_branch:branchId})
+    ]);
+    rows=(today.data||[]).filter(r=>presentSet.has(r.driver_id));
+    (month.data||[]).forEach(r=>{ monthMap[r.driver_id]={hard:r.hard_trips,total:r.total_trips}; });
+  }
   catch(err){ body.innerHTML='<div style="text-align:center;padding:2rem;color:#dc2626">تعذّر التحميل</div>'; return; }
   rows.sort((a,b)=>(b.hard_trips-a.hard_trips)||(b.total_trips-a.total_trips));
   body.innerHTML=
-    `<div style="font-size:.72rem;color:#64748b;margin:.2rem .2rem .6rem">الحاضرين الآن: ${present.length} طيار · اضغط على الطيار لعرض رحلاته الصعبة</div>`+
-    (rows.map(r=>`
+    `<div style="font-size:.72rem;color:#64748b;margin:.2rem .2rem .6rem">الحاضرين الآن: ${present.length} طيار · اضغط على الطيار لعرض رحلاته الصعبة<br><span style="color:#dc2626;font-weight:700">🔴 الشيفت الحالي</span> · <span style="color:#7c3aed;font-weight:700">🟣 الشهر الحالي</span></div>`+
+    (rows.map(r=>{
+      const mh=(monthMap[r.driver_id]&&monthMap[r.driver_id].hard)||0;
+      return `
       <div onclick="toggleHardDriver(this,'${r.driver_id}','${branchId}')" style="border:1px solid #e2e8f0;border-radius:10px;margin-bottom:.5rem;overflow:hidden;cursor:pointer">
         <div style="display:flex;align-items:center;justify-content:space-between;padding:.6rem .75rem;background:#f8fafc">
           <div style="font-weight:700;font-size:.85rem;color:#0f172a">${e(r.driver_name)}</div>
           <div style="display:flex;align-items:center;gap:.5rem">
             <span style="font-size:.68rem;color:#64748b">${r.total_trips} رحلة</span>
-            <span style="background:${r.hard_trips>0?'#dc2626':'#94a3b8'};color:#fff;font-weight:800;font-size:.75rem;padding:.15rem .55rem;border-radius:20px">${r.hard_trips} صعبة</span>
+            <span title="رحلات صعبة في الشيفت الحالي" style="background:${r.hard_trips>0?'#dc2626':'#94a3b8'};color:#fff;font-weight:800;font-size:.75rem;padding:.15rem .55rem;border-radius:20px">${r.hard_trips} صعبة</span>
+            <span title="رحلات صعبة على مدار الشهر الحالي" style="background:${mh>0?'#7c3aed':'#94a3b8'};color:#fff;font-weight:800;font-size:.75rem;padding:.15rem .55rem;border-radius:20px">${mh} الشهر</span>
           </div>
         </div>
         <div class="ht-detail" style="display:none;padding:.4rem .6rem;background:#fff"></div>
-      </div>`).join('') || '<div style="text-align:center;padding:2rem;color:#64748b">لا يوجد</div>');
+      </div>`;}).join('') || '<div style="text-align:center;padding:2rem;color:#64748b">لا يوجد</div>');
 }
 
 async function toggleHardDriver(el, driverId, branchId){
