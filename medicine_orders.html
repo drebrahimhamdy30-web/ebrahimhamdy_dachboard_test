@@ -386,7 +386,19 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     const CR_SIZE = 50;
     let crPage = 1, crTotal = 0, crBusy = false, crTimer = null, canEdit = false, canOrder = false;
     let muRows = [], muHeaders = [];
-    const H = { 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + SB_ANON_API };
+    // توكن المستخدم لو موجود وصالح → الصفحة تشتغل كـauthenticated عشان الـRPCs المحروسة بالدور
+    // (upload_month_sales / delete_month_sales / mark_item_coded / refresh_consumption_rates /
+    //  refresh_purchase_orders). لو ناقص أو منتهي نرجع لمفتاح anon عشان العرض مايقعش —
+    // وساعتها أزرار المشتريات/الإدارة بس هي اللي هترفض برسالة واضحة.
+    const MO_AUTH = (function () {
+      const t = localStorage.getItem('authJwt');
+      try {
+        const p = t && JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        if (p && p.exp * 1000 > Date.now() + 60000) return t;
+      } catch (e) {}
+      return SB_ANON_API;
+    })();
+    const H = { 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + MO_AUTH };
     const REST = SB_URL_API + '/rest/v1/';
     const numv = v => (v === null || v === undefined || v === '') ? '0' : (Math.round(Number(v) * 10) / 10);
     const BR = { mamora:'المعمورة', san:'سان ستيفانو', bishr:'سيدى بشر' };
