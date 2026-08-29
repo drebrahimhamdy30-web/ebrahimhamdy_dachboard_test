@@ -1318,19 +1318,19 @@ async function openHardTripsModal(){
   body.innerHTML='<div style="text-align:center;padding:2rem;color:#64748b">جاري التحميل…</div>';
   let rows=[], monthMap={};
   try{
-    const [today, month]=await Promise.all([
+    const [today, load]=await Promise.all([
       db.rpc('get_hard_trips_today',{p_branch:branchId}),
-      db.rpc('get_hard_trips_month',{p_branch:branchId})
+      db.rpc('get_hard_load',{p_branch:branchId})
     ]);
     rows=(today.data||[]).filter(r=>presentSet.has(r.driver_id));
-    (month.data||[]).forEach(r=>{ monthMap[r.driver_id]={hard:r.hard_trips,total:r.total_trips}; });
+    (load.data||[]).forEach(r=>{ monthMap[r.driver_id]={hard:r.hard_trips,hours:r.work_hours,rate:r.hard_rate}; });
   }
   catch(err){ body.innerHTML='<div style="text-align:center;padding:2rem;color:#dc2626">تعذّر التحميل</div>'; return; }
   rows.sort((a,b)=>(b.hard_trips-a.hard_trips)||(b.total_trips-a.total_trips));
   body.innerHTML=
-    `<div style="font-size:.72rem;color:#64748b;margin:.2rem .2rem .6rem">الحاضرين الآن: ${present.length} طيار · اضغط على الطيار لعرض رحلاته الصعبة<br><span style="color:#dc2626;font-weight:700">🔴 الشيفت الحالي</span> · <span style="color:#7c3aed;font-weight:700">🟣 الشهر الحالي</span></div>`+
+    `<div style="font-size:.72rem;color:#64748b;margin:.2rem .2rem .6rem">الحاضرين الآن: ${present.length} طيار · اضغط على الطيار لعرض رحلاته الصعبة<br><span style="color:#dc2626;font-weight:700">🔴 الشيفت الحالي (عدد)</span> · <span style="color:#7c3aed;font-weight:700">🟣 معدل الشهر = صعبة ÷ ساعات العمل</span></div>`+
     (rows.map(r=>{
-      const mh=(monthMap[r.driver_id]&&monthMap[r.driver_id].hard)||0;
+      const md=monthMap[r.driver_id]||{hard:0,hours:0,rate:0};
       return `
       <div onclick="toggleHardDriver(this,'${r.driver_id}','${branchId}')" style="border:1px solid #e2e8f0;border-radius:10px;margin-bottom:.5rem;overflow:hidden;cursor:pointer">
         <div style="display:flex;align-items:center;justify-content:space-between;padding:.6rem .75rem;background:#f8fafc">
@@ -1338,7 +1338,7 @@ async function openHardTripsModal(){
           <div style="display:flex;align-items:center;gap:.5rem">
             <span style="font-size:.68rem;color:#64748b">${r.total_trips} رحلة</span>
             <span title="رحلات صعبة في الشيفت الحالي" style="background:${r.hard_trips>0?'#dc2626':'#94a3b8'};color:#fff;font-weight:800;font-size:.75rem;padding:.15rem .55rem;border-radius:20px">${r.hard_trips} صعبة</span>
-            <span title="رحلات صعبة على مدار الشهر الحالي" style="background:${mh>0?'#7c3aed':'#94a3b8'};color:#fff;font-weight:800;font-size:.75rem;padding:.15rem .55rem;border-radius:20px">${mh} الشهر</span>
+            <span title="معدل الشهر: ${md.hard} رحلة صعبة ÷ ${md.hours} ساعة عمل" style="background:${md.rate>0?'#7c3aed':'#94a3b8'};color:#fff;font-weight:800;font-size:.75rem;padding:.15rem .55rem;border-radius:20px">${Number(md.rate||0).toFixed(2)}/س</span>
           </div>
         </div>
         <div class="ht-detail" style="display:none;padding:.4rem .6rem;background:#fff"></div>
