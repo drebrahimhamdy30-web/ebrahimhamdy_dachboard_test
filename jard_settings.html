@@ -77,6 +77,21 @@
         <div class="loading-note">⏳ جاري التحميل...</div>
       </div>
     </div>
+
+    <div class="card settings-card">
+      <div class="cat-title">🚫 أكواد مستثناة من الجرد</div>
+      <p style="font-size:0.78rem;color:var(--text-muted);margin:-6px 0 12px;">
+        الأكواد دي مش هتظهر لموظف الجرد في النطاق المختار. المطابقة <b>تامة</b> (مش بادئة) وبتتجاهل حالة الأحرف — يعني الكود «1» يستثني «1» بس مش «100».
+      </p>
+      <div class="fastmove-add-row" style="flex-wrap:wrap;align-items:center;">
+        <input type="text" id="excl-new-code" class="form-input" placeholder="اكتب الكود..." style="max-width:220px">
+        <span id="excl-scopes" style="display:inline-flex;gap:14px;align-items:center;font-size:0.82rem;font-weight:700;color:var(--text-secondary);"></span>
+        <button class="btn btn-primary" onclick="addExcluded()"><i class="fas fa-plus"></i> إضافة</button>
+      </div>
+      <div id="excl-list" class="fastmove-list">
+        <div class="loading-note">⏳ جاري التحميل...</div>
+      </div>
+    </div>
   </div>
 
   <div class="save-toast" id="toast">✅ تم الحفظ بنجاح!</div>
@@ -98,6 +113,8 @@
       if (user) {
         loadSettings();
         loadFastmoveCodes();
+        renderExclScopes();
+        loadExcludedCodes();
       }
     });
 
@@ -312,6 +329,79 @@
       } else {
         alert('❌ فشل الحذف، حاول تاني');
       }
+    }
+
+    // ===== أكواد مستثناة من الجرد (لكل نطاق) =====
+    const JARD_SCOPES = [{ value: 'returns', label: 'المرتجعات' }];   // نطاقات جديدة تتضاف هنا لاحقًا
+    const EXCL_REST = SB_URL_API + '/rest/v1/jard_excluded_codes';
+    const EXCL_H = { 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + SB_ANON_API, 'Content-Type': 'application/json' };
+
+    function renderExclScopes() {
+      document.getElementById('excl-scopes').innerHTML = JARD_SCOPES.map(s =>
+        `<label style="display:inline-flex;gap:4px;align-items:center;cursor:pointer;">
+           <input type="checkbox" class="excl-scope" value="${s.value}" ${s.value === 'returns' ? 'checked' : ''}> ${s.label}
+         </label>`).join('');
+    }
+    function scopeLabel(v) { const s = JARD_SCOPES.find(x => x.value === v); return s ? s.label : v; }
+
+    async function loadExcludedCodes() {
+      const listEl = document.getElementById('excl-list');
+      listEl.innerHTML = '<div class="loading-note">⏳ جاري التحميل...</div>';
+      try {
+        const r = await fetch(EXCL_REST + '?select=id,code,scopes&order=code.asc', { headers: EXCL_H });
+        renderExcludedList(await r.json());
+      } catch(e) {
+        listEl.innerHTML = '<div class="loading-note" style="color:var(--danger)">❌ فشل تحميل الأكواد</div>';
+      }
+    }
+
+    function renderExcludedList(rows) {
+      const listEl = document.getElementById('excl-list');
+      if (!Array.isArray(rows) || !rows.length) {
+        listEl.innerHTML = '<div class="loading-note">لا توجد أكواد مستثناة</div>';
+        return;
+      }
+      listEl.innerHTML = rows.map(item => `
+        <div class="fastmove-item">
+          <div>
+            <span class="code">${item.code}</span>
+            <span class="date"> — ${(item.scopes || []).map(scopeLabel).join('، ')}</span>
+          </div>
+          <button class="btn-del-code" onclick="removeExcluded(${item.id})" title="حذف">
+            <i class="fas fa-trash-alt"></i>
+          </button>
+        </div>`).join('');
+    }
+
+    async function addExcluded() {
+      const input = document.getElementById('excl-new-code');
+      const code = input.value.trim();
+      if (!code) { alert('اكتب الكود أولاً'); return; }
+      const scopes = [...document.querySelectorAll('.excl-scope:checked')].map(c => c.value);
+      if (!scopes.length) { alert('اختر نطاق واحد على الأقل'); return; }
+      try {
+        const r = await fetch(EXCL_REST, {
+          method: 'POST',
+          headers: { ...EXCL_H, 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ code, scopes, added_by: (localStorage.getItem('fullName') || '') })
+        });
+        if (!r.ok) { const t = await r.text(); throw new Error(t); }
+        input.value = '';
+        showToast();
+        loadExcludedCodes();
+      } catch(e) {
+        alert(String(e.message || '').includes('duplicate') ? '⚠️ الكود مضاف بالفعل' : '❌ فشل الإضافة، حاول تاني');
+      }
+    }
+
+    async function removeExcluded(id) {
+      if (!confirm('حذف الكود ده من قائمة الاستثناء؟')) return;
+      try {
+        const r = await fetch(EXCL_REST + '?id=eq.' + id, { method: 'DELETE', headers: { ...EXCL_H, 'Prefer': 'return=minimal' } });
+        if (!r.ok) throw new Error(await r.text());
+        showToast();
+        loadExcludedCodes();
+      } catch(e) { alert('❌ فشل الحذف، حاول تاني'); }
     }
   </script>
 </body>

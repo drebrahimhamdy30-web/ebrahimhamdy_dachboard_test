@@ -638,6 +638,27 @@
     const LIVE_CATEGORIES = new Set(['تلاجه', 'غوالى', 'fastmove']);
     function isLiveTab(tab) { return LIVE_CATEGORIES.has(tab); }
 
+    // ===== أكواد مستثناة من الجرد (تُدار من إعدادات الجرد) — لكل فئة نطاق (scope) =====
+    const CATEGORY_SCOPE = { 'مرتجعات': 'returns' };   // نطاقات إضافية تتضاف هنا لاحقًا
+    let EXCLUDED_CODES = {};   // scope -> Set(code_norm)
+    async function loadExcludedCodes() {
+      try {
+        const r = await fetch(`${SB_URL_API}/rest/v1/jard_excluded_codes?select=code_norm,scopes`,
+          { headers: { 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + SB_ANON_API } });
+        const rows = await r.json();
+        EXCLUDED_CODES = {};
+        (Array.isArray(rows) ? rows : []).forEach(row => {
+          (row.scopes || []).forEach(sc => { (EXCLUDED_CODES[sc] = EXCLUDED_CODES[sc] || new Set()).add(row.code_norm); });
+        });
+      } catch (e) { /* لو فشل التحميل، منستثنيش حاجة */ }
+    }
+    // مطابقة تامة بعد trim + توحيد حروف صغيرة (مش بادئة) — فـ"1" يستثني "1" بس
+    function isExcludedForTab(code, tab) {
+      const scope = CATEGORY_SCOPE[tab]; if (!scope) return false;
+      const set = EXCLUDED_CODES[scope]; if (!set) return false;
+      return set.has(String(code || '').trim().toLowerCase());
+    }
+
     const TAB_COLS = {
       'تلاجه':    ['code', 'itm_name_ar', 'itm_name_en'],
       'غوالى':    ['code', 'itm_name_ar', 'itm_name_en'],
@@ -791,6 +812,7 @@
         buildDrawerBranches();
         showScreen('scan');
         await loadFormCategoryRules();
+        await loadExcludedCodes();
         loadCurrentTab();
         loadMyDailyCount();
       }
@@ -890,6 +912,8 @@
           });
         }
 
+        // استبعاد الأكواد المستثناة لنطاق الفئة الحالية (مثلاً المرتجعات)
+        rawData = rawData.filter(it => !isExcludedForTab(it.code, currentTab));
         rawData = sortItemsForAudit(rawData);
         buildTableHeader();
         applyFilter();
