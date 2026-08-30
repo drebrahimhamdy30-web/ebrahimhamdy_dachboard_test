@@ -228,27 +228,36 @@
       }
       populateStoreFilter();
     }
+    function curStoreVal(){ const el=document.getElementById('storeFilter'); return el?el.value:'all'; }
+    // يختار بيانات المخزن للعرض: لو مخزن محدّد في الفلتر ومتاح للصنف → هو؛ وإلا أرخص مخزن
+    function storeEntry(s){
+      if (!s || !Array.isArray(s.stores) || !s.stores.length) return null;
+      const sv = curStoreVal();
+      if (sv && sv!=='all'){ const f = s.stores.find(x=>x.store===sv); if (f) return { e:f, selected:true }; }
+      return { e:s.stores[0], selected:false };
+    }
     function srcHtml(id){
       const s = SRC_MAP[id];
       if (s === undefined) return '<span style="font-size:0.68rem;color:var(--text-muted)">⏳</span>';
-      if (s.status === 'ok'){
-        const disc = (s.discount_perc!=null) ? `<div style="font-size:0.64rem;color:var(--text-muted);font-weight:400">خصم ${s.discount_perc}%</div>` : '';
-        const viaName = (s.matched_by==='name') ? `<div style="font-size:0.62rem;color:#b45309;">مطابقة كود ${s.resolved_code||'—'}</div>` : '';
-        return `<button onclick="openStoreCompareById('${id}')" title="اضغط لمقارنة المخازن بالكود"
-                  style="background:#ccfbf1;color:#0f766e;font-weight:700;font-size:0.74rem;padding:4px 9px;border:none;border-radius:8px;cursor:pointer;">
-                  <i class="fas fa-store"></i> ${s.store}</button>${disc}${viaName}`;
-      }
-      if (s.status === 'not_available')
-        return `<span style="font-size:0.74rem;color:#dc2626;font-weight:700;">🚫 غير متوفر</span>`;
-      if (s.status === 'no_match')
-        return `<span style="font-size:0.68rem;color:var(--text-muted);">لا يوجد تطابق</span>`;
-      return '';
+      if (s.status === 'no_match') return `<span style="font-size:0.68rem;color:var(--text-muted);">لا يوجد تطابق</span>`;
+      const pick = storeEntry(s);
+      if (!pick) return `<span style="font-size:0.74rem;color:#dc2626;font-weight:700;">🚫 غير متوفر</span>`;
+      const e = pick.e;
+      const disc = (e.discount!=null) ? `<div style="font-size:0.64rem;color:var(--text-muted);font-weight:400">سعر ${e.price} · خصم ${e.discount}%</div>` : '';
+      const viaName = (s.matched_by==='name') ? `<div style="font-size:0.62rem;color:#b45309;">مطابقة كود ${s.resolved_code||'—'}</div>` : '';
+      const bg = pick.selected ? '#fde68a' : '#ccfbf1';   // مميّز أصفر لو ده المخزن المختار في الفلتر
+      const many = (s.stores.length>1 && curStoreVal()==='all') ? ` <span style="font-size:0.6rem;color:var(--text-muted)">+${s.stores.length-1}</span>` : '';
+      return `<button onclick="openStoreCompareById('${id}')" title="اضغط لمقارنة المخازن بالكود"
+                style="background:${bg};color:#0f766e;font-weight:700;font-size:0.74rem;padding:4px 9px;border:none;border-radius:8px;cursor:pointer;">
+                <i class="fas fa-store"></i> ${e.store}</button>${many}${disc}${viaName}`;
     }
-    // ملء فلتر المخازن من الترشيحات المتاحة
+    // فلتر المخازن = كل المخازن المتاحة لأي صنف (مش أفضل مخزن بس)
     function populateStoreFilter(){
       const sel = document.getElementById('storeFilter'); if (!sel) return;
       const cur = sel.value;
-      const stores = [...new Set(Object.values(SRC_MAP).filter(s=>s && s.status==='ok' && s.store).map(s=>s.store))].sort((a,b)=>String(a).localeCompare(String(b),'ar'));
+      const set = new Set();
+      Object.values(SRC_MAP).forEach(s=>{ if (s && s.status==='ok' && Array.isArray(s.stores)) s.stores.forEach(x=>{ if(x.store) set.add(x.store); }); });
+      const stores = [...set].sort((a,b)=>String(a).localeCompare(String(b),'ar'));
       sel.innerHTML = '<option value="all">كل المخازن</option>' + stores.map(st=>`<option value="${st}">🏬 ${st}</option>`).join('');
       if (stores.includes(cur)) sel.value = cur;
     }
@@ -348,7 +357,7 @@
         const sMatch = (statusVal === 'all' || i.status === statusVal);
         const bMatch = selectedBranches.includes(i.branch);
         const tMatch = (orderTypeVal === 'all' || String(i.order_type).includes(orderTypeVal));
-        const stMatch = (storeVal === 'all' || (SRC_MAP[i.id] && SRC_MAP[i.id].store === storeVal));
+        const stMatch = (storeVal === 'all' || (SRC_MAP[i.id] && Array.isArray(SRC_MAP[i.id].stores) && SRC_MAP[i.id].stores.some(x=>x.store===storeVal)));
         const searchMatch = !searchVal || [
           i.item_name, i.item_code,
           i.customer_name, i.customer_code,
