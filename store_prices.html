@@ -88,6 +88,7 @@
           <div id="sp-count" style="font-size:0.8rem;color:var(--text-muted);"></div>
           <button class="sp-up-btn" id="sp-open-st" style="display:none;background:var(--surface-3);color:var(--text-primary);" onclick="openStores()"><i class="fas fa-warehouse"></i> إدارة المخازن</button>
           <button class="sp-up-btn" id="sp-open-up" style="display:none;" onclick="openUpload()"><i class="fas fa-file-arrow-up"></i> رفع شيت مخزن</button>
+          <button class="sp-up-btn" id="sp-open-pharma" style="display:none;background:#0d9488;color:#fff;" onclick="syncPharma()"><i class="fas fa-cloud-arrow-down"></i> تحديث مخزون فارما اوفر سيز</button>
         </div>
       </div>
 
@@ -795,8 +796,39 @@
         canEdit = true;
         document.getElementById('sp-open-up').style.display = 'inline-flex';
         document.getElementById('sp-open-st').style.display = 'inline-flex';
+        document.getElementById('sp-open-pharma').style.display = 'inline-flex';
       }
     })();
+
+    // سحب كتالوج «فارما اوفر سيز» المتاح لحظيًا من موقع المورد (زر يدوي) — يحدّث السعر/الخصم/التوفر
+    async function syncPharma() {
+      const btn = document.getElementById('sp-open-pharma');
+      if (btn.disabled) return;
+      const jwt = (SP_AUTH && SP_AUTH !== SB_ANON_API) ? SP_AUTH : null;
+      if (!jwt) { alert('سجّل الدخول بحساب مصرّح (أدمن/مدير/مشتريات) لتحديث فارما اوفر سيز'); return; }
+      const orig = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جارٍ السحب… (~40 ثانية)';
+      try {
+        const r = await fetch(SB_URL_API + '/functions/v1/pharma_sync', {
+          method: 'POST',
+          headers: { apikey: SB_ANON_API, Authorization: 'Bearer ' + jwt, 'Content-Type': 'application/json' },
+          body: '{}'
+        });
+        const j = await r.json();
+        if (j && j.ok) {
+          const n = (Number(j.upserted) || 0).toLocaleString('ar-EG');
+          btn.innerHTML = '<i class="fas fa-check"></i> تم تحديث ' + n + ' صنف';
+          spPage = 1; await loadStores(); loadPage();
+        } else {
+          const msg = (j && j.error === 'unauthorized') ? 'ليس لديك صلاحية' : ((j && (j.hint || j.error)) || 'فشل السحب');
+          btn.innerHTML = '<i class="fas fa-triangle-exclamation"></i> ' + msg;
+        }
+      } catch (e) {
+        btn.innerHTML = '<i class="fas fa-triangle-exclamation"></i> تعذّر الاتصال';
+      }
+      setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 5000);
+    }
 
     // ===== أحداث =====
     document.getElementById('sp-search').addEventListener('input', () => {
