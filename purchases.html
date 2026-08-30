@@ -234,7 +234,9 @@
     function curStoreVal(){ const el=document.getElementById('storeFilter'); return el?el.value:'all'; }
     // يختار بيانات المخزن للعرض: لو مخزن محدّد في الفلتر ومتاح للصنف → هو؛ وإلا أرخص مخزن
     function storeEntry(s){
-      if (!s || !Array.isArray(s.stores) || !s.stores.length) return null;
+      if (!s) return null;
+      if (s._chosen) return { e:s._chosen, selected:true, chosen:true };   // مخزن مختار يدويًا له الأولوية
+      if (!Array.isArray(s.stores) || !s.stores.length) return null;
       const sv = curStoreVal();
       if (sv && sv!=='all'){ const f = s.stores.find(x=>x.store===sv); if (f) return { e:f, selected:true }; }
       return { e:s.stores[0], selected:false };
@@ -248,11 +250,12 @@
       const e = pick.e;
       const disc = (e.discount!=null) ? `<div style="font-size:0.64rem;color:var(--text-muted);font-weight:400">سعر ${e.price} · خصم ${e.discount}%</div>` : '';
       const viaName = (s.matched_by==='name') ? `<div style="font-size:0.62rem;color:#b45309;">مطابقة كود ${s.resolved_code||'—'}</div>` : '';
-      const bg = pick.selected ? '#fde68a' : '#ccfbf1';   // مميّز أصفر لو ده المخزن المختار في الفلتر
-      const many = (s.stores.length>1 && curStoreVal()==='all') ? ` <span style="font-size:0.6rem;color:var(--text-muted)">+${s.stores.length-1}</span>` : '';
-      return `<button onclick="openStoreCompareById('${id}')" title="اضغط لمقارنة المخازن بالكود"
+      const bg = pick.chosen ? '#bbf7d0' : (pick.selected ? '#fde68a' : '#ccfbf1');   // أخضر=مختار يدويًا · أصفر=فلتر المخزن
+      const mark = pick.chosen ? '✓ ' : '';
+      const many = (!pick.chosen && Array.isArray(s.stores) && s.stores.length>1 && curStoreVal()==='all') ? ` <span style="font-size:0.6rem;color:var(--text-muted)">+${s.stores.length-1}</span>` : '';
+      return `<button onclick="openStoreCompareById('${id}')" title="اضغط لمقارنة المخازن واختيار مخزن الطلب"
                 style="background:${bg};color:#0f766e;font-weight:700;font-size:0.74rem;padding:4px 9px;border:none;border-radius:8px;cursor:pointer;">
-                <i class="fas fa-store"></i> ${e.store}</button>${many}${disc}${viaName}`;
+                <i class="fas fa-store"></i> ${mark}${e.store}</button>${many}${disc}${viaName}`;
     }
     // فلتر المخازن = كل المخازن المتاحة لأي صنف (مش أفضل مخزن بس)
     function populateStoreFilter(){
@@ -267,38 +270,49 @@
     // ===== مقارنة المخازن لكود (نفس فكرة شاشة الأسعار) =====
     const _num = v => { const n=Number(v); return (v==null||v===''||isNaN(n))?'—':(Math.round(n*100)/100).toLocaleString('ar-EG'); };
     const _netCost = r => { const p=Number(r.price), d=Number(r.discount_perc)||0; if(r.price==null||r.price===''||isNaN(p)) return null; return p*(1-Math.min(Math.max(d,0),100)/100); };
+    let _cmpId = null;
     function openStoreCompareById(id){
       const s = SRC_MAP[id]; if (!s || !s.resolved_code) return;
+      _cmpId = id;
       const item = rawData.find(x=>String(x.id)===String(id));
       openStoreCompare(s.resolved_code, item ? item.item_name : '');
     }
     async function openStoreCompare(code, name){
       const bg = document.getElementById('cmp-modal');
-      document.getElementById('cmp-title').textContent = 'مقارنة المخازن — كود ' + code;
+      document.getElementById('cmp-title').textContent = 'اختر المخزن — ' + (name || ('كود ' + code));
       document.getElementById('cmp-body').innerHTML = 'جارٍ التحميل…';
       bg.style.display = 'flex';
       try {
-        const url = SB_URL_API + '/rest/v1/store_item_prices?select=item_name,store,price,discount_perc,available,updated_at&code=eq.' + encodeURIComponent(code) + '&order=available.desc';
+        const url = SB_URL_API + '/rest/v1/store_item_prices?select=item_name,store,price,discount_perc,available&code=eq.' + encodeURIComponent(code) + '&available=eq.true';
         let rows = await (await fetch(url, { headers: SRC_H })).json();
-        if (!Array.isArray(rows) || !rows.length){ document.getElementById('cmp-body').innerHTML = '<div style="color:var(--text-muted)">لا توجد مخازن بهذا الكود</div>'; return; }
-        rows = rows.map(r=>({ ...r, _cost:_netCost(r) }));
-        // المتاح أولًا ثم الأرخص تكلفة صافية
-        rows.sort((a,b)=>{ const av=(b.available===true)-(a.available===true); if(av) return av; const ac=a._cost==null?Infinity:a._cost, bc=b._cost==null?Infinity:b._cost; return ac-bc; });
-        const bestCost = rows.filter(r=>r.available===true).map(r=>r._cost).filter(c=>c!=null)[0];
+        if (!Array.isArray(rows) || !rows.length){ document.getElementById('cmp-body').innerHTML = '<div style="color:var(--text-muted)">لا يوجد هذا الصنف متاحًا في أي مخزن.</div>'; return; }
+        rows = rows.map(r=>({ ...r, _cost:_netCost(r) })).sort((a,b)=>{ const ac=a._cost==null?Infinity:a._cost, bc=b._cost==null?Infinity:b._cost; return ac-bc; });
+        const chosen = (_cmpId!=null && SRC_MAP[_cmpId] && SRC_MAP[_cmpId]._chosen) ? SRC_MAP[_cmpId]._chosen.store : null;
         document.getElementById('cmp-body').innerHTML =
-          `<div style="font-size:0.76rem;color:var(--text-secondary);margin-bottom:8px;">${rows.length} مخزن · المتاح والأقل تكلفةً فوق (السعر بعد الخصم)</div>`
-          + '<table style="width:100%;border-collapse:collapse;font-size:0.8rem;"><thead><tr style="background:#f1f5f9;"><th style="text-align:right;padding:6px">المخزن</th><th style="padding:6px">متاح</th><th style="padding:6px">السعر</th><th style="padding:6px">الخصم %</th><th style="padding:6px">التكلفة</th></tr></thead><tbody>'
-          + rows.map(r=>`<tr style="border-bottom:1px solid #e2e8f0;${(r.available===true && r._cost!=null && r._cost===bestCost)?'background:#f0fdfa;font-weight:700;':''}">
-              <td style="text-align:right;padding:6px;">${(r.available===true && r._cost===bestCost)?'🏆 ':''}${r.store||'—'}</td>
-              <td style="text-align:center;padding:6px;">${r.available===true?'✅':'—'}</td>
+          `<div style="font-size:0.76rem;color:var(--text-secondary);margin-bottom:8px;">مرتّبة من الأقل تكلفة — اضغط «اختيار» لاستبداله كمخزن الطلب.</div>`
+          + '<table style="width:100%;border-collapse:collapse;font-size:0.8rem;"><thead><tr style="background:#f1f5f9;"><th style="text-align:right;padding:6px">المخزن</th><th style="text-align:right;padding:6px">اسم الصنف بالمخزن</th><th style="padding:6px">سعر البيع</th><th style="padding:6px">الخصم</th><th style="padding:6px">التكلفة</th><th style="padding:6px">الإتاحة</th><th style="padding:6px"></th></tr></thead><tbody>'
+          + rows.map(r=>`<tr style="border-bottom:1px solid #e2e8f0;${(chosen && chosen===r.store)?'background:#dcfce7;font-weight:800;':''}">
+              <td style="text-align:right;padding:6px;">${r.store||'—'}</td>
+              <td style="text-align:right;padding:6px;font-size:0.72rem;color:var(--text-muted);">${r.item_name||'—'}</td>
               <td style="text-align:center;padding:6px;">${_num(r.price)}</td>
               <td style="text-align:center;padding:6px;color:#0f766e;">${_num(r.discount_perc)}%</td>
               <td style="text-align:center;padding:6px;font-weight:700;">${_num(r._cost)}</td>
+              <td style="text-align:center;padding:6px;">${r.available?'متاح':'<span style="color:#b91c1c">غير متاح</span>'}</td>
+              <td style="text-align:center;padding:6px;"><button onclick="chooseWarehouse('${String(r.store||'').replace(/'/g,"\\'")}',${r.price==null?'null':r.price},${r.discount_perc==null?'null':r.discount_perc})" style="background:#0d9488;color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:0.72rem;font-weight:700;cursor:pointer;">اختيار</button></td>
             </tr>`).join('')
           + '</tbody></table>';
       } catch(e){ document.getElementById('cmp-body').innerHTML = '<div style="color:var(--danger)">خطأ في التحميل</div>'; }
     }
     function closeStoreCompare(){ document.getElementById('cmp-modal').style.display='none'; }
+    // اختيار مخزن للطلب: يعلّمه في العمود (أخضر ✓) ويملأ حقل المورد ويحفظ
+    function chooseWarehouse(store, price, disc){
+      const id = _cmpId; if (id==null || !SRC_MAP[id]) return;
+      SRC_MAP[id]._chosen = { store, price:(price==null?null:price), discount:(disc==null?null:disc) };
+      const cell = document.getElementById('src-'+id); if (cell) cell.innerHTML = srcHtml(id);
+      const comp = document.getElementById('comp-'+id);
+      if (comp){ comp.value = store; autoSave(id); }
+      closeStoreCompare();
+    }
 
     async function loadOrders() {
       const tbody = document.getElementById('table-body');
