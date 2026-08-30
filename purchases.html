@@ -189,6 +189,43 @@
       if (user) loadOrders();
     });
 
+    // ===== ترشيح المخزن اللي نجيب منه كل صنف شراء =====
+    // كود موجود → أفضل مخزن متاح (أعلى خصم)؛ مفيش → غير متاح.
+    // ملوش كود → يطابق الاسم لكود (زي شاشة أسعار المخازن) وبعدها يرشّح المخزن.
+    let SRC_MAP = {};   // id -> {status, store, discount_perc, resolved_code, matched_by}
+    const SRC_H = { apikey: SB_ANON_API, Authorization: 'Bearer ' + SB_ANON_API, 'Content-Type': 'application/json' };
+    async function loadSourceSuggestions(items){
+      const pending = (items||[]).filter(i => SRC_MAP[i.id] === undefined && i.id != null);
+      if (!pending.length) return;
+      const CHUNK = 40;
+      for (let x=0; x<pending.length; x+=CHUNK){
+        const slice = pending.slice(x, x+CHUNK);
+        const rows = slice.map(i => ({ k: String(i.id), code: i.item_code || '', name: i.item_name || '' }));
+        try {
+          const res = await fetch(SB_URL_API + '/rest/v1/rpc/suggest_purchase_sources', {
+            method:'POST', headers: SRC_H, body: JSON.stringify({ p_rows: rows })
+          });
+          const data = await res.json();
+          (Array.isArray(data) ? data : []).forEach(d => { SRC_MAP[d.k] = d; });
+        } catch(e){ /* تجاهل */ }
+        slice.forEach(i => { const el = document.getElementById('src-'+i.id); if (el) el.innerHTML = srcHtml(i.id); });
+      }
+    }
+    function srcHtml(id){
+      const s = SRC_MAP[id];
+      if (s === undefined) return '<span style="font-size:0.68rem;color:var(--text-muted)">⏳ يرشّح المخزن…</span>';
+      if (s.status === 'ok'){
+        const disc = (s.discount_perc!=null) ? ` · خصم ${s.discount_perc}%` : '';
+        const viaName = (s.matched_by==='name') ? ` <span style="color:var(--text-muted)">(مطابقة كود ${s.resolved_code||'—'})</span>` : '';
+        return `<div style="font-size:0.72rem;color:#0f766e;font-weight:700;"><i class="fas fa-store"></i> ${s.store}${disc}${viaName}</div>`;
+      }
+      if (s.status === 'not_available')
+        return `<div style="font-size:0.72rem;color:#dc2626;font-weight:700;">🚫 غير متاح في المخازن</div>`;
+      if (s.status === 'no_match')
+        return `<div style="font-size:0.68rem;color:var(--text-muted);">لا يوجد تطابق للاسم</div>`;
+      return '';
+    }
+
     async function loadOrders() {
       const tbody = document.getElementById('table-body');
       tbody.innerHTML = '<tr class="loading-row"><td colspan="9">⏳ جاري جلب البيانات...</td></tr>';
@@ -219,6 +256,7 @@
 
           generateBranches(rawData);
           applyFilter();
+          loadSourceSuggestions(rawData);
         } else {
           tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted);">لا توجد طلبات شراء</td></tr>';
         }
@@ -296,6 +334,7 @@
               <div style="font-size:0.72rem;color:var(--text-muted);">
                 <i class="fas fa-barcode"></i> ${i.item_code || '---'}
               </div>
+              <div id="src-${i.id}" style="margin-top:3px;">${srcHtml(i.id)}</div>
             </td>
             <td style="text-align:right;">
               <div style="font-weight:600;font-size:0.82rem;">${i.customer_name || '---'}</div>
