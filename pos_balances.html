@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>أرصدة نقاط البيع - Phalix</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <script src="api.js?v=tt20260824d"></script>
+  <style>
+    :root{ --primary:#0d9488; --primary-dark:#0f766e; }
+    .container{ max-width:100% !important; width:100%; }
+    .pb-tabs{ display:flex; gap:6px; border-bottom:2px solid var(--border); margin-bottom:16px; flex-wrap:wrap; }
+    .pb-tab{ padding:9px 18px; border:none; background:none; font-family:var(--font); font-size:0.9rem; font-weight:700; color:var(--text-secondary); cursor:pointer; border-bottom:3px solid transparent; margin-bottom:-2px; }
+    .pb-tab.active{ color:var(--primary-dark); border-bottom-color:var(--primary); }
+    .pb-bar{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; background:var(--surface-3); border:1px solid var(--border); border-radius:var(--radius-md); padding:12px 16px; margin-bottom:16px; }
+    .pb-bar label{ font-size:0.82rem; font-weight:700; color:var(--text-secondary); }
+    .pb-bar input[type="datetime-local"]{ font-family:var(--font); font-size:0.88rem; padding:7px 10px; border:1.5px solid var(--border); border-radius:var(--radius-sm); background:var(--surface); color:var(--text-primary); }
+    .pb-total{ margin-inline-start:auto; font-weight:800; font-size:1rem; }
+    .pb-card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); overflow:hidden; box-shadow:var(--shadow-sm); }
+    table{ width:100%; border-collapse:collapse; }
+    th,td{ padding:10px 12px; font-size:0.86rem; border-bottom:1px solid var(--border); text-align:center; }
+    th{ background:#f1f5f9; font-weight:800; color:#334155; }
+    td.name{ text-align:right; font-weight:700; }
+    tbody tr:hover td{ background:#f0fdfa; cursor:pointer; }
+    .bal{ font-weight:800; font-variant-numeric:tabular-nums; }
+    .bal.pos{ color:#15803d; } .bal.neg{ color:#dc2626; }
+    .muted{ color:var(--text-muted); font-size:0.75rem; }
+    .pb-ov{ display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:9999; align-items:center; justify-content:center; padding:16px; }
+    .pb-ov.open{ display:flex; }
+    .pb-modal{ background:var(--surface); border-radius:var(--radius-lg); width:100%; max-width:560px; max-height:90vh; overflow:auto; box-shadow:var(--shadow-lg); }
+    .pb-modal h3{ padding:14px 18px; margin:0; font-size:1rem; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+    .pb-close{ background:none; border:none; font-size:1.2rem; cursor:pointer; color:var(--text-muted); }
+  </style>
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+      <div class="page-header">
+        <div class="page-title"><i class="fas fa-cash-register"></i> أرصدة نقاط البيع</div>
+        <button class="btn btn-primary" onclick="loadBranch()"><i class="fas fa-sync-alt"></i> تحديث</button>
+      </div>
+
+      <div class="pb-tabs" id="pb-tabs"></div>
+
+      <div class="pb-bar">
+        <label>الرصيد كما في:</label>
+        <input type="datetime-local" id="pb-at" onchange="loadBranch()">
+        <button class="btn btn-sm" style="background:var(--surface-3)" onclick="setNow()">🕐 الآن</button>
+        <span class="pb-total" id="pb-total"></span>
+      </div>
+
+      <div class="pb-card">
+        <table>
+          <thead><tr><th style="text-align:right">الجهاز</th><th>الكود</th><th>الرصيد</th><th>آخر تحديث قبل الوقت المختار</th></tr></thead>
+          <tbody id="pb-body"><tr><td colspan="4" class="muted" style="padding:24px">جارٍ التحميل…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="muted" style="margin-top:8px">اضغط على أي جهاز لعرض تاريخ رصيده عبر الوقت.</div>
+    </div>
+  </div>
+
+  <!-- history modal -->
+  <div class="pb-ov" id="pb-hist-ov">
+    <div class="pb-modal">
+      <h3><span id="pb-hist-title">تاريخ الرصيد</span><button class="pb-close" onclick="closeHist()">✕</button></h3>
+      <div id="pb-hist-body" style="padding:14px 18px"></div>
+    </div>
+  </div>
+
+  <script>
+    const REST = SB_URL_API + '/rest/v1/';
+    const H = { apikey: SB_ANON_API, Authorization: 'Bearer ' + SB_ANON_API, 'Content-Type': 'application/json' };
+    const BRANCHES = (window.ORG_BRANCHES && window.ORG_BRANCHES.length) ? window.ORG_BRANCHES.slice() : ['المعمورة','سان ستيفانو','سيدى بشر'];
+    let curBranch = BRANCHES[0];
+
+    function fmtMoney(v){ const n = Number(v)||0; return Math.round(n).toLocaleString('ar-EG'); }
+    function fmtDT(s){ if(!s) return '—'; const d=new Date(s); return d.toLocaleDateString('ar-EG',{timeZone:'Africa/Cairo',day:'numeric',month:'numeric',year:'numeric'})+' '+d.toLocaleTimeString('ar-EG',{timeZone:'Africa/Cairo',hour:'2-digit',minute:'2-digit'}); }
+    function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+    // قيمة datetime-local الحالية بتوقيت المتصفح
+    function nowLocalInput(){
+      const d = new Date(); const p = n => String(n).padStart(2,'0');
+      return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+    function setNow(){ document.getElementById('pb-at').value = nowLocalInput(); loadBranch(); }
+    function atISO(){ const v = document.getElementById('pb-at').value; return v ? new Date(v).toISOString() : new Date().toISOString(); }
+
+    function renderTabs(){
+      document.getElementById('pb-tabs').innerHTML = BRANCHES.map(b =>
+        `<button class="pb-tab ${b===curBranch?'active':''}" onclick="pickBranch('${esc(b)}')">${esc(b)}</button>`).join('');
+    }
+    function pickBranch(b){ curBranch = b; renderTabs(); loadBranch(); }
+
+    async function loadBranch(){
+      const body = document.getElementById('pb-body');
+      body.innerHTML = '<tr><td colspan="4" class="muted" style="padding:24px">جارٍ التحميل…</td></tr>';
+      document.getElementById('pb-total').textContent = '';
+      let rows = [];
+      try {
+        const r = await fetch(REST + 'rpc/get_pos_balances_at', { method:'POST', headers:H, body: JSON.stringify({ p_branch: curBranch, p_at: atISO() }) });
+        rows = await r.json();
+        if (!Array.isArray(rows)) rows = [];
+      } catch(e){ body.innerHTML = '<tr><td colspan="4" style="color:var(--danger);padding:24px">تعذّر التحميل</td></tr>'; return; }
+      if (!rows.length){ body.innerHTML = '<tr><td colspan="4" class="muted" style="padding:24px">لا توجد بيانات لهذا الفرع في هذا الوقت</td></tr>'; return; }
+      rows.sort((a,b)=> (Number(b.balance)||0) - (Number(a.balance)||0));
+      const total = rows.reduce((s,x)=> s + (Number(x.balance)||0), 0);
+      document.getElementById('pb-total').innerHTML = `الإجمالي: <span class="bal ${total<0?'neg':'pos'}">${fmtMoney(total)} ج</span>`;
+      body.innerHTML = rows.map(x=>{
+        const bal = Number(x.balance)||0;
+        return `<tr onclick="openHist('${esc(x.pos_code)}','${esc(x.pos_name_ar||x.pos_code)}')">
+          <td class="name">${esc(x.pos_name_ar||'—')}${x.pos_name_en?` <span class="muted">(${esc(x.pos_name_en)})</span>`:''}</td>
+          <td><code>${esc(x.pos_code)}</code></td>
+          <td class="bal ${bal<0?'neg':'pos'}">${fmtMoney(bal)} ج</td>
+          <td class="muted">${fmtDT(x.captured_at)}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    async function openHist(posCode, posName){
+      document.getElementById('pb-hist-title').textContent = 'تاريخ الرصيد — ' + posName;
+      document.getElementById('pb-hist-body').innerHTML = 'جارٍ التحميل…';
+      document.getElementById('pb-hist-ov').classList.add('open');
+      let rows = [];
+      try {
+        const url = REST + 'eplus_pos?select=pos_current_balance,captured_at&branch=eq.' + encodeURIComponent(curBranch) + '&pos_code=eq.' + encodeURIComponent(posCode) + '&order=captured_at.desc&limit=300';
+        rows = await (await fetch(url, { headers:H })).json();
+        if (!Array.isArray(rows)) rows = [];
+      } catch(e){ document.getElementById('pb-hist-body').innerHTML = '<div style="color:var(--danger)">تعذّر التحميل</div>'; return; }
+      if (!rows.length){ document.getElementById('pb-hist-body').innerHTML = '<div class="muted">لا يوجد تاريخ</div>'; return; }
+      // نعرض التغيّرات فقط (نتجاهل اللقطات المكرّرة بنفس الرصيد المتتالي)
+      const changes = [];
+      let prev = null;
+      for (const x of rows){ const b = Number(x.pos_current_balance)||0; if (prev===null || b!==prev){ changes.push(x); prev = b; } }
+      document.getElementById('pb-hist-body').innerHTML =
+        `<div class="muted" style="margin-bottom:8px">${rows.length} لقطة · ${changes.length} تغيّر — الأحدث فوق</div>`
+        + '<table><thead><tr><th style="text-align:right">الوقت</th><th>الرصيد</th></tr></thead><tbody>'
+        + changes.map(x=>{ const b=Number(x.pos_current_balance)||0; return `<tr><td class="name muted" style="font-weight:400">${fmtDT(x.captured_at)}</td><td class="bal ${b<0?'neg':'pos'}">${fmtMoney(b)} ج</td></tr>`; }).join('')
+        + '</tbody></table>';
+    }
+    function closeHist(){ document.getElementById('pb-hist-ov').classList.remove('open'); }
+
+    document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeHist(); });
+    document.getElementById('pb-at').value = nowLocalInput();
+    renderTabs();
+    loadBranch();
+  </script>
+</body>
+</html>
