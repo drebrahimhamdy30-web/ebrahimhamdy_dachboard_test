@@ -622,8 +622,61 @@ async function paymobMarkPaidForDay(dayStr) {
   });
 }
 
-async function login(username, password) {
+// ===================== المصادقة =====================
+// فك payload بتاع JWT بترميز UTF-8 صحيح.
+// ⚠️ atob لوحده بيخرّب العربي (اسم الفرع بيرجع رموز) — لازم الخطوة الزيادة دي.
+function sbDecodeJwt(t) {
   try {
+    const p = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(decodeURIComponent(escape(atob(p))));
+  } catch (e) { return null; }
+}
+
+// دخول عبر Supabase Auth. بيرجّع نفس شكل رد n8n عشان الصفحات ماتتغيّرش،
+// وبيرجّع null لو فشل لأي سبب → المنادي بيرجع لـn8n.
+async function sbAuthLogin(username, password) {
+  try {
+    const er = await fetch(`${SB_URL_API}/rest/v1/rpc/resolve_login_email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SB_ANON_API, Authorization: 'Bearer ' + SB_ANON_API },
+      body: JSON.stringify({ p_login: username })
+    });
+    if (!er.ok) return null;
+    const email = await er.json();
+    if (!email) return null;
+
+    const tr = await fetch(`${SB_URL_API}/auth/v1/token?grant_type=password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SB_ANON_API },
+      body: JSON.stringify({ email: email, password: password })
+    });
+    const data = await tr.json();
+    if (!tr.ok || !data.access_token) return null;
+
+    const m = (sbDecodeJwt(data.access_token) || {}).app_metadata || {};
+    localStorage.setItem('authProvider', 'supabase');
+    localStorage.setItem('sbRefresh', data.refresh_token || '');
+    return {
+      success: true, status: 'success',
+      user:      m.username || username,
+      role:      m.user_role || 'employee',
+      branch:    m.branch || '',
+      full_name: m.full_name || m.username || username,
+      legacy_id: m.legacy_id || '',
+      id:        m.branch_user_id || '',
+      token:     data.access_token,
+      jwt:       data.access_token
+    };
+  } catch (e) { return null; }
+}
+
+async function login(username, password) {
+  // Supabase Auth أولًا؛ ولو فشل لأي سبب نرجع لـn8n — فمفيش لحظة قفل أثناء الانتقال
+  const sb = await sbAuthLogin(username, password);
+  if (sb) return sb;
+  try {
+    localStorage.removeItem('authProvider');
+    localStorage.removeItem('sbRefresh');
     const response = await fetch(LOGIN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
@@ -671,9 +724,38 @@ async function updateDataWithResponse(data) {
   }
 }
 
+// تجديد جلسة Supabase بالـrefresh token. بيرجّع true لو الجلسة لسه صالحة أو اتجددت.
+async function sbAuthRefresh() {
+  const rt = localStorage.getItem('sbRefresh');
+  if (!rt) return false;
+  try {
+    const r = await fetch(`${SB_URL_API}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SB_ANON_API },
+      body: JSON.stringify({ refresh_token: rt })
+    });
+    const d = await r.json();
+    if (!r.ok || !d.access_token) return false;
+    localStorage.setItem('authJwt',   d.access_token);
+    localStorage.setItem('authToken', d.access_token);
+    localStorage.setItem('sbRefresh', d.refresh_token || rt);
+    return true;
+  } catch (e) { return false; }
+}
+
 async function verifyToken() {
   const token = localStorage.getItem('authToken');
   if (!token) return false;
+
+  // جلسة Supabase: بنتحقق منها محليًا وبنجددها عند اللزوم.
+  // ⚠️ من غير الفرع ده، توكن Supabase كان هيتبعت لـwebhook التحقق بتاع n8n
+  // اللي مش هيعرفه → «غير صالح» → localStorage.clear() وخروج كل المستخدمين بعد 30 دقيقة.
+  if (localStorage.getItem('authProvider') === 'supabase') {
+    const p = sbDecodeJwt(localStorage.getItem('authJwt') || '');
+    if (p && p.exp && p.exp * 1000 > Date.now() + 60000) return true;
+    return await sbAuthRefresh();
+  }
+
   try {
     const response = await fetch(VERIFY_URL, {
       method: 'POST',

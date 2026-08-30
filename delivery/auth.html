@@ -372,9 +372,57 @@
     if (!hasSession) showLoginForm();
   })();
 
-  // ===== تسجيل الدخول عبر الـ login workflow الموحّد =====
-  async function loginRequest(username, password) {
+  // ===== تسجيل الدخول: Supabase Auth أولًا، وبرجوع تلقائي لـn8n =====
+  // ⚠️ atob لوحده بيخرّب العربي في اسم الفرع — لازم الخطوة الزيادة دي
+  function sbDecodeJwt(t) {
     try {
+      const p = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      return JSON.parse(decodeURIComponent(escape(atob(p))));
+    } catch (e) { return null; }
+  }
+
+  async function sbAuthLogin(username, password) {
+    try {
+      const er = await fetch(`${SUPABASE_URL}/rest/v1/rpc/resolve_login_email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY },
+        body: JSON.stringify({ p_login: username })
+      });
+      if (!er.ok) return null;
+      const email = await er.json();
+      if (!email) return null;
+
+      const tr = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
+        body: JSON.stringify({ email: email, password: password })
+      });
+      const d = await tr.json();
+      if (!tr.ok || !d.access_token) return null;
+
+      const m = (sbDecodeJwt(d.access_token) || {}).app_metadata || {};
+      localStorage.setItem('authProvider', 'supabase');
+      localStorage.setItem('sbRefresh', d.refresh_token || '');
+      return {
+        status: 'success', success: true,
+        user:      m.username || username,
+        role:      m.user_role || 'employee',
+        branch:    m.branch || '',
+        full_name: m.full_name || m.username || username,
+        legacy_id: m.legacy_id || '',
+        id:        m.branch_user_id || '',
+        token:     d.access_token,
+        jwt:       d.access_token
+      };
+    } catch (e) { return null; }
+  }
+
+  async function loginRequest(username, password) {
+    const sb = await sbAuthLogin(username, password);
+    if (sb) return sb;
+    try {
+      localStorage.removeItem('authProvider');
+      localStorage.removeItem('sbRefresh');
       const response = await fetch(LOGIN_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
