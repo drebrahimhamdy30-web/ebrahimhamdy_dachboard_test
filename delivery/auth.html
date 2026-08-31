@@ -347,6 +347,36 @@
     const token = localStorage.getItem('authToken');
     if (!token) return false;
 
+    // جلسة Supabase: نتحقق منها محليًا ونجددها بالـrefresh token.
+    // من غير الفرع ده كانت بتتبعت لـwebhook التحقق بتاع n8n اللي مش هيعرفها،
+    // فيرجع false وتظهر شاشة الدخول كل ساعة.
+    if (localStorage.getItem('authProvider') === 'supabase') {
+      const p = sbDecodeJwt(localStorage.getItem('authJwt') || '');
+      if (p && p.exp && p.exp * 1000 > Date.now() + 60000) {
+        redirectByRole(localStorage.getItem('userRole'));
+        return true;
+      }
+      const rt = localStorage.getItem('sbRefresh');
+      if (rt) {
+        try {
+          const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
+            body: JSON.stringify({ refresh_token: rt })
+          });
+          const d = await r.json();
+          if (r.ok && d.access_token) {
+            localStorage.setItem('authJwt',   d.access_token);
+            localStorage.setItem('authToken', d.access_token);
+            if (d.refresh_token) localStorage.setItem('sbRefresh', d.refresh_token);
+            redirectByRole(localStorage.getItem('userRole'));
+            return true;
+          }
+        } catch (e) {}
+      }
+      return false;   // التجديد فشل → الدخول من جديد
+    }
+
     try {
       const response = await fetch(VERIFY_URL, {
         method: 'POST',

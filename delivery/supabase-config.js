@@ -2,11 +2,60 @@ const SUPABASE_URL = 'https://rxtjoqulmgkkcohmgzgi.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
 
 const { createClient } = supabase;
+
+// ⚠️ atob لوحده بيخرّب اسم الفرع العربي جوه التوكن
+function sbDecodeJwt(t) {
+  try {
+    return JSON.parse(decodeURIComponent(escape(atob(
+      t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))));
+  } catch (e) { return null; }
+}
+function sbJwtValid(t) {
+  const p = t && sbDecodeJwt(t);
+  return !!(p && p.exp && p.exp * 1000 > Date.now() + 60000);
+}
+
+// توكن Supabase عمره ساعة. الصفحات دي بتفضل مفتوحة ساعات (التوزيع مثلًا)، وقبل كده
+// كان التوكن بيتاخد وقت التحميل بس وبعد ساعة كل النداءات تبقى 401 والمستخدم يتطلّع.
+// نجدّده استباقيًا كل 10 دقايق وبنبعت دايمًا آخر توكن مخزّن مش نسخة وقت التحميل.
+async function sbRefreshSession() {
+  if (localStorage.getItem('authProvider') !== 'supabase') return false;
+  if (sbJwtValid(localStorage.getItem('authJwt'))) return true;
+  const rt = localStorage.getItem('sbRefresh');
+  if (!rt) return false;
+  try {
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
+      body: JSON.stringify({ refresh_token: rt })
+    });
+    const d = await r.json();
+    if (!r.ok || !d.access_token) return false;
+    localStorage.setItem('authJwt',   d.access_token);
+    localStorage.setItem('authToken', d.access_token);
+    if (d.refresh_token) localStorage.setItem('sbRefresh', d.refresh_token);
+    return true;
+  } catch (e) { return false; }
+}
+
 const _authJwt = localStorage.getItem('authJwt');
 const db = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
-  global: { headers: _authJwt ? { Authorization: 'Bearer ' + _authJwt } : {} }
+  global: {
+    headers: _authJwt ? { Authorization: 'Bearer ' + _authJwt } : {},
+    // كل نداء بياخد أحدث توكن من التخزين (بعد أي تجديد) بدل نسخة وقت التحميل
+    fetch: (url, options = {}) => {
+      const t = localStorage.getItem('authJwt');
+      if (t) {
+        options.headers = { ...(options.headers || {}), Authorization: 'Bearer ' + t };
+      }
+      return fetch(url, options);
+    }
+  }
 });
+
+sbRefreshSession();
+setInterval(sbRefreshSession, 10 * 60 * 1000);
 
 // ===== الهوية (White-label): تطبيق من الكاش فورًا + تحديث من org_settings =====
 (function () {

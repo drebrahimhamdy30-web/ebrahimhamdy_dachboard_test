@@ -490,7 +490,29 @@ window.addEventListener('DOMContentLoaded', async () => {
   // تجديد تلقائي: جلسة قديمة بلا JWT صالح → عدّي على صفحة الدخول لتجديده (بدون كتابة بيانات)
   const _jwt = localStorage.getItem('authJwt');
   let _jwtOk = false;
-  try { const _p = _jwt && JSON.parse(atob(_jwt.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); _jwtOk = _p && _p.exp*1000 > Date.now()+60000; } catch(e){ _jwtOk = false; }
+  // ⚠️ decodeURIComponent(escape(...)) لازم — atob لوحده بيخرّب أسماء الفروع العربية
+  try { const _p = _jwt && JSON.parse(decodeURIComponent(escape(atob(_jwt.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))))); _jwtOk = _p && _p.exp*1000 > Date.now()+60000; } catch(e){ _jwtOk = false; }
+
+  // توكن Supabase عمره ساعة، وتطبيق التوصيل مابيحمّلش api.js فماكانش فيه أي تجديد —
+  // فكل ساعة كان بيحوّل على صفحة الدخول ويطلب الدخول من جديد. نجدّده هنا بالـrefresh token.
+  if (!_jwtOk && localStorage.getItem('authProvider') === 'supabase' && localStorage.getItem('sbRefresh')) {
+    try {
+      const _r = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=refresh_token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
+        body: JSON.stringify({ refresh_token: localStorage.getItem('sbRefresh') })
+      });
+      const _d = await _r.json();
+      if (_r.ok && _d.access_token) {
+        localStorage.setItem('authJwt',   _d.access_token);
+        localStorage.setItem('authToken', _d.access_token);
+        if (_d.refresh_token) localStorage.setItem('sbRefresh', _d.refresh_token);
+        _jwtOk = true;
+        sessionStorage.removeItem('jwtRefreshDone');
+      }
+    } catch(e){}
+  }
+
   if (!_jwtOk && !sessionStorage.getItem('jwtRefreshDone')) {
     sessionStorage.setItem('jwtRefreshDone', '1');
     window.location.href = 'auth.html';
