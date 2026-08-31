@@ -43,13 +43,17 @@ const db = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
   global: {
     headers: _authJwt ? { Authorization: 'Bearer ' + _authJwt } : {},
-    // كل نداء بياخد أحدث توكن من التخزين (بعد أي تجديد) بدل نسخة وقت التحميل
+    // كل نداء بياخد أحدث توكن من التخزين (بعد أي تجديد) بدل نسخة وقت التحميل.
+    // ⚠️ لازم Headers() مش نشر بالـspread: supabase-js بيبعت الهيدرات كـHeaders instance،
+    // و{...headers} عليها بيدّي {} فالـapikey بيضيع والنتيجة "No API key found in request".
+    // التوكن يُستعمل بس لو لسه صالح — لو منتهي نسيب مفتاح anon يشتغل فالعرض مايقعش
+    // بدل ما كل نداء يرجع 401.
     fetch: (url, options = {}) => {
       const t = localStorage.getItem('authJwt');
-      if (t) {
-        options.headers = { ...(options.headers || {}), Authorization: 'Bearer ' + t };
-      }
-      return fetch(url, options);
+      if (!t || !sbJwtValid(t)) return fetch(url, options);
+      const h = new Headers(options.headers || {});
+      h.set('Authorization', 'Bearer ' + t);
+      return fetch(url, { ...options, headers: h });
     }
   }
 });
