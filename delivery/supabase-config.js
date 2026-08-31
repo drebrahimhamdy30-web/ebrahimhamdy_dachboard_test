@@ -18,9 +18,15 @@ function sbJwtValid(t) {
 // توكن Supabase عمره ساعة. الصفحات دي بتفضل مفتوحة ساعات (التوزيع مثلًا)، وقبل كده
 // كان التوكن بيتاخد وقت التحميل بس وبعد ساعة كل النداءات تبقى 401 والمستخدم يتطلّع.
 // نجدّده استباقيًا كل 10 دقايق وبنبعت دايمًا آخر توكن مخزّن مش نسخة وقت التحميل.
+let _sbRefreshInFlight = null;   // تجديد واحد بس مهما كان عدد النداءات المتوازية
 async function sbRefreshSession() {
   if (localStorage.getItem('authProvider') !== 'supabase') return false;
   if (sbJwtValid(localStorage.getItem('authJwt'))) return true;
+  if (_sbRefreshInFlight) return _sbRefreshInFlight;
+  _sbRefreshInFlight = _sbDoRefresh().finally(() => { _sbRefreshInFlight = null; });
+  return _sbRefreshInFlight;
+}
+async function _sbDoRefresh() {
   const rt = localStorage.getItem('sbRefresh');
   if (!rt) return false;
   try {
@@ -38,18 +44,22 @@ async function sbRefreshSession() {
   } catch (e) { return false; }
 }
 
-const _authJwt = localStorage.getItem('authJwt');
+// ⚠️ التوكن مش بيتحط في الهيدر الثابت خالص: الهيدر ده بيتاخد مرة واحدة وقت التحميل
+// وبيفضل يتبعت حتى لو التوكن انتهى — فكل النداءات ترجع 401 والشاشة تفضل فاضية.
+// الـfetch تحت هو اللي بيضيفه، ولو مش صالح مابيضيفوش فمفتاح anon يشتغل والعرض يفضل شغّال.
 const db = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
   global: {
-    headers: _authJwt ? { Authorization: 'Bearer ' + _authJwt } : {},
     // كل نداء بياخد أحدث توكن من التخزين (بعد أي تجديد) بدل نسخة وقت التحميل.
     // ⚠️ لازم Headers() مش نشر بالـspread: supabase-js بيبعت الهيدرات كـHeaders instance،
     // و{...headers} عليها بيدّي {} فالـapikey بيضيع والنتيجة "No API key found in request".
     // التوكن يُستعمل بس لو لسه صالح — لو منتهي نسيب مفتاح anon يشتغل فالعرض مايقعش
     // بدل ما كل نداء يرجع 401.
-    fetch: (url, options = {}) => {
-      const t = localStorage.getItem('authJwt');
+    // لو التوكن منتهي بنستنى التجديد يخلص الأول. الرجوع لمفتاح anon مش كفاية هنا:
+    // سياسة orders بتدي anon صفر صفوف، فالشاشة كانت بتفضل فاضية من غير أي رسالة خطأ.
+    fetch: async (url, options = {}) => {
+      let t = localStorage.getItem('authJwt');
+      if (t && !sbJwtValid(t)) { await sbRefreshSession(); t = localStorage.getItem('authJwt'); }
       if (!t || !sbJwtValid(t)) return fetch(url, options);
       const h = new Headers(options.headers || {});
       h.set('Authorization', 'Bearer ' + t);
