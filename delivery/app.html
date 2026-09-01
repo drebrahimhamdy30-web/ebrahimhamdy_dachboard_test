@@ -496,21 +496,36 @@ window.addEventListener('DOMContentLoaded', async () => {
   // توكن Supabase عمره ساعة، وتطبيق التوصيل مابيحمّلش api.js فماكانش فيه أي تجديد —
   // فكل ساعة كان بيحوّل على صفحة الدخول ويطلب الدخول من جديد. نجدّده هنا بالـrefresh token.
   if (!_jwtOk && localStorage.getItem('authProvider') === 'supabase' && localStorage.getItem('sbRefresh')) {
-    try {
-      const _r = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=refresh_token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
-        body: JSON.stringify({ refresh_token: localStorage.getItem('sbRefresh') })
-      });
-      const _d = await _r.json();
-      if (_r.ok && _d.access_token) {
+    // نفس اسم القفل المستعمل في supabase-config.js — الصفحات بتتفتح في iframe جوّه
+    // الصفحة دي، ولو الاتنين جدّدوا في نفس اللحظة Supabase بيحرق الـrefresh token
+    // والتاني ياخد "Already Used" فيظهر «خطأ في التحميل».
+    const _stillOk = () => {
+      try {
+        const q = JSON.parse(decodeURIComponent(escape(atob(
+          (localStorage.getItem('authJwt')||'').split('.')[1].replace(/-/g,'+').replace(/_/g,'/')))));
+        return !!(q && q.exp*1000 > Date.now()+60000);
+      } catch(e){ return false; }
+    };
+    const _doRefresh = async () => {
+      if (_stillOk()) return true;                 // سياق تاني جدّد وإحنا مستنيين القفل
+      try {
+        const _r = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=refresh_token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
+          body: JSON.stringify({ refresh_token: localStorage.getItem('sbRefresh') })
+        });
+        const _d = await _r.json();
+        if (!_r.ok || !_d.access_token) return _stillOk();
         localStorage.setItem('authJwt',   _d.access_token);
         localStorage.setItem('authToken', _d.access_token);
         if (_d.refresh_token) localStorage.setItem('sbRefresh', _d.refresh_token);
-        _jwtOk = true;
-        sessionStorage.removeItem('jwtRefreshDone');
-      }
-    } catch(e){}
+        return true;
+      } catch(e){ return _stillOk(); }
+    };
+    const _ok = (navigator.locks && navigator.locks.request)
+      ? await navigator.locks.request('phalix-sb-refresh', _doRefresh)
+      : await _doRefresh();
+    if (_ok) { _jwtOk = true; sessionStorage.removeItem('jwtRefreshDone'); }
   }
 
   if (!_jwtOk && !sessionStorage.getItem('jwtRefreshDone')) {

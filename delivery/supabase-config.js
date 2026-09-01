@@ -23,9 +23,23 @@ async function sbRefreshSession() {
   if (localStorage.getItem('authProvider') !== 'supabase') return false;
   if (sbJwtValid(localStorage.getItem('authJwt'))) return true;
   if (_sbRefreshInFlight) return _sbRefreshInFlight;
-  _sbRefreshInFlight = _sbDoRefresh().finally(() => { _sbRefreshInFlight = null; });
+  _sbRefreshInFlight = _sbGuardedRefresh().finally(() => { _sbRefreshInFlight = null; });
   return _sbRefreshInFlight;
 }
+
+// قفل على مستوى الأصل كله: app.html والـiframe جوّاه وأي تبويب تاني ما يجدّدوش مع بعض.
+// Supabase بيلغي الـrefresh token مع كل استعمال — فلو سياقين بعتوه في نفس اللحظة،
+// واحد ينجح والتاني ياخد "Already Used" ويقع بـ«خطأ في التحميل».
+async function _sbGuardedRefresh() {
+  if (navigator.locks && navigator.locks.request) {
+    return navigator.locks.request('phalix-sb-refresh', async () => {
+      if (sbJwtValid(localStorage.getItem('authJwt'))) return true;   // حد تاني جدّد وإحنا مستنيين
+      return _sbDoRefresh();
+    });
+  }
+  return _sbDoRefresh();
+}
+
 async function _sbDoRefresh() {
   const rt = localStorage.getItem('sbRefresh');
   if (!rt) return false;
@@ -36,12 +50,14 @@ async function _sbDoRefresh() {
       body: JSON.stringify({ refresh_token: rt })
     });
     const d = await r.json();
-    if (!r.ok || !d.access_token) return false;
+    // فشل التجديد مش معناه بالضرورة خروج: ممكن سياق تاني يكون جدّد وحرق التوكن —
+    // لو التخزين بقى فيه توكن صالح يبقى إحنا تمام.
+    if (!r.ok || !d.access_token) return sbJwtValid(localStorage.getItem('authJwt'));
     localStorage.setItem('authJwt',   d.access_token);
     localStorage.setItem('authToken', d.access_token);
     if (d.refresh_token) localStorage.setItem('sbRefresh', d.refresh_token);
     return true;
-  } catch (e) { return false; }
+  } catch (e) { return sbJwtValid(localStorage.getItem('authJwt')); }
 }
 
 // ⚠️ التوكن مش بيتحط في الهيدر الثابت خالص: الهيدر ده بيتاخد مرة واحدة وقت التحميل
