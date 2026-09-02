@@ -142,21 +142,48 @@ const SB_URL='https://rxtjoqulmgkkcohmgzgi.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
 // توكن المستخدم لو موجود وصالح → الصفحة تشتغل كـauthenticated عشان الـRPCs المحروسة بالدور
 // (add_recon_txn / move_recon_txn). لو ناقص أو منتهي نرجع لمفتاح anon عشان العرض مايقعش.
-const SH_AUTH=(function(){
+// توكن المستخدم الصالح (يُقرأ لكل نداء مش مرة واحدة — عشان التجديد يوصل)
+function shTok(){
   const t=localStorage.getItem('authJwt');
   try{
     const p=t&&JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
     if(p&&p.exp*1000>Date.now()+60000) return t;
   }catch(e){}
-  return SB_KEY;
-})();
-const H_BASE={'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+SH_AUTH};
-const H={...H_BASE,'Prefer':'return=representation'};
-const H_WRITE={...H_BASE,'Prefer':'return=minimal'};
+  return null;
+}
+// تجديد جلسة Supabase بالـrefresh token (مضمّن لأن الصفحة مش بتحمّل api.js)
+async function shRefresh(){
+  const rt=localStorage.getItem('sbRefresh');
+  if(!rt || localStorage.getItem('authProvider')!=='supabase') return false;
+  try{
+    const r=await fetch(SB_URL+'/auth/v1/token?grant_type=refresh_token',{method:'POST',
+      headers:{'Content-Type':'application/json','apikey':SB_KEY},
+      body:JSON.stringify({refresh_token:rt})});
+    const d=await r.json();
+    if(!r.ok||!d.access_token) return false;
+    localStorage.setItem('authJwt',d.access_token);
+    localStorage.setItem('authToken',d.access_token);
+    if(d.refresh_token) localStorage.setItem('sbRefresh',d.refresh_token);
+    return true;
+  }catch(e){ return false; }
+}
+// توكن صالح: لو منتهي نجدّد الأول، وإلا anon (عرض فقط)
+let _shRefreshing=null;
+async function shValidToken(){
+  let t=shTok();
+  if(!t){ if(!_shRefreshing) _shRefreshing=shRefresh(); const ok=await _shRefreshing; _shRefreshing=null; if(ok) t=shTok(); }
+  return t||SB_KEY;
+}
+async function shHeaders(prefer){
+  const h={'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+(await shValidToken())};
+  if(prefer) h['Prefer']=prefer;
+  return h;
+}
 
 async function api(path,opts={}){
   const isWrite=['PATCH','DELETE','PUT'].includes(opts.method);
-  const r=await fetch(SB_URL+'/rest/v1/'+path,{headers:isWrite?H_WRITE:H,...opts});
+  const headers=await shHeaders(isWrite?'return=minimal':'return=representation');
+  const r=await fetch(SB_URL+'/rest/v1/'+path,{...opts,headers});
   if(!r.ok){throw new Error(await r.text());}
   return isWrite?null:r.json();
 }
@@ -897,7 +924,7 @@ function openingModal(branch, cur, asOf){
     const btn=document.getElementById('opnSave'); btn.disabled=true; btn.textContent='جاري الحفظ...';
     try{
       const r=await fetch(SB_URL+'/rest/v1/pos_branch_opening',{method:'POST',
-        headers:{...H_BASE,'Prefer':'resolution=merge-duplicates,return=minimal'},
+        headers:await shHeaders('resolution=merge-duplicates,return=minimal'),
         body:JSON.stringify({branch, opening_balance:v, as_of:d, set_by:settler, set_at:new Date().toISOString()})});
       if(!r.ok) throw new Error(await r.text());
       ov.remove(); toast('اتحفظ رصيد البداية ✓'); await loadBalance();
