@@ -482,6 +482,40 @@ let currentUser = null;
 let currentPage = null;
 let allowedPages = [];
 
+// تجديد توكن Supabase (يحصّن كل الشاشات في الـiframe لأنها بتشارك نفس localStorage).
+// بيجدّد بس لو باقي على انتهاء التوكن أقل من marginMs. يستخدم قفل مشترك عشان
+// سياقين مايجدّدوش في نفس اللحظة (Supabase بيحرق الـrefresh token فالتاني ياخد Already Used).
+async function sbRefreshJwt(marginMs) {
+  if (localStorage.getItem('authProvider') !== 'supabase' || !localStorage.getItem('sbRefresh')) return false;
+  const stillOk = () => {
+    try {
+      const q = JSON.parse(decodeURIComponent(escape(atob(
+        (localStorage.getItem('authJwt')||'').split('.')[1].replace(/-/g,'+').replace(/_/g,'/')))));
+      return !!(q && q.exp*1000 > Date.now() + marginMs);
+    } catch(e){ return false; }
+  };
+  if (stillOk()) return true;
+  const doRefresh = async () => {
+    if (stillOk()) return true;                 // سياق تاني جدّد وإحنا مستنيين القفل
+    try {
+      const _r = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=refresh_token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
+        body: JSON.stringify({ refresh_token: localStorage.getItem('sbRefresh') })
+      });
+      const _d = await _r.json();
+      if (!_r.ok || !_d.access_token) return stillOk();
+      localStorage.setItem('authJwt',   _d.access_token);
+      localStorage.setItem('authToken', _d.access_token);
+      if (_d.refresh_token) localStorage.setItem('sbRefresh', _d.refresh_token);
+      return true;
+    } catch(e){ return stillOk(); }
+  };
+  return (navigator.locks && navigator.locks.request)
+    ? await navigator.locks.request('phalix-sb-refresh', doRefresh)
+    : await doRefresh();
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
   const token = localStorage.getItem('authToken');
   const activeUser = localStorage.getItem('activeUser');
@@ -493,45 +527,19 @@ window.addEventListener('DOMContentLoaded', async () => {
   // ⚠️ decodeURIComponent(escape(...)) لازم — atob لوحده بيخرّب أسماء الفروع العربية
   try { const _p = _jwt && JSON.parse(decodeURIComponent(escape(atob(_jwt.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))))); _jwtOk = _p && _p.exp*1000 > Date.now()+60000; } catch(e){ _jwtOk = false; }
 
-  // توكن Supabase عمره ساعة، وتطبيق التوصيل مابيحمّلش api.js فماكانش فيه أي تجديد —
-  // فكل ساعة كان بيحوّل على صفحة الدخول ويطلب الدخول من جديد. نجدّده هنا بالـrefresh token.
-  if (!_jwtOk && localStorage.getItem('authProvider') === 'supabase' && localStorage.getItem('sbRefresh')) {
-    // نفس اسم القفل المستعمل في supabase-config.js — الصفحات بتتفتح في iframe جوّه
-    // الصفحة دي، ولو الاتنين جدّدوا في نفس اللحظة Supabase بيحرق الـrefresh token
-    // والتاني ياخد "Already Used" فيظهر «خطأ في التحميل».
-    const _stillOk = () => {
-      try {
-        const q = JSON.parse(decodeURIComponent(escape(atob(
-          (localStorage.getItem('authJwt')||'').split('.')[1].replace(/-/g,'+').replace(/_/g,'/')))));
-        return !!(q && q.exp*1000 > Date.now()+60000);
-      } catch(e){ return false; }
-    };
-    const _doRefresh = async () => {
-      if (_stillOk()) return true;                 // سياق تاني جدّد وإحنا مستنيين القفل
-      try {
-        const _r = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=refresh_token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
-          body: JSON.stringify({ refresh_token: localStorage.getItem('sbRefresh') })
-        });
-        const _d = await _r.json();
-        if (!_r.ok || !_d.access_token) return _stillOk();
-        localStorage.setItem('authJwt',   _d.access_token);
-        localStorage.setItem('authToken', _d.access_token);
-        if (_d.refresh_token) localStorage.setItem('sbRefresh', _d.refresh_token);
-        return true;
-      } catch(e){ return _stillOk(); }
-    };
-    const _ok = (navigator.locks && navigator.locks.request)
-      ? await navigator.locks.request('phalix-sb-refresh', _doRefresh)
-      : await _doRefresh();
-    if (_ok) { _jwtOk = true; sessionStorage.removeItem('jwtRefreshDone'); }
-  }
+  // توكن Supabase عمره ساعة — نجدّده بالـrefresh token لو منتهي (بدل التحويل لصفحة الدخول)
+  if (!_jwtOk) { _jwtOk = await sbRefreshJwt(60000); if (_jwtOk) sessionStorage.removeItem('jwtRefreshDone'); }
 
   if (!_jwtOk && !sessionStorage.getItem('jwtRefreshDone')) {
     sessionStorage.setItem('jwtRefreshDone', '1');
     window.location.href = 'auth.html';
     return;
+  }
+
+  // تجديد استباقي كل 5 دقائق: يضمن التوكن دايمًا صالح لأكتر من 15 دقيقة —
+  // فأي شاشة مفتوحة في الـiframe (جرد/إغلاقات/…) تلاقي توكن حي ومتقعش في 401/403.
+  if (!window.__sbRefreshTimer) {
+    window.__sbRefreshTimer = setInterval(() => { sbRefreshJwt(15*60*1000); }, 5*60*1000);
   }
 
   currentUser = {
