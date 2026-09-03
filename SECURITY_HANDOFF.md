@@ -636,3 +636,84 @@ Session.require({roles, page}) / clear() / logout()
 5. صلاحيات بأسماء واضحة بدل أسماء ملفات
 6. `branch_id` بدل اسم الفرع كنص
 7. ألوان بـtokens بدل قيم صريحة
+
+---
+
+## مراجعة المعمارية — الخطوة 4: الفروع من قاعدة البيانات  ✅ 2026-09-04
+
+**ملفات جديدة:** `branches.js` (وحدة الفروع) و`brand.js` (محمّل الهوية)
+
+### تغيير قاعدة البيانات
+```sql
+alter table branches add column code text;            -- mamora / san / bishr
+alter table branches add column aliases text[];       -- أسماء المخازن والتهجئات البديلة
+alter table branches add column sort_order int;
+alter table branches add column is_active boolean not null default true;
+alter table branches add column phone text;           -- الشاشة كانت بتبعته وهو مش موجود
+create unique index branches_code_uniq on branches (code) where code is not null;
+create unique index branches_name_uniq on branches (name);
+```
+**اتطبّق على السحابة والسيرفر الجديد الاتنين.**
+
+القيم الحالية:
+| الاسم | code | aliases |
+|---|---|---|
+| المعمورة | `mamora` | الصيدلية |
+| سان ستيفانو | `san` | ابراهيم حمدي 2، سان |
+| سيدى بشر | `bishr` | ابراهيم حمدي 3، سيدي بشر |
+
+### اللي اتشال من الكود
+الفروع كانت مكتوبة صريح بأربع صور: قائمة أسماء، خريطة كود→اسم،
+خريطة اسم→اسم المخزن، وقايمة UUIDs في شاشة التوزيع — في ~20 ملف.
+
+### واجهة الوحدة
+```
+Branches.all() / names() / codes() / ids()
+Branches.byName() / byCode() / byId()
+Branches.toName(v)   // اسم أو كود أو اسم مخزن أو uuid → الاسم القياسي
+Branches.toCode(v) / toId(v) / storeName(v)
+Branches.codeMap() / storeMap() / aliasMap()
+Branches.fillSelect(el, {all, value}) / autofill()
+Branches.load(force) / ready() / onChange(fn)
+```
+
+**ملء تلقائي تصريحي:** `<select data-branches>` بيتملى لوحده.
+`data-branches="code"` للكود، `="store"` لاسم المخزن، `="id"` للـuuid.
+الخيارات اللي مش فروع تفضل في الـHTML؛ اللي عايز يفضل آخر القايمة
+(زي «عام») ياخد `data-after`.
+
+**اختبار حاسم:** ضفت فرع رابع للقاعدة → ظهر في الـ15 قايمة كلها من غير
+تعديل سطر واحد، وبعدين اتشال.
+
+### باجات اتصلحت
+| الباج | الأثر |
+|---|---|
+| `inventory_min` بتفلتر بـ«سيدي بشر» والبيانات «سيدى بشر» | الفرع كان بيعرض **٠ من ١٨ صف** |
+| شاشة «الفروع» بتبعت عمود `phone` غير موجود | **كل حفظ بيرجع 400** والنافذة تتقفل كأنه نجح |
+| محررين مختلفين للفروع (جدول `branches` مقابل `org_settings.branches` jsonb) | مضمون يتفرّعوا |
+| حذف فرع عليه بيانات بيفشل بصمت | بقى برسالة واضحة (10 مفاتيح أجنبية بتمنع الحذف) |
+
+### مصدر التحرير الوحيد
+شاشة **«الفروع»** في تطبيق التوصيل = المحرر الوحيد (اتضاف لها حقلَي
+الكود والأسماء البديلة). **«إعدادات المؤسسة»** بقت عرض فقط للفروع،
+ومابقتش تكتب `org_settings.branches`.
+
+### دَين متبقّي (مش في نطاق الخطوة دي)
+- **أعمدة قاعدة البيانات لكل فرع**: `balance_san`، `surplus_mamora`،
+  `m_q/s_q/b_q`، `av_mamora`، `customer_san_search` — دي أعمدة فعلية
+  في الجداول، يعني **فرع رابع لسه محتاج تعديل schema** مش بس كود.
+  الحل الصح صفوف بدل أعمدة، وده ترحيل بيانات كبير.
+- `LEGACY_USER_BRANCH` (`mangersan`/`mangermamora`…) مكررة في 3 صفحات —
+  دي أسماء مستخدمين قديمة مش فروع، شأن تاني.
+- رؤوس الجداول (`<th>`) المرتبطة بالأعمدة دي لسه ثابتة.
+
+### التحقق قبل النشر
+- 54 صفحة في المتصفح على الريبوهين | parse-check 55 صفحة صفر أخطاء
+- `inventory_min` بقت تعرض 18 صف لسيدى بشر (كانت صفر)
+- `salesanalysis` و`inventory_management` أعطوا نفس القيم القديمة بالظبط
+- الموقع الحيّ اتأكد بعد النشر
+
+### باقي من المراجعة
+5. صلاحيات بأسماء واضحة بدل أسماء ملفات
+6. `branch_id` بدل اسم الفرع كنص
+7. ألوان بـtokens بدل قيم صريحة
