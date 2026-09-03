@@ -8,34 +8,8 @@ const PAYMOB_URL    = "https://agent.ebrahimhamdy.com/webhook/paymobtransaction"
 
 // بحث الصنف من مخزون Supabase مباشرة (بدل نداء ERP) — يرجّع {found,itm_name_ar,itm_name_en,balance,item_type}
 
-// ===== الهوية (White-label): تطبيق من الكاش فورًا + تحديث من org_settings =====
-(function () {
-  function setBrand(b) {
-    if (!b) return;
-    var r = document.documentElement.style;
-    if (b.brand_primary)       { r.setProperty('--primary', b.brand_primary); r.setProperty('--accent', b.brand_primary); }
-    if (b.brand_primary_dark)  { r.setProperty('--primary-dark', b.brand_primary_dark); r.setProperty('--accent-dark', b.brand_primary_dark); }
-    if (b.brand_primary_light) r.setProperty('--primary-light', b.brand_primary_light);
-    if (b.branches && b.branches.length) {
-      window.ORG_BRANCHES = b.branches.map(function (x) { return x.name; });
-      var am = {}; b.branches.forEach(function (x) { am[x.name] = x.name; (x.aliases || []).forEach(function (a) { am[a] = x.name; }); });
-      window.ORG_BRANCH_ALIAS = am;
-    }
-    function els() {
-      if (b.company_name) document.querySelectorAll('[data-org-name]').forEach(function (e) { e.textContent = b.company_name; });
-      if (b.logo_url)     document.querySelectorAll('[data-org-logo]').forEach(function (e) { e.src = b.logo_url; });
-    }
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', els); else els();
-  }
-  window.orgBranchAlias = function (raw) { return (window.ORG_BRANCH_ALIAS && window.ORG_BRANCH_ALIAS[String(raw == null ? '' : raw).trim()]) || raw; };
-  try { setBrand(JSON.parse(localStorage.getItem('orgBrand') || 'null')); } catch (e) {}
-  try {
-    fetch(SB_URL_API + '/rest/v1/org_settings?select=*&id=eq.1', { headers: { apikey: SB_ANON_API, Authorization: 'Bearer ' + SB_ANON_API } })
-      .then(function (r) { return r.json(); })
-      .then(function (a) { if (a && a[0]) { setBrand(a[0]); try { localStorage.setItem('orgBrand', JSON.stringify(a[0])); } catch (e) {} } })
-      .catch(function () {});
-  } catch (e) {}
-})();
+// الهوية في brand.js والفروع في branches.js — كانت الكتلة دي مكررة
+// حرفيًا في 3 ملفات.
 async function sbItemLookup(code, branch) {
   try {
     const r = await fetch(`${SB_URL_API}/rest/v1/rpc/item_lookup`, {

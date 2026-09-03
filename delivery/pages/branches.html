@@ -152,6 +152,16 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
         <label>رقم الهاتف</label>
         <input type="text" class="form-control" id="b-phone" placeholder="03xxxxxxx">
       </div>
+      <div class="form-group">
+        <label>الكود المختصر</label>
+        <input type="text" class="form-control" id="b-code" placeholder="مثال: mamora">
+        <div style="font-size:.72rem;color:var(--text-muted);margin-top:4px">بتستخدمه الشاشات في الفلاتر والروابط. حروف إنجليزي صغيرة من غير مسافات.</div>
+      </div>
+      <div class="form-group">
+        <label>أسماء بديلة (بفاصلة)</label>
+        <input type="text" class="form-control" id="b-aliases" placeholder="مثال: الصيدلية, ابراهيم حمدي 2">
+        <div style="font-size:.72rem;color:var(--text-muted);margin-top:4px">اسم الفرع زي ما بيجي من مصادر تانية (اسم المخزن في eplus مثلًا). أول اسم هو اسم المخزن.</div>
+      </div>
       <div class="form-group" style="margin-bottom:0">
         <label class="checkbox-item">
           <input type="checkbox" id="b-active" checked>
@@ -171,6 +181,8 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../../config.js?v=20260903"></script>
 <script src="../../session.js?v=20260903"></script>
+<script src="../../branches.js?v=20260904"></script>
+<script src="../../brand.js?v=20260904"></script>
 <script src="../supabase-config.js?v=20260901"></script>
 <script src="../permissions.js"></script>
 <script>
@@ -373,7 +385,7 @@ function toggleRouteBody(id, header) {
 
 function openAddBranchModal() {
   document.getElementById('branchModalTitle').textContent = 'إضافة فرع جديد';
-  ['b-id','b-name','b-address','b-phone'].forEach(id => document.getElementById(id).value = '');
+  ['b-id','b-name','b-address','b-phone','b-code','b-aliases'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('b-active').checked = true;
   document.getElementById('branchModal').classList.add('open');
 }
@@ -384,6 +396,8 @@ function openEditBranch(id) {
   document.getElementById('b-id').value = b.id;
   document.getElementById('b-name').value = b.name || '';
   document.getElementById('b-address').value = b.address || '';
+  document.getElementById('b-code').value = b.code || '';
+  document.getElementById('b-aliases').value = (b.aliases || []).join(', ');
   document.getElementById('b-phone').value = b.phone || '';
   document.getElementById('b-active').checked = b.is_active !== false;
   document.getElementById('branchModal').classList.add('open');
@@ -396,16 +410,24 @@ async function saveBranch() {
     name,
     address: document.getElementById('b-address').value.trim() || null,
     phone: document.getElementById('b-phone').value.trim() || null,
+    code: document.getElementById('b-code').value.trim().toLowerCase() || null,
+    aliases: document.getElementById('b-aliases').value.split(',').map(x => x.trim()).filter(Boolean),
     is_active: document.getElementById('b-active').checked,
   };
   showLoading(true);
   const id = document.getElementById('b-id').value;
+  // ⚠️ قبل كده نتيجة الحفظ كانت بتتجاهل: الشاشة كانت بتبعت عمود phone
+  // اللي مش موجود، فالطلب يرجع 400 والنافذة تتقفل كأن الحفظ نجح.
+  let err = null;
   if (id) {
-    await db.from('branches').update(payload).eq('id', id);
+    ({ error: err } = await db.from('branches').update(payload).eq('id', id));
   } else {
-    const { data } = await db.from('branches').insert(payload).select().single();
+    const { data, error } = await db.from('branches').insert(payload).select().single();
+    err = error;
     if (data) selectedBranchId = data.id;
   }
+  if (err) { showLoading(false); alert('تعذّر الحفظ: ' + (err.message || err)); return; }
+  if (window.Branches) Branches.load(true);   // الشاشات التانية تشوف التغيير
   closeBranchModal();
   await init();
 }
@@ -413,7 +435,11 @@ async function saveBranch() {
 async function deleteBranch(id) {
   if (!confirm('هل تريد حذف هذا الفرع؟')) return;
   showLoading(true);
-  await db.from('branches').delete().eq('id', id);
+  // الفرع اللي عليه طلبات/رحلات/طيارين مايتحذفش (قيود مفاتيح أجنبية) —
+  // الصح إنه يتعطّل مش يتمسح.
+  const { error: derr } = await db.from('branches').delete().eq('id', id);
+  if (derr) { showLoading(false); alert('مش هينفع تحذف الفرع ده — عليه بيانات مرتبطة (طلبات/رحلات/طيارين). عطّله بدل ما تحذفه.'); return; }
+  if (window.Branches) Branches.load(true);
   if (selectedBranchId === id) {
     selectedBranchId = null;
     document.getElementById('branchDetail').innerHTML = '<div class="empty-detail"><div class="icon">🏢</div><p>اختر فرعاً لعرض تفاصيله</p></div>';

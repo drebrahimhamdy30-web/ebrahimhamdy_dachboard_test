@@ -161,10 +161,7 @@
             <div class="settings-strip" id="need-config-wrap">
               <div class="mini-field wide" id="target-field">
                 <span class="filter-label">الفرع المستهدف <span class="help-ic">؟<span class="tip">الفرع الذي نريد إمداده — يُعرض ما يحتاجه من فائض الفروع الأخرى.</span></span></span>
-                <select id="target-branch" class="form-select" onchange="onFilterChange()">
-                  <option value="mamora">المعمورة</option>
-                  <option value="san">سان ستيفانو</option>
-                  <option value="bishr">سيدى بشر</option>
+                <select data-branches="code" id="target-branch" class="form-select" onchange="onFilterChange()">
                 </select>
               </div>
               <div class="mini-field">
@@ -192,10 +189,7 @@
             <div class="settings-strip" id="missing-config-wrap" style="display:none;">
               <div class="mini-field wide" id="target-field-missing">
                 <span class="filter-label">الفرع المستهدف <span class="help-ic">؟<span class="tip">الفرع الذي نبحث عن الأصناف الناقصة منه.</span></span></span>
-                <select id="target-branch-missing" class="form-select" onchange="syncMissingTarget()">
-                  <option value="mamora">المعمورة</option>
-                  <option value="san">سان ستيفانو</option>
-                  <option value="bishr">سيدى بشر</option>
+                <select data-branches="code" id="target-branch-missing" class="form-select" onchange="syncMissingTarget()">
                 </select>
               </div>
               <div class="mini-field">
@@ -212,11 +206,8 @@
             <div class="settings-strip" id="pc-config-wrap" style="display:none;">
               <div class="mini-field wide">
                 <span class="filter-label">الفرع <span class="help-ic">؟<span class="tip">فلترة التغييرات حسب الفرع.</span></span></span>
-                <select id="pc-branch" onchange="renderPriceChanges()">
+                <select data-branches="code" id="pc-branch" onchange="renderPriceChanges()">
                   <option value="">كل الفروع</option>
-                  <option value="mamora">المعمورة</option>
-                  <option value="san">سان ستيفانو</option>
-                  <option value="bishr">سيدى بشر</option>
                 </select>
               </div>
               <div class="mini-field auto">
@@ -238,11 +229,8 @@
             <div class="settings-strip" id="over-config-wrap" style="display:none;">
               <div class="mini-field wide">
                 <span class="filter-label">النطاق <span class="help-ic">؟<span class="tip">احسب الفائض على إجمالي الفروع مجتمعة، أو على فرع واحد لوحده.</span></span></span>
-                <select id="over-scope" onchange="renderOverstock()">
+                <select data-branches="code" id="over-scope" onchange="renderOverstock()">
                   <option value="all">كل الفروع (مجمّعة)</option>
-                  <option value="mamora">المعمورة</option>
-                  <option value="san">سان ستيفانو</option>
-                  <option value="bishr">سيدى بشر</option>
                 </select>
               </div>
               <div class="mini-field auto">
@@ -336,13 +324,16 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="config.js?v=20260903"></script>
   <script src="session.js?v=20260903"></script>
+  <script src="branches.js?v=20260904"></script>
+  <script src="brand.js?v=20260904"></script>
   <script src="api.js?v=tt20260830"></script>
   <script>
     const INV_URL = 'https://agent.ebrahimhamdy.com/webhook/inventory';
     const REFRESH_WEBHOOK = 'https://agent.ebrahimhamdy.com/webhook/refresh_stock';
     const REFRESH_URLS = { mamora: REFRESH_WEBHOOK, san: REFRESH_WEBHOOK, bishr: REFRESH_WEBHOOK };
-    const BRANCHES = { mamora: 'المعمورة', san: 'سان ستيفانو', bishr: 'سيدى بشر' };
-    const BRANCH_NAME_MAP = { 'الصيدلية':'mamora', 'ابراهيم حمدي 2':'san', 'ابراهيم حمدي 3':'bishr' };
+    const BRANCHES = Branches.codeMap();
+    // اسم المخزن → الكود المختصر
+    const BRANCH_NAME_MAP = (function(){ var m={}; Branches.all().forEach(function(b){ (b.aliases||[]).forEach(function(a){ m[a]=b.code; }); }); return m; })();
     const STALE_HOURS = 12;
 
     var stockSummary={meta:{},items:[]}, salesData=[];
@@ -1184,7 +1175,8 @@
       if(overPage>totalPages) overPage=totalPages;
       if(overPage<1) overPage=1;
       var pageRows = rows.slice((overPage-1)*OVER_PAGE, overPage*OVER_PAGE);
-      var scopeLbl = ({all:'كل الفروع',mamora:'المعمورة',san:'سان ستيفانو',bishr:'سيدى بشر'})[document.getElementById('over-scope').value]||'';
+      var _scope = document.getElementById('over-scope').value;
+      var scopeLbl = _scope === 'all' ? 'كل الفروع' : (Branches.toName(_scope) || '');
 
       var html = '<div class="summary-bar">'+
         '<div class="summary-item">أصناف زائدة: <b>'+rows.length+'</b></div>'+
