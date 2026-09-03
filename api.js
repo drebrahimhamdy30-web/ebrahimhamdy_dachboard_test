@@ -622,12 +622,8 @@ async function paymobMarkPaidForDay(dayStr) {
 // ===================== المصادقة =====================
 // فك payload بتاع JWT بترميز UTF-8 صحيح.
 // ⚠️ atob لوحده بيخرّب العربي (اسم الفرع بيرجع رموز) — لازم الخطوة الزيادة دي.
-function sbDecodeJwt(t) {
-  try {
-    const p = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(decodeURIComponent(escape(atob(p))));
-  } catch (e) { return null; }
-}
+// فكّ التوكن — التنفيذ في session.js
+const sbDecodeJwt = Session.decodeJwt;
 
 // دخول عبر Supabase Auth. بيرجّع نفس شكل رد n8n عشان الصفحات ماتتغيّرش،
 // وبيرجّع null لو فشل لأي سبب → المنادي بيرجع لـn8n.
@@ -651,8 +647,7 @@ async function sbAuthLogin(username, password) {
     if (!tr.ok || !data.access_token) return null;
 
     const m = (sbDecodeJwt(data.access_token) || {}).app_metadata || {};
-    localStorage.setItem('authProvider', 'supabase');
-    localStorage.setItem('sbRefresh', data.refresh_token || '');
+    // authProvider و sbRefresh بيتكتبوا مع باقي الجلسة في Session.save()
     return {
       success: true, status: 'success',
       user:      m.username || username,
@@ -662,7 +657,9 @@ async function sbAuthLogin(username, password) {
       legacy_id: m.legacy_id || '',
       id:        m.branch_user_id || '',
       token:     data.access_token,
-      jwt:       data.access_token
+      jwt:       data.access_token,
+      provider:  'supabase',
+      refresh:   data.refresh_token || ''
     };
   } catch (e) { return null; }
 }
@@ -721,23 +718,10 @@ async function updateDataWithResponse(data) {
   }
 }
 
-// تجديد جلسة Supabase بالـrefresh token. بيرجّع true لو الجلسة لسه صالحة أو اتجددت.
+// تجديد جلسة Supabase — التنفيذ في session.js (مقفول). الغلاف باقي
+// عشان verifyToken() القديمة تفضل شغّالة.
 async function sbAuthRefresh() {
-  const rt = localStorage.getItem('sbRefresh');
-  if (!rt) return false;
-  try {
-    const r = await fetch(`${SB_URL_API}/auth/v1/token?grant_type=refresh_token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: SB_ANON_API },
-      body: JSON.stringify({ refresh_token: rt })
-    });
-    const d = await r.json();
-    if (!r.ok || !d.access_token) return false;
-    localStorage.setItem('authJwt',   d.access_token);
-    localStorage.setItem('authToken', d.access_token);
-    localStorage.setItem('sbRefresh', d.refresh_token || rt);
-    return true;
-  } catch (e) { return false; }
+  return Session.refresh();
 }
 
 async function verifyToken() {
@@ -780,7 +764,7 @@ async function sbForcedLogoutCheck() {
     const cutoff = (rows && rows[0] && rows[0].force_logout_before) ? new Date(rows[0].force_logout_before).getTime() : 0;
     const loginTime = parseInt(localStorage.getItem('loginTime') || '0', 10);
     if (cutoff && loginTime && loginTime < cutoff) {
-      localStorage.clear();
+      Session.clear();
       window.location.replace('index.html');
       return true;
     }
@@ -805,7 +789,7 @@ async function checkAuth() {
   }
   const valid = await verifyToken();
   if (!valid) {
-    localStorage.clear();
+    Session.clear();
     window.location.replace('index.html');
     return null;
   }
@@ -1053,8 +1037,10 @@ async function fetchFullJardReport({ branch, category, dateFrom, dateTo }) {
 }
 
 function logout() {
-  localStorage.clear();
-  window.location.replace('index.html');
+  // localStorage.clear() كان بيشيل كمان تفضيلات مش جلسة (الخط، الثيم،
+  // عرض الأعمدة) فالمستخدم يرجع لإعدادات المصنع كل مرة. Session بيمسح
+  // مفاتيح الجلسة بس.
+  Session.logout('index.html');
 }
 
 // ===================== متابعة أرصدة الموردين (Supplier Balance Watch) =====================

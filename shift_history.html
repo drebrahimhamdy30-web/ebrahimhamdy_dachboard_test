@@ -138,6 +138,7 @@ tr:last-child td{border-bottom:none;}
 <div class="toast" id="toast"></div>
 
 <script src="config.js?v=20260903"></script>
+<script src="session.js?v=20260903"></script>
 <script>
 // توكن المستخدم لو موجود وصالح → الصفحة تشتغل كـauthenticated عشان الـRPCs المحروسة بالدور
 // (add_recon_txn / move_recon_txn). لو ناقص أو منتهي نرجع لمفتاح anon عشان العرض مايقعش.
@@ -150,22 +151,10 @@ function shTok(){
   }catch(e){}
   return null;
 }
-// تجديد جلسة Supabase بالـrefresh token (مضمّن لأن الصفحة مش بتحمّل api.js)
-async function shRefresh(){
-  const rt=localStorage.getItem('sbRefresh');
-  if(!rt || localStorage.getItem('authProvider')!=='supabase') return false;
-  try{
-    const r=await fetch(SB_URL+'/auth/v1/token?grant_type=refresh_token',{method:'POST',
-      headers:{'Content-Type':'application/json','apikey':SB_KEY},
-      body:JSON.stringify({refresh_token:rt})});
-    const d=await r.json();
-    if(!r.ok||!d.access_token) return false;
-    localStorage.setItem('authJwt',d.access_token);
-    localStorage.setItem('authToken',d.access_token);
-    if(d.refresh_token) localStorage.setItem('sbRefresh',d.refresh_token);
-    return true;
-  }catch(e){ return false; }
-}
+// تجديد جلسة Supabase — التنفيذ الوحيد المقفول في session.js.
+// النسخة اللي كانت هنا كانت بدون قفل، فلو الصفحة دي والشل جدّدوا في نفس
+// اللحظة واحد ياخد «Already Used» ويقع بـ«خطأ في التحميل».
+async function shRefresh(){ return Session.refresh(); }
 // توكن صالح: لو منتهي نجدّد الأول، وإلا anon (عرض فقط)
 let _shRefreshing=null;
 async function shValidToken(){
@@ -198,14 +187,14 @@ function toast(msg,type='ok'){
   t.style.display='block';clearTimeout(toastT);toastT=setTimeout(()=>t.style.display='none',2800);
 }
 
-const role=(localStorage.getItem('userRole')||'').trim();
+const role=(Session.role()||'').trim();
 // admin + accountant => كل الفروع | manager => فرعه فقط
 const isAdminView = role==='admin' || role==='accountant' || role==='reviewer';
 const isManager   = role==='manager';
 const canConfirm  = isAdminView || isManager;   // صلاحية الاعتماد والتوريد
 const isAdmin     = role==='admin';               // بعض إجراءات كشف الحساب للأدمن فقط
-const MY_BRANCH   = (localStorage.getItem('userBranch')||'').trim();
-const settler=localStorage.getItem('activeUser')||localStorage.getItem('fullName')||'محاسب';
+const MY_BRANCH   = (Session.branch()).trim();
+const settler=Session.username()||Session.fullName()||'محاسب';
 const REASON_LABEL={supplier:'تحويل لمورد', customer_refund:'مرتجع لعميل'};
 
 const today=new Date().toISOString().slice(0,10);

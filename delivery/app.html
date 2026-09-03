@@ -264,6 +264,7 @@ body.dark{ --bg:#0b1220; --white:#111a2e; --text:#e6ecf5; --text-muted:#93a3bd; 
 </div>
 
 <script src="../config.js?v=20260903"></script>
+<script src="../session.js?v=20260903"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 const { createClient } = supabase;
@@ -481,53 +482,23 @@ let currentUser = null;
 let currentPage = null;
 let allowedPages = [];
 
-// تجديد توكن Supabase (يحصّن كل الشاشات في الـiframe لأنها بتشارك نفس localStorage).
-// بيجدّد بس لو باقي على انتهاء التوكن أقل من marginMs. يستخدم قفل مشترك عشان
-// سياقين مايجدّدوش في نفس اللحظة (Supabase بيحرق الـrefresh token فالتاني ياخد Already Used).
+// تجديد توكن Supabase — التنفيذ الوحيد في session.js. الشل والـiframe
+// وأي تبويب بيشاركوا نفس القفل فمفيش سياقين بيحرقوا الـrefresh token.
 async function sbRefreshJwt(marginMs) {
-  if (localStorage.getItem('authProvider') !== 'supabase' || !localStorage.getItem('sbRefresh')) return false;
-  const stillOk = () => {
-    try {
-      const q = JSON.parse(decodeURIComponent(escape(atob(
-        (localStorage.getItem('authJwt')||'').split('.')[1].replace(/-/g,'+').replace(/_/g,'/')))));
-      return !!(q && q.exp*1000 > Date.now() + marginMs);
-    } catch(e){ return false; }
-  };
-  if (stillOk()) return true;
-  const doRefresh = async () => {
-    if (stillOk()) return true;                 // سياق تاني جدّد وإحنا مستنيين القفل
-    try {
-      const _r = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=refresh_token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
-        body: JSON.stringify({ refresh_token: localStorage.getItem('sbRefresh') })
-      });
-      const _d = await _r.json();
-      if (!_r.ok || !_d.access_token) return stillOk();
-      localStorage.setItem('authJwt',   _d.access_token);
-      localStorage.setItem('authToken', _d.access_token);
-      if (_d.refresh_token) localStorage.setItem('sbRefresh', _d.refresh_token);
-      return true;
-    } catch(e){ return stillOk(); }
-  };
-  return (navigator.locks && navigator.locks.request)
-    ? await navigator.locks.request('phalix-sb-refresh', doRefresh)
-    : await doRefresh();
+  return Session.refresh(marginMs);
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
   const token = localStorage.getItem('authToken');
-  const activeUser = localStorage.getItem('activeUser');
+  const activeUser = Session.username();
   if (!token || !activeUser) { window.location.href = 'auth.html'; return; }
 
-  // تجديد تلقائي: جلسة قديمة بلا JWT صالح → عدّي على صفحة الدخول لتجديده (بدون كتابة بيانات)
-  const _jwt = localStorage.getItem('authJwt');
-  let _jwtOk = false;
-  // ⚠️ decodeURIComponent(escape(...)) لازم — atob لوحده بيخرّب أسماء الفروع العربية
-  try { const _p = _jwt && JSON.parse(decodeURIComponent(escape(atob(_jwt.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))))); _jwtOk = _p && _p.exp*1000 > Date.now()+60000; } catch(e){ _jwtOk = false; }
-
-  // توكن Supabase عمره ساعة — نجدّده بالـrefresh token لو منتهي (بدل التحويل لصفحة الدخول)
-  if (!_jwtOk) { _jwtOk = await sbRefreshJwt(60000); if (_jwtOk) sessionStorage.removeItem('jwtRefreshDone'); }
+  // توكن Supabase عمره ساعة — Session.refresh() بيرجّع true لو التوكن صالح
+  // أو اتجدّد بنجاح، وبيقفل عشان مايتصادمش مع الـiframe أو تبويب تاني.
+  // tokenValid الأول: جلسة n8n معاها JWT صالح لازم تعدّي — Session.refresh()
+  // بترجّع false فورًا لأي مزوّد غير supabase.
+  const _jwtOk = Session.tokenValid(60000) || await Session.refresh(60000);
+  if (_jwtOk) sessionStorage.removeItem('jwtRefreshDone');
 
   if (!_jwtOk && !sessionStorage.getItem('jwtRefreshDone')) {
     sessionStorage.setItem('jwtRefreshDone', '1');
@@ -541,14 +512,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     window.__sbRefreshTimer = setInterval(() => { sbRefreshJwt(15*60*1000); }, 5*60*1000);
   }
 
-  currentUser = {
-    id: activeUser,
-    legacyId: localStorage.getItem('legacyId') || null,
-    username: activeUser,
-    full_name: localStorage.getItem('fullName') || activeUser,
-    role: localStorage.getItem('userRole') || '',
-    branch: localStorage.getItem('userBranch') || ''
-  };
+  currentUser = Session.user();   // نفس الشكل بالظبط، مصدر واحد
 
   if (currentUser.role === 'driver') { window.location.href = 'driver.html'; return; }
 
@@ -836,16 +800,9 @@ function closeSidebar() {
 }
 
 function logout() {
-  localStorage.removeItem('authToken');
-  localStorage.removeItem('activeUser');
-  localStorage.removeItem('userBranch');
-  localStorage.removeItem('userRole');
-  localStorage.removeItem('fullName');
-  localStorage.removeItem('legacyId');
-  localStorage.removeItem('loginTime');
-  sessionStorage.removeItem('delivery_last_page');
-  sessionStorage.removeItem('delivery_last_title');
-  window.location.href = 'auth.html';
+  // ⚠️ كان بيمسح المفاتيح بالاسم وناسي authJwt و sbRefresh و authProvider،
+  // فالجهاز يفضل شايل جلسة قابلة للتجديد بعد الخروج. Session.clear() بيمسح الكل.
+  Session.logout('auth.html');
 }
 
 function openChangePassword(){

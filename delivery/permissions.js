@@ -1,42 +1,27 @@
 // ===== نظام الجلسة الموحّد (SSO) =====
+// المنطق نفسه اتنقل لـsession.js في جذر المشروع عشان الـERP والتوصيل
+// يشتغلوا بنفس المفاتيح ونفس الخروج. الدوال هنا بقت أغلفة رفيعة عشان
+// الصفحات القائمة تفضل شغّالة من غير تعديل.
+//
+// ⚠️ لازم session.js يتحمّل قبل الملف ده.
 
 function getCurrentUser() {
-  const token = localStorage.getItem('authToken');
-  const activeUser = localStorage.getItem('activeUser');
-  if (!token || !activeUser) return null;
-  return {
-    id: localStorage.getItem('userDbId') || null,
-    legacyId: localStorage.getItem('legacyId') || null,
-    username: activeUser,
-    full_name: localStorage.getItem('fullName') || activeUser,
-    role: localStorage.getItem('userRole') || '',
-    branch: localStorage.getItem('userBranch') || '',
-    branch_id: localStorage.getItem('userBranchId') || null
-  };
+  return Session.user();
 }
 
 function requireAuth(allowedRoles = []) {
-  const user = getCurrentUser();
-  if (!user) {
-    window.location.href = 'auth.html';
-    return null;
-  }
-  if (allowedRoles.length > 0 && !allowedRoles.includes(user.role)) {
+  const user = Session.user();
+  if (!user) { window.location.href = 'auth.html'; return null; }
+  if (allowedRoles.length > 0 && !allowedRoles.map(Session.normRole).includes(user.role)) {
     window.location.href = 'auth.html';
     return null;
   }
   return user;
 }
 
+// ⚠️ الإصدار القديم كان بيمسح المفاتيح بالاسم وناسي authJwt و sbRefresh
+// و authProvider — يعني بعد «الخروج» الجهاز يفضل شايل refresh token صالح
+// وsupabase-config.js يفضل يجدّد بيه. Session.clear() بيمسح القائمة كلها.
 function logout() {
-  localStorage.removeItem('authToken');
-  localStorage.removeItem('activeUser');
-  localStorage.removeItem('userBranch');
-  localStorage.removeItem('userBranchId');
-  localStorage.removeItem('userRole');
-  localStorage.removeItem('fullName');
-  localStorage.removeItem('legacyId');
-  localStorage.removeItem('userDbId');   // ← جديد
-  localStorage.removeItem('loginTime');
-  window.location.href = 'auth.html';
+  Session.logout('auth.html');
 }

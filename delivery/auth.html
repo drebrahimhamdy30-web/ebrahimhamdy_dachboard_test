@@ -306,6 +306,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../config.js?v=20260903"></script>
+<script src="../session.js?v=20260903"></script>
 <script src="supabase-config.js?v=20260901"></script>
 <script>
   const LOGIN_URL  = 'https://agent.ebrahimhamdy.com/webhook/login';
@@ -352,29 +353,9 @@
     // من غير الفرع ده كانت بتتبعت لـwebhook التحقق بتاع n8n اللي مش هيعرفها،
     // فيرجع false وتظهر شاشة الدخول كل ساعة.
     if (localStorage.getItem('authProvider') === 'supabase') {
-      const p = sbDecodeJwt(localStorage.getItem('authJwt') || '');
-      if (p && p.exp && p.exp * 1000 > Date.now() + 60000) {
-        redirectByRole(localStorage.getItem('userRole'));
-        return true;
-      }
-      const rt = localStorage.getItem('sbRefresh');
-      if (rt) {
-        try {
-          const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
-            body: JSON.stringify({ refresh_token: rt })
-          });
-          const d = await r.json();
-          if (r.ok && d.access_token) {
-            localStorage.setItem('authJwt',   d.access_token);
-            localStorage.setItem('authToken', d.access_token);
-            if (d.refresh_token) localStorage.setItem('sbRefresh', d.refresh_token);
-            redirectByRole(localStorage.getItem('userRole'));
-            return true;
-          }
-        } catch (e) {}
-      }
+      // التوكن صالح أو اتجدّد → دخول مباشر. التجديد نفسه في session.js
+      // بقفل مشترك؛ النسخة اللي كانت هنا كانت بدون قفل.
+      if (await Session.refresh()) { redirectByRole(Session.role()); return true; }
       return false;   // التجديد فشل → الدخول من جديد
     }
 
@@ -405,12 +386,8 @@
 
   // ===== تسجيل الدخول: Supabase Auth أولًا، وبرجوع تلقائي لـn8n =====
   // ⚠️ atob لوحده بيخرّب العربي في اسم الفرع — لازم الخطوة الزيادة دي
-  function sbDecodeJwt(t) {
-    try {
-      const p = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-      return JSON.parse(decodeURIComponent(escape(atob(p))));
-    } catch (e) { return null; }
-  }
+  // فكّ التوكن — التنفيذ في session.js
+  const sbDecodeJwt = Session.decodeJwt;
 
   async function sbAuthLogin(username, password) {
     try {
@@ -432,8 +409,7 @@
       if (!tr.ok || !d.access_token) return null;
 
       const m = (sbDecodeJwt(d.access_token) || {}).app_metadata || {};
-      localStorage.setItem('authProvider', 'supabase');
-      localStorage.setItem('sbRefresh', d.refresh_token || '');
+      // authProvider و sbRefresh بيتكتبوا مع باقي الجلسة في Session.save()
       return {
         status: 'success', success: true,
         user:      m.username || username,
@@ -443,7 +419,9 @@
         legacy_id: m.legacy_id || '',
         id:        m.branch_user_id || '',
         token:     d.access_token,
-        jwt:       d.access_token
+        jwt:       d.access_token,
+        provider:  'supabase',
+        refresh:   d.refresh_token || ''
       };
     } catch (e) { return null; }
   }
@@ -485,32 +463,13 @@
       const result = await loginRequest(username, password);
 
 if (result && result.status === 'success') {
-  localStorage.setItem('authToken',  result.token);
-  localStorage.setItem('activeUser', result.user);
-  localStorage.setItem('userBranch', result.branch);
-  localStorage.setItem('userRole',   result.role || 'employee');
-  localStorage.setItem('fullName',   result.full_name || result.user);
-  localStorage.setItem('legacyId',   result.legacy_id || '');   // ← جديد
-  localStorage.setItem('userDbId',  result.id || '');            // ← جديد
-  localStorage.setItem('authJwt',   result.jwt || '');           // ← JWT للأمان (RLS)
-  localStorage.setItem('loginTime',  Date.now());
+  // كتابة الجلسة كلها من session.js (نفس المفاتيح في كل الشاشات)
+  Session.save(result);
 
-
-        // جلب وتخزين branch_id (uuid) مرة واحدة وقت الدخول لغير الـ admin
-        // (مع timeout 3 ثواني عشان لو الاتصال بـ Supabase تعطل، تسجيل الدخول يكمل عادي)
-        if (result.role !== 'admin' && result.branch) {
-          try {
-            const branchIdPromise = db.from('branches').select('id').eq('name', result.branch).maybeSingle();
-            const timeoutPromise = new Promise(resolve => setTimeout(() => resolve({ data: null }), 3000));
-            const { data: b } = await Promise.race([branchIdPromise, timeoutPromise]);
-            localStorage.setItem('userBranchId', b?.id || '');
-          } catch (e) {
-            console.warn('تعذر جلب branch_id، هيتم تجاهله دلوقتي', e);
-            localStorage.setItem('userBranchId', '');
-          }
-        } else {
-          localStorage.setItem('userBranchId', '');
-        }
+        // branch_id (uuid) مرة واحدة وقت الدخول — نفس الاستعلام كان مكتوب
+        // في صفحتَي الدخول، دلوقتي في Session.resolveBranchId() بنفس
+        // مهلة الـ3 ثواني عشان الدخول يكمل لو Supabase بطيء.
+        await Session.resolveBranchId();
 
         redirectByRole(result.role);
       } else {

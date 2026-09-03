@@ -2,62 +2,17 @@
 
 const { createClient } = supabase;
 
-// ⚠️ atob لوحده بيخرّب اسم الفرع العربي جوه التوكن
-function sbDecodeJwt(t) {
-  try {
-    return JSON.parse(decodeURIComponent(escape(atob(
-      t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))));
-  } catch (e) { return null; }
-}
-function sbJwtValid(t) {
-  const p = t && sbDecodeJwt(t);
-  return !!(p && p.exp && p.exp * 1000 > Date.now() + 60000);
-}
+// فكّ التوكن وفحص صلاحيته — التنفيذ في session.js (atob لوحده بيخرّب
+// اسم الفرع العربي جوه التوكن فبيتفكّ بـdecodeURIComponent(escape(...))).
+const sbDecodeJwt = Session.decodeJwt;
+const sbJwtValid  = Session.jwtValid;
 
 // توكن Supabase عمره ساعة. الصفحات دي بتفضل مفتوحة ساعات (التوزيع مثلًا)، وقبل كده
 // كان التوكن بيتاخد وقت التحميل بس وبعد ساعة كل النداءات تبقى 401 والمستخدم يتطلّع.
 // نجدّده استباقيًا كل 10 دقايق وبنبعت دايمًا آخر توكن مخزّن مش نسخة وقت التحميل.
-let _sbRefreshInFlight = null;   // تجديد واحد بس مهما كان عدد النداءات المتوازية
-async function sbRefreshSession() {
-  if (localStorage.getItem('authProvider') !== 'supabase') return false;
-  if (sbJwtValid(localStorage.getItem('authJwt'))) return true;
-  if (_sbRefreshInFlight) return _sbRefreshInFlight;
-  _sbRefreshInFlight = _sbGuardedRefresh().finally(() => { _sbRefreshInFlight = null; });
-  return _sbRefreshInFlight;
-}
-
-// قفل على مستوى الأصل كله: app.html والـiframe جوّاه وأي تبويب تاني ما يجدّدوش مع بعض.
-// Supabase بيلغي الـrefresh token مع كل استعمال — فلو سياقين بعتوه في نفس اللحظة،
-// واحد ينجح والتاني ياخد "Already Used" ويقع بـ«خطأ في التحميل».
-async function _sbGuardedRefresh() {
-  if (navigator.locks && navigator.locks.request) {
-    return navigator.locks.request('phalix-sb-refresh', async () => {
-      if (sbJwtValid(localStorage.getItem('authJwt'))) return true;   // حد تاني جدّد وإحنا مستنيين
-      return _sbDoRefresh();
-    });
-  }
-  return _sbDoRefresh();
-}
-
-async function _sbDoRefresh() {
-  const rt = localStorage.getItem('sbRefresh');
-  if (!rt) return false;
-  try {
-    const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
-      body: JSON.stringify({ refresh_token: rt })
-    });
-    const d = await r.json();
-    // فشل التجديد مش معناه بالضرورة خروج: ممكن سياق تاني يكون جدّد وحرق التوكن —
-    // لو التخزين بقى فيه توكن صالح يبقى إحنا تمام.
-    if (!r.ok || !d.access_token) return sbJwtValid(localStorage.getItem('authJwt'));
-    localStorage.setItem('authJwt',   d.access_token);
-    localStorage.setItem('authToken', d.access_token);
-    if (d.refresh_token) localStorage.setItem('sbRefresh', d.refresh_token);
-    return true;
-  } catch (e) { return sbJwtValid(localStorage.getItem('authJwt')); }
-}
+// التجديد كله في session.js دلوقتي (نفس القفل ونفس المنطق) — كان مكرر
+// هنا وفي api.js و app.html و auth.html و shift_history.html.
+async function sbRefreshSession() { return Session.refresh(); }
 
 // ⚠️ التوكن مش بيتحط في الهيدر الثابت خالص: الهيدر ده بيتاخد مرة واحدة وقت التحميل
 // وبيفضل يتبعت حتى لو التوكن انتهى — فكل النداءات ترجع 401 والشاشة تفضل فاضية.
@@ -73,9 +28,8 @@ const db = createClient(SUPABASE_URL, SUPABASE_KEY, {
     // لو التوكن منتهي بنستنى التجديد يخلص الأول. الرجوع لمفتاح anon مش كفاية هنا:
     // سياسة orders بتدي anon صفر صفوف، فالشاشة كانت بتفضل فاضية من غير أي رسالة خطأ.
     fetch: async (url, options = {}) => {
-      let t = localStorage.getItem('authJwt');
-      if (t && !sbJwtValid(t)) { await sbRefreshSession(); t = localStorage.getItem('authJwt'); }
-      if (!t || !sbJwtValid(t)) return fetch(url, options);
+      const t = await Session.validToken();
+      if (!t) return fetch(url, options);
       const h = new Headers(options.headers || {});
       h.set('Authorization', 'Bearer ' + t);
       return fetch(url, { ...options, headers: h });
