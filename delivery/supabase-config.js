@@ -1,5 +1,4 @@
-const SUPABASE_URL = 'https://rxtjoqulmgkkcohmgzgi.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0';
+// الرابط والمفتاح بييجوا من config.js — لازم يتحمّل قبل الملف ده
 
 const { createClient } = supabase;
 
