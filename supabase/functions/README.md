@@ -37,3 +37,13 @@ GitHub، فاتشال من الملف **واتغيّر** — شيله من ال�
 ```bash
 grep -nE '=\s*["'"'"'][A-Za-z0-9_./+-]{16,}["'"'"']' supabase/functions/*/index.ts
 ```
+
+## الفحص التلقائي
+```bash
+node scripts/check-secrets.js
+```
+شغّال تلقائيًا قبل كل commit عبر `.githooks/pre-commit`.
+لتفعيله على نسخة جديدة من الريبو:
+```bash
+git config core.hooksPath .githooks
+```
