@@ -23,8 +23,10 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const BUCKET = "db-backups";
 const KEEP_LAST = 30;
-const PAGE = 500;              // صفوف لكل دفعة
-const BUDGET_MS = 50_000;      // هامش قبل حد وقت التنفيذ
+const PAGE = 1000;             // صفوف لكل دفعة
+const MAX_PARTS_PER_RUN = 30;  // سقف الشغل في النداء الواحد
+const SAVE_EVERY = 10;         // نحفظ المكان كل كام جزء
+const BUDGET_MS = 25_000;      // هامش قبل حد وقت التنفيذ
 
 let _tokCache: { v: string; exp: number } | null = null;
 async function triggerToken(admin: any): Promise<string> {
@@ -85,7 +87,7 @@ Deno.serve(async (req: Request) => {
     const tables = (tbls as unknown[]).map(String).sort();
 
     const { data: created, error: cErr } = await admin.from("backup_runs")
-      .insert({ folder: `backup-${stampNow()}`, tables }).select().single();
+      .insert({ folder: `backup-${stampNow()}`, tables, page_size: PAGE }).select().single();
     if (cErr) return json({ error: "create_run: " + cErr.message }, 500);
     run = created;
   }
@@ -99,16 +101,36 @@ Deno.serve(async (req: Request) => {
   const folder: string = run.folder;
   let lastError: string | null = run.last_error ?? null;
 
-  while (ti < tables.length && Date.now() - started < BUDGET_MS) {
-    const t = tables[ti];
-    const from = page * PAGE;
+  // ⚠️ بنستعمل حجم الصفحة المحفوظ مع التشغيلة مش الثابت الحالي.
+  // لو الثابت اتغيّر بعد ما التشغيلة بدأت، الاستئناف بالحجم الجديد
+  // بيقرا من مكان غلط ويسيب فجوة في الجدول — حصل فعلًا مع order_logs.
+  const pageSize: number = run.page_size ?? PAGE;
 
-    const { data, error } = await admin.from(t).select("*").range(from, from + PAGE - 1);
+  // ⚠️ الحفظ لازم يكون **دوري** مش في الآخر بس. لو الدالة وقعت
+  // بـWORKER_RESOURCE_LIMIT قبل ما تحفظ، التقدّم بيضيع والنداء اللي بعده
+  // يعيد نفس الشغل ويقع تاني — حلقة لا نهائية. حصل فعلًا عند order_logs.
+  const save = async (finished: boolean) =>
+    await admin.from("backup_runs").update({
+      tbl_index: ti, page, rows_done: rowsDone, parts_done: partsDone,
+      last_error: lastError, updated_at: new Date().toISOString(),
+      ...(finished ? { status: "done", finished_at: new Date().toISOString() } : {}),
+    }).eq("id", run.id);
+
+  let partsThisRun = 0;
+
+  while (ti < tables.length
+         && Date.now() - started < BUDGET_MS
+         && partsThisRun < MAX_PARTS_PER_RUN) {
+    const t = tables[ti];
+    const from = page * pageSize;
+
+    const { data, error } = await admin.from(t).select("*").range(from, from + pageSize - 1);
 
     if (error) {
       // جدول مش مقروء (view أو صلاحية) — نسجّله ونعدّي بدل ما نقف
       lastError = `${t}: ${error.message}`;
       ti++; page = 0;
+      await save(false);
       continue;
     }
 
@@ -121,20 +143,19 @@ Deno.serve(async (req: Request) => {
       if (upErr) lastError = `${t} upload: ${upErr.message}`;
       rowsDone += rows.length;
       partsDone++;
+      partsThisRun++;
     }
 
-    if (rows.length < PAGE) { ti++; page = 0; }   // الجدول خلص
+    if (rows.length < pageSize) { ti++; page = 0; }   // الجدول خلص
     else { page++; }
+
+    if (partsThisRun % SAVE_EVERY === 0) await save(false);
   }
 
   const done = ti >= tables.length;
 
   // ── 3) نحفظ المكان ─────────────────────────────────────────────
-  await admin.from("backup_runs").update({
-    tbl_index: ti, page, rows_done: rowsDone, parts_done: partsDone,
-    last_error: lastError, updated_at: new Date().toISOString(),
-    ...(done ? { status: "done", finished_at: new Date().toISOString() } : {}),
-  }).eq("id", run.id);
+  await save(done);
 
   if (!done) {
     return json({ ok: true, done: false, folder, progress: `${ti}/${tables.length}`,
