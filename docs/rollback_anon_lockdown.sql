@@ -59,3 +59,24 @@ end $$;
 -- 4) الفيوهات اللي بتتخطى RLS (security_invoker=false)
 grant select on public.v_supplier_movements to anon;
 grant select on public.v_store_item_prices  to anon;
+
+-- ═══════════════════════════════════════════════════════════════════
+-- 5) الأربعة اللي اتقفلوا في جولة تانية (كانوا مستثنيين بالغلط)
+-- ═══════════════════════════════════════════════════════════════════
+-- branches · app_pages · app_control · page_permissions
+-- (الاستثناء الأصلي اتبنى على «بتتحمّل في صفحة الدخول» بدل «بتتستعمل
+--  قبل الدخول» — الاتنين مش نفس الحاجة.)
+grant select on public.branches         to anon;
+grant select on public.app_pages        to anon;
+grant select on public.app_control      to anon;
+grant select on public.page_permissions to anon;
+do $$
+declare p record;
+begin
+  for p in select tablename, policyname from pg_policies
+           where schemaname='public'
+             and tablename in ('branches','app_pages','app_control','page_permissions')
+  loop
+    execute format('alter policy %I on public.%I to anon, authenticated', p.policyname, p.tablename);
+  end loop;
+end $$;
