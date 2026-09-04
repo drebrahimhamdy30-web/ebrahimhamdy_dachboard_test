@@ -9,6 +9,7 @@
 <script src="../../config.js?v=20260903"></script>
 <script src="../../session.js?v=20260903"></script>
 <script src="../../branches.js?v=20260904"></script>
+<script src="../../pages.js?v=20260905"></script>
 <script src="../../brand.js?v=20260904"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -74,56 +75,9 @@ const ROLES = [
   {key:'pharmacist', label:'مشتريات'},
 ];
 
-const PAGE_META = {
-  'main.html':{title:'طلب جديد', group:'الصيدلية'},
-  'transfers.html':{title:'التحويلات', group:'الصيدلية'},
-  'inventory.html':{title:'الجرد', group:'الصيدلية'},
-  'notifications.html':{title:'الإشعارات', group:'الصيدلية'},
-  'offers.html':{title:'العروض', group:'الصيدلية'},
-  'missing_items.html':{title:'لم يصل من الشركات', group:'الصيدلية'},
-  'inventory_min.html':{title:'حدود المخزون', group:'الصيدلية'},
-  'customers.html':{title:'العملاء', group:'الصيدلية'},
-  'employees.html':{title:'الموظفين', group:'الصيدلية'},
-  'purchases.html':{title:'مشتريات', group:'الصيدلية'},
-  'cosmo_order.html':{title:'طلبيات الكوزمو والشركات', group:'الصيدلية'},
-  'inventory_management.html':{title:'إدارة المخزون', group:'الصيدلية'},
-  'price_check.html':{title:'مراجعة السعر لإذون الصرف', group:'الصيدلية'},
-  'customer_service.html':{title:'خدمة العملاء', group:'الصيدلية'},
-  'customer_problems.html':{title:'مشاكل العملاء', group:'الصيدلية'},
-  'shortages.html':{title:'نواقص', group:'الصيدلية'},
-  'print_invoice.html':{title:'طباعة فاتورة بيع', group:'الصيدلية'},
-  'sales_contracts.html':{title:'فواتير التعاقد', group:'الصيدلية'},
-  'claims.html':{title:'مطالبات', group:'الصيدلية'},
-  'contracts.html':{title:'لنا فواتير لدى العملاء', group:'الصيدلية'},
-  'contracts_stats.html':{title:'إحصائيات التعاقدات', group:'الصيدلية'},
-  'bank_monitor.html':{title:'متابعة البنك', group:'الصيدلية'},
-  'wallet.html':{title:'مبيعات الماكينات', group:'الصيدلية'},
-  'sms.html':{title:'معاملات المحافظ', group:'الصيدلية'},
-  'machine_import.html':{title:'استيراد جدول الماكينات', group:'الصيدلية'},
-  'shift_close.html':{title:'إغلاق الشيفت', group:'الصيدلية'},
-  'shift_history.html':{title:'سجل الإغلاقات', group:'الصيدلية'},
-  'jard_settings.html':{title:'إعدادات الجرد', group:'الصيدلية'},
-  'dispatch.html':{title:'شاشة التوزيع', group:'التوصيل'},
-  'orders.html':{title:'الطلبات', group:'التوصيل'},
-  'trips.html':{title:'الرحلات', group:'التوصيل'},
-  'drivers.html':{title:'الطيارين', group:'التوصيل'},
-  'attendance.html':{title:'الحضور', group:'التوصيل'},
-  'branches.html':{title:'الفروع', group:'إعدادات التوصيل'},
-  'regions.html':{title:'المناطق', group:'إعدادات التوصيل'},
-  'routes.html':{title:'خطوط السير', group:'إعدادات التوصيل'},
-  'dispatch-settings.html':{title:'إعدادات التوزيع', group:'إعدادات التوصيل'},
-  'reports.html':{title:'التقارير', group:'تقارير'},
-  'salesanalysis.html':{title:'تحليل المبيعات', group:'تقارير'},
-  'users.html':{title:'المستخدمون', group:'إدارة'},
-  'permissions.html':{title:'الصلاحيات', group:'إدارة'},
-  'pos_methods.html':{title:'إدارة ماكينات الفروع', group:'إدارة'},
-  'tasks.html':{title:'تنظيم المهام', group:'إدارة'},
-  'org_settings.html':{title:'إعدادات المؤسسة', group:'إدارة'},
-  'supplier_balances.html':{title:'متابعة أرصدة الموردين', group:'الموردين'},
-  'store_prices.html':{title:'أسعار وخصومات المخازن', group:'الموردين'},
-  'medicine_orders.html':{title:'طلبيات الأدوية', group:'الموردين'},
-};
-const GROUP_ORDER = ['الصيدلية','الموردين','التوصيل','إعدادات التوصيل','تقارير','إدارة'];
+// كتالوج الشاشات من جدول app_pages عبر pages.js — كان مكتوب هنا نسخة
+// تانية مختلفة عن اللي في القائمة (42 اختلاف في الأسماء والمجموعات)،
+// و4 شاشات مكانتش موجودة هنا خالص فماكانش ينفع تتعدّل صلاحياتها.
 
 let permData = {};   // permData[role][page] = {can_view, can_edit}
 let editMode = false;
@@ -138,7 +92,8 @@ async function loadPermissions(){
     return;
   }
   loadOk=false;
-  const {data,error}=await db.from('page_permissions').select('role,page,can_view,can_edit');
+  await Pages.ready();   // الكتالوج لازم يكون جاهز قبل الرسم
+  const {data,error}=await db.from('page_permissions').select('role,page,page_key,can_view,can_edit');
   if(error || !data || data.length===0){
     console.error('permissions load failed', error);
     document.getElementById('permActions').innerHTML='';
@@ -148,7 +103,7 @@ async function loadPermissions(){
   permData={};
   data.forEach(r=>{
     if(!permData[r.role]) permData[r.role]={};
-    permData[r.role][r.page]={can_view:r.can_view, can_edit:r.can_edit};
+    permData[r.role][r.page_key || Pages.keyOf(r.page)]={can_view:r.can_view, can_edit:r.can_edit};
   });
   loadOk=true;
   render();
@@ -171,11 +126,13 @@ function render(){
   ROLES.forEach(r => html += `<th>${r.label}</th>`);
   html += `</tr></thead><tbody>`;
 
-  GROUP_ORDER.forEach(group => {
-    const pages = Object.entries(PAGE_META).filter(([,m]) => m.group === group);
+  const grouped = Pages.grouped();
+  Pages.sections().forEach(group => {
+    const pages = grouped[group] || [];
     if(!pages.length) return;
     html += `<tr class="group-row"><td colspan="${ROLES.length+1}">${group}</td></tr>`;
-    pages.forEach(([page, meta]) => {
+    pages.forEach(meta => {
+      const page = meta.key;
       html += `<tr><td>${meta.title}</td>`;
       ROLES.forEach(role => {
         const pp = permData[role.key]?.[page] || {};
@@ -210,7 +167,7 @@ async function savePermissions(){
   const updates = [];
   sels.forEach(s=>{
     const v = s.value;
-    updates.push({ role: s.dataset.role, page: s.dataset.page, can_view: v!=='', can_edit: v==='edit' });
+    updates.push({ role: s.dataset.role, page_key: s.dataset.page, can_view: v!=='', can_edit: v==='edit' });
   });
   try{
     const { error } = await db.rpc('save_page_permissions_bulk', { p_updates: updates });

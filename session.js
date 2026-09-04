@@ -250,16 +250,16 @@ const Session = (function () {
     return _permCache;
   }
 
-  /* مفتاح الصفحة في page_permissions = اسم الملف، مثلاً 'expenses.html'.
-     can() من غير وسيط بتفترض الصفحة الحالية.
-     can('supplier_balances.html') → { view:true, edit:false }         */
+  /* can() بتقبل المفتاح الثابت ('supplier_balances') أو اسم الملف
+     ('supplier_balances.html')، ومن غير وسيط بتفترض الصفحة الحالية.
+     get_role_pages بترجّع الاتنين فالمقارنة بتنجح مع أي شكل.          */
   function thisPage() {
     return (location.pathname.split('/').pop() || '').split('?')[0] || '';
   }
   async function can(page) {
     if (isAdmin()) return { view: true, edit: true };
-    const key = page || thisPage();
-    const p = (await pages()).find(x => x.page === key);
+    const q = String(page || thisPage()).trim();
+    const p = (await pages()).find(x => x.key === q || x.page === q);
     return { view: !!(p && p.can_view), edit: !!(p && p.can_edit) };
   }
 
