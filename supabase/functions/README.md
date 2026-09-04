@@ -32,6 +32,33 @@ GitHub، فاتشال من الملف **واتغيّر** — شيله من ال�
 | `apk-publish` / `db-restore` / `pharma_search` / `pharma_probe` | أدوات إدارية |
 | `clever-action` / `swift-api` / `send-push` | مفيش مستدعي — مرشّحة للحذف |
 
+## مصدر الأسرار: متغيّر بيئة ولا vault؟
+
+الاتنين مقبولين — المهم إنه **مش في الملف**:
+
+| الدالة | مصدر سرها | ليه |
+|---|---|---|
+| `eplus_sync` | `Deno.env.get("SYNC_KEY")` | الأبسط لما السر بتاع الدالة نفسها |
+| `db-backup` | vault عبر `vault_secret()` | الـcron بينادي الدالة، فلازم الاتنين يقروا نفس القيمة |
+| `delivery-performance` / `trip-return-perf` | vault عبر `vault_secret()` | نفس السبب — التريجرات بتنادي الدالة |
+
+`public.vault_secret(text)` دالة وسيطة `SECURITY DEFINER` صلاحيتها
+لـ`service_role` بس، لأن سكيما `vault` نفسها مش معروضة لـPostgREST.
+
+⚠️ لو سر vault اتمسح أو رجع فاضي، الدالة **ترفض** — مش تسمح للكل.
+الشرط دايمًا `if (!expected || provided !== expected) return 401`.
+
+### الأسرار المخزّنة في vault دلوقتي
+| الاسم | بيستعمله |
+|---|---|
+| `backup_trigger_token` | `db-backup` + كرونتين النسخ الاحتياطي |
+| `perf_functions_secret` | دالتين الأداء + 4 دوال قاعدة بيانات |
+| `driver_app_secret` | نسخة من سر تطبيق السواقين (قبول انتقالي) |
+| `eplus_sync_key` | نفس قيمة `SYNC_KEY` — عشان الـcron مايكتبهاش صريح |
+
+تغيير قيمة `eplus_sync_key` لوحدها **مش كفاية**: الدالة بتقارن
+بـ`SYNC_KEY` من متغيّرات البيئة، فلازم الاتنين يتغيّروا مع بعض.
+
 ## قبل ما تصدّر دالة هنا
 افحصها من الأسرار الأول:
 ```bash
