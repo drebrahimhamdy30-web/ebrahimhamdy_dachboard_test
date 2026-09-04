@@ -395,7 +395,7 @@ textarea.form-ctrl{height:80px;padding:.75rem;resize:none}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../config.js?v=20260904c"></script>
-<script src="../session.js?v=20260904e"></script>
+<script src="../session.js?v=20260905"></script>
 <script src="../branches.js?v=20260904d"></script>
 <script src="../pages.js?v=20260904d"></script>
 <script src="../brand.js?v=20260904c"></script>
@@ -727,11 +727,21 @@ function showBanner(msg, color, persistent=false){
 window.addEventListener('DOMContentLoaded', async()=>{
   currentUser=getCurrentUser();
   if(!currentUser){window.location.href='auth.html';return;}
-  // تجديد تلقائي: جلسة قديمة بلا JWT صالح → عدّي على صفحة الدخول لتجديده
-  const _jwt=localStorage.getItem('authJwt');
-  let _jwtOk=false;
-  try{const _p=_jwt&&JSON.parse(atob(_jwt.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));_jwtOk=_p&&_p.exp*1000>Date.now()+60000;}catch(e){_jwtOk=false;}
-  if(!_jwtOk&&!sessionStorage.getItem('jwtRefreshDone')){sessionStorage.setItem('jwtRefreshDone','1');window.location.href='auth.html';return;}
+  // تجديد التوكن **في مكانه** — مش بالتحويل لصفحة الدخول.
+  // ⚠️ النسخة القديمة كانت بتحوّل فورًا لو التوكن منتهي. المشكلة إن
+  //    branches.js/pages.js بيكونوا بدأوا تجديد في نفس اللحظة، والتحويل
+  //    بيقطعه في نُصّه — وSupabase بيكون دوّر الـrefresh token بالفعل،
+  //    فالمخزّن يبقى باطل والتجديد اللي بعده يفشل. النتيجة: الطيار
+  //    يضطر يخرج ويدخل أكتر من مرة. (اتبلّغ عنها 2026-09-05.)
+  //    Session.refresh مقفول (Web Lock) فبينسّق مع باقي المستدعيين.
+  if(!Session.tokenValid(60000)){
+    const _ok = await Session.refresh(60000);
+    if(!_ok && !sessionStorage.getItem('jwtRefreshDone')){
+      sessionStorage.setItem('jwtRefreshDone','1');
+      window.location.href='auth.html'; return;
+    }
+  }
+  sessionStorage.removeItem('jwtRefreshDone');   // نجح → صفّر العلامة للمرة الجاية
   if(currentUser.role!=='driver'){window.location.href='app.html';return;}
   document.getElementById('driverName').textContent=currentUser.full_name||'طيار';
   updateMuteBtn();   // زر كتم الصوت — يعكس آخر اختيار محفوظ للطيار
