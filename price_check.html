@@ -197,7 +197,17 @@
     // ربط اسم الفرع كما قد يظهر في بيانات اليوزر بكود الفرع
     // أي شكل لاسم الفرع (اسم/كود/اسم مخزن/تهجئة بديلة) → الكود المختصر.
     // الأشكال دي متسجّلة كأسماء بديلة في جدول branches.
-    const USER_BRANCH_MAP = new Proxy({}, { get: function(_, k){ return Branches.toCode(k); } });
+    // v حوّل أي شكل لاسم الفرع (اسم/كود/اسم مخزن/تهجئة) للكود المختصر، أو null.
+    function branchToCode(v){
+      if(v==null) return null;
+      var key=String(v).trim();
+      if(!key) return null;
+      var code=Branches.toCode(key);           // مطابقة مباشرة (اسم/كود/معرّف/تهجئة)
+      if(code) return code;
+      var am=Branches.aliasMap()||{};          // احتياطي: الاسم جاي ضمن نص أطول
+      for(var nm in am){ if(nm && key.indexOf(nm)>-1){ var c=Branches.toCode(am[nm]); if(c) return c; } }
+      return null;
+    }
 
     var myBranch='mamora';
     var parsedRows=[];        // الأصناف الملصوقة
@@ -211,28 +221,15 @@
     // ===== تحديد الفرع من اليوزر المفتوح =====
     // المصدر الأساسي: localStorage.userBranch (نفس اللي يعتمده الـ nav) — قيمته بالعربي
     function resolveBranchFromStorage(){
-      var v = Session.branch();
-      if(v==null) return null;
-      var key=String(v).trim();
-      if(USER_BRANCH_MAP.hasOwnProperty(key)) return USER_BRANCH_MAP[key];
-      for(var nm in USER_BRANCH_MAP){
-        if(key.indexOf(nm)>-1) return USER_BRANCH_MAP[nm];
-      }
-      return null;
+      return branchToCode(Session.branch());
     }
     function resolveBranchFromUser(user){
       if(!user) return null;
       var candidates=[user.branch, user.branch_code, user.branchName, user.branch_name,
                       user.store, user.store_name, user.username, user.user_branch, user.location];
       for(var i=0;i<candidates.length;i++){
-        var v=candidates[i];
-        if(v==null) continue;
-        var key=String(v).trim();
-        if(USER_BRANCH_MAP.hasOwnProperty(key)) return USER_BRANCH_MAP[key];
-        // محاولة مطابقة جزئية (لو الاسم جاي ضمن نص أطول)
-        for(var nm in USER_BRANCH_MAP){
-          if(key.indexOf(nm)>-1) return USER_BRANCH_MAP[nm];
-        }
+        var code=branchToCode(candidates[i]);
+        if(code) return code;
       }
       return null;
     }
@@ -757,8 +754,7 @@
           var diffTxt = r.diff>0 ? '+'+r2(r.diff) : r2(r.diff);
           var statusBadge = r.match ? '<span class="badge-match">مطابق</span>' : '<span class="badge-diff">مختلف</span>';
           html+='<tr class="'+(r.match?'':'mismatch-row')+'">'+
-            '<td class="name-cell"><div style="font-weight:600">'+r.name+'</div>'+
-              (r.myName && r.myName!==r.name ? '<div style="font-size:0.65rem;color:var(--text-muted)">عندي: '+r.myName+'</div>':'')+'</td>'+
+            '<td class="name-cell"><div style="font-weight:600">'+(r.myName||r.name)+'</div></td>'+
             '<td>'+r.code+'</td>'+
             '<td class="price-new">'+r2(r.newPrice)+'</td>'+
             '<td class="price-mine">'+r2(r.myPrice)+'</td>'+
