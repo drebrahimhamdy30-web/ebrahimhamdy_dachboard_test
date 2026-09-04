@@ -74,3 +74,25 @@ node scripts/check-secrets.js
 ```bash
 git config core.hooksPath .githooks
 ```
+
+### أسرار الدوال — الحالة بعد 2026-09-04
+
+| الدالة | السر | المصدر |
+|---|---|---|
+| `db-backup` · `db-restore` | `backup_trigger_token` | vault |
+| `delivery-performance` · `trip-return-perf` | `perf_functions_secret` | vault |
+| `driver-poll` | `driver_app_secret` | vault (نفس قيمة الـAPK) |
+| `apk-publish` | `apk_publish_secret` | vault — **مستقل** عن سر التطبيق |
+| `eplus_sync` · `pharma_sync` | `SYNC_KEY` | متغيّر بيئة |
+| `pharma_*` | `PHARMA_MARKET_AUTH` | متغيّر بيئة |
+
+🔴 **`db-restore` كان شايل نسخة من التوكن المسرّب** بعد ما دوّرته في
+`db-backup` — أي حد قرا تاريخ الريبو كان يقدر يكتب فوق القاعدة كلها.
+**لما تدوّر سر، اعمل grep عليه في كل الدوال مش اللي فاكر إنها بتستعمله.**
+
+🔴 **سر تطبيق الطيارين منشور** في ريبو `phalix-driver-app` العام
+(workflow + `lib/config.dart`). `apk-publish` اتفصلت عنه فورًا عشان
+مايتستعملش لاستبدال الـAPK. تغيير السر نفسه محتاج إصدار جديد.
+
+✅ **إنذار كاذب:** `OAUTH_SECRET="secret"` في `pharma_*` = قيمة SAP
+Commerce الافتراضية، مش سر. اتأكد قبل ما «تصلّح».
