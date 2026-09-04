@@ -1,7 +1,10 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-const TRIGGER_TOKEN = "phlx_bkp_9f3c7a1e5b8d24k6a0";
+// ⚠️ التوكن مايتكتبش في الكود — الريبو ده عام. بييجي من متغيّر بيئة
+// (Supabase → Edge Functions → Secrets). التوكن القديم اتكشف على GitHub
+// واتغيّر؛ لو رجع تاني في الكود يبقى مكشوف تاني.
+const TRIGGER_TOKEN = Deno.env.get("BACKUP_TRIGGER_TOKEN") ?? "";
 const BUCKET = "db-backups";
 const KEEP_LAST = 30;
 const PAGE = 1000;
@@ -62,7 +65,7 @@ function cleanFolderId(raw: string): string {
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
   const token = url.searchParams.get("token") || req.headers.get("x-backup-token") || "";
-  if (token !== TRIGGER_TOKEN) {
+  if (!TRIGGER_TOKEN || token !== TRIGGER_TOKEN) {   // توكن فاضي = ممنوع، مش مسموح للكل
     return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
   }
 
