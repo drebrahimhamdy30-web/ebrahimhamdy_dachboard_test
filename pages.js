@@ -64,8 +64,9 @@ const Pages = (function () {
         const r = await fetch(
           `${PHALIX_CONFIG.supabaseUrl}/rest/v1/app_pages` +
           `?select=key,file,title,section,sort_order,badge&is_active=eq.true&order=sort_order`,
-          { headers: { apikey: PHALIX_CONFIG.supabaseAnonKey,
-                       Authorization: 'Bearer ' + PHALIX_CONFIG.supabaseAnonKey } });
+          // توكن المستخدم لو موجود — الجدول بقى authenticated-only.
+          // (الجلب الاستباقي على صفحة الدخول بيفشل بهدوء والكاش بيغطّي.)
+          { headers: await Session.headers() });
         if (r.ok) _apply(await r.json());
       } catch (e) {}
       return _list;

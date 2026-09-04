@@ -83,8 +83,9 @@ const Branches = (function () {
         const r = await fetch(
           `${PHALIX_CONFIG.supabaseUrl}/rest/v1/branches` +
           `?select=id,name,code,aliases,sort_order,is_active&is_active=eq.true&order=sort_order`,
-          { headers: { apikey: PHALIX_CONFIG.supabaseAnonKey,
-                       Authorization: 'Bearer ' + PHALIX_CONFIG.supabaseAnonKey } });
+          // توكن المستخدم لو موجود — الجدول بقى authenticated-only.
+          // (الجلب الاستباقي على صفحة الدخول بيفشل بهدوء والكاش بيغطّي.)
+          { headers: await Session.headers() });
         if (r.ok) _apply(await r.json());
       } catch (e) {}
       return _list;
