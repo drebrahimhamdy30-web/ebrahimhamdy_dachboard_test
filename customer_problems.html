@@ -82,15 +82,18 @@
     </div>
   </div>
 
-  <script src="config.js?v=20260903"></script>
-  <script src="session.js?v=20260904b"></script>
-  <script src="branches.js?v=20260904"></script>
-  <script src="pages.js?v=20260905"></script>
-  <script src="brand.js?v=20260904"></script>
-  <script src="api.js?v=20260904b"></script>
+  <script src="config.js?v=20260904c"></script>
+  <script src="session.js?v=20260904c"></script>
+  <script src="branches.js?v=20260904c"></script>
+  <script src="pages.js?v=20260904c"></script>
+  <script src="brand.js?v=20260904c"></script>
+  <script src="api.js?v=20260904c"></script>
   <script>
     const REST = SB_URL_API + '/rest/v1/';
-    const H = { apikey: SB_ANON_API, Authorization: 'Bearer ' + SB_ANON_API, 'Content-Type': 'application/json' };
+    // الترويسة بتتبني لكل نداء بتوكن المستخدم (sbH بيجدّد لو لزم).
+    // ⚠️ كانت كائن ثابت بمفتاح anon: الجداول بقت authenticated-only، وكمان
+    //    أي توكن بيتقرا مرة واحدة وقت التحميل بيقدم بعد ساعة ويرجّع 401.
+    const H = extra => sbH(Object.assign({ 'Content-Type': 'application/json' }, extra || {}));
     const PRESETS = ['صيادلة','طيارين','مشتريات','تحضير','مراجعة','كاشير'];
     const WHO = (Session.fullName() || Session.username() || '—').trim();
     let INS = [], CAT = '', Q = '', canEdit = false;
@@ -100,7 +103,7 @@
 
     async function load(){
       try{
-        const r = await fetch(REST + 'instructions?select=*&order=pinned.desc,created_at.desc', { headers: H });
+        const r = await fetch(REST + 'instructions?select=*&order=pinned.desc,created_at.desc', { headers: await H() });
         INS = await r.json(); if(!Array.isArray(INS)) INS = [];
       }catch(e){ INS = []; }
       renderCats(); render();
@@ -163,17 +166,17 @@
       if(!title){ alert('اكتب عنوان التعليمة'); return; }
       const payload = { category, title, body, pinned, updated_by: WHO, updated_at: new Date().toISOString() };
       try{
-        if(id){ await fetch(REST+'instructions?id=eq.'+id, { method:'PATCH', headers:{...H,Prefer:'return=minimal'}, body: JSON.stringify(payload) }); }
-        else { payload.created_by = WHO; await fetch(REST+'instructions', { method:'POST', headers:{...H,Prefer:'return=minimal'}, body: JSON.stringify(payload) }); }
+        if(id){ await fetch(REST+'instructions?id=eq.'+id, { method:'PATCH', headers:await H({ Prefer:'return=minimal' }), body: JSON.stringify(payload) }); }
+        else { payload.created_by = WHO; await fetch(REST+'instructions', { method:'POST', headers:await H({ Prefer:'return=minimal' }), body: JSON.stringify(payload) }); }
         CAT = category; closeEdit(); await load();
       }catch(e){ alert('فشل الحفظ'); }
     }
     async function del(id){
       if(!confirm('تأكيد حذف التعليمة؟')) return;
-      try{ await fetch(REST+'instructions?id=eq.'+id, { method:'DELETE', headers:H }); await load(); }catch(e){ alert('فشل الحذف'); }
+      try{ await fetch(REST+'instructions?id=eq.'+id, { method:'DELETE', headers: await H() }); await load(); }catch(e){ alert('فشل الحذف'); }
     }
     async function togglePin(id,on){
-      try{ await fetch(REST+'instructions?id=eq.'+id, { method:'PATCH', headers:{...H,Prefer:'return=minimal'}, body: JSON.stringify({ pinned: !!on }) }); await load(); }catch(e){}
+      try{ await fetch(REST+'instructions?id=eq.'+id, { method:'PATCH', headers:await H({ Prefer:'return=minimal' }), body: JSON.stringify({ pinned: !!on }) }); await load(); }catch(e){}
     }
 
     function exportPdf(){

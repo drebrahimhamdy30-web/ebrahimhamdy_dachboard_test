@@ -14,7 +14,7 @@ async function sbItemLookup(code, branch) {
   try {
     const r = await fetch(`${SB_URL_API}/rest/v1/rpc/item_lookup`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + SB_ANON_API },
+      headers: await sbH({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ p_code: String(code || ''), p_branch: branch || localStorage.getItem('userBranch') || '' })
     });
     if (!r.ok) return { found: false };
@@ -990,7 +990,7 @@ async function fetchDailyJardStats(dateFrom, dateTo, branch) {
   try {
     const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_jard_daily_stats`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + SB_ANON_API },
+      headers: await sbH({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ p_from: dateFrom || null, p_to: (dateTo || dateFrom) || null, p_branch: branch || null })
     });
     if (!r.ok) return [];

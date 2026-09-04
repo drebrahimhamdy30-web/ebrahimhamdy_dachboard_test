@@ -186,15 +186,19 @@
     </div>
   </div>
 
-  <script src="config.js?v=20260903"></script>
-  <script src="session.js?v=20260904b"></script>
-  <script src="branches.js?v=20260904"></script>
-  <script src="pages.js?v=20260905"></script>
-  <script src="brand.js?v=20260904"></script>
+  <script src="config.js?v=20260904c"></script>
+  <script src="session.js?v=20260904c"></script>
+  <script src="branches.js?v=20260904c"></script>
+  <script src="pages.js?v=20260904c"></script>
+  <script src="brand.js?v=20260904c"></script>
+  <script src="api.js?v=20260904c"></script>
   <script>
     const REST=SB_URL+'/rest/v1/';
     const FN=SB_URL+'/functions/v1/';
-    const H={ apikey:SB_KEY, Authorization:'Bearer '+SB_KEY, 'Content-Type':'application/json' };
+    // الترويسة بتتبني لكل نداء بتوكن المستخدم (sbH بيجدّد لو لزم).
+    // ⚠️ كانت كائن ثابت بمفتاح anon: الجداول بقت authenticated-only، وكمان
+    //    أي توكن بيتقرا مرة واحدة وقت التحميل بيقدم بعد ساعة ويرجّع 401.
+    const H = extra => sbH(Object.assign({ 'Content-Type':'application/json' }, extra || {}));
     const BRANCHES=Branches.names();
     const ROLE=(Session.role()||'').toLowerCase();
     const IS_ADMIN = ROLE==='admin';
@@ -240,7 +244,7 @@
     // ===== تحميل + عرض العناوين =====
     async function load(){
       try{
-        const r=await fetch(REST+'integration_endpoints?select=*&order=sort_order.asc,id.asc',{headers:H});
+        const r=await fetch(REST+'integration_endpoints?select=*&order=sort_order.asc,id.asc',{headers: await H()});
         EPS=await r.json(); if(!Array.isArray(EPS)) EPS=[];
       }catch(e){ EPS=[]; }
       render();
@@ -288,7 +292,7 @@
       const patch = on
         ? { sched_enabled:true, next_run_at: ep.daily_at ? clientNextDaily(ep.daily_at) : new Date().toISOString() }
         : { sched_enabled:false, next_run_at:null };
-      try{ await fetch(REST+'integration_endpoints?id=eq.'+id,{method:'PATCH',headers:{...H,Prefer:'return=minimal'},body:JSON.stringify(patch)}); await load(); }catch(e){ alert('فشل'); }
+      try{ await fetch(REST+'integration_endpoints?id=eq.'+id,{method:'PATCH',headers:await H({ Prefer:'return=minimal' }),body:JSON.stringify(patch)}); await load(); }catch(e){ alert('فشل'); }
     }
     async function runNow(id){
       const jwt=authToken(); if(!jwt){ alert('لازم تسجّل دخول من جديد (توكن منتهي)'); return; }
@@ -350,8 +354,10 @@
       box.innerHTML=meta+'<div class="res-out">'+esc(out)+'</div>';
       // حفظ عيّنة + آخر اختبار (best-effort)
       if(j.ok && IS_ADMIN){
-        fetch(REST+'integration_endpoints?id=eq.'+e.id,{ method:'PATCH', headers:{...H,Prefer:'return=minimal'},
-          body:JSON.stringify({ all_records:j.all_records??null, last_tested_at:new Date().toISOString() }) }).catch(()=>{});
+        // renderResult مش async والنداء ده fire-and-forget، فبنجيب
+        // الترويسة بـthen بدل await عشان مانغيّرش توقيع الدالة.
+        H({ Prefer:'return=minimal' }).then(h=>fetch(REST+'integration_endpoints?id=eq.'+e.id,{ method:'PATCH', headers:h,
+          body:JSON.stringify({ all_records:j.all_records??null, last_tested_at:new Date().toISOString() }) })).catch(()=>{});
       }
     }
 
@@ -523,14 +529,14 @@
         updated_at:new Date().toISOString()
       };
       try{
-        if(id){ await fetch(REST+'integration_endpoints?id=eq.'+id,{method:'PATCH',headers:{...H,Prefer:'return=minimal'},body:JSON.stringify(payload)}); }
-        else  { await fetch(REST+'integration_endpoints',{method:'POST',headers:{...H,Prefer:'return=minimal'},body:JSON.stringify(payload)}); }
+        if(id){ await fetch(REST+'integration_endpoints?id=eq.'+id,{method:'PATCH',headers:await H({ Prefer:'return=minimal' }),body:JSON.stringify(payload)}); }
+        else  { await fetch(REST+'integration_endpoints',{method:'POST',headers:await H({ Prefer:'return=minimal' }),body:JSON.stringify(payload)}); }
         closeEdit(); await load();
       }catch(e){ alert('فشل الحفظ'); }
     }
     async function delEndpoint(id){
       if(!confirm('تأكيد حذف العنوان؟')) return;
-      try{ await fetch(REST+'integration_endpoints?id=eq.'+id,{method:'DELETE',headers:H}); await load(); }catch(e){ alert('فشل الحذف'); }
+      try{ await fetch(REST+'integration_endpoints?id=eq.'+id,{method:'DELETE',headers: await H()}); await load(); }catch(e){ alert('فشل الحذف'); }
     }
 
     // ===== init =====

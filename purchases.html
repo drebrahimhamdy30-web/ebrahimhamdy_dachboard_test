@@ -180,12 +180,12 @@
     </div>
   </div>
 
-<script src="config.js?v=20260903"></script>
-<script src="session.js?v=20260904b"></script>
-<script src="branches.js?v=20260904"></script>
-<script src="pages.js?v=20260905"></script>
-<script src="brand.js?v=20260904"></script>
-<script src="api.js?v=20260904b"></script>
+<script src="config.js?v=20260904c"></script>
+<script src="session.js?v=20260904c"></script>
+<script src="branches.js?v=20260904c"></script>
+<script src="pages.js?v=20260904c"></script>
+<script src="brand.js?v=20260904c"></script>
+<script src="api.js?v=20260904c"></script>
   <script>
     let activeUser = null;
     let rawData    = [];
@@ -198,7 +198,7 @@
       try {
         const res = await fetch(SB_URL_API + '/rest/v1/rpc/get_user_name_map', {
           method:'POST',
-          headers:{ apikey:SB_ANON_API, Authorization:'Bearer '+SB_ANON_API, 'Content-Type':'application/json' },
+          headers: await sbH({ 'Content-Type':'application/json' }),
           body:'{}'
         });
         const d = await res.json();
@@ -215,7 +215,10 @@
     // كود موجود → أفضل مخزن متاح (أعلى خصم)؛ مفيش → غير متاح.
     // ملوش كود → يطابق الاسم لكود (زي شاشة أسعار المخازن) وبعدها يرشّح المخزن.
     let SRC_MAP = {};   // id -> {status, store, discount_perc, resolved_code, matched_by}
-    const SRC_H = { apikey: SB_ANON_API, Authorization: 'Bearer ' + SB_ANON_API, 'Content-Type': 'application/json' };
+    // الترويسة بتتبني لكل نداء بتوكن المستخدم (sbH بيجدّد لو لزم).
+    // ⚠️ كانت كائن ثابت بمفتاح anon: الجداول بقت authenticated-only، وكمان
+    //    أي توكن بيتقرا مرة واحدة وقت التحميل بيقدم بعد ساعة ويرجّع 401.
+    const SRC_H = extra => sbH(Object.assign({ 'Content-Type': 'application/json' }, extra || {}));
     async function loadSourceSuggestions(items){
       const pending = (items||[]).filter(i => SRC_MAP[i.id] === undefined && i.id != null);
       if (!pending.length) return;
@@ -227,7 +230,7 @@
         const rows = slice.map(i => ({ k: String(i.id), code: i.item_code || '', name: i.item_name || '' }));
         try {
           const res = await fetch(SB_URL_API + '/rest/v1/rpc/suggest_purchase_sources', {
-            method:'POST', headers: SRC_H, body: JSON.stringify({ p_rows: rows })
+            method:'POST', headers: await SRC_H(), body: JSON.stringify({ p_rows: rows })
           });
           const data = await res.json();
           (Array.isArray(data) ? data : []).forEach(d => { SRC_MAP[d.k] = d; });
@@ -287,7 +290,7 @@
       bg.style.display = 'flex';
       try {
         const url = SB_URL_API + '/rest/v1/store_item_prices?select=item_name,store,price,discount_perc,available&code=eq.' + encodeURIComponent(code) + '&available=eq.true';
-        let rows = await (await fetch(url, { headers: SRC_H })).json();
+        let rows = await (await fetch(url, { headers: await SRC_H() })).json();
         if (!Array.isArray(rows) || !rows.length){ document.getElementById('cmp-body').innerHTML = '<div style="color:var(--text-muted)">لا يوجد هذا الصنف متاحًا في أي مخزن.</div>'; return; }
         rows = rows.map(r=>({ ...r, _cost:_netCost(r) })).sort((a,b)=>{ const ac=a._cost==null?Infinity:a._cost, bc=b._cost==null?Infinity:b._cost; return ac-bc; });
         const chosen = (_cmpId!=null && SRC_MAP[_cmpId] && SRC_MAP[_cmpId]._chosen) ? SRC_MAP[_cmpId]._chosen.store : null;

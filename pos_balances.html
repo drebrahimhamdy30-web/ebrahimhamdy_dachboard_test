@@ -7,12 +7,12 @@
   <link rel="stylesheet" href="tokens.css?v=20260906">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-  <script src="config.js?v=20260903"></script>
-  <script src="session.js?v=20260904b"></script>
-  <script src="branches.js?v=20260904"></script>
-  <script src="pages.js?v=20260905"></script>
-  <script src="brand.js?v=20260904"></script>
-  <script src="api.js?v=20260904b"></script>
+  <script src="config.js?v=20260904c"></script>
+  <script src="session.js?v=20260904c"></script>
+  <script src="branches.js?v=20260904c"></script>
+  <script src="pages.js?v=20260904c"></script>
+  <script src="brand.js?v=20260904c"></script>
+  <script src="api.js?v=20260904c"></script>
   <style>
     :root{ --primary:#0d9488; --primary-dark:#0f766e; }
     .container{ max-width:100% !important; width:100%; }
@@ -77,7 +77,10 @@
 
   <script>
     const REST = SB_URL_API + '/rest/v1/';
-    const H = { apikey: SB_ANON_API, Authorization: 'Bearer ' + SB_ANON_API, 'Content-Type': 'application/json' };
+    // الترويسة بتتبني لكل نداء بتوكن المستخدم (sbH بيجدّد لو لزم).
+    // ⚠️ كانت كائن ثابت بمفتاح anon: الجداول بقت authenticated-only، وكمان
+    //    أي توكن بيتقرا مرة واحدة وقت التحميل بيقدم بعد ساعة ويرجّع 401.
+    const H = extra => sbH(Object.assign({ 'Content-Type': 'application/json' }, extra || {}));
     const BRANCHES = Branches.names();
     let curBranch = BRANCHES[0];
 
@@ -105,7 +108,7 @@
       document.getElementById('pb-total').textContent = '';
       let rows = [];
       try {
-        const r = await fetch(REST + 'rpc/get_pos_balances_at', { method:'POST', headers:H, body: JSON.stringify({ p_branch: curBranch, p_at: atISO() }) });
+        const r = await fetch(REST + 'rpc/get_pos_balances_at', { method:'POST', headers: await H(), body: JSON.stringify({ p_branch: curBranch, p_at: atISO() }) });
         rows = await r.json();
         if (!Array.isArray(rows)) rows = [];
       } catch(e){ body.innerHTML = '<tr><td colspan="4" style="color:var(--danger);padding:24px">تعذّر التحميل</td></tr>'; return; }
@@ -131,7 +134,7 @@
       let rows = [];
       try {
         const url = REST + 'eplus_pos?select=pos_current_balance,captured_at&branch=eq.' + encodeURIComponent(curBranch) + '&pos_code=eq.' + encodeURIComponent(posCode) + '&order=captured_at.desc&limit=300';
-        rows = await (await fetch(url, { headers:H })).json();
+        rows = await (await fetch(url, { headers: await H() })).json();
         if (!Array.isArray(rows)) rows = [];
       } catch(e){ document.getElementById('pb-hist-body').innerHTML = '<div style="color:var(--danger)">تعذّر التحميل</div>'; return; }
       if (!rows.length){ document.getElementById('pb-hist-body').innerHTML = '<div class="muted">لا يوجد تاريخ</div>'; return; }

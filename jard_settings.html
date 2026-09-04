@@ -97,12 +97,12 @@
 
   <div class="save-toast" id="toast">✅ تم الحفظ بنجاح!</div>
 
-  <script src="config.js?v=20260903"></script>
-  <script src="session.js?v=20260904b"></script>
-  <script src="branches.js?v=20260904"></script>
-  <script src="pages.js?v=20260905"></script>
-  <script src="brand.js?v=20260904"></script>
-  <script src="api.js?v=20260904b"></script>
+  <script src="config.js?v=20260904c"></script>
+  <script src="session.js?v=20260904c"></script>
+  <script src="branches.js?v=20260904c"></script>
+  <script src="pages.js?v=20260904c"></script>
+  <script src="brand.js?v=20260904c"></script>
+  <script src="api.js?v=20260904c"></script>
   <script>
     let currentSettings = [];
     let currentTags = {};
@@ -340,7 +340,10 @@
     // ===== أكواد مستثناة من الجرد (لكل نطاق) =====
     const JARD_SCOPES = [{ value: 'returns', label: 'المرتجعات' }];   // نطاقات جديدة تتضاف هنا لاحقًا
     const EXCL_REST = SB_URL_API + '/rest/v1/jard_excluded_codes';
-    const EXCL_H = { 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + SB_ANON_API, 'Content-Type': 'application/json' };
+    // الترويسة بتتبني لكل نداء بتوكن المستخدم (sbH بيجدّد لو لزم).
+    // ⚠️ كانت كائن ثابت بمفتاح anon: الجداول بقت authenticated-only، وكمان
+    //    أي توكن بيتقرا مرة واحدة وقت التحميل بيقدم بعد ساعة ويرجّع 401.
+    const EXCL_H = extra => sbH(Object.assign({ 'Content-Type': 'application/json' }, extra || {}));
 
     function renderExclScopes() {
       document.getElementById('excl-scopes').innerHTML = JARD_SCOPES.map(s =>
@@ -354,7 +357,7 @@
       const listEl = document.getElementById('excl-list');
       listEl.innerHTML = '<div class="loading-note">⏳ جاري التحميل...</div>';
       try {
-        const r = await fetch(EXCL_REST + '?select=id,code,scopes&order=code.asc', { headers: EXCL_H });
+        const r = await fetch(EXCL_REST + '?select=id,code,scopes&order=code.asc', { headers: await EXCL_H() });
         renderExcludedList(await r.json());
       } catch(e) {
         listEl.innerHTML = '<div class="loading-note" style="color:var(--danger)">❌ فشل تحميل الأكواد</div>';
@@ -388,7 +391,7 @@
       try {
         const r = await fetch(EXCL_REST, {
           method: 'POST',
-          headers: { ...EXCL_H, 'Prefer': 'return=minimal' },
+          headers: await EXCL_H({ 'Prefer': 'return=minimal' }),
           body: JSON.stringify({ code, scopes, added_by: (Session.fullName() || '') })
         });
         if (!r.ok) { const t = await r.text(); throw new Error(t); }
@@ -403,7 +406,7 @@
     async function removeExcluded(id) {
       if (!confirm('حذف الكود ده من قائمة الاستثناء؟')) return;
       try {
-        const r = await fetch(EXCL_REST + '?id=eq.' + id, { method: 'DELETE', headers: { ...EXCL_H, 'Prefer': 'return=minimal' } });
+        const r = await fetch(EXCL_REST + '?id=eq.' + id, { method: 'DELETE', headers: await EXCL_H({ 'Prefer': 'return=minimal' }) });
         if (!r.ok) throw new Error(await r.text());
         showToast();
         loadExcludedCodes();

@@ -180,12 +180,12 @@
     </div>
   </div>
 
-<script src="config.js?v=20260903"></script>
-<script src="session.js?v=20260904b"></script>
-<script src="branches.js?v=20260904"></script>
-<script src="pages.js?v=20260905"></script>
-<script src="brand.js?v=20260904"></script>
-<script src="api.js?v=20260904b"></script>
+<script src="config.js?v=20260904c"></script>
+<script src="session.js?v=20260904c"></script>
+<script src="branches.js?v=20260904c"></script>
+<script src="pages.js?v=20260904c"></script>
+<script src="brand.js?v=20260904c"></script>
+<script src="api.js?v=20260904c"></script>
   <script>
     let activeUser   = null;
     let userBranch   = '';
@@ -198,15 +198,18 @@
     const SB_URL_CI = PHALIX_CONFIG.supabaseUrl;
     const SB_KEY_CI = PHALIX_CONFIG.supabaseAnonKey;
     const CI_URL = SB_URL_CI + '/rest/v1/contract_invoices';
-    const CI_H   = { apikey: SB_KEY_CI, Authorization: 'Bearer ' + SB_KEY_CI, 'Content-Type': 'application/json' };
-    const CI_HW  = { ...CI_H, Prefer: 'return=minimal' };
+    // الترويسة بتتبني لكل نداء بتوكن المستخدم (sbH بيجدّد لو لزم).
+    // ⚠️ كانت كائن ثابت بمفتاح anon: الجداول بقت authenticated-only، وكمان
+    //    أي توكن بيتقرا مرة واحدة وقت التحميل بيقدم بعد ساعة ويرجّع 401.
+    const CI_H = extra => sbH(Object.assign({ 'Content-Type': 'application/json' }, extra || {}));
+    const CI_HW = extra => CI_H(Object.assign({ Prefer: 'return=minimal' }, extra || {}));
     function ciReviewer(){ return (activeUser && (activeUser.full_name || activeUser.username)) || Session.fullName() || 'مراجع'; }
 
     // قراءة كل فواتير التعاقد من Supabase (مقسّمة صفحات — سقف 1000/طلب)
     async function ciLoadInvoices(){
       let all = [], from = 0; const PAGE = 1000;
       while (true) {
-        const r = await fetch(CI_URL + `?select=*&order=bill_date.desc.nullslast&limit=${PAGE}&offset=${from}`, { headers: CI_H });
+        const r = await fetch(CI_URL + `?select=*&order=bill_date.desc.nullslast&limit=${PAGE}&offset=${from}`, { headers: await CI_H() });
         if (!r.ok) break;
         const chunk = await r.json();
         if (!Array.isArray(chunk)) break;
@@ -224,7 +227,7 @@
         const patch = { reviewed_at: stamp, reviewed_by: by };
         ['bill_state','bill_type','payment_type','serial_no','cust_name_ar','claim_id','claim_date','merged_into']
           .forEach(k => { if (k in p) patch[k] = (p[k] === '' ? null : p[k]); });
-        const r = await fetch(CI_URL + '?id=eq.' + encodeURIComponent(p.id), { method:'PATCH', headers:CI_HW, body:JSON.stringify(patch) });
+        const r = await fetch(CI_URL + '?id=eq.' + encodeURIComponent(p.id), { method:'PATCH', headers: await CI_HW(), body:JSON.stringify(patch) });
         return r.ok;
       }catch(e){ console.error('updateData(CI) error', e); return false; }
     }

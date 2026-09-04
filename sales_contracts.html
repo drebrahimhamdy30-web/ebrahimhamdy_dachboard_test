@@ -281,12 +281,12 @@
     </div>
   </div>
 
-<script src="config.js?v=20260903"></script>
-<script src="session.js?v=20260904b"></script>
-<script src="branches.js?v=20260904"></script>
-<script src="pages.js?v=20260905"></script>
-<script src="brand.js?v=20260904"></script>
-<script src="api.js?v=20260904b"></script>
+<script src="config.js?v=20260904c"></script>
+<script src="session.js?v=20260904c"></script>
+<script src="branches.js?v=20260904c"></script>
+<script src="pages.js?v=20260904c"></script>
+<script src="brand.js?v=20260904c"></script>
+<script src="api.js?v=20260904c"></script>
   <script>
     let activeUser = null;
     let userBranch = '';
@@ -296,8 +296,11 @@
     const SB_URL_CI = PHALIX_CONFIG.supabaseUrl;
     const SB_KEY_CI = PHALIX_CONFIG.supabaseAnonKey;
     const CI_URL = SB_URL_CI + '/rest/v1/contract_invoices';
-    const CI_H   = { apikey: SB_KEY_CI, Authorization: 'Bearer ' + SB_KEY_CI, 'Content-Type': 'application/json' };
-    const CI_HW  = { ...CI_H, Prefer: 'return=minimal' };
+    // الترويسة بتتبني لكل نداء بتوكن المستخدم (sbH بيجدّد لو لزم).
+    // ⚠️ كانت كائن ثابت بمفتاح anon: الجداول بقت authenticated-only، وكمان
+    //    أي توكن بيتقرا مرة واحدة وقت التحميل بيقدم بعد ساعة ويرجّع 401.
+    const CI_H = extra => sbH(Object.assign({ 'Content-Type': 'application/json' }, extra || {}));
+    const CI_HW = extra => CI_H(Object.assign({ Prefer: 'return=minimal' }, extra || {}));
     // تقسيم صفحات العرض (30/صفحة)
     let currentPage = 1; const PAGE_SIZE = 30; let filteredData = [];
     function ciReviewer(){ return (activeUser && (activeUser.full_name || activeUser.username)) || Session.fullName() || 'مراجع'; }
@@ -308,20 +311,20 @@
       try{
         const stamp = new Date().toISOString(), by = ciReviewer();
         if(p.type === 'contract_merge'){
-          const r1 = await fetch(CI_URL+'?id=eq.'+encodeURIComponent(p.bill_a_id), {method:'PATCH', headers:CI_HW, body:JSON.stringify({total_bill:ciNum(p.new_total), reviewed_at:stamp, reviewed_by:by})});
-          const r2 = await fetch(CI_URL+'?id=eq.'+encodeURIComponent(p.bill_b_id), {method:'PATCH', headers:CI_HW, body:JSON.stringify({bill_state:'مدموجة', merged_into:(p.bill_a_no||null), reviewed_at:stamp, reviewed_by:by})});
+          const r1 = await fetch(CI_URL+'?id=eq.'+encodeURIComponent(p.bill_a_id), {method:'PATCH', headers: await CI_HW(), body:JSON.stringify({total_bill:ciNum(p.new_total), reviewed_at:stamp, reviewed_by:by})});
+          const r2 = await fetch(CI_URL+'?id=eq.'+encodeURIComponent(p.bill_b_id), {method:'PATCH', headers: await CI_HW(), body:JSON.stringify({bill_state:'مدموجة', merged_into:(p.bill_a_no||null), reviewed_at:stamp, reviewed_by:by})});
           return r1.ok && r2.ok;
         }
         if(p.type === 'contract_new'){
           const row = {bill_no:p.bill_no||null, bill_date:p.bill_date||null, cust_code:p.cust_code||null, cust_name_ar:p.cust_name_ar||null, total_bill:ciNum(p.total_bill), employee_name:p.employee_name||null, bill_type:p.bill_type||null, payment_type:p.payment_type||null, bill_state:p.bill_state||null, branch:p.branch||null, serial_no:p.serial_no||null, reviewed_at:stamp, reviewed_by:by};
-          const r = await fetch(CI_URL, {method:'POST', headers:CI_HW, body:JSON.stringify(row)});
+          const r = await fetch(CI_URL, {method:'POST', headers: await CI_HW(), body:JSON.stringify(row)});
           return r.ok;
         }
         // contract_update — تحديث حقول المراجعة على الصف بالـid
         const patch = {reviewed_at:stamp, reviewed_by:by};
         ['bill_state','bill_type','payment_type','serial_no','cust_name_ar','claim_id','claim_date','merged_into','cust_code','employee_name'].forEach(k=>{ if(k in p) patch[k] = (p[k]===''?null:p[k]); });
         if('total_bill' in p) patch.total_bill = ciNum(p.total_bill);   // القيمة رقمية — كانت مش بتتحفظ
-        const r = await fetch(CI_URL+'?id=eq.'+encodeURIComponent(p.id), {method:'PATCH', headers:CI_HW, body:JSON.stringify(patch)});
+        const r = await fetch(CI_URL+'?id=eq.'+encodeURIComponent(p.id), {method:'PATCH', headers: await CI_HW(), body:JSON.stringify(patch)});
         return r.ok;
       }catch(e){ return false; }
     }
@@ -348,7 +351,7 @@
       body.innerHTML = '<tr class="loading-row"><td colspan="9">⏳ جاري جلب المرتجعات...</td></tr>';
       try {
         // كل الفروع (زي تبويب الفواتير اللي بيعرض الكل) — عشان الأدمن وأي حساب يشوف كل المرتجعات
-        const r = await fetch(RPC + 'get_contract_returns', { method:'POST', headers:CI_H, body: JSON.stringify({ p_branch: '' }) });
+        const r = await fetch(RPC + 'get_contract_returns', { method:'POST', headers: await CI_H(), body: JSON.stringify({ p_branch: '' }) });
         RETURNS = await r.json();
         if (!Array.isArray(RETURNS)) RETURNS = [];
         retPage = 1;
@@ -425,7 +428,7 @@
       const box = document.getElementById('pick-list');
       box.innerHTML = '<div class="sc-mini">⏳ جاري البحث...</div>';
       try {
-        const r = await fetch(RPC + 'suggest_contract_invoices', { method:'POST', headers:CI_H, body: JSON.stringify({
+        const r = await fetch(RPC + 'suggest_contract_invoices', { method:'POST', headers: await CI_H(), body: JSON.stringify({
           p_cust_code: pickCurrent.cust_code || null,
           p_cust_name: pickCurrent.cust_name || null,
           p_return_date: pickCurrent.return_date || null,
@@ -457,7 +460,7 @@
     async function chooseInvoice(invoiceId, invoiceBillNo){
       if (!pickCurrent) return;
       try {
-        const r = await fetch(RPC + 'match_contract_return', { method:'POST', headers:CI_H, body: JSON.stringify({
+        const r = await fetch(RPC + 'match_contract_return', { method:'POST', headers: await CI_H(), body: JSON.stringify({
           p_return_bill_no: pickCurrent.return_bill_no,
           p_return_branch: pickCurrent.return_branch || '',
           p_invoice_id: invoiceId,
@@ -475,7 +478,7 @@
     async function unmatchReturn(returnBillNo, branch){
       if (!confirm('فك الربط وإرجاع حالة الفاتورة؟')) return;
       try {
-        const r = await fetch(RPC + 'unmatch_contract_return', { method:'POST', headers:CI_H, body: JSON.stringify({ p_return_bill_no: returnBillNo, p_return_branch: branch||'' }) });
+        const r = await fetch(RPC + 'unmatch_contract_return', { method:'POST', headers: await CI_H(), body: JSON.stringify({ p_return_bill_no: returnBillNo, p_return_branch: branch||'' }) });
         const res = await r.json();
         if (res && res.success===false){ alert('تعذّر فك الربط: '+(res.error||'')); return; }
         const row = RETURNS.find(r=>String(r.return_bill_no)===String(returnBillNo) && String(r.return_branch||'')===String(branch||''));
@@ -499,7 +502,7 @@
         // pagination: سقف Supabase 1000 صف/طلب — بنجيب على صفحات لحد ما يخلص
         let all = [], from = 0; const PAGE = 1000;
         while (true) {
-          const r = await fetch(CI_URL + `?select=*&order=bill_date.desc.nullslast&limit=${PAGE}&offset=${from}`, { headers: CI_H });
+          const r = await fetch(CI_URL + `?select=*&order=bill_date.desc.nullslast&limit=${PAGE}&offset=${from}`, { headers: await CI_H() });
           if (!r.ok) break;
           const chunk = await r.json();
           all = all.concat(chunk);

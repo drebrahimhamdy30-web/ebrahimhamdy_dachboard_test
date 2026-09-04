@@ -7,12 +7,12 @@
   <link rel="stylesheet" href="tokens.css?v=20260906">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-  <script src="config.js?v=20260903"></script>
-  <script src="session.js?v=20260904b"></script>
-  <script src="branches.js?v=20260904"></script>
-  <script src="pages.js?v=20260905"></script>
-  <script src="brand.js?v=20260904"></script>
-  <script src="api.js?v=20260904b"></script>
+  <script src="config.js?v=20260904c"></script>
+  <script src="session.js?v=20260904c"></script>
+  <script src="branches.js?v=20260904c"></script>
+  <script src="pages.js?v=20260904c"></script>
+  <script src="brand.js?v=20260904c"></script>
+  <script src="api.js?v=20260904c"></script>
   <style>
     :root{ --primary:#0d9488; --primary-dark:#0f766e; --primary-light:#ccfbf1; }
     .container { max-width:100% !important; width:100%; }
@@ -152,8 +152,11 @@
 
   <script>
     const REST = SB_URL_API + '/rest/v1/';
-    const H = { apikey: SB_ANON_API, Authorization: 'Bearer ' + SB_ANON_API };
-    const HW = { ...H, 'Content-Type': 'application/json' };
+    // الترويسة بتتبني لكل نداء بتوكن المستخدم (sbH بيجدّد لو لزم).
+    // ⚠️ كانت كائن ثابت بمفتاح anon: الجداول بقت authenticated-only، وكمان
+    //    أي توكن بيتقرا مرة واحدة وقت التحميل بيقدم بعد ساعة ويرجّع 401.
+    const H = extra => sbH(Object.assign({}, extra || {}));
+    const HW = extra => H(Object.assign({ 'Content-Type': 'application/json' }, extra || {}));
     const WD = ['الأحد','الإثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
     const MO = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
     const FREQ = { daily:'يومي', weekly:'أسبوعي', monthly:'شهري', yearly:'سنوي' };
@@ -215,9 +218,9 @@
     function onBranchChange(b){ selectedBranch = b; renderSchedule(); }
 
     async function loadAll(){
-      try { TASKS = await (await fetch(REST+'tasks?select=*&order=freq.asc,sort_order.asc,title.asc', { headers:H })).json(); } catch(e){ TASKS=[]; }
+      try { TASKS = await (await fetch(REST+'tasks?select=*&order=freq.asc,sort_order.asc,title.asc', { headers: await H() })).json(); } catch(e){ TASKS=[]; }
       try {
-        const rows = await (await fetch(REST+'task_assignee?select=task_id,branch,assignee', { headers:H })).json();
+        const rows = await (await fetch(REST+'task_assignee?select=task_id,branch,assignee', { headers: await H() })).json();
         ASSIGN = {}; rows.forEach(r=>{ (ASSIGN[r.task_id] = ASSIGN[r.task_id]||{})[r.branch] = r.assignee; });
       } catch(e){ ASSIGN={}; }
       renderSchedule();
@@ -225,7 +228,7 @@
     async function loadDone(){
       const dstr = document.getElementById('tk-date').value || todayCairo();
       try {
-        const rows = await (await fetch(REST+'task_done?select=task_id&branch=eq.'+encodeURIComponent(selectedBranch)+'&done_on=eq.'+dstr, { headers:H })).json();
+        const rows = await (await fetch(REST+'task_done?select=task_id&branch=eq.'+encodeURIComponent(selectedBranch)+'&done_on=eq.'+dstr, { headers: await H() })).json();
         DONE = new Set(rows.map(r=>r.task_id));
       } catch(e){ DONE = new Set(); }
     }
@@ -261,11 +264,11 @@
       try {
         if (on){
           DONE.add(id);
-          await fetch(REST+'task_done', { method:'POST', headers:{ ...HW, Prefer:'resolution=merge-duplicates,return=minimal' },
+          await fetch(REST+'task_done', { method:'POST', headers:await HW({ Prefer:'resolution=merge-duplicates,return=minimal' }),
             body: JSON.stringify({ task_id:id, branch:selectedBranch, done_on:dstr, done_by: me || null }) });
         } else {
           DONE.delete(id);
-          await fetch(REST+'task_done?task_id=eq.'+id+'&branch=eq.'+encodeURIComponent(selectedBranch)+'&done_on=eq.'+dstr, { method:'DELETE', headers:{ ...H, Prefer:'return=minimal' } });
+          await fetch(REST+'task_done?task_id=eq.'+id+'&branch=eq.'+encodeURIComponent(selectedBranch)+'&done_on=eq.'+dstr, { method:'DELETE', headers:await H({ Prefer:'return=minimal' }) });
         }
       } catch(e){}
       renderSchedule();
@@ -339,15 +342,15 @@
       try {
         let tid = editId;
         if (editId){
-          await fetch(REST+'tasks?id=eq.'+editId, { method:'PATCH', headers:{ ...HW, Prefer:'return=minimal' }, body: JSON.stringify(rec) });
+          await fetch(REST+'tasks?id=eq.'+editId, { method:'PATCH', headers:await HW({ Prefer:'return=minimal' }), body: JSON.stringify(rec) });
         } else {
           rec.created_by = me || null;
-          const r = await fetch(REST+'tasks', { method:'POST', headers:{ ...HW, Prefer:'return=representation' }, body: JSON.stringify(rec) });
+          const r = await fetch(REST+'tasks', { method:'POST', headers:await HW({ Prefer:'return=representation' }), body: JSON.stringify(rec) });
           const row = (await r.json())[0]; tid = row && row.id;
         }
         if (tid){
           const rows = asg.map(a=>({ task_id: tid, branch: a.branch, assignee: a.assignee || null }));
-          await fetch(REST+'task_assignee?on_conflict=task_id,branch', { method:'POST', headers:{ ...HW, Prefer:'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows) });
+          await fetch(REST+'task_assignee?on_conflict=task_id,branch', { method:'POST', headers:await HW({ Prefer:'resolution=merge-duplicates,return=minimal' }), body: JSON.stringify(rows) });
         }
         closeTask();
         await loadAll();
@@ -359,7 +362,7 @@
       const t = TASKS.find(x=>x.id===id);
       if (!confirm('حذف المهمة «'+(t?t.title:'')+'» نهائيًا من كل الفروع؟')) return;
       try {
-        await fetch(REST+'tasks?id=eq.'+id, { method:'DELETE', headers:{ ...H, Prefer:'return=minimal' } });
+        await fetch(REST+'tasks?id=eq.'+id, { method:'DELETE', headers:await H({ Prefer:'return=minimal' }) });
         await loadAll(); renderAll();
       } catch(e){ alert('تعذّر الحذف'); }
     }
