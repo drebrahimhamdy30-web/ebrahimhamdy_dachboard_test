@@ -166,6 +166,9 @@ const Session = (function () {
   let _expiredShown = false;
   function _sessionExpired() {
     if (_expiredShown) return;
+    // على صفحة الدخول نفسها مفيش معنى للبانر — ده مكان تسجيل الدخول
+    const _p = location.pathname;
+    if (/(^|\/)(index|auth)\.html?$/.test(_p) || _p.charAt(_p.length - 1) === '/') return;
     _expiredShown = true;
     try {
       const d = document.createElement('div');
@@ -184,10 +187,18 @@ const Session = (function () {
         + 'padding:11px 26px;font-family:inherit;font-size:.95rem;font-weight:700;cursor:pointer">'
         + 'تسجيل الدخول</button></div>';
       const go = () => {
-        const p = loginPage();
-        // جوّه إطار؟ نودّي النافذة الأصلية مش الإطار لوحده
-        try { if (window.top !== window.self) { window.top.location.href = (/\/delivery\//.test(window.top.location.pathname) ? 'auth.html' : p); return; } } catch (e) {}
-        window.location.href = p;
+        // ⚠️ لازم نمسح الجلسة الأول: من غير كده صفحة الدخول نفسها بتلاقي
+        //    authProvider='supabase' وتوكن منتهي، فالبانر يظهر عليها تاني
+        //    والمستخدم يفضل يلف في دايرة من غير ما يوصل لحاجة.
+        try { clear(); } catch (e) {}
+        // النافذة الأصلية مش الإطار، والمسار نسبي لموقعها عشان يشتغل على
+        // أي دومين أو مجلد فرعي.
+        let loc;
+        try { loc = (window.top !== window.self) ? window.top.location : location; }
+        catch (e) { loc = location; }
+        const file = loc.pathname.indexOf('/delivery/') >= 0 ? 'auth.html' : 'index.html';
+        let href; try { href = new URL(file, loc.href).href; } catch (e) { href = file; }
+        try { loc.replace(href); } catch (e) { window.location.replace(href); }
       };
       d.addEventListener('click', ev => { if (ev.target && ev.target.id === '_sxBtn') go(); });
       (document.body || document.documentElement).appendChild(d);
