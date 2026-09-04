@@ -26,6 +26,18 @@ async function sbItemLookup(code, branch) {
 // نكتب/نقرأ/نحدّث الطلبات والتحويلات مباشرة على جدول task في Supabase عبر PostgREST
 // بمفتاح anon (نفس أسلوب صفحات الصيدلية). السكوب على الفرع بيتعمل في الصفحة زي ما هو دلوقتي.
 const SB_TASK_URL     = `${SB_URL_API}/rest/v1/task`;
+// ترويسة النداء: توكن المستخدم لو صالح (Session بيجدّده لو لزم)، وإلا مفتاح
+// anon. الجداول المالية (contracts / sales_items / …) بتتقفل على anon، يعني
+// النداء لازم يبقى authenticated وإلا يرجّع صفوف فاضية أو 401.
+// ⚠️ لازم تتنادى **لكل نداء**: كائن ثابت بيتبني وقت التحميل بيقدم بعد ساعة
+//    ويخلّي كل حاجة ترجّع 401 من غير سبب واضح.
+async function sbH(extra) {
+  const h = (typeof Session !== 'undefined' && Session.headers)
+    ? await Session.headers()
+    : { 'Content-Type': 'application/json', apikey: SB_ANON_API, Authorization: 'Bearer ' + SB_ANON_API };
+  return extra ? { ...h, ...extra } : h;
+}
+
 const SB_TASK_HEADERS = {
   'Content-Type':  'application/json',
   'apikey':        SB_ANON_API,
@@ -64,7 +76,7 @@ async function sbTaskInsert(payload) {
     };
     const r = await fetch(SB_TASK_URL, {
       method:  'POST',
-      headers: { ...SB_TASK_HEADERS, 'Prefer': 'return=representation' },
+      headers: await sbH({ 'Prefer': 'return=representation' }),
       body:    JSON.stringify(row)
     });
     if (!r.ok) return { ok: false, data: null };
@@ -88,7 +100,7 @@ async function sbTaskList(opts = {}) {
     if (opts.user)   params.set('user',  `eq.${opts.user}`);
     if (opts.states && opts.states.length) params.set('state', `in.(${opts.states.join(',')})`);
     if (opts.limit)  params.set('limit', String(opts.limit));
-    const r = await fetch(`${SB_TASK_URL}?${params.toString()}`, { headers: SB_TASK_HEADERS });
+    const r = await fetch(`${SB_TASK_URL}?${params.toString()}`, { headers: await sbH() });
     if (!r.ok) return [];
     const rows = await r.json();
     if (!Array.isArray(rows)) return [];
@@ -106,7 +118,7 @@ async function sbTaskUpdate(id, patch) {
     Object.keys(patch || {}).forEach(k => { if (patch[k] !== undefined) clean[k] = patch[k]; });
     const r = await fetch(`${SB_TASK_URL}?id=eq.${encodeURIComponent(id)}`, {
       method:  'PATCH',
-      headers: SB_TASK_HEADERS,
+      headers: await sbH(),
       body:    JSON.stringify(clean)
     });
     return r.ok;
@@ -126,7 +138,7 @@ async function sbContractInsert({ branch, cust_code, total_amount, notes, custom
   try {
     const chk = await fetch(
       `${SB_CONTRACT_URL}?select=id&cust_code=eq.${encodeURIComponent(cust_code || '')}&status=eq.block&limit=1`,
-      { headers: SB_TASK_HEADERS }
+      { headers: await sbH() }
     );
     if (chk.ok) {
       const rows = await chk.json();
@@ -134,7 +146,7 @@ async function sbContractInsert({ branch, cust_code, total_amount, notes, custom
     }
     const r = await fetch(SB_CONTRACT_URL, {
       method: 'POST',
-      headers: { ...SB_TASK_HEADERS, 'Prefer': 'return=minimal' },
+      headers: await sbH({ 'Prefer': 'return=minimal' }),
       body: JSON.stringify({
         branch:       branch || null,
         cust_code:    cust_code || null,
@@ -152,7 +164,7 @@ async function sbContractInsert({ branch, cust_code, total_amount, notes, custom
 async function sbContractUpdate(id, patch) {
   try {
     const r = await fetch(`${SB_CONTRACT_URL}?id=eq.${encodeURIComponent(id)}`, {
-      method: 'PATCH', headers: SB_TASK_HEADERS, body: JSON.stringify(patch || {})
+      method: 'PATCH', headers: await sbH(), body: JSON.stringify(patch || {})
     });
     return r.ok;
   } catch (e) { console.error('sbContractUpdate error:', e); return false; }
@@ -160,7 +172,7 @@ async function sbContractUpdate(id, patch) {
 
 async function sbContractList() {
   try {
-    const r = await fetch(`${SB_CONTRACT_URL}?select=*&order=created_at.desc`, { headers: SB_TASK_HEADERS });
+    const r = await fetch(`${SB_CONTRACT_URL}?select=*&order=created_at.desc`, { headers: await sbH() });
     if (!r.ok) return [];
     const rows = await r.json();
     return Array.isArray(rows) ? rows.map(x => ({ ...x, createdAt: x.created_at })) : [];
@@ -172,7 +184,7 @@ async function sbMissingInsert({ branch, invoice_no, item_name, qty, supplier_co
   try {
     const r = await fetch(SB_MISSING_URL, {
       method: 'POST',
-      headers: { ...SB_TASK_HEADERS, 'Prefer': 'return=minimal' },
+      headers: await sbH({ 'Prefer': 'return=minimal' }),
       body: JSON.stringify({
         branch:        branch || null,
         invoice_no:    invoice_no || null,
@@ -190,7 +202,7 @@ async function sbMissingInsert({ branch, invoice_no, item_name, qty, supplier_co
 async function sbMissingUpdate(id, patch) {
   try {
     const r = await fetch(`${SB_MISSING_URL}?id=eq.${encodeURIComponent(id)}`, {
-      method: 'PATCH', headers: SB_TASK_HEADERS, body: JSON.stringify(patch || {})
+      method: 'PATCH', headers: await sbH(), body: JSON.stringify(patch || {})
     });
     return r.ok;
   } catch (e) { console.error('sbMissingUpdate error:', e); return false; }
@@ -198,7 +210,7 @@ async function sbMissingUpdate(id, patch) {
 
 async function sbMissingList() {
   try {
-    const r = await fetch(`${SB_MISSING_URL}?select=*&order=created_at.desc`, { headers: SB_TASK_HEADERS });
+    const r = await fetch(`${SB_MISSING_URL}?select=*&order=created_at.desc`, { headers: await sbH() });
     if (!r.ok) return [];
     const rows = await r.json();
     return Array.isArray(rows) ? rows.map(x => ({ ...x, createdAt: x.created_at })) : [];
@@ -211,7 +223,7 @@ async function sbShortages(branch) {
   try {
     const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_shortages`, {
       method: 'POST',
-      headers: SB_TASK_HEADERS,
+      headers: await sbH(),
       body: JSON.stringify({ p_branch: branch || 'عام' })
     });
     if (!r.ok) return [];
@@ -224,7 +236,7 @@ async function sbShortages(branch) {
 async function _sbRpc(fn, body) {
   try {
     const r = await fetch(`${SB_URL_API}/rest/v1/rpc/${fn}`, {
-      method: 'POST', headers: SB_TASK_HEADERS, body: JSON.stringify(body || {})
+      method: 'POST', headers: await sbH(), body: JSON.stringify(body || {})
     });
     if (!r.ok) return [];
     const rows = await r.json();
@@ -253,7 +265,7 @@ const SB_DISCREV_URL = `${SB_URL_API}/rest/v1/sales_discount_reviews`;
 async function sbMarkPriceReviewed(id, by) {
   try {
     const r = await fetch(`${SB_SALES_URL}?id=eq.${encodeURIComponent(id)}`, {
-      method:'PATCH', headers: SB_TASK_HEADERS,
+      method:'PATCH', headers: await sbH(),
       body: JSON.stringify({ price_reviewed:true, price_reviewed_at:new Date().toISOString(), price_reviewed_by: by||null })
     });
     return r.ok;
@@ -263,7 +275,7 @@ async function sbBillItems(store, billNo) {
   try {
     const url = `${SB_SALES_URL}?store_name=eq.${encodeURIComponent(store)}&bill_no=eq.${encodeURIComponent(billNo)}`
       + `&select=line_no,itm_code,itm_name_ar,unit_name,unit_price,itm_qty,line_total,itm_disc_value,itm_disc_perc,bill_notes&order=line_no.asc`;
-    const r = await fetch(url, { headers: SB_TASK_HEADERS });
+    const r = await fetch(url, { headers: await sbH() });
     if (!r.ok) return [];
     const rows = await r.json();
     return Array.isArray(rows) ? rows : [];
@@ -272,7 +284,7 @@ async function sbBillItems(store, billNo) {
 async function sbMarkDiscountReviewed(store, billNo, by) {
   try {
     const r = await fetch(SB_DISCREV_URL, {
-      method:'POST', headers:{ ...SB_TASK_HEADERS, 'Prefer':'resolution=merge-duplicates,return=minimal' },
+      method:'POST', headers: await sbH({ 'Prefer':'resolution=merge-duplicates,return=minimal' }),
       body: JSON.stringify({ store_name:store, bill_no:String(billNo), reviewed_by: by||null, reviewed_at:new Date().toISOString() })
     });
     return r.ok;
@@ -284,7 +296,7 @@ const SB_SALES_ACCESS_URL = `${SB_URL_API}/rest/v1/sales_analysis_access`;
 // قائمة الفروع المسموح لها بفتح الشاشة — بترجّع Array من store_name
 async function sbSalesAccessList() {
   try {
-    const r = await fetch(`${SB_SALES_ACCESS_URL}?select=store_name,enabled_at&order=store_name.asc`, { headers: SB_TASK_HEADERS });
+    const r = await fetch(`${SB_SALES_ACCESS_URL}?select=store_name,enabled_at&order=store_name.asc`, { headers: await sbH() });
     if (!r.ok) return [];
     const rows = await r.json();
     return Array.isArray(rows) ? rows : [];
@@ -294,7 +306,7 @@ async function sbSalesAccessList() {
 async function sbSalesAccessEnable(store) {
   try {
     const r = await fetch(SB_SALES_ACCESS_URL, {
-      method:'POST', headers:{ ...SB_TASK_HEADERS, 'Prefer':'resolution=merge-duplicates,return=minimal' },
+      method:'POST', headers: await sbH({ 'Prefer':'resolution=merge-duplicates,return=minimal' }),
       body: JSON.stringify({ store_name: store })
     });
     return r.ok;
@@ -304,7 +316,7 @@ async function sbSalesAccessEnable(store) {
 async function sbSalesAccessDisable(store) {
   try {
     const r = await fetch(`${SB_SALES_ACCESS_URL}?store_name=eq.${encodeURIComponent(store)}`, {
-      method:'DELETE', headers:{ ...SB_TASK_HEADERS, 'Prefer':'return=minimal' }
+      method:'DELETE', headers: await sbH({ 'Prefer':'return=minimal' })
     });
     return r.ok;
   } catch(e){ console.error('sbSalesAccessDisable', e); return false; }
@@ -315,7 +327,7 @@ async function sbCsOrders(branch, pendingOnly) {
   try {
     const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_cs_orders`, {
       method: 'POST',
-      headers: SB_TASK_HEADERS,
+      headers: await sbH(),
       body: JSON.stringify({ p_branch: branch || '', p_pending: pendingOnly !== false })
     });
     if (!r.ok) return [];
@@ -329,7 +341,7 @@ const SB_MATERIAL_URL = `${SB_URL_API}/rest/v1/material_prices`;
 
 async function sbMaterialList() {
   try {
-    const r = await fetch(`${SB_MATERIAL_URL}?select=*&order=name.asc,size.asc`, { headers: SB_TASK_HEADERS });
+    const r = await fetch(`${SB_MATERIAL_URL}?select=*&order=name.asc,size.asc`, { headers: await sbH() });
     if (!r.ok) return [];
     const rows = await r.json();
     return Array.isArray(rows) ? rows : [];
@@ -340,7 +352,7 @@ async function sbMaterialInsert({ name, size, price }) {
   try {
     const r = await fetch(SB_MATERIAL_URL, {
       method: 'POST',
-      headers: { ...SB_TASK_HEADERS, 'Prefer': 'return=minimal' },
+      headers: await sbH({ 'Prefer': 'return=minimal' }),
       body: JSON.stringify({
         name:  name  || null,
         size:  size  || null,
@@ -354,7 +366,7 @@ async function sbMaterialInsert({ name, size, price }) {
 async function sbMaterialUpdate(id, patch) {
   try {
     const r = await fetch(`${SB_MATERIAL_URL}?id=eq.${encodeURIComponent(id)}`, {
-      method: 'PATCH', headers: SB_TASK_HEADERS, body: JSON.stringify(patch || {})
+      method: 'PATCH', headers: await sbH(), body: JSON.stringify(patch || {})
     });
     return r.ok;
   } catch (e) { console.error('sbMaterialUpdate error:', e); return false; }
@@ -363,7 +375,7 @@ async function sbMaterialUpdate(id, patch) {
 async function sbMaterialDelete(id) {
   try {
     const r = await fetch(`${SB_MATERIAL_URL}?id=eq.${encodeURIComponent(id)}`, {
-      method: 'DELETE', headers: SB_TASK_HEADERS
+      method: 'DELETE', headers: await sbH()
     });
     return r.ok;
   } catch (e) { console.error('sbMaterialDelete error:', e); return false; }
@@ -373,7 +385,7 @@ async function sbMaterialDelete(id) {
 const SB_OFFERS_URL = `${SB_URL_API}/rest/v1/offers`;
 async function sbOffersList() {
   try {
-    const r = await fetch(`${SB_OFFERS_URL}?select=*&order=created_at.desc`, { headers: SB_TASK_HEADERS });
+    const r = await fetch(`${SB_OFFERS_URL}?select=*&order=created_at.desc`, { headers: await sbH() });
     if (!r.ok) return [];
     const rows = await r.json();
     return Array.isArray(rows) ? rows : [];
@@ -382,7 +394,7 @@ async function sbOffersList() {
 async function sbOfferInsert({ name, type, details, expires_at, branch }) {
   try {
     const r = await fetch(SB_OFFERS_URL, {
-      method: 'POST', headers: { ...SB_TASK_HEADERS, 'Prefer': 'return=minimal' },
+      method: 'POST', headers: await sbH({ 'Prefer': 'return=minimal' }),
       body: JSON.stringify({
         name: name || null, type: type || null, details: details || null,
         expires_at: (expires_at && expires_at !== 'null' && expires_at !== '') ? expires_at : null,
@@ -395,7 +407,7 @@ async function sbOfferInsert({ name, type, details, expires_at, branch }) {
 async function sbOfferUpdate(id, patch) {
   try {
     const r = await fetch(`${SB_OFFERS_URL}?id=eq.${encodeURIComponent(id)}`, {
-      method: 'PATCH', headers: SB_TASK_HEADERS, body: JSON.stringify(patch || {})
+      method: 'PATCH', headers: await sbH(), body: JSON.stringify(patch || {})
     });
     return r.ok;
   } catch (e) { console.error('sbOfferUpdate error:', e); return false; }
@@ -403,7 +415,7 @@ async function sbOfferUpdate(id, patch) {
 async function sbOfferDelete(id) {
   try {
     const r = await fetch(`${SB_OFFERS_URL}?id=eq.${encodeURIComponent(id)}`, {
-      method: 'DELETE', headers: SB_TASK_HEADERS
+      method: 'DELETE', headers: await sbH()
     });
     return r.ok;
   } catch (e) { console.error('sbOfferDelete error:', e); return false; }
@@ -415,7 +427,7 @@ const SB_STOCKLIMIT_URL = `${SB_URL_API}/rest/v1/stock_limit`;
 async function sbStockLimits(branch) {
   try {
     const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_stock_limits`, {
-      method: 'POST', headers: SB_TASK_HEADERS,
+      method: 'POST', headers: await sbH(),
       body: JSON.stringify({ p_branch: branch || 'عام' })
     });
     if (!r.ok) return [];
@@ -427,7 +439,7 @@ async function sbStockLimits(branch) {
 async function sbItemBalance(code, branch) {
   try {
     const r = await fetch(`${SB_URL_API}/rest/v1/rpc/item_balance`, {
-      method: 'POST', headers: SB_TASK_HEADERS,
+      method: 'POST', headers: await sbH(),
       body: JSON.stringify({ p_code: String(code || ''), p_branch: branch || '' })
     });
     if (!r.ok) return 0;
@@ -438,7 +450,7 @@ async function sbItemBalance(code, branch) {
 async function sbStockLimitInsert({ item_code, item_name, item_type, branch, min_stock }) {
   try {
     const r = await fetch(SB_STOCKLIMIT_URL, {
-      method: 'POST', headers: { ...SB_TASK_HEADERS, 'Prefer': 'return=minimal' },
+      method: 'POST', headers: await sbH({ 'Prefer': 'return=minimal' }),
       body: JSON.stringify({
         item_code: item_code || null, item_name: item_name || null,
         item_type: item_type || null, branch: branch || null,
@@ -451,7 +463,7 @@ async function sbStockLimitInsert({ item_code, item_name, item_type, branch, min
 async function sbStockLimitUpdate(id, patch) {
   try {
     const r = await fetch(`${SB_STOCKLIMIT_URL}?id=eq.${encodeURIComponent(id)}`, {
-      method: 'PATCH', headers: SB_TASK_HEADERS, body: JSON.stringify(patch || {})
+      method: 'PATCH', headers: await sbH(), body: JSON.stringify(patch || {})
     });
     return r.ok;
   } catch (e) { console.error('sbStockLimitUpdate error:', e); return false; }
@@ -459,7 +471,7 @@ async function sbStockLimitUpdate(id, patch) {
 async function sbStockLimitDelete(id) {
   try {
     const r = await fetch(`${SB_STOCKLIMIT_URL}?id=eq.${encodeURIComponent(id)}`, {
-      method: 'DELETE', headers: SB_TASK_HEADERS
+      method: 'DELETE', headers: await sbH()
     });
     return r.ok;
   } catch (e) { console.error('sbStockLimitDelete error:', e); return false; }
@@ -732,7 +744,7 @@ async function verifyToken() {
 // خروج إجباري لكل الجلسات: بيقارن وقت دخول المستخدم بقيمة force_logout_before على Supabase
 async function sbForcedLogoutCheck() {
   try {
-    const r = await fetch(`${SB_URL_API}/rest/v1/app_control?id=eq.1&select=force_logout_before`, { headers: SB_TASK_HEADERS });
+    const r = await fetch(`${SB_URL_API}/rest/v1/app_control?id=eq.1&select=force_logout_before`, { headers: await sbH() });
     if (!r.ok) return false;
     const rows = await r.json();
     const cutoff = (rows && rows[0] && rows[0].force_logout_before) ? new Date(rows[0].force_logout_before).getTime() : 0;
@@ -1029,7 +1041,7 @@ const SB_SUPBAL_SET_URL  = `${SB_URL_API}/rest/v1/supplier_balance_settings`;
 async function sbGetRolePages(role) {
   try {
     const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_role_pages`, {
-      method: 'POST', headers: SB_TASK_HEADERS, body: JSON.stringify({ p_role: role || '' })
+      method: 'POST', headers: await sbH(), body: JSON.stringify({ p_role: role || '' })
     });
     if (!r.ok) return [];
     const rows = await r.json();
@@ -1040,7 +1052,7 @@ async function sbGetRolePages(role) {
 // قائمة الفروع من جدول branches
 async function sbBranches() {
   try {
-    const r = await fetch(`${SB_URL_API}/rest/v1/branches?select=name&order=name.asc`, { headers: SB_TASK_HEADERS });
+    const r = await fetch(`${SB_URL_API}/rest/v1/branches?select=name&order=name.asc`, { headers: await sbH() });
     if (!r.ok) return [];
     const rows = await r.json();
     return Array.isArray(rows) ? rows.map(x => x.name).filter(Boolean) : [];
@@ -1052,7 +1064,7 @@ async function sbSupBalSnapshots(branch, limit) {
   try {
     const url = `${SB_SUPBAL_SNAP_URL}?select=id,branch,taken_at,taken_by,rows,rows_count,kind,restored_from`
       + `&branch=eq.${encodeURIComponent(branch)}&order=taken_at.desc,id.desc&limit=${limit || 2}`;
-    const r = await fetch(url, { headers: SB_TASK_HEADERS });
+    const r = await fetch(url, { headers: await sbH() });
     if (!r.ok) return [];
     const rows = await r.json();
     return Array.isArray(rows) ? rows : [];
@@ -1063,7 +1075,7 @@ async function sbSupBalSnapshots(branch, limit) {
 async function sbSupBalLatestRun(branch) {
   try {
     const url = `${SB_SUPBAL_RUNS_URL}?select=*&branch=eq.${encodeURIComponent(branch)}&order=run_at.desc,id.desc&limit=1`;
-    const r = await fetch(url, { headers: SB_TASK_HEADERS });
+    const r = await fetch(url, { headers: await sbH() });
     if (!r.ok) return null;
     const rows = await r.json();
     return Array.isArray(rows) && rows.length ? rows[0] : null;
@@ -1074,7 +1086,7 @@ async function sbSupBalLatestRun(branch) {
 async function sbSupBalInsertSnapshot({ branch, rows, rows_count, taken_by, kind, restored_from }) {
   try {
     const r = await fetch(SB_SUPBAL_SNAP_URL, {
-      method: 'POST', headers: { ...SB_TASK_HEADERS, 'Prefer': 'return=representation' },
+      method: 'POST', headers: await sbH({ 'Prefer': 'return=representation' }),
       body: JSON.stringify({
         branch, rows: rows || {}, rows_count: rows_count || 0,
         taken_by: taken_by || null, kind: kind || 'import',
@@ -1091,7 +1103,7 @@ async function sbSupBalInsertSnapshot({ branch, rows, rows_count, taken_by, kind
 async function sbSupBalInsertRun({ branch, run_by, changed_count, added_count, removed_count, result, snapshot_id }) {
   try {
     const r = await fetch(SB_SUPBAL_RUNS_URL, {
-      method: 'POST', headers: { ...SB_TASK_HEADERS, 'Prefer': 'return=minimal' },
+      method: 'POST', headers: await sbH({ 'Prefer': 'return=minimal' }),
       body: JSON.stringify({
         branch, run_by: run_by || null,
         changed_count: changed_count || 0, added_count: added_count || 0, removed_count: removed_count || 0,
@@ -1105,7 +1117,7 @@ async function sbSupBalInsertRun({ branch, run_by, changed_count, added_count, r
 // الاستثناءات (قائمة عامة لكل الفروع)
 async function sbSupBalExclusions() {
   try {
-    const r = await fetch(`${SB_SUPBAL_EXCL_URL}?select=*&order=created_at.desc`, { headers: SB_TASK_HEADERS });
+    const r = await fetch(`${SB_SUPBAL_EXCL_URL}?select=*&order=created_at.desc`, { headers: await sbH() });
     if (!r.ok) return [];
     const rows = await r.json();
     return Array.isArray(rows) ? rows : [];
@@ -1114,7 +1126,7 @@ async function sbSupBalExclusions() {
 async function sbSupBalAddExclusion({ supplier_code, note, created_by }) {
   try {
     const r = await fetch(SB_SUPBAL_EXCL_URL, {
-      method: 'POST', headers: { ...SB_TASK_HEADERS, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      method: 'POST', headers: await sbH({ 'Prefer': 'resolution=merge-duplicates,return=minimal' }),
       body: JSON.stringify({ supplier_code: String(supplier_code), note: note || null, created_by: created_by || null })
     });
     return r.ok;
@@ -1123,7 +1135,7 @@ async function sbSupBalAddExclusion({ supplier_code, note, created_by }) {
 async function sbSupBalRemoveExclusion(supplier_code) {
   try {
     const r = await fetch(`${SB_SUPBAL_EXCL_URL}?supplier_code=eq.${encodeURIComponent(supplier_code)}`, {
-      method: 'DELETE', headers: { ...SB_TASK_HEADERS, 'Prefer': 'return=minimal' }
+      method: 'DELETE', headers: await sbH({ 'Prefer': 'return=minimal' })
     });
     return r.ok;
   } catch (e) { console.error('sbSupBalRemoveExclusion error:', e); return false; }
@@ -1132,7 +1144,7 @@ async function sbSupBalRemoveExclusion(supplier_code) {
 // الإعدادات المشتركة (حد تجاهل الفروق) — صف واحد id=1
 async function sbSupBalSettings() {
   try {
-    const r = await fetch(`${SB_SUPBAL_SET_URL}?select=*&id=eq.1`, { headers: SB_TASK_HEADERS });
+    const r = await fetch(`${SB_SUPBAL_SET_URL}?select=*&id=eq.1`, { headers: await sbH() });
     if (!r.ok) return { threshold: 0.01 };
     const rows = await r.json();
     return (Array.isArray(rows) && rows[0]) ? rows[0] : { threshold: 0.01 };
@@ -1141,7 +1153,7 @@ async function sbSupBalSettings() {
 async function sbSupBalSaveSettings({ threshold, updated_by }) {
   try {
     const r = await fetch(SB_SUPBAL_SET_URL, {
-      method: 'POST', headers: { ...SB_TASK_HEADERS, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      method: 'POST', headers: await sbH({ 'Prefer': 'resolution=merge-duplicates,return=minimal' }),
       body: JSON.stringify({ id: 1, threshold: Number(threshold) || 0, updated_by: updated_by || null, updated_at: new Date().toISOString() })
     });
     return r.ok;

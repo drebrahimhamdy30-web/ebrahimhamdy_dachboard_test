@@ -274,13 +274,15 @@ select:focus,input:focus{border-color:#16a34a;box-shadow:0 0 0 3px rgba(22,163,7
 <div class="toast" id="toast"></div>
 
 <script src="config.js?v=20260903"></script>
-<script src="session.js?v=20260903"></script>
+<script src="session.js?v=20260904b"></script>
 <script src="branches.js?v=20260904"></script>
 <script src="pages.js?v=20260905"></script>
 <script src="brand.js?v=20260904"></script>
 <script>
-const H_BASE={'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY};
-const H={...H_BASE,'Prefer':'return=representation'};
+// pos_shifts و pos_wallet_transfers جداول مالية بتتقفل على anon، فالنداء لازم
+// يبعت توكن المستخدم. الترويسة بتتبني **لكل نداء** (Session بيجدّد لو لزم):
+// كائن ثابت وقت التحميل بيقدم بعد ساعة ويخلّي كل حاجة ترجّع 401 من غير سبب.
+const shcH = prefer => Session.headers(prefer);
 
 let METHODS=[], VALUES={}, TRANSFERS=[], SAVING=false;
 let SHIFT_START=null;
@@ -288,7 +290,7 @@ let LAST_INSTAPAY_NOTE=null;
 const REASON_LABEL={supplier:'تحويل لمورد', customer_refund:'مرتجع لعميل'};
 
 async function api(path,opts={}){
-  const r=await fetch(SB_URL+'/rest/v1/'+path,{headers:H,...opts});
+  const r=await fetch(SB_URL+'/rest/v1/'+path,{headers:await shcH('return=representation'),...opts});
   if(!r.ok){throw new Error(await r.text());}
   return r.status===204?null:r.json();
 }
@@ -765,7 +767,7 @@ async function doCloseShift(){
     await api('pos_shift_lines',{method:'POST',body:JSON.stringify(lines)});
     await fetch(SB_URL+`/rest/v1/pos_wallet_transfers?branch=eq.${encodeURIComponent(branch)}&shift_id=is.null&is_disbursed=eq.false`,{
       method:'PATCH',
-      headers:{...H_BASE,'Prefer':'return=minimal'},
+      headers:await shcH('return=minimal'),
       body:JSON.stringify({shift_id:shift.id})
     });
     closeModal();

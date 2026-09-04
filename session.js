@@ -160,6 +160,40 @@ const Session = (function () {
     return jwtValid(t) ? t : null;
   }
 
+  /* ── ترويسات PostgREST للجداول المقفولة ─────────────────────────
+     الجداول المالية (contracts / sales_items / erp_expenses /
+     pos_shifts / pos_wallet_transfers / wallet) بتتقفل على anon، يعني
+     لازم النداء يتبعت بتوكن المستخدم. الدوال دي بتجيب توكن صالح
+     (وبتجدّده لو لزم) وبترجع لمفتاح anon لو مفيش — عشان صفحة عرض
+     لمستخدم خارج الجلسة ماتقعش كلها، بس الكتابة هتترفض من السيرفر.
+
+     ⚠️ استدعيها **قبل كل نداء** مش مرة واحدة عند التحميل: التوكن
+     بيخلص بعد ساعة، والترويسة المتخزّنة وقت الإنشاء بتفضل بالقديم
+     فكل حاجة ترجّع 401 من غير سبب واضح.                            */
+  async function bearer() {
+    return (await validToken()) || PHALIX_CONFIG.supabaseAnonKey;
+  }
+  async function headers(prefer) {
+    const h = { 'Content-Type': 'application/json',
+                apikey: PHALIX_CONFIG.supabaseAnonKey,
+                Authorization: 'Bearer ' + (await bearer()) };
+    if (prefer) h.Prefer = prefer;
+    return h;
+  }
+  /* عميل supabase-js متسلّح بتوكن المستخدم.
+     ⚠️ **ماتعدّلش `db.rest.headers` بعد الإنشاء** — supabase-js v2 بيحسب
+        ترويسة Authorization لكل نداء من خيار `accessToken`، والتعديل
+        اليدوي بيتجاهَل **بصمت**: الصفحة تفضل تبعت مفتاح anon وانت فاكرها
+        بقت authenticated. (متأكد بالتجربة على الموقع الحي 2026-09-04:
+        السنتينل اللي اتحط في db.rest.headers ماظهرش في النداء خالص،
+        وخيار accessToken ظهر فورًا.)
+     الدالة بتترجع لمفتاح anon لو مفيش توكن — عشان صفحة العرض ماتقعش. */
+  function client(extra) {
+    return supabase.createClient(PHALIX_CONFIG.supabaseUrl, PHALIX_CONFIG.supabaseAnonKey,
+      Object.assign({ auth: { persistSession: false, autoRefreshToken: false },
+                      accessToken: () => bearer() }, extra || {}));
+  }
+
   /* ── كتابة الجلسة ────────────────────────────────────────────────
      صفحتَي الدخول (index.html و delivery/auth.html) كانتا بتكتبا نفس
      الـ11 مفتاح كل واحدة بطريقتها — أي مفتاح جديد كان لازم يتضاف في
@@ -284,7 +318,7 @@ const Session = (function () {
 
   return { KEYS, ROLES, normRole, user, isLoggedIn, role, branch, branchId,
            username, fullName, is, isAdmin, decodeJwt, jwtValid, tokenValid,
-           refresh, validToken,
+           refresh, validToken, bearer, headers, client,
            save, resolveBranchId, clear, logout, loginPage, thisPage,
            pages, can, require };
 })();
