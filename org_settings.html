@@ -114,6 +114,16 @@
         </div>
       </div>
 
+      <!-- فحص قيم الفروع في البيانات -->
+      <div class="os-card">
+        <h3><i class="fas fa-triangle-exclamation"></i> فحص قيم الفروع</h3>
+        <div style="font-size:.78rem;color:var(--text-secondary);margin-bottom:10px">
+          أي قيمة فرع مخزّنة في البيانات ومش مطابقة لأي اسم أو كود أو اسم بديل.
+          القيم دي بتخلّي الشاشات تفلتر وترجّع صفر صف من غير أي رسالة خطأ.
+        </div>
+        <div id="os-audit" style="font-size:.82rem;color:var(--text-muted)">جارٍ الفحص…</div>
+      </div>
+
       <div class="os-actions">
         <span id="save-msg" class="os-msg" style="align-self:center;margin-inline-end:auto"></span>
         <button class="btn btn-primary" onclick="saveSettings()"><i class="fas fa-check"></i> حفظ التغييرات</button>
@@ -218,6 +228,33 @@
       } catch(e){}
     }
 
+    // فحص قيم الفروع — v_branch_value_audit بتعدّي على كل أعمدة الفرع
+    // النصية وترجّع اللي مش قابل للتحويل (بعد استبعاد النطاقات زي «عام»).
+    async function loadBranchAudit(){
+      const el = document.getElementById('os-audit');
+      if (!el) return;
+      try {
+        // العرض ده متاح للمسجّلين بس (مش anon) — لازم توكن المستخدم
+        const tok = await Session.validToken();
+        if (!tok) { el.textContent = 'الفحص محتاج جلسة مسجّلة — سجّل الدخول من جديد.'; return; }
+        const r = await fetch(REST + 'v_branch_value_audit?select=*&order=rows.desc',
+                  { headers: { apikey: SB_ANON_API, Authorization: 'Bearer ' + tok } });
+        if (!r.ok) { el.textContent = 'تعذّر الفحص (' + r.status + ').'; return; }
+        const rows = await r.json();
+        if (!rows.length) { el.innerHTML = '<span style="color:#16a34a;font-weight:700">✓ كل قيم الفروع في البيانات مفهومة</span>'; return; }
+        const total = rows.reduce(function(a,b){ return a + Number(b.rows||0); }, 0);
+        el.innerHTML = '<div style="margin-bottom:8px;color:var(--danger);font-weight:700">'
+          + total + ' صف بقيمة فرع مش معروفة</div>'
+          + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem">'
+          + '<tr style="text-align:right;color:var(--text-secondary)"><th>الجدول</th><th>العمود</th><th>القيمة</th><th>عدد الصفوف</th></tr>'
+          + rows.map(function(x){
+              return '<tr><td>' + escAttr(x.table_name) + '</td><td>' + escAttr(x.column_name)
+                   + '</td><td><b>' + escAttr(x.value) + '</b></td><td>' + x.rows + '</td></tr>';
+            }).join('')
+          + '</table></div>';
+      } catch(e){ el.textContent = 'تعذّر الفحص.'; }
+    }
+
     async function saveSettings(){
       var msg = document.getElementById('save-msg');
       var rec = {
@@ -240,6 +277,7 @@
     }
 
     load();
+    loadBranchAudit();
   </script>
 </body>
 </html>

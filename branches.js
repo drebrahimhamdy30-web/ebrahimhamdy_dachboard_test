@@ -119,6 +119,15 @@ const Branches = (function () {
   function toCode(v) { const b = byName(toName(v)); return b ? b.code : null; }
   function toId(v)   { const b = byName(toName(v)); return b ? b.id   : null; }
 
+  /* مقارنة فرعين مهما كان شكل كل واحد (اسم/كود/اسم بديل/تهجئة بديلة).
+     ⚠️ المقارنة الحرفية (a === b) هي اللي عملت باج inventory_min: البيانات
+     فيها «سيدى بشر» والفلتر بيبعت «سيدي بشر» فالنتيجة صفر صف من غير أي
+     رسالة خطأ. same() بتطبّع الطرفين الأول.                             */
+  function same(a, b) {
+    const x = toName(a), y = toName(b);
+    return !!x && !!y && x === y;
+  }
+
   /* خرايط جاهزة — الصفحات كانت بتكتبها بنفسها.
      ⚠️ بترجّع نسخة جديدة كل نداء: لو الفروع اتحدّثت من الشبكة بعد ما
      الصفحة خزّنت الخريطة في const، الخريطة القديمة تفضل قديمة. للصفحات
@@ -203,7 +212,7 @@ const Branches = (function () {
 
   return { all, names, codes, ids, byName, byCode, byId,
            codeMap, storeMap, aliasMap,
-           toName, toCode, toId, storeName, fromStoreName,
+           toName, toCode, toId, same, storeName, fromStoreName,
            fillSelect, autofill, load, ready, onChange };
 })();
 
