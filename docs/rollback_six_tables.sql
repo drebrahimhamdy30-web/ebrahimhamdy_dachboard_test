@@ -1,0 +1,29 @@
+-- ═══════════════════════════════════════════════════════════════════
+-- تراجع فوري عن إغلاق الجداول المالية الستة (المرحلة 3)
+-- ═══════════════════════════════════════════════════════════════════
+-- شغّله كامل لو أي شاشة وقعت بعد الإغلاق. بيرجّع الوضع بالظبط زي ما كان
+-- قبل 2026-09-04: anon يقرا ويكتب في الستة.
+-- ⚠️ ده بيرجّع الثغرة — استعمله للطوارئ وبس، وبعدين دوّر على السبب.
+
+grant select, insert, update, delete on public.contracts            to anon;
+grant select, insert, update, delete on public.sales_items          to anon;
+grant select, insert, update, delete on public.erp_expenses         to anon;
+grant select, insert, update         on public.pos_shifts           to anon;
+grant select, insert, update, delete on public.pos_wallet_transfers to anon;
+grant select, update                 on public.wallet               to anon;
+
+drop policy if exists contracts_anon_all             on public.contracts;
+drop policy if exists sales_items_all                on public.sales_items;
+drop policy if exists erp_expenses_anon_all          on public.erp_expenses;
+drop policy if exists allow_all                      on public.pos_shifts;
+drop policy if exists pos_wallet_transfers_all       on public.pos_wallet_transfers;
+drop policy if exists "Allow public read on wallet"   on public.wallet;
+drop policy if exists "Allow public update on wallet" on public.wallet;
+
+create policy contracts_anon_all       on public.contracts            for all to anon, authenticated using (true) with check (true);
+create policy sales_items_all          on public.sales_items          for all to anon, authenticated using (true) with check (true);
+create policy erp_expenses_anon_all    on public.erp_expenses         for all to anon, authenticated using (true) with check (true);
+create policy allow_all                on public.pos_shifts           for all to public               using (true) with check (true);
+create policy pos_wallet_transfers_all on public.pos_wallet_transfers for all to anon, authenticated using (true) with check (true);
+create policy "Allow public read on wallet"   on public.wallet for select to public using (true);
+create policy "Allow public update on wallet" on public.wallet for update to public using (true) with check (true);
