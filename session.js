@@ -154,10 +154,53 @@ const Session = (function () {
 
   /* توكن صالح للاستعمال في هيدر Authorization — بيجدّد لو لزم.
      بيرجّع null لو مفيش، فالنداء يستعمل مفتاح anon (عرض فقط).      */
+  /* ── انتهاء الجلسة: رسالة بدل شاشة فاضية ────────────────────────
+     قبل إغلاق anon، أي نداء بتوكن منتهي كان بيرجع لمفتاح anon ويشتغل،
+     فالمستخدم مايحسّش. بعد الإغلاق، نفس المسار بيدّي **401 صامت**
+     والشاشة تبان فاضية والمستخدم يفتكر إن مفيش بيانات.
+     (حصل فعلًا 2026-09-04 مع حساب محاسب: جدار 401 في الكونسول وجدول
+     فاضي من غير أي رسالة.)
+
+     ⚠️ الشرط `authProvider === 'supabase'` مهم: من غيره البانر هيظهر
+        على صفحة الدخول نفسها — هناك مفيش توكن **بقصد**.                */
+  let _expiredShown = false;
+  function _sessionExpired() {
+    if (_expiredShown) return;
+    _expiredShown = true;
+    try {
+      const d = document.createElement('div');
+      d.setAttribute('role', 'alert');
+      d.style.cssText = 'position:fixed;inset:0;z-index:2147483647;display:flex;'
+        + 'align-items:center;justify-content:center;background:rgba(15,23,42,.72);'
+        + 'font-family:Cairo,sans-serif;direction:rtl';
+      d.innerHTML =
+        '<div style="background:#fff;color:#0f172a;max-width:340px;width:86%;padding:26px 22px;'
+        + 'border-radius:16px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.35)">'
+        + '<div style="font-size:38px;line-height:1;margin-bottom:12px">\u23F1\uFE0F</div>'
+        + '<div style="font-weight:700;font-size:1.05rem;margin-bottom:6px">انتهت الجلسة</div>'
+        + '<div style="color:#64748b;font-size:.9rem;line-height:1.7;margin-bottom:18px">'
+        + 'مدة الدخول خلصت، فالبيانات مش هتظهر.<br>سجّل دخول تاني وكمّل عادي.</div>'
+        + '<button id="_sxBtn" style="background:#0d9488;color:#fff;border:0;border-radius:10px;'
+        + 'padding:11px 26px;font-family:inherit;font-size:.95rem;font-weight:700;cursor:pointer">'
+        + 'تسجيل الدخول</button></div>';
+      const go = () => {
+        const p = loginPage();
+        // جوّه إطار؟ نودّي النافذة الأصلية مش الإطار لوحده
+        try { if (window.top !== window.self) { window.top.location.href = (/\/delivery\//.test(window.top.location.pathname) ? 'auth.html' : p); return; } } catch (e) {}
+        window.location.href = p;
+      };
+      d.addEventListener('click', ev => { if (ev.target && ev.target.id === '_sxBtn') go(); });
+      (document.body || document.documentElement).appendChild(d);
+    } catch (e) { /* لو الـDOM لسه مش جاهز، الرجوع لـanon بيفضل زي ما هو */ }
+  }
+
   async function validToken() {
     if (!tokenValid()) await refresh();
     const t = get('authJwt');
-    return jwtValid(t) ? t : null;
+    if (jwtValid(t)) return t;
+    // كان مسجّل دخول والتجديد فشل = جلسة منتهية فعلًا، مش زائر
+    if (get('authProvider') === 'supabase') _sessionExpired();
+    return null;
   }
 
   /* ── ترويسات PostgREST للجداول المقفولة ─────────────────────────
