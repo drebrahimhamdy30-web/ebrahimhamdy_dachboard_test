@@ -1,10 +1,20 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-// ⚠️ التوكن مايتكتبش في الكود — الريبو ده عام. بييجي من متغيّر بيئة
-// (Supabase → Edge Functions → Secrets). التوكن القديم اتكشف على GitHub
-// واتغيّر؛ لو رجع تاني في الكود يبقى مكشوف تاني.
-const TRIGGER_TOKEN = Deno.env.get("BACKUP_TRIGGER_TOKEN") ?? "";
+// ⚠️ التوكن مايتكتبش في الكود — الريبو ده عام. مخزّن في vault وبيتقرا
+// وقت الطلب. التوكن القديم كان مكتوب هنا واتكشف على GitHub، واتغيّر.
+// تغييره بعد كده = UPDATE واحد على vault، من غير أي نشر.
+let _tokCache: { v: string; exp: number } | null = null;
+async function triggerToken(admin: any): Promise<string> {
+  const now = Date.now();
+  if (_tokCache && _tokCache.exp > now) return _tokCache.v;
+  // سكيما vault مش معروضة لـPostgREST، فبنعدّي على دالة وسيطة
+  // (public.vault_secret) صلاحيتها لـservice_role بس.
+  const { data } = await admin.rpc("vault_secret", { p_name: "backup_trigger_token" });
+  const v = typeof data === "string" ? data : "";
+  _tokCache = { v, exp: now + 60000 };
+  return v;
+}
 const BUCKET = "db-backups";
 const KEEP_LAST = 30;
 const PAGE = 1000;
@@ -65,13 +75,16 @@ function cleanFolderId(raw: string): string {
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
   const token = url.searchParams.get("token") || req.headers.get("x-backup-token") || "";
-  if (!TRIGGER_TOKEN || token !== TRIGGER_TOKEN) {   // توكن فاضي = ممنوع، مش مسموح للكل
-    return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
-  }
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
   const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+
+  // التوكن من vault. فاضي = رفض — عشان لو السر اتمسح مايبقاش مفتوح للكل.
+  const expected = await triggerToken(admin);
+  if (!expected || token !== expected) {
+    return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
+  }
 
   const folder = `backup-${stampNow()}`;
 
