@@ -1,9 +1,31 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-// ⚠️ التوكن مايتكتبش في الكود — الريبو ده عام. مخزّن في vault وبيتقرا
-// وقت الطلب. التوكن القديم كان مكتوب هنا واتكشف على GitHub، واتغيّر.
-// تغييره بعد كده = UPDATE واحد على vault، من غير أي نشر.
+/* ═══════════════════════════════════════════════════════════════════
+   نسخة احتياطية على دفعات — بذاكرة محدودة
+   ═══════════════════════════════════════════════════════════════════
+   النسخة القديمة كانت بتعمل حاجتين بيقتلوا الذاكرة:
+     1. بتحمّل كل جدول **كامل** في مصفوفة JS (sales_items لوحده 108MB
+        خام، يبقى أضعافها كـobjects في الذاكرة).
+     2. بتبني أرشيف للقاعدة كلها في بَفَر واحد عشان ترفعه على Drive.
+   القاعدة بقت ~400MB، فالدالة كانت بتقع بـWORKER_RESOURCE_LIMIT —
+   وواقفة من 28 يوليو من غير ما حد ياخد باله، لأن الـcron بيقول «نجح»
+   (net.http_post بيرجّع فورًا: النجاح ده للإرسال مش للنتيجة).
+
+   الجديد:
+     • كل نداء بيشتغل ~50 ثانية ويسيب مكانه في backup_runs، والـcron
+       بيكمّل. الذاكرة محدودة بصفحة واحدة (500 صف) مهما كبرت القاعدة.
+     • كل صفحة بتترفع كملف مستقل: folder/table/part-0001.json.gz
+     • مفيش أرشيف مجمّع في الذاكرة خالص.
+
+   ⚠️ التوكن مايتكتبش في الكود — الريبو ده عام. مخزّن في vault.
+   ═══════════════════════════════════════════════════════════════════ */
+
+const BUCKET = "db-backups";
+const KEEP_LAST = 30;
+const PAGE = 500;              // صفوف لكل دفعة
+const BUDGET_MS = 50_000;      // هامش قبل حد وقت التنفيذ
+
 let _tokCache: { v: string; exp: number } | null = null;
 async function triggerToken(admin: any): Promise<string> {
   const now = Date.now();
@@ -12,13 +34,9 @@ async function triggerToken(admin: any): Promise<string> {
   // (public.vault_secret) صلاحيتها لـservice_role بس.
   const { data } = await admin.rpc("vault_secret", { p_name: "backup_trigger_token" });
   const v = typeof data === "string" ? data : "";
-  _tokCache = { v, exp: now + 60000 };
+  _tokCache = { v, exp: now + 60_000 };
   return v;
 }
-const BUCKET = "db-backups";
-const KEEP_LAST = 30;
-const PAGE = 1000;
-const BOUNDARY = "phlxBackupBoundary7c1e5b8d";
 
 async function gzipBytes(bytes: Uint8Array): Promise<Uint8Array> {
   const cs = new CompressionStream("gzip");
@@ -28,51 +46,13 @@ async function gzipBytes(bytes: Uint8Array): Promise<Uint8Array> {
 }
 
 function stampNow(): string {
-  const s = new Date().toISOString();
-  return s.slice(0, 19).replace(/[:]/g, "").replace(/-/g, "");
+  return new Date().toISOString().slice(0, 19).replace(/[:]/g, "").replace(/-/g, "");
 }
 
-async function getTokenViaRefresh(clientId: string, clientSecret: string, refreshToken: string): Promise<string> {
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: "refresh_token" }),
-  });
-  const j = await res.json();
-  if (!j.access_token) throw new Error("oauth_refresh: " + JSON.stringify(j));
-  return j.access_token as string;
-}
-
-async function driveUpload(token: string, folderId: string, name: string, bytes: Uint8Array): Promise<Record<string, unknown>> {
-  const meta = JSON.stringify({ name, parents: [folderId] });
-  const pre = `--${BOUNDARY}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${BOUNDARY}\r\nContent-Type: application/gzip\r\n\r\n`;
-  const post = `\r\n--${BOUNDARY}--`;
-  const body = new Blob([pre, bytes, post]);
-  const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size", {
-    method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": `multipart/related; boundary=${BOUNDARY}` }, body,
-  });
-  return await res.json();
-}
-
-async function driveList(token: string, folderId: string): Promise<{ id: string; name: string }[]> {
-  const q = encodeURIComponent(`'${folderId}' in parents and trashed=false and name contains '.ndjson.gz'`);
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&pageSize=1000&orderBy=name`, { headers: { Authorization: `Bearer ${token}` } });
-  const j = await res.json();
-  return (j.files || []) as { id: string; name: string }[];
-}
-
-async function driveDelete(token: string, fileId: string): Promise<void> {
-  await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
-}
-
-function cleanFolderId(raw: string): string {
-  let id = (raw || "").trim();
-  const m = id.match(/folders\/([^/?#]+)/);
-  if (m) id = m[1];
-  const q = id.indexOf("?"); if (q >= 0) id = id.slice(0, q);
-  return id.trim();
-}
+function pad(n: number, w = 4): string { return String(n).padStart(w, "0"); }
 
 Deno.serve(async (req: Request) => {
+  const started = Date.now();
   const url = new URL(req.url);
   const token = url.searchParams.get("token") || req.headers.get("x-backup-token") || "";
 
@@ -86,78 +66,111 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
   }
 
-  const folder = `backup-${stampNow()}`;
+  const json = (b: unknown, status = 200) =>
+    new Response(JSON.stringify(b), { status, headers: { "Content-Type": "application/json" } });
 
-  const { data: tbls, error: tErr } = await admin.rpc("list_public_tables");
-  if (tErr) return new Response(JSON.stringify({ error: "list_tables: " + tErr.message }), { status: 500, headers: { "Content-Type": "application/json" } });
-  const tables: string[] = (tbls as unknown[]).map((x) => String(x));
+  // ── 1) نكمّل تشغيلة شغّالة، وإلا نبدأ واحدة جديدة ──────────────────
+  const { data: running } = await admin.from("backup_runs")
+    .select("*").eq("status", "running").order("id", { ascending: false }).limit(1).maybeSingle();
 
-  const cs = new CompressionStream("gzip");
-  const cw = cs.writable.getWriter();
-  const combinedPromise = new Response(cs.readable).arrayBuffer();
-  const enc = new TextEncoder();
+  let run = running;
 
-  const tstat: unknown[] = [];
-  let totalRows = 0;
+  if (!run) {
+    // ?resume=1 معناها «كمّل بس» — الـcron بيستعمله كل دقيقة عشان
+    // مايبدأش نسخة جديدة؛ البداية اليومية ليها نداء منفصل.
+    if (url.searchParams.get("resume") === "1") return json({ ok: true, idle: true });
 
-  for (const t of tables) {
-    let from = 0; let all: unknown[] = []; let failed: string | null = null;
-    while (true) {
-      const { data, error } = await admin.from(t).select("*").range(from, from + PAGE - 1);
-      if (error) { failed = error.message; break; }
-      all = all.concat(data || []);
-      if (!data || data.length < PAGE) break;
-      from += PAGE;
-    }
-    if (failed) { tstat.push({ table: t, error: failed }); continue; }
-    const gz = await gzipBytes(enc.encode(JSON.stringify(all)));
-    const { error: upErr } = await admin.storage.from(BUCKET).upload(`${folder}/${t}.json.gz`, gz, { contentType: "application/gzip", upsert: true });
-    await cw.write(enc.encode(JSON.stringify({ table: t, rows: all }) + "\n"));
-    totalRows += all.length;
-    tstat.push({ table: t, rows: all.length, ...(upErr ? { upload_error: upErr.message } : {}) });
-    all = [];
+    const { data: tbls, error: tErr } = await admin.rpc("list_public_tables");
+    if (tErr) return json({ error: "list_tables: " + tErr.message }, 500);
+    const tables = (tbls as unknown[]).map(String).sort();
+
+    const { data: created, error: cErr } = await admin.from("backup_runs")
+      .insert({ folder: `backup-${stampNow()}`, tables }).select().single();
+    if (cErr) return json({ error: "create_run: " + cErr.message }, 500);
+    run = created;
   }
-  await cw.close();
-  const combined = new Uint8Array(await combinedPromise);
 
-  const manifest = { created_at: new Date().toISOString(), bucket: BUCKET, folder, total_rows: totalRows, tables: tstat };
-  await admin.storage.from(BUCKET).upload(`${folder}/_manifest.json`, new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" }), { upsert: true });
+  // ── 2) نشتغل لحد ما الوقت يخلص ──────────────────────────────────
+  let ti: number = run.tbl_index;
+  let page: number = run.page;
+  let rowsDone: number = run.rows_done;
+  let partsDone: number = run.parts_done;
+  const tables: string[] = run.tables;
+  const folder: string = run.folder;
+  let lastError: string | null = run.last_error ?? null;
+
+  while (ti < tables.length && Date.now() - started < BUDGET_MS) {
+    const t = tables[ti];
+    const from = page * PAGE;
+
+    const { data, error } = await admin.from(t).select("*").range(from, from + PAGE - 1);
+
+    if (error) {
+      // جدول مش مقروء (view أو صلاحية) — نسجّله ونعدّي بدل ما نقف
+      lastError = `${t}: ${error.message}`;
+      ti++; page = 0;
+      continue;
+    }
+
+    const rows = data ?? [];
+    if (rows.length > 0) {
+      const gz = await gzipBytes(new TextEncoder().encode(JSON.stringify(rows)));
+      const { error: upErr } = await admin.storage.from(BUCKET)
+        .upload(`${folder}/${t}/part-${pad(page + 1)}.json.gz`, gz,
+                { contentType: "application/gzip", upsert: true });
+      if (upErr) lastError = `${t} upload: ${upErr.message}`;
+      rowsDone += rows.length;
+      partsDone++;
+    }
+
+    if (rows.length < PAGE) { ti++; page = 0; }   // الجدول خلص
+    else { page++; }
+  }
+
+  const done = ti >= tables.length;
+
+  // ── 3) نحفظ المكان ─────────────────────────────────────────────
+  await admin.from("backup_runs").update({
+    tbl_index: ti, page, rows_done: rowsDone, parts_done: partsDone,
+    last_error: lastError, updated_at: new Date().toISOString(),
+    ...(done ? { status: "done", finished_at: new Date().toISOString() } : {}),
+  }).eq("id", run.id);
+
+  if (!done) {
+    return json({ ok: true, done: false, folder, progress: `${ti}/${tables.length}`,
+                  table: tables[ti], page, rows: rowsDone, parts: partsDone });
+  }
+
+  // ── 4) خلصت: manifest + تنظيف النسخ القديمة ────────────────────
+  const manifest = {
+    created_at: new Date().toISOString(), bucket: BUCKET, folder,
+    tables: tables.length, total_rows: rowsDone, parts: partsDone,
+    last_error: lastError, format: "per-table pages: <table>/part-NNNN.json.gz",
+  };
+  await admin.storage.from(BUCKET).upload(`${folder}/_manifest.json`,
+    new Blob([JSON.stringify(manifest, null, 2)], { type: "application/json" }), { upsert: true });
 
   const deleted: string[] = [];
-  const { data: roots } = await admin.storage.from(BUCKET).list("", { limit: 1000, sortBy: { column: "name", order: "asc" } });
-  const backupFolders = (roots || []).filter((r) => r.name.startsWith("backup-")).map((r) => r.name).sort();
-  if (backupFolders.length > KEEP_LAST) {
-    for (const f of backupFolders.slice(0, backupFolders.length - KEEP_LAST)) {
-      const { data: files } = await admin.storage.from(BUCKET).list(f, { limit: 1000 });
-      const paths = (files || []).map((x) => `${f}/${x.name}`);
-      if (paths.length) await admin.storage.from(BUCKET).remove(paths);
+  const { data: roots } = await admin.storage.from(BUCKET)
+    .list("", { limit: 1000, sortBy: { column: "name", order: "asc" } });
+  const folders = (roots || []).filter((r) => r.name.startsWith("backup-")).map((r) => r.name).sort();
+  if (folders.length > KEEP_LAST) {
+    for (const f of folders.slice(0, folders.length - KEEP_LAST)) {
+      // النسخ الجديدة فيها مجلد لكل جدول، فالحذف على مستويين
+      const { data: subs } = await admin.storage.from(BUCKET).list(f, { limit: 1000 });
+      for (const s of subs || []) {
+        const { data: files } = await admin.storage.from(BUCKET).list(`${f}/${s.name}`, { limit: 1000 });
+        const paths = (files || []).map((x) => `${f}/${s.name}/${x.name}`);
+        if (paths.length) await admin.storage.from(BUCKET).remove(paths);
+      }
+      const { data: top } = await admin.storage.from(BUCKET).list(f, { limit: 1000 });
+      const topPaths = (top || []).map((x) => `${f}/${x.name}`);
+      if (topPaths.length) await admin.storage.from(BUCKET).remove(topPaths);
       deleted.push(f);
     }
   }
 
-  let drive: Record<string, unknown> = { skipped: "no GDRIVE OAuth secrets" };
-  const folderIdRaw = Deno.env.get("GDRIVE_FOLDER_ID");
-  const clientId = Deno.env.get("GDRIVE_CLIENT_ID");
-  const clientSecret = Deno.env.get("GDRIVE_CLIENT_SECRET");
-  const refresh = Deno.env.get("GDRIVE_REFRESH_TOKEN");
-  if (folderIdRaw && clientId && clientSecret && refresh) {
-    try {
-      const folderId = cleanFolderId(folderIdRaw);
-      const dtok = await getTokenViaRefresh(clientId, clientSecret, refresh);
-      const up = await driveUpload(dtok, folderId, `${folder}.ndjson.gz`, combined);
-      let drivePruned = 0;
-      try {
-        const listed = (await driveList(dtok, folderId)).sort((a, b) => (a.name < b.name ? -1 : 1));
-        if (listed.length > KEEP_LAST) {
-          for (const f of listed.slice(0, listed.length - KEEP_LAST)) { await driveDelete(dtok, f.id); drivePruned++; }
-        }
-      } catch (_e) { /* تجاهل فشل التنظيف */ }
-      drive = up.id ? { uploaded: true, folder_id: folderId, file: up, pruned: drivePruned } : { uploaded: false, folder_id: folderId, resp: up };
-    } catch (e) {
-      drive = { uploaded: false, error: String(e) };
-    }
-  }
-
-  const errs = tstat.filter((x) => (x as Record<string, unknown>).error);
-  return new Response(JSON.stringify({ ok: true, folder, tables: tables.length, total_rows: totalRows, archive_bytes: combined.length, deleted_old: deleted.length, errors: errs, drive }), { headers: { "Content-Type": "application/json" } });
+  return json({ ok: true, done: true, folder, tables: tables.length,
+                total_rows: rowsDone, parts: partsDone, deleted_old: deleted.length,
+                last_error: lastError });
 });
