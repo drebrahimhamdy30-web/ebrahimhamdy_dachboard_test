@@ -51,3 +51,23 @@ begin
     execute format('grant execute on function %s to anon', f.sig);
   end loop;
 end $$;
+
+-- ═══════════════════════════════════════════════════════════════════
+-- تراجع عن إغلاق التلات دوال المحروسة + الفيو (2026-09-04)
+-- ═══════════════════════════════════════════════════════════════════
+do $$
+declare f record;
+begin
+  for f in
+    select p.oid::regprocedure as sig
+    from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+    where ns.nspname='public'
+      and p.proname in ('add_recon_txn','move_recon_txn','delete_current_wallet_transfer')
+  loop
+    execute format('grant execute on function %s to anon', f.sig);
+  end loop;
+end $$;
+
+-- ⚠️ الفيو بيتخطى RLS (security_invoker=false، مالكه postgres) — رجوعه
+--    يفتح بيانات erp_expenses تاني حتى والجدول نفسه مقفول.
+grant select on public.v_supplier_movements to anon;
