@@ -13,9 +13,15 @@
    ═══════════════════════════════════════════════════════════════════ */
 
 const PHALIX_CONFIG = {
-  // خادم Supabase — غيّر ده لما تنقل لخادم تاني
-  supabaseUrl:     'https://rxtjoqulmgkkcohmgzgi.supabase.co',
-  supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4dGpvcXVsbWdra2NvaG1nemdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3MDQ2OTUsImV4cCI6MjA5NDI4MDY5NX0.QVoJPtlRlRIz9tdhmdTZxHtKxrwAxJq0Je4QHkFKxj0',
+  // ⚠️⚠️ الريبو ده (التست) بيشتغل على **السيرفر الخاص**، مش السحابة.
+  //   البرودكشن (ebrahimhamdy_dachboard) لسه على سحابة Supabase.
+  //   دي **أول مرة** الملفين يختلفوا بين الريبوهين عن قصد —
+  //   ماتزامنهوش تلقائيًا وإلا التست هيرجع على السحابة من غير ما حد ياخد باله.
+  //
+  //   للرجوع للسحابة: بدّل السطرين دول بقيم البرودكشن.
+  // خادم Supabase — السيرفر الخاص
+  supabaseUrl:     'https://supabase.ebrahimhamdy.com',
+  supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg4MzI1MDA0LCJleHAiOjE5NDYwMDUwMDR9.Yx-kNhTDLh9fLku8AAdVnx1ir_xzT1uToO9XJdZ7d7I',
 
   // خادم n8n — لسه بيشغّل الدخول وبعض التكاملات
   n8nBase: 'https://agent.ebrahimhamdy.com'
