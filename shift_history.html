@@ -218,11 +218,36 @@ const weekAgo=new Date(Date.now()-6*86400000).toISOString().slice(0,10);
 document.getElementById('f-from').value=weekAgo;
 document.getElementById('f-to').value=today;
 
+/* ═══ تحميل كسول للتبويبات ═══
+   قبل كده reloadAll كان بينادي الأربع لوادرز مرة واحدة، فالمستخدم
+   بيستنى أبطأ نداء فيهم عشان يشوف تبويب واحد. دلوقتي: المفتوح بس،
+   والباقي أول ما يتفتح. البانر (loadUnreviewed) بيفضل فوري لأنه
+   ظاهر دايمًا برّه التبويبات. */
+let ACTIVE_TAB='shifts';                 // مطابق للـclass="active" في HTML
+const tabLoaded=new Set();
+
+// بالنداء مش كثابت — عشان ما نعتمدش على ترتيب التعريف
+function tabLoader(t){
+  return {shifts:loadShifts, transfers:loadTransfers, recon:loadRecon, balance:loadBalance}[t];
+}
+
+async function loadTab(t){
+  if(tabLoaded.has(t)) return;           // متحمّل خلاص بنفس الفلاتر
+  tabLoaded.add(t);
+  // فشل؟ نشيل العلامة عشان يعيد المحاولة أول ما يتفتح تاني.
+  // مابنرميش الخطأ لبرّه — كل لودر بيعرض «فشل التحميل» في مكانه،
+  // والرمي هنا كان هيبقى unhandled rejection لأن switchTab مابينتظرش.
+  try{ await tabLoader(t)(); }
+  catch(e){ tabLoaded.delete(t); console.error('فشل تحميل تبويب '+t, e); }
+}
+
 function switchTab(t){
   ['shifts','transfers','recon','balance'].forEach(x=>{
     document.getElementById('tab-'+x).classList.toggle('active',x===t);
     document.getElementById('pane-'+x).classList.toggle('active',x===t);
   });
+  ACTIVE_TAB=t;
+  loadTab(t);
 }
 
 async function init(){
@@ -241,7 +266,10 @@ async function init(){
 }
 
 async function reloadAll(){
-  await Promise.all([loadShifts(), loadTransfers(), loadUnreviewed(), loadRecon(), loadBalance()]);
+  // الفلاتر اتغيّرت → كل التبويبات بقت قديمة، بس نحمّل المفتوح بس.
+  // الباقي هيتحمّل لما يتفتح (loadTab).
+  tabLoaded.clear();
+  await Promise.all([loadUnreviewed(), loadTab(ACTIVE_TAB)]);
 }
 
 /* ===== إجمالي غير المراجَع (يتبع فلتر الفرع فوق، لكن مستقل عن التاريخ) ===== */
