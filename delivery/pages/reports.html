@@ -109,6 +109,9 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
 .sa-scope .ov-kpi-val { font-size:1.45rem; font-weight:900; color:var(--text-primary); line-height:1.15; }
 .sa-scope .ov-kpi-val small { font-size:.72rem; font-weight:700; color:var(--text-secondary); }
 .sa-scope .ov-kpi-lbl { font-size:.74rem; color:var(--text-secondary); font-weight:700; margin-top:5px; }
+.sa-scope .ov-kpi-sub { font-size:.66rem; color:var(--text-muted); font-weight:700; margin-top:3px; }
+/* أعمدة الاتجاه اليومي — نفس أعمدة الساعات بس أعرض شوية عشان تاريخ اليوم يبان */
+.sa-scope .ov-daybar { min-width:34px; }
 .sa-scope .ov-card { background:var(--bg-card); border:1px solid var(--border); border-radius:16px; padding:16px 18px; margin-bottom:16px; }
 .sa-scope .ov-card-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
 .sa-scope .ov-card-title { font-size:.95rem; font-weight:800; color:var(--text-primary); display:flex; align-items:center; gap:8px; }
@@ -1398,6 +1401,8 @@ const saSalesByHour       = (f, t, s) => _saRpc('sales_by_hour',        _saArgs(
 const saSalesByEmployee   = (f, t, s) => _saRpc('sales_by_employee',    _saArgs(f, t, s));
 const saDeliveryByHour    = (f, t, s) => _saRpc('delivery_by_hour',     _saArgs(f, t, s));
 const saDiscountStats     = (f, t, s) => _saRpc('sales_discount_stats', _saArgs(f, t, s));
+const saSalesByDay        = (f, t, s) => _saRpc('sales_by_day',         _saArgs(f, t, s));
+async function saOverview(f, t, s)        { return (await _saRpc('sales_overview', _saArgs(f, t, s)))[0] || {}; }
 const saPriceReview       = (f, t, s) => _saRpc('sales_price_review',   _saArgs(f, t, s));
 const saDiscountBills     = (f, t, s) => _saRpc('sales_discount_bills', _saArgs(f, t, s));
 async function saActiveDays(f, t, s)      { return (await _saRpc('sales_active_days',    _saArgs(f, t, s)))[0] || { active_days: 0 }; }
@@ -1592,7 +1597,43 @@ async function saLoadOverview() {
       </div>`; }).join('')}</div>
       ${list.length > 12 ? `<div style="font-size:.72rem;color:var(--text-muted);margin:8px 2px 0">+ ${list.length - 12} غيرهم…</div>` : ''}`;
   };
-  const kpi = (c, ic, val, lbl, idAttr) => `<div class="ov-kpi" style="--_c:${c}"><div class="ov-kpi-ic"><i class="fas ${ic}"></i></div><div class="ov-kpi-val"${idAttr || ''}>${val}</div><div class="ov-kpi-lbl">${lbl}</div></div>`;
+  const kpi = (c, ic, val, lbl, idAttr, sub) => `<div class="ov-kpi" style="--_c:${c}"><div class="ov-kpi-ic"><i class="fas ${ic}"></i></div><div class="ov-kpi-val"${idAttr || ''}>${val}</div><div class="ov-kpi-lbl">${lbl}</div>${sub ? `<div class="ov-kpi-sub">${sub}</div>` : ''}</div>`;
+
+  // ===== مؤشرات المبيعات العامة + الاتجاه اليومي =====
+  // (كانت مكتوبة في salesanalysis_enhance.patch من 2026-08-06 ومااتطبّقتش —
+  //  الشاشة اتطوّرت بعدها فاتنقلت هنا على التصميم الحالي بدل الباتش الحرفي)
+  const [o, days] = await Promise.all([saOverview(from, to, store), saSalesByDay(from, to, store)]);
+  const netTot = Number(o.net) || 0;
+  // متوسط عدد الأصناف بالفاتورة = عدد أسطر الأصناف ÷ عدد الفواتير
+  const oBills   = Number(o.bills) || 0;
+  const avgItems = oBills > 0 ? (Number(o.lines) || 0) / oBills : 0;
+  // نسبة المرتجعات من المبيعات **قبل** خصم المرتجع — الصافي بيبقى المرتجع
+  // مخصوم منه أصلًا، فلو قسمنا عليه النسبة بتطلع أكبر من الحقيقة
+  const retVal  = Number(o.returns_val) || 0;
+  const retBase = netTot + retVal;
+  const retPct  = retBase > 0 ? retVal / retBase * 100 : 0;
+  // أعلى/أقل يوم — نستبعد يوم النهاردة (لسه ناقص) والأيام الصفر.
+  // التاريخ بتوقيت القاهرة صراحةً، مش بتوقيت الجهاز
+  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' });
+  const compDays = (days || []).filter(d => d.day !== todayStr && (Number(d.net_val) || 0) > 0);
+  let hiDay = null, loDay = null;
+  if (compDays.length) {
+    hiDay = compDays.reduce((a, b) => (Number(b.net_val) || 0) > (Number(a.net_val) || 0) ? b : a);
+    loDay = compDays.reduce((a, b) => (Number(b.net_val) || 0) < (Number(a.net_val) || 0) ? b : a);
+  }
+  const dLabel = s => s ? new Date(s + 'T00:00:00').toLocaleDateString('ar-EG', { weekday: 'long', day: '2-digit', month: '2-digit' }) : '—';
+  // أعمدة الاتجاه اليومي — أعلى يوم أخضر وأقل يوم أحمر
+  const maxDay = Math.max(1, ...(days || []).map(d => Number(d.net_val) || 0));
+  const dayBars = (days || []).map(d => {
+    const v = Number(d.net_val) || 0;
+    const lbl = new Date(d.day + 'T00:00:00').toLocaleDateString('ar-EG', { day: '2-digit', month: '2-digit' });
+    const isHi = hiDay && d.day === hiDay.day, isLo = loDay && d.day === loDay.day;
+    const bg = isHi ? 'background:linear-gradient(180deg,#16a34a,#86efac)'
+             : isLo ? 'background:linear-gradient(180deg,#dc2626,#fca5a5)' : '';
+    return `<div class="ov-hbar ov-daybar" title="${lbl} — ${saNum(v)} ج · ${d.bills} فاتورة${isHi ? ' (أعلى يوم)' : isLo ? ' (أقل يوم)' : ''}">
+      <div class="ov-hbar-fill" style="height:${Math.round(Math.max(v, 0) / maxDay * 100)}%;${bg}"></div>
+      <div class="ov-hbar-lbl">${lbl}</div></div>`;
+  }).join('');
 
   wrap.innerHTML = `
     <div class="ov-head">
@@ -1601,11 +1642,23 @@ async function saLoadOverview() {
     </div>
 
     <div class="ov-kpis">
+      ${kpi('#0d9488', 'fa-basket-shopping', avgItems.toLocaleString('en', { minimumFractionDigits: 1, maximumFractionDigits: 1 }), 'متوسط الأصناف/فاتورة', '', `${(Number(o.lines) || 0).toLocaleString('en')} سطر · ${oBills.toLocaleString('en')} فاتورة`)}
+      ${kpi('#b91c1c', 'fa-rotate-left', `${saNum(retVal)} <small>ج</small>`, 'المرتجعات', '', `${(Number(o.returns_cnt) || 0).toLocaleString('en')} سطر · ${retPct.toFixed(1)}% من المبيعات`)}
+      ${kpi('#15803d', 'fa-arrow-trend-up', hiDay ? `${saNum(hiDay.net_val)} <small>ج</small>` : '—', 'أعلى يوم مبيعات', '', hiDay ? dLabel(hiDay.day) : '')}
+      ${kpi('#ea580c', 'fa-arrow-trend-down', loDay ? `${saNum(loDay.net_val)} <small>ج</small>` : '—', 'أقل يوم مبيعات', '', loDay ? dLabel(loDay.day) : '')}
       ${kpi('#dc2626', 'fa-tags', `${saNum(totD)} <small>ج</small>`, 'إجمالي قيمة الخصم')}
       ${kpi('#2563eb', 'fa-file-invoice', dBills, 'فواتير عليها خصم')}
       ${kpi('#d97706', 'fa-percent', `${saNum(avgDisc)} <small>ج</small>`, 'متوسط الخصم/فاتورة')}
       ${kpi('#16a34a', 'fa-clock', `${saHrLabel(peak.hr)} <small>${peakAvg.toFixed(0)}/س</small>`, 'ساعة الذروة')}
       ${kpi('#7c3aed', 'fa-users', '—', 'أقصى موظفين مطلوبين', ' id="saKpiPeakStaff"')}
+    </div>
+
+    <div class="ov-card">
+      <div class="ov-card-head">
+        <div class="ov-card-title"><i class="fas fa-chart-line"></i> اتجاه المبيعات اليومي (بالصافي)</div>
+        <div class="ov-card-sub">الأخضر = أعلى يوم · الأحمر = أقل يوم · النهاردة مستبعد من المقارنة</div>
+      </div>
+      <div class="ov-hours">${dayBars || '<div class="empty-tab">لا يوجد بيانات</div>'}</div>
     </div>
 
     <div class="ov-card">
