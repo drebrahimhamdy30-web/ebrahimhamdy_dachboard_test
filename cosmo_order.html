@@ -138,7 +138,7 @@
 
         <!-- اختيار الفرع -->
         <div style="margin-top:10px;">
-          <span class="filter-label">الفرع المطلوب له</span>
+          <span class="filter-label">الفرع المطلوب له <small style="font-weight:400;opacity:0.65;">(تقدر تختار فرع أو أكتر)</small></span>
           <div class="type-toggle branch-toggle" style="display:flex;width:100%;">
             <button id="branch-all" class="active" onclick="setBranch('all')" style="flex:1;">🏬 كل الفروع</button>
             <button id="branch-mamora" onclick="setBranch('mamora')" style="flex:1;">المعمورة</button>
@@ -236,7 +236,8 @@
     var dataLoaded=false, allResults=[], filteredResults=[];
     var itemStates = {};
     var currentType = 'cosmo';          // 'cosmo' = itm_ismedicine 0 | 'medicine' = 1
-    var selectedBranch = 'all';         // 'all' | 'mamora' | 'san' | 'bishr'
+    var ALL_BR = ['mamora','san','bishr'];
+    var selectedBranches = ['mamora','san','bishr'];  // المختارة (الثلاثة = إجمالي/كل الفروع)
     var allCompanies = [];              // كل الشركات المتاحة للنوع الحالي
     var selectedCompanies = [];         // المختارة ([] = الكل)
     var companyActiveIdx = -1;          // للتنقل بالكيبورد في الاقتراحات
@@ -310,12 +311,24 @@
     }
 
     function setBranch(b){
-      if(selectedBranch === b) return;
-      selectedBranch = b;
-      ['all','mamora','san','bishr'].forEach(function(x){
-        document.getElementById('branch-'+x).classList.toggle('active', x===b);
+      if(b === 'all'){
+        selectedBranches = ALL_BR.slice();          // «كل الفروع» = الثلاثة
+      } else if(selectedBranches.length === 3){
+        // كنا في وضع «الكل» (الفردية مطفية) → أول ضغطة تبدأ اختيار الفرع ده وحده
+        selectedBranches = [b];
+      } else {
+        var i = selectedBranches.indexOf(b);
+        if(i > -1) selectedBranches.splice(i,1);     // شيل الفرع لو كان مختار
+        else       selectedBranches.push(b);         // أو ضيفه (تجميع فرعين مع بعض)
+        if(!selectedBranches.length) selectedBranches = ALL_BR.slice(); // مفيش اختيار = رجوع للكل
+      }
+      var isAll = selectedBranches.length === 3;
+      document.getElementById('branch-all').classList.toggle('active', isAll);
+      ['mamora','san','bishr'].forEach(function(x){
+        // في وضع «الكل» نضيء زر الكل بس؛ في وضع مخصّص نضيء الفروع المختارة
+        document.getElementById('branch-'+x).classList.toggle('active', !isAll && selectedBranches.includes(x));
       });
-      // إعادة الحساب لأن الكمية/الهدف/المعدل تتغير حسب الفرع
+      // إعادة الحساب لأن الكمية/الهدف/المعدل تتغير حسب الفروع المختارة
       if(dataLoaded) calculate();
     }
     function qtyKeyNav(e, input){
@@ -650,12 +663,16 @@ saveQty();
         var nN=Math.ceil(Math.max(0,tN-s.san));
         var nB=Math.ceil(Math.max(0,tB-s.bishr));
 
-        // الإجماليات حسب الفرع المختار (أو كل الفروع)
-        var totalTarget, totalStock, totalAvg;
-        if(selectedBranch==='mamora'){ totalTarget=tM; totalStock=s.mamora; totalAvg=m.avg; }
-        else if(selectedBranch==='san'){ totalTarget=tN; totalStock=s.san; totalAvg=n.avg; }
-        else if(selectedBranch==='bishr'){ totalTarget=tB; totalStock=s.bishr; totalAvg=b.avg; }
-        else { totalTarget=tM+tN+tB; totalStock=s.mamora+s.san+s.bishr; totalAvg=m.avg+n.avg+b.avg; }
+        // الإجماليات تُجمَع على الفروع المختارة (فرع · فرعين · كل الفروع)
+        var brMap = {
+          mamora:{ t:tM, stock:s.mamora, avg:m.avg },
+          san:   { t:tN, stock:s.san,    avg:n.avg },
+          bishr: { t:tB, stock:s.bishr,  avg:b.avg }
+        };
+        var totalTarget=0, totalStock=0, totalAvg=0;
+        selectedBranches.forEach(function(x){
+          totalTarget += brMap[x].t; totalStock += brMap[x].stock; totalAvg += brMap[x].avg;
+        });
 
         var orderQty=Math.ceil(totalTarget-totalStock);
         if(orderQty<=0||totalTarget===0) return;
@@ -717,7 +734,7 @@ saveQty();
     function renderResults(list){
       var container=document.getElementById('result-container');
       // نرجع لأول صفحة عند تغيّر الفلاتر فقط (مش عند تعليم/تجاهل صنف)
-      var _sig=[document.getElementById('search-input').value,document.getElementById('status-filter').value,getSelectedCompanies().join(','),selectedBranch,currentType,showIgnored].join('|');
+      var _sig=[document.getElementById('search-input').value,document.getElementById('status-filter').value,getSelectedCompanies().join(','),selectedBranches.join(','),currentType,showIgnored].join('|');
       if(_sig!==_cosmoSig){ _cosmoSig=_sig; cosmoPage=1; }
       var ordered=list.filter(function(i){return (itemStates[i.code]||{}).ordered;}).length;
       // عدّ المتجاهَل من كل النتائج (حتى لو مخفي من القائمة)
@@ -730,9 +747,9 @@ saveQty();
 
       if(!list.length){container.innerHTML='<div class="loading-overlay">لا توجد نتائج</div>';return;}
 
-      var brLbl = selectedBranch==='mamora' ? 'المعمورة —' :
-                  selectedBranch==='san'    ? 'سان —' :
-                  selectedBranch==='bishr'  ? 'بشر —' : 'إجمالي';
+      var BR_NAMES = {mamora:'المعمورة', san:'سان', bishr:'بشر'};
+      var brLbl = selectedBranches.length===3 ? 'إجمالي'
+                : selectedBranches.map(function(x){return BR_NAMES[x];}).join('+') + ' —';
       var html=`
         <div class="summary-bar">
           <div class="summary-item">أصناف: <b>${list.filter(i=>!(itemStates[i.code]||{}).ignored).length}</b></div>
@@ -910,7 +927,7 @@ saveQty();
       ws['!freeze'] = {xSplit:0, ySplit:1};
 
       XLSX.utils.book_append_sheet(wb, ws, 'الطلبية');
-      var brTag = selectedBranch==='all' ? '' : '_'+selectedBranch;
+      var brTag = selectedBranches.length===3 ? '' : '_'+selectedBranches.join('_');
       var fname = (currentType==='medicine'?'medicine':'cosmo') + brTag + '_order_';
       XLSX.writeFile(wb, fname + new Date().toISOString().slice(0,10) + '.xlsx');
     }
