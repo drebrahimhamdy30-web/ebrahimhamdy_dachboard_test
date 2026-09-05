@@ -27,6 +27,13 @@
 --   ⚠️ failed **مش** ممنوع عن قصد — طلب رجّعه الطيار لازم يتعاد تعيينه.
 --   ⚠️ cancelled كمان مسموح — سيبناه لحد ما نراجع مسار الإلغاء لوحده.
 --
+-- ⚠️ فخّ: CREATE OR REPLACE FUNCTION **بيمسح** خصائص الدالة اللي مش
+--    مكتوبة صريح في الأمر — ومنها SET search_path. وده على دالة
+--    SECURITY DEFINER ثغرة تصعيد صلاحيات، وكل الدوال الشبيهة عندنا
+--    (cleanup_empty_trips / recompute_trip_total) عليها search_path=public.
+--    عشان كده مكتوب صريح تحت في الاتنين. الصلاحيات (proacl) بتفضل
+--    زي ما هي — بس الخصائص لأ.
+--
 -- ⚠️ يتشغّل على **الاتنين**: سحابة rxtjoqulmgkkcohmgzgi + سيرفر
 --    supabase.ebrahimhamdy.com — القاعدتين لازم يفضلوا متطابقين.
 -- ═══════════════════════════════════════════════════════════════════
@@ -38,6 +45,7 @@ CREATE OR REPLACE FUNCTION public.manual_assign_order(
   p_order_id uuid, p_driver_id uuid, p_user_name text
 ) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public          -- ⚠️ لازم صريح: CREATE OR REPLACE بيمسحه
 AS $function$
 DECLARE
   v_driver drivers%ROWTYPE;
@@ -137,6 +145,7 @@ CREATE OR REPLACE FUNCTION public.transfer_orders_to_driver(
   p_order_ids uuid[], p_to_driver_id uuid, p_reason text, p_user_name text
 ) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public          -- ⚠️ لازم صريح: CREATE OR REPLACE بيمسحه
 AS $function$
 DECLARE
   v_to_driver drivers%ROWTYPE;
