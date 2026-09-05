@@ -33,7 +33,12 @@ const ALLOW = [
   /BOUNDARY\s*=/,               // فاصل multipart مش سر
   /CHANGE_ME/,                  // قيمة نائبة
   /Deno\.env\.get/,             // بيقرا من البيئة = سليم
-  /decrypted_secret/            // بيقرا من vault = سليم
+  /decrypted_secret/,           // بيقرا من vault = سليم
+  // ⚠️ ترويسة PEM جوّه regex بيشيلها = كود مش مفتاح:
+  //      pem.replace(/-----BEGIN PRIVATE KEY-----/, '')
+  //    المفتاح الحقيقي هو **جسم** base64 الطويل، مش الترويسة لوحدها.
+  //    القاعدة ضيقة عن قصد: لازم يكون جوه replace( عشان تعدّي.
+  /replace\(\s*\/-----(BEGIN|END)/
 ];
 
 function files() {
