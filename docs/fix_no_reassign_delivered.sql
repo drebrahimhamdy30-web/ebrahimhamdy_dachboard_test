@@ -43,6 +43,22 @@
 --      لموبايلات الطيارين (notify_fcm_on_assign / notify_on_driver_change
 --      / notify_driver_order_event). اتأكدنا بعدها: صفر إشعار جديد.
 --
+-- فحص تاني (التسليم المكرر) — نتج عنه القسم 3 تحت:
+--   366 طلب ليهم أكتر من حدث تسليم. 13 منهم بطيار مختلف = نفس باج
+--   إعادة التعيين (اتقفل بالقسمين 1 و2). الباقي ضغط مزدوج/إعادة إرسال.
+--   ✅ مفيش دالة تقارير بتعدّ من order_logs، والشاشات بتعدّ منه
+--      order_postponed بس — فالتكرار مش بيضخّم أعداد الموصّل.
+--   🔴 لكن **192 طلب** الـdelivered_at بتاعهم اتكتب بوقت الموبايل فوق
+--      وقت السيرفر، متوسط تضخيم 22.5 دقيقة (أغسطس أسوأهم: 133 طلب).
+--      اتصلّحوا 2026-09-05 من order_logs، و20 منهم picked_at كمان.
+--      11 تقييم اتحسّن (5 اترفع عنهم «متأخر»)، و**7 اتمنعوا** لأن
+--      الحساب بإعدادات النهاردة كان هيسوّئهم — التصحيح يخفّف أو يسيب،
+--      عمره ما يزوّد.
+--
+-- ⚠️ لسه محتاج قرار: 955 طلب delivered_at بتاعهم متأخر عن السجل
+--    و1426 أقدم منه — من غير تسليم مكرر. سببهم مختلف (ساعة الموبايل،
+--    زي ما اتصلّح لـ823 طلب في 2026-08-22). خارج نطاق الشغل ده.
+--
 -- ⚠️ فخّ: CREATE OR REPLACE FUNCTION **بيمسح** خصائص الدالة اللي مش
 --    مكتوبة صريح في الأمر — ومنها SET search_path. وده على دالة
 --    SECURITY DEFINER ثغرة تصعيد صلاحيات، وكل الدوال الشبيهة عندنا
@@ -275,3 +291,50 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   RETURN jsonb_build_object('success', false, 'error', SQLERRM);
 END $function$;
+
+
+-- ───────────────────────────────────────────────────────────────────
+-- 3) trg_server_event_time — قفل وقت الاستلام/التسليم بعد ما يتسجّل
+-- ───────────────────────────────────────────────────────────────────
+-- اتضاف 2026-09-05 بعد فحص الطلبات اللي ليها أكتر من حدث تسليم (366 طلب).
+--
+-- الباج: التريجر كان بيعتمد وقت السيرفر **لأول تسجيل بس**
+-- (`OLD.delivered_at is null`). لما الطيار يضغط «تم» تاني — والشاشة
+-- ما بتتحدّثش فبيضغط كتير — الشرط ده مابيتحققش، فالتريجر بيسكت
+-- و**وقت موبايل الطيار بيتكتب فوق وقت السيرفر الصح**. وبعدها
+-- trg_sla_rating بيعيد الحساب على الوقت المتضخّم.
+--
+-- الأثر اللي اتقاس على السحابة: 192 طلب، متوسط تضخيم **22.5 دقيقة**،
+-- أكتر شهر أغسطس (133 طلب). التقييم ده بيتحسب على **الصيدلية والفرع**
+-- مش على الطيار، فكانوا بياخدوا تأخير مالهمش فيه.
+--
+-- ⚠️ التصفير (NULL) مسموح عن قصد — auto_dispatch_tick و
+--    recover_stuck_orders بيصفّروا الأوقات لما يرجّعوا طلب للتوزيع،
+--    فقفل مطلق كان هيعطّلهم.
+--
+-- ⚠️ التصحيح الإداري بيعدّي عادي لأنه بيتعمل بـ
+--    `SET LOCAL session_replication_role = replica`.
+CREATE OR REPLACE FUNCTION public.trg_server_event_time()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public          -- ⚠️ لازم صريح: CREATE OR REPLACE بيمسحه
+AS $function$
+begin
+  -- أول ما يتسجّل الاستلام: اعتمد وقت السيرفر بدل وقت جهاز الطيار
+  if NEW.picked_at is not null and OLD.picked_at is null then
+    NEW.picked_at := now();
+  -- ⛔ اتسجّل خلاص؟ ماينكتبش فوقه (الضغطة التانية).
+  elsif NEW.picked_at is not null and OLD.picked_at is not null
+        and NEW.picked_at is distinct from OLD.picked_at then
+    NEW.picked_at := OLD.picked_at;
+  end if;
+
+  if NEW.delivered_at is not null and OLD.delivered_at is null then
+    NEW.delivered_at := now();
+  elsif NEW.delivered_at is not null and OLD.delivered_at is not null
+        and NEW.delivered_at is distinct from OLD.delivered_at then
+    NEW.delivered_at := OLD.delivered_at;
+  end if;
+
+  return NEW;
+end $function$;
