@@ -491,6 +491,36 @@ function switchTab(tab) {
   }
   // تبويبات المبيعات بتتحمّل أول ما تفتحها بس
   if (tab.indexOf('sa_') === 0) loadSalesTab(tab);
+  else loadMainTab(tab);
+}
+
+// كل قسم محصّن لوحده — عشان فشل قسم (مثلاً تقييمات/طلبات) ما يوقّفش باقي الأقسام
+// (كان أي استثناء قبل جدول الأداء بيمنعه من التحديث مع فلتر التاريخ)
+async function step(fn) { try { await fn(); } catch (e) { console.error('report step failed:', e); } }
+
+/* ═══ تحميل كسول للتبويبات الرئيسية ═══
+   تبويبات المبيعات (sa_) كانت كسولة خلاص، لكن الأربعة الرئيسية كانت
+   بتتحمّل كلها في loadReport مهما كان المفتوح — يعني عشان تشوف
+   «تقارير الطيارين» كنت بتستنى الحوافز والجرد كمان.
+   ⚠️ الجلب الكبير (reportOrders) بيفضل فوري لأن الأربعة بيشتغلوا عليه —
+      الكسل هنا للنداءات الزيادة والحسابات التقيلة اللي فوقه.
+   ⚠️ renderSlaAnalysis في تبويب **الطلبات** مش الطيارين (slaSummary
+      جوّه pane تقارير الطلبات) — سهل يتحط في الخانة الغلط. */
+const mainLoaded = new Set();
+const MAIN_TAB_STEPS = {
+  drivers:    (f, t) => [renderKPIs, renderDailyChart, renderStatusPie, renderRegions,
+                         () => loadFairScores(f, t), () => loadDriverPerfTab(f, t)],
+  orders:     (f, t) => [() => loadOrdersTab(f, t), renderSlaAnalysis],
+  incentives: (f, t) => [() => loadIncentivesTab(f, t)],
+  jard:       (f, t) => [() => loadJardTab(f, t)],
+};
+
+async function loadMainTab(tab) {
+  if (mainLoaded.has(tab) || !MAIN_TAB_STEPS[tab]) return;
+  mainLoaded.add(tab);                       // متحمّل بنفس الفترة/الفرع
+  const from = document.getElementById('dateFrom').value;
+  const to   = document.getElementById('dateTo').value;
+  for (const fn of MAIN_TAB_STEPS[tab](from, to)) await step(fn);
 }
 
 async function loadReport() {
@@ -507,23 +537,12 @@ async function loadReport() {
     return q;
   });
 
-  // كل قسم محصّن لوحده — عشان فشل قسم (مثلاً تقييمات/طلبات) ما يوقّفش باقي الأقسام
-  // (كان أي استثناء قبل جدول الأداء بيمنعه من التحديث مع فلتر التاريخ)
-  const step = async (fn) => { try { await fn(); } catch (e) { console.error('report step failed:', e); } };
-  await step(() => renderKPIs());
-  await step(() => renderDailyChart());
-  await step(() => renderStatusPie());
-  await step(() => renderRegions());
-  await step(() => loadFairScores(from, to));
-  await step(() => loadOrdersTab(from, to));
-  await step(() => renderSlaAnalysis());
-  await step(() => loadDriverPerfTab(from, to));
-  await step(() => loadIncentivesTab(from, to));
-  await step(() => loadJardTab(from, to));
-  // الفترة/الفرع اتغيّروا: علّم تبويبات المبيعات إنها بايتة، وحمّل
-  // المفتوح منها دلوقتي بس (الباقي يتحمّل أول ما تفتحه)
+  // الفترة/الفرع اتغيّروا: كل التبويبات بقت بايتة — نحمّل المفتوح بس،
+  // والباقي أول ما يتفتح (زي ما تبويبات المبيعات بتعمل من الأول)
+  mainLoaded.clear();
   saMarkDirty();
   if (currentTab.indexOf('sa_') === 0) await step(() => loadSalesTab(currentTab));
+  else await loadMainTab(currentTab);
   showLoading(false);
 }
 
