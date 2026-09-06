@@ -765,11 +765,40 @@
         note:'من شاشة الجرد — تحويل إلى '+targetName
       });
       if(out&&out.ok){
-        if(btn){ btn.dataset.sent='1'; btn.textContent='تم الإرسال ✓'; btn.style.background='var(--success,#16a34a)'; btn.disabled=true; btn.onclick=null; }
+        // سجّل الصنف كـ«قيد التحويل» لفرع الطالب — نفس جدول شاشة الطلبيات/التحويل
+        // (شاشة التحويل بتمسح الصف لما الطلب يتقفل «تم/غير متوفر» فالعلامة تتشال تلقائيًا)
+        try{
+          await fetch(SB_URL_API+'/rest/v1/order_transfer_pending?on_conflict=branch,itm_code',{
+            method:'POST',
+            headers:await sbH({'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=minimal'}),
+            body:JSON.stringify({ branch:targetName, itm_code:String(it.code), qty:plan.qty, requested_at:new Date().toISOString() })
+          });
+        }catch(e){}
+        transferPending.add(targetName+'|'+String(it.code));
+        if(btn){ btn.dataset.sent='1'; btn.outerHTML='<span style="display:inline-block;margin-top:4px;font-family:Cairo,sans-serif;font-size:0.72rem;font-weight:700;color:var(--warning,#f59e0b);">⏳ تم طلب تحويله</span>'; }
       }else{
         if(btn){ btn.disabled=false; btn.textContent='↪ تحويل'; }
         alert('فشل إرسال طلب التحويل — حاول تاني');
       }
+    }
+
+    // ===== الأصناف قيد التحويل (طلبات تحويل لسه قيد الانتظار) =====
+    // مفتاح: "اسم الفرع الطالب|كود الصنف". بنجيبها من نفس جدول order_transfer_pending
+    // اللي شاشة التحويل بتمسح منه الصف لما الطلب يتقفل، فوجود الصف = لسه قيد الانتظار.
+    var transferPending = new Set();
+    async function loadTransferPending(){
+      try{
+        var r=await fetch(SB_URL_API+'/rest/v1/order_transfer_pending?select=branch,itm_code', { headers: await sbH() });
+        var rows=await r.json();
+        transferPending=new Set((Array.isArray(rows)?rows:[]).map(function(x){ return String(x.branch)+'|'+String(x.itm_code); }));
+      }catch(e){ transferPending=new Set(); }
+    }
+    // إمّا شارة «قيد التحويل» (لو الصنف اتطلب تحويله لفرع الطالب الحالي) أو زر التحويل
+    function transferActionHtml(it, mp){
+      var target=document.getElementById('target-branch').value;
+      var pend=transferPending.has(BRANCHES[target]+'|'+String(it.code));
+      if(pend) return '<span style="display:inline-block;margin-top:4px;font-family:Cairo,sans-serif;font-size:0.72rem;font-weight:700;color:var(--warning,#f59e0b);">⏳ تم طلب تحويله</span>';
+      return '<button id="trbtn-'+it.code+'" onclick="sendTransfer(\''+it.code+'\')" style="display:'+(mp.qty>0?'inline-block':'none')+';margin-top:4px;font-family:Cairo,sans-serif;font-size:0.72rem;font-weight:700;padding:3px 10px;background:var(--accent,#0d9488);color:#fff;border:none;border-radius:6px;cursor:pointer;">↪ تحويل</button>';
     }
 
     async function calculate(){
@@ -788,6 +817,7 @@
         });
       allResults=items;
       hasCalculated=true;
+      await loadTransferPending();
       applyAndRender();
     }
 
@@ -904,7 +934,7 @@
           var mSel='<select onchange="setMissingSource(\''+it.code+'\',this.value)" style="font-family:Cairo,sans-serif;font-size:0.72rem;padding:2px 4px;border:1px solid var(--border,#ccc);border-radius:6px;background:var(--bg-input,#fff);color:inherit;">'+
             mo.map(function(b){ if(!it[b]||!it[b].has) return ''; return '<option value="'+b+'"'+(mp.source===b?' selected':'')+'>'+BRANCHES[b]+' (فائض '+branchSurplus(it[b])+')</option>'; }).join('')+'</select>';
           var mQty='<input type="number" min="0" value="'+mp.qty+'" oninput="setMissingQty(\''+it.code+'\',this.value)" style="width:64px;font-family:Cairo,sans-serif;font-size:0.75rem;padding:2px 4px;border:1px solid var(--border,#ccc);border-radius:6px;text-align:center;background:var(--bg-input,#fff);color:inherit;">';
-          var mBtn='<button id="trbtn-'+it.code+'" onclick="sendTransfer(\''+it.code+'\')" style="display:'+(mp.qty>0?'inline-block':'none')+';margin-top:4px;font-family:Cairo,sans-serif;font-size:0.72rem;font-weight:700;padding:3px 10px;background:var(--accent,#0d9488);color:#fff;border:none;border-radius:6px;cursor:pointer;">↪ تحويل</button>';
+          var mBtn=transferActionHtml(it, mp);
           html+='<tr><td class="name-cell"><div style="font-weight:600;">'+it.name+' '+medBadge(it)+'</div>'+
             '<div style="font-size:0.65rem;color:var(--text-muted);">'+it.code+' · '+it.company+'</div></td>'+
             branchInfoCell(it.mamora)+branchInfoCell(it.san)+branchInfoCell(it.bishr)+
@@ -921,7 +951,7 @@
           var mSel='<select onchange="setMissingSource(\''+it.code+'\',this.value)" style="font-family:Cairo,sans-serif;font-size:0.72rem;padding:2px 4px;border:1px solid var(--border,#ccc);border-radius:6px;background:var(--bg-input,#fff);color:inherit;">'+
             mo.map(function(b){ if(!it[b]||!it[b].has) return ''; return '<option value="'+b+'"'+(mp.source===b?' selected':'')+'>'+BRANCHES[b]+' (فائض '+branchSurplus(it[b])+')</option>'; }).join('')+'</select>';
           var mQty='<input type="number" min="0" value="'+mp.qty+'" oninput="setMissingQty(\''+it.code+'\',this.value)" style="width:64px;font-family:Cairo,sans-serif;font-size:0.75rem;padding:2px 4px;border:1px solid var(--border,#ccc);border-radius:6px;text-align:center;background:var(--bg-input,#fff);color:inherit;">';
-          var mBtn='<button id="trbtn-'+it.code+'" onclick="sendTransfer(\''+it.code+'\')" style="display:'+(mp.qty>0?'inline-block':'none')+';margin-top:4px;font-family:Cairo,sans-serif;font-size:0.72rem;font-weight:700;padding:3px 10px;background:var(--accent,#0d9488);color:#fff;border:none;border-radius:6px;cursor:pointer;">↪ تحويل</button>';
+          var mBtn=transferActionHtml(it, mp);
           html+='<tr><td class="name-cell"><div style="font-weight:600;">'+it.name+' '+medBadge(it)+'</div>'+
             '<div style="font-size:0.65rem;color:var(--text-muted);">'+it.code+' · '+it.company+'</div></td>'+
             branchInfoCell(it.mamora)+branchInfoCell(it.san)+branchInfoCell(it.bishr)+
