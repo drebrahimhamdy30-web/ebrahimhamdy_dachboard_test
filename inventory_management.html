@@ -192,6 +192,10 @@
                 <span class="filter-label">يظهر الفائض ≥ <span class="help-ic">؟<span class="tip">لا تعرض الفائض إلا إذا بلغ هذا الرقم على الأقل.</span></span></span>
                 <input type="number" id="min-surplus" value="1" min="1" step="1" oninput="onFilterChange()">
               </div>
+              <div class="mini-field">
+                <span class="filter-label">أهم كام صنف <span class="help-ic">؟<span class="tip">اعرض أهم هذا العدد من الأصناف احتياجًا للتحويل — الأقل أيام تغطية (قلة الرصيد + كثرة المعدل) أولاً. سيبها فاضية لعرض الكل.</span></span></span>
+                <input type="number" id="transfer-topn" value="" min="1" step="1" placeholder="الكل" oninput="onFilterChange()">
+              </div>
             </div>
 
             <div class="settings-strip" id="missing-config-wrap" style="display:none;">
@@ -638,6 +642,14 @@
 
     function coverQty(branchObj, days){ return (branchObj.daily||0) * days; }
 
+    // أولوية الاحتياج للتحويل: أيام التغطية = الرصيد ÷ المعدل اليومي.
+    // أقل = أهم (قلة الرصيد + كثرة المعدل). معدل صفر = آخر الأولوية.
+    function transferUrgency(b){
+      var daily=(b&&b.daily)||0;
+      if(daily<=0) return Infinity;
+      return (b.stock||0)/daily;
+    }
+
     function branchSurplus(branchObj){
       var minStock    = parseFloat(document.getElementById('min-stock').value)||0;
       var surplusDays = parseFloat(document.getElementById('surplus-days').value)||0;
@@ -806,6 +818,10 @@
           var hasSurplus=others.some(function(b){ return branchSurplus(it[b]) > 0; });
           if(hasSurplus) rows.push(it);
         });
+        // الأكثر احتياجًا أولاً (أقل أيام تغطية = قلة الرصيد + كثرة المعدل) ثم أهم N
+        rows.sort(function(a,b){ return transferUrgency(a[target]) - transferUrgency(b[target]); });
+        var topN=parseInt(document.getElementById('transfer-topn').value,10);
+        if(topN>0) rows=rows.slice(0, topN);
       } else if(currentTab==='missing'){
         var target2=document.getElementById('target-branch').value;
         var others2=['mamora','san','bishr'].filter(function(b){return b!==target2;});
@@ -882,12 +898,18 @@
         var target=document.getElementById('target-branch').value;
         html+='<tr><th class="name-cell" style="text-align:right;">الصنف</th>'+
           '<th>'+BRANCHES.mamora+'</th><th>'+BRANCHES.san+'</th><th>'+BRANCHES.bishr+'</th>'+
-          '<th>المستهدف</th></tr></thead><tbody>';
+          '<th>المستهدف</th><th>تحويل من</th><th>الكمية المطلوبة</th></tr></thead><tbody>';
         pageItems.forEach(function(it){
+          var mp=missingPlan(it), mo=missingOthers();
+          var mSel='<select onchange="setMissingSource(\''+it.code+'\',this.value)" style="font-family:Cairo,sans-serif;font-size:0.72rem;padding:2px 4px;border:1px solid var(--border,#ccc);border-radius:6px;background:var(--bg-input,#fff);color:inherit;">'+
+            mo.map(function(b){ if(!it[b]||!it[b].has) return ''; return '<option value="'+b+'"'+(mp.source===b?' selected':'')+'>'+BRANCHES[b]+' (فائض '+branchSurplus(it[b])+')</option>'; }).join('')+'</select>';
+          var mQty='<input type="number" min="0" value="'+mp.qty+'" oninput="setMissingQty(\''+it.code+'\',this.value)" style="width:64px;font-family:Cairo,sans-serif;font-size:0.75rem;padding:2px 4px;border:1px solid var(--border,#ccc);border-radius:6px;text-align:center;background:var(--bg-input,#fff);color:inherit;">';
+          var mBtn='<button id="trbtn-'+it.code+'" onclick="sendTransfer(\''+it.code+'\')" style="display:'+(mp.qty>0?'inline-block':'none')+';margin-top:4px;font-family:Cairo,sans-serif;font-size:0.72rem;font-weight:700;padding:3px 10px;background:var(--accent,#0d9488);color:#fff;border:none;border-radius:6px;cursor:pointer;">↪ تحويل</button>';
           html+='<tr><td class="name-cell"><div style="font-weight:600;">'+it.name+' '+medBadge(it)+'</div>'+
             '<div style="font-size:0.65rem;color:var(--text-muted);">'+it.code+' · '+it.company+'</div></td>'+
             branchInfoCell(it.mamora)+branchInfoCell(it.san)+branchInfoCell(it.bishr)+
-            '<td style="font-weight:700;">'+BRANCHES[target]+'</td></tr>';
+            '<td style="font-weight:700;">'+BRANCHES[target]+'</td>'+
+            '<td>'+mSel+'</td><td>'+mQty+'<br>'+mBtn+'</td></tr>';
         });
       } else if(currentTab==='missing'){
         var target2=document.getElementById('target-branch').value;
@@ -1725,23 +1747,16 @@
         XLSX.utils.book_append_sheet(wb, ws, 'فرق الأسعار');
       } else if(currentTab==='transfer'){
         var target=document.getElementById('target-branch').value;
-        var others=['mamora','san','bishr'].filter(function(b){return b!==target;});
-        var sheets={};
-        others.forEach(function(b){ sheets[b]=[['الكود','الصنف','الكمية المطلوب تحويلها']]; });
+        var wsDataT=[['الكود','الصنف','الكمية المطلوبة','تحويل من (فائض)','إلى (الفرع الطالب)']];
         filteredResults.forEach(function(it){
-          var plan=transferPlan(it, target);
-          others.forEach(function(b){ if(plan[b] && plan[b]>0){ sheets[b].push([it.code, it.name, plan[b]]); } });
+          var plan=missingPlan(it);
+          if(!plan.source || !(plan.qty>0)) return;
+          wsDataT.push([it.code, it.name, plan.qty, BRANCHES[plan.source], BRANCHES[target]]);
         });
-        var added=false;
-        others.forEach(function(b){
-          if(sheets[b].length>1){
-            var ws=XLSX.utils.aoa_to_sheet(sheets[b]);
-            ws['!cols']=[{wch:14},{wch:45},{wch:18}];
-            var name=('من '+BRANCHES[b]+' ← '+BRANCHES[target]).slice(0,31);
-            XLSX.utils.book_append_sheet(wb, ws, name); added=true;
-          }
-        });
-        if(!added){ alert('لا توجد كميات للتحويل'); return; }
+        if(wsDataT.length===1){ alert('لا توجد كميات مطلوبة للتصدير — اكتب الكميات المطلوبة أولاً'); return; }
+        var wsT=XLSX.utils.aoa_to_sheet(wsDataT);
+        wsT['!cols']=[{wch:14},{wch:45},{wch:14},{wch:20},{wch:20}];
+        XLSX.utils.book_append_sheet(wb, wsT, ('طلب '+BRANCHES[target]).slice(0,31));
       } else if(currentTab==='missing'){
         var target2=document.getElementById('target-branch').value;
         var wsData2=[['الكود','الصنف','الكمية المطلوبة','تحويل من (فائض)','إلى (الفرع الطالب)']];
