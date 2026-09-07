@@ -381,11 +381,11 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
     <span id="onlineChip" title="طيارين أونلاين الآن" style="display:inline-flex;align-items:center;gap:5px;background:var(--green-light);color:#15803d;font-weight:800;font-size:.72rem;padding:.3rem .65rem;border-radius:20px;white-space:nowrap">🟢 — أونلاين</span>
     <div class="search-wrap">
       <svg class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input type="text" class="toolbar-search" id="searchBill" placeholder="رقم الفاتورة (٣ أرقام فأكثر)" oninput="renderOrders()">
+      <input type="text" class="toolbar-search" id="searchBill" placeholder="رقم الفاتورة (٣ أرقام فأكثر)" oninput="onOrderSearch()">
     </div>
     <div class="search-wrap">
       <svg class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input type="text" class="toolbar-search" id="searchCode" placeholder="كود العميل (بالضبط) أو الاسم" oninput="renderOrders()">
+      <input type="text" class="toolbar-search" id="searchCode" placeholder="كود العميل (بالضبط) أو الاسم" oninput="onOrderSearch()">
     </div>
     <button class="ftab active" onclick="setFilter('all',this)">الكل <span id="f-all">0</span></button>
     <button class="ftab" onclick="setFilter('pending',this)">جاهز <span id="f-pending">0</span></button>
@@ -947,29 +947,41 @@ async function loadAll(){
     // فلتر حسب الفرع المختار
     const branchId = currentUser?.role==='admin' ? activeBranchId : (currentUser?.branch_id||null);
 
-    let ordersQ=db.from('orders').select('*').order('created_at',{ascending:false});
     let driversQ=db.from('drivers').select('*,branches!drivers_branch_id_fkey(name)').eq('is_active',true).order('full_name');
     let tripsQ=db.from('trips').select('*').in('status',['active','pending_complete']).order('created_at',{ascending:false});
-
     if(branchId){
-      ordersQ=ordersQ.eq('branch_id',branchId);
       driversQ=driversQ.eq('branch_id',branchId);
       tripsQ=tripsQ.eq('branch_id',branchId);
     }
 
-    const [oR,dR,tR]=await Promise.all([
-      ordersQ,
-      driversQ,
-      tripsQ
-    ]);
-    allOrders=oR.data||[];allDrivers=dR.data||[];activeTrips=tR.data||[];
-    // روابط trip_orders للرحلات النشطة فقط — بدل تحميل الجدول كله (يتجاوز حد 1000 صف ويخفي أوردرات بعض الطيارين)
+    // الطيارين + الرحلات النشطة أولاً — عشان نعرف أوردرات الرحلات قبل ما نجيب الطلبات
+    const [dR,tR]=await Promise.all([driversQ,tripsQ]);
+    allDrivers=dR.data||[];activeTrips=tR.data||[];
+    // روابط trip_orders للرحلات النشطة فقط
     let rrData=[];
     const activeTripIds=activeTrips.map(t=>t.id);
     if(activeTripIds.length){
       const rrR=await db.from('trip_orders').select('*').in('trip_id',activeTripIds);
       rrData=rrR.data||[];
     }
+    tripOrdersMap={};
+    rrData.forEach(r=>{if(!tripOrdersMap[r.trip_id])tripOrdersMap[r.trip_id]=[];tripOrdersMap[r.trip_id].push(r.order_id);});
+    const tripOrderIds=[...new Set(rrData.map(r=>r.order_id).filter(Boolean))];
+
+    // الطلبات: النشطة فقط (أي عمر) + أي طلب داخل رحلة نشطة (حتى لو اتوصّل) — بدل سحب ~1000 صف كل مرة.
+    // البحث بالفاتورة/الكود بيعمل استعلام مباشر على القاعدة (كل التاريخ) في onOrderSearch/doOrderSearch.
+    let actQ=db.from('orders').select('*').in('status',['pending','postponed','assigned','picked']).order('created_at',{ascending:false});
+    if(branchId) actQ=actQ.eq('branch_id',branchId);
+    const actR=await actQ;
+    let linkedRows=[];
+    if(tripOrderIds.length){
+      let lq=db.from('orders').select('*').in('id',tripOrderIds);
+      if(branchId) lq=lq.eq('branch_id',branchId);
+      const lR=await lq; linkedRows=lR.data||[];
+    }
+    { const _seen=new Set(); allOrders=[];
+      (actR.data||[]).concat(linkedRows).forEach(o=>{ if(o && !_seen.has(o.id)){ _seen.add(o.id); allOrders.push(o); } }); }
+
     // Load dispatch settings
     if(branchId){
       const dsRes=await db.from('dispatch_settings').select('*').eq('branch_id',branchId);
@@ -978,8 +990,6 @@ async function loadAll(){
     // تحديث لابل الفرع
     const bl=document.getElementById('branchLabel');
     if(bl&&!bl.textContent) bl.textContent=branchId?'':'· كل الفروع';
-    tripOrdersMap={};
-    rrData.forEach(r=>{if(!tripOrdersMap[r.trip_id])tripOrdersMap[r.trip_id]=[];tripOrdersMap[r.trip_id].push(r.order_id);});
     // جيب المناطق المسجلة
     const regRes=await db.from('regions').select('name').eq('is_active',true);
     knownRegions=new Set((regRes.data||[]).map(r=>r.name));
@@ -1892,19 +1902,51 @@ function orderDT(o){
   try{ return new Date(d).toLocaleString('ar-EG',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}); }catch(_){ return ''; }
 }
 
+// ===== بحث مباشر عن الطلبات (كل التاريخ) — الشاشة بتحمّل النشطة + أوردرات الرحلات فقط =====
+let orderSearchResults=null;   // null = مش في وضع بحث
+let _orderSearchTimer=null;
+function onOrderSearch(){
+  const billQ=(document.getElementById('searchBill')?.value||'').trim();
+  const codeQ=(document.getElementById('searchCode')?.value||'').trim();
+  // في تبويب «لم تُغلق على B Connect» البحث بيفلتر القايمة المحمّلة نفسها (مش استعلام طلبات)
+  if(currentFilter==='unclosed'){ renderOrders(); return; }
+  if(billQ.length<3 && codeQ.length<1){ orderSearchResults=null; renderOrders(); return; }
+  clearTimeout(_orderSearchTimer);
+  _orderSearchTimer=setTimeout(doOrderSearch, 300);
+}
+async function doOrderSearch(){
+  const billQ=(document.getElementById('searchBill')?.value||'').trim().toLowerCase();
+  const codeQ=(document.getElementById('searchCode')?.value||'').trim().toLowerCase();
+  const billActive=billQ.length>=3, codeActive=codeQ.length>=1;
+  if(!billActive && !codeActive){ orderSearchResults=null; renderOrders(); return; }
+  try{
+    const branchId=currentUser?.role==='admin'?activeBranchId:(currentUser?.branch_id||null);
+    let q=db.from('orders').select('*').order('created_at',{ascending:false}).limit(200);
+    if(branchId) q=q.eq('branch_id',branchId);
+    const _bp=billQ.replace(/[%(),]/g,''), _cp=codeQ.replace(/[%(),]/g,'');
+    if(billActive) q=q.ilike('bill_no','%'+_bp+'%');
+    else if(codeActive) q=q.or('cust_code.ilike.%'+_cp+'%,customer_name.ilike.%'+_cp+'%');
+    const {data}=await q;
+    let rows=data||[];
+    // نفس المطابقة الدقيقة زي الأول (fuzzy للاسم / كود بالضبط)
+    if(billActive) rows=rows.filter(o=>(o.bill_no||'').toLowerCase().includes(billQ));
+    if(codeActive) rows=rows.filter(o=>matchCodeName(o.cust_code, o.customer_name||o.cust_name, codeQ));
+    orderSearchResults=rows;
+  }catch(e){ orderSearchResults=[]; }
+  renderOrders();
+}
+
 function renderOrders(){
-  // خانتان: رقم الفاتورة (تبحث بعد ٣ أرقام) + كود/اسم العميل — تبحثان في كل الطلبات مهما كانت حالتها
+  // خانتان: رقم الفاتورة (تبحث بعد ٣ أرقام) + كود/اسم العميل — البحث مباشر من القاعدة (كل التاريخ)
   const billQ=(document.getElementById('searchBill')?.value||'').trim().toLowerCase();
   const codeQ=(document.getElementById('searchCode')?.value||'').trim().toLowerCase();
   const billActive=billQ.length>=3;
   const codeActive=codeQ.length>=1;
   let orders, combined=false;   // combined = العرض الافتراضي (هتتوزع + مؤجلة) => نفصلهم في صفّين
   if(billActive||codeActive){
-    orders=allOrders.filter(o=>
-      (!billActive || (o.bill_no||'').toLowerCase().includes(billQ)) &&
-      (!codeActive || matchCodeName(o.cust_code, o.customer_name||o.cust_name, codeQ))
-    );
+    orders = orderSearchResults || [];   // نتائج البحث المباشر من القاعدة (كل التاريخ) — تتجهّز في doOrderSearch
   } else {
+    orderSearchResults=null;             // خرجنا من وضع البحث
     orders=[...allOrders];
     if(currentFilter==='pending') orders=orders.filter(o=>o.status==='pending');
     else if(currentFilter==='postponed') orders=orders.filter(o=>o.status==='postponed');
