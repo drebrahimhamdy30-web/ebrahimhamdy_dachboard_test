@@ -947,23 +947,17 @@ async function loadAll(){
     // فلتر حسب الفرع المختار
     const branchId = currentUser?.role==='admin' ? activeBranchId : (currentUser?.branch_id||null);
 
-    // كل الاستعلامات المستقلة بالتوازي (طيارين/رحلات/طلبات نشطة/مناطق/إعدادات الفرع/الحضور/الأحمال/عدد الرحلات/المعلّقة)
-    // بدل ما تشتغل واحدة ورا التانية. التبعية الوحيدة: رحلات ← أوردرات الرحلات ← الطلبات المرتبطة.
     let driversQ=db.from('drivers').select('*,branches!drivers_branch_id_fkey(name)').eq('is_active',true).order('full_name');
     let tripsQ=db.from('trips').select('*').in('status',['active','pending_complete']).order('created_at',{ascending:false});
-    let actQ=db.from('orders').select('*').in('status',['pending','postponed','assigned','picked']).order('created_at',{ascending:false});
-    let regQ=db.from('regions').select('name').eq('is_active',true);
-    let dsQ=branchId?db.from('dispatch_settings').select('*').eq('branch_id',branchId):null;
-    if(branchId){ driversQ=driversQ.eq('branch_id',branchId); tripsQ=tripsQ.eq('branch_id',branchId); actQ=actQ.eq('branch_id',branchId); }
-    const [dR,tR,actR,regRes,dsRes]=await Promise.all([
-      driversQ, tripsQ, actQ, regQ, (dsQ||Promise.resolve({data:null})),
-      loadAttendanceData(), loadHardLoad(), loadTripCounts(), loadTransferPending()
-    ]);
-    allDrivers=dR.data||[]; activeTrips=tR.data||[];
-    knownRegions=new Set((regRes.data||[]).map(r=>r.name));
-    if(branchId) dispatchSettings=dsRes.data?.[0]||null;
+    if(branchId){
+      driversQ=driversQ.eq('branch_id',branchId);
+      tripsQ=tripsQ.eq('branch_id',branchId);
+    }
 
-    // التبعية: أوردرات الرحلات النشطة ثم الطلبات المرتبطة بيها
+    // الطيارين + الرحلات النشطة أولاً — عشان نعرف أوردرات الرحلات قبل ما نجيب الطلبات
+    const [dR,tR]=await Promise.all([driversQ,tripsQ]);
+    allDrivers=dR.data||[];activeTrips=tR.data||[];
+    // روابط trip_orders للرحلات النشطة فقط
     let rrData=[];
     const activeTripIds=activeTrips.map(t=>t.id);
     if(activeTripIds.length){
@@ -973,6 +967,12 @@ async function loadAll(){
     tripOrdersMap={};
     rrData.forEach(r=>{if(!tripOrdersMap[r.trip_id])tripOrdersMap[r.trip_id]=[];tripOrdersMap[r.trip_id].push(r.order_id);});
     const tripOrderIds=[...new Set(rrData.map(r=>r.order_id).filter(Boolean))];
+
+    // الطلبات: النشطة فقط (أي عمر) + أي طلب داخل رحلة نشطة (حتى لو اتوصّل) — بدل سحب ~1000 صف كل مرة.
+    // البحث بالفاتورة/الكود بيعمل استعلام مباشر على القاعدة (كل التاريخ) في onOrderSearch/doOrderSearch.
+    let actQ=db.from('orders').select('*').in('status',['pending','postponed','assigned','picked']).order('created_at',{ascending:false});
+    if(branchId) actQ=actQ.eq('branch_id',branchId);
+    const actR=await actQ;
     let linkedRows=[];
     if(tripOrderIds.length){
       let lq=db.from('orders').select('*').in('id',tripOrderIds);
@@ -982,14 +982,25 @@ async function loadAll(){
     { const _seen=new Set(); allOrders=[];
       (actR.data||[]).concat(linkedRows).forEach(o=>{ if(o && !_seen.has(o.id)){ _seen.add(o.id); allOrders.push(o); } }); }
 
+    // Load dispatch settings
+    if(branchId){
+      const dsRes=await db.from('dispatch_settings').select('*').eq('branch_id',branchId);
+      dispatchSettings=dsRes.data?.[0]||null;
+    }
     // تحديث لابل الفرع
     const bl=document.getElementById('branchLabel');
     if(bl&&!bl.textContent) bl.textContent=branchId?'':'· كل الفروع';
+    // جيب المناطق المسجلة
+    const regRes=await db.from('regions').select('name').eq('is_active',true);
+    knownRegions=new Set((regRes.data||[]).map(r=>r.name));
+    await loadAttendanceData();
+    await loadHardLoad();
+    await loadTripCounts();
     // تبويب «لم تُغلق على B Connect» بياخد بياناته من refreshUnclosed مش من allOrders،
     // و loadAll مكانتش بتنده عليها — فتغيير الفرع كان بيعيد رسم قايمة الفرع السابق
     // (طلبات فروع تانية بتظهر تحت المعمورة). نعلّم إنها بتتحمّل قبل الرسم ونعيد جلبها بعده.
     if(currentFilter==='unclosed') unclosedLoading=true;
-    renderHeader();renderDrivers();renderTrips();renderOrders();renderAttNotif();
+    renderHeader();renderDrivers();renderTrips();renderOrders();
     if(currentFilter==='unclosed') refreshUnclosed();
   }catch(e){console.error(e);showToast('خطأ في التحميل');}
   showLoading(false);
