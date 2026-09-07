@@ -1004,6 +1004,17 @@ setInterval(()=>{
     const h=Math.floor(d/3600); d-=h*3600; const m=Math.floor(d/60); const s=d-m*60;
     el.textContent=String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
   });
+  // عدّاد كل طلب جارٍ (ساعات:دقايق) من آخر تشغيل — يحمرّ لو تعدّى حد التأخير
+  document.querySelectorAll('.ord-live[data-start]').forEach(el=>{
+    const st=Number(el.dataset.start); if(!st)return;
+    const lateMin=Number(el.dataset.late)||0;
+    const mins=Math.max(0,Math.floor((now-st)/60000));
+    const h=Math.floor(mins/60), m=mins%60;
+    el.textContent=(el.dataset.label||'')+(mins<60?(mins+'د'):(h+':'+String(m).padStart(2,'0')));
+    const over=lateMin>0 && mins>lateMin;
+    el.style.color=over?'#ef4444':'#94a3b8';
+    el.style.fontWeight=over?'800':'700';
+  });
 },1000);
 setInterval(()=>{renderTrips();},10000);
 setInterval(loadAll,30000);
@@ -1721,17 +1732,15 @@ function renderTrips(){
         ${tO.length?tO.map(o=>{
           const base=getTimerBase(o);
           // التسمية + العداد + فحص تجاوز الحد (كل حالة وحدها الخاص بيها)
-          let timerLabel='', timerVal=0, rowCls='', over=false;
+          let timerLabel='', timerVal=0, rowCls='', over=false, lateMin=0, live=false;
           if(o.status==='assigned'){
             timerLabel='على رحلة';
-            timerVal=dm(o.assigned_at||base);
-            over=timerVal>(dispatchSettings?.max_assigned_minutes||10);
-            rowCls='st-assigned';
+            lateMin=dispatchSettings?.max_assigned_minutes||10;
+            rowCls='st-assigned'; live=true;
           } else if(o.status==='picked'){
             timerLabel='تم الاستلام';
-            timerVal=dm(o.picked_at||base);
-            over=timerVal>(dispatchSettings?.max_picked_minutes||30);
-            rowCls='st-picked';
+            lateMin=dispatchSettings?.max_picked_minutes||30;
+            rowCls='st-picked'; live=true;
           } else if(o.status==='delivered'){
             timerLabel='تم التوصيل';
             timerVal=dm(o.delivered_at);
@@ -1742,16 +1751,20 @@ function renderTrips(){
             over=true;
           } else {
             timerLabel='منذ الإنشاء';
-            timerVal=dm(base);
-            over=timerVal>(dispatchSettings?.max_pending_minutes||10);
+            lateMin=dispatchSettings?.max_pending_minutes||10; live=true;
           }
+          // العدّاد الحيّ للطلبات الجارية = من آخر تشغيل (last_activated_at)، ويحمرّ لو تعدّى الحد
+          const _liveStart=new Date(getTimerBase(o)).getTime();
+          if(live){ timerVal=dm(new Date(_liveStart)); over=lateMin>0 && timerVal>lateMin; }
           const _code=(o.cust_code&&String(o.cust_code).trim()&&String(o.cust_code)!=='null')?o.cust_code:(o.bill_no||o.id?.slice(0,6));
           return `<div class="tc-row ${rowCls} ${over?'st-over':''}" onclick="openTripOrderDetail('${o.id}','${trip.id}')">
             <div style="flex:1;min-width:0">
               <!-- السطر 1: الاسم + العداد -->
               <div style="display:flex;align-items:center;gap:.35rem">
                 <span class="tc-rnm" style="font-weight:800;font-size:.78rem">${o.customer_name||o.cust_name||'—'}</span>
-                <span style="color:#94a3b8;font-size:.6rem;font-weight:700;white-space:nowrap">${timerLabel}: ${fm(timerVal)}</span>
+                ${live
+                  ? `<span class="ord-live" data-start="${_liveStart}" data-late="${lateMin}" data-label="${timerLabel}: " style="font-size:.6rem;font-weight:${over?'800':'700'};white-space:nowrap;color:${over?'#ef4444':'#94a3b8'}">${timerLabel}: ${fm(timerVal)}</span>`
+                  : `<span style="color:#94a3b8;font-size:.6rem;font-weight:700;white-space:nowrap">${timerLabel}: ${fm(timerVal)}</span>`}
                 <div class="tc-rdt" style="background:${SC[o.status]||'#9ca3af'}"></div>
               </div>
               <!-- السطر 2: المنطقة + كود العميل -->
