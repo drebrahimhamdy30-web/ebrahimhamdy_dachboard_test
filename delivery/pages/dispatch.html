@@ -3424,11 +3424,20 @@ async function completeTrip(tripId){
   const nowC=new Date().toISOString();
   const tripRow=activeTrips.find(t=>t.id===tripId);
   await db.from('trips').update({status:'completed',completed_at:nowC,updated_at:nowC}).eq('id',tripId);
-  if(oIds.length)await db.from('orders').update({status:'completed',completed_at:nowC,updated_at:nowC}).in('id',oIds);
-  await addTripLog(tripId,'trip_completed',{orders:oIds.length});
-  for(const id of oIds)await addOrderLog(id,'order_completed',{trip_id:tripId});
+  // المتعذرة ترجع للتوزيع (زي ما الطيار ينهي الرحلة بالظبط) — ماتتقفلش «مكتمل»
+  const failedIds=tripOrders.filter(o=>o.status==='failed').map(o=>o.id);
+  if(failedIds.length){
+    await db.from('orders').update({status:'postponed',driver_id:null,deliveryman:null,assigned_at:null,picked_at:null,updated_at:nowC}).in('id',failedIds);
+    for(const id of failedIds){ await db.from('trip_orders').delete().eq('trip_id',tripId).eq('order_id',id); }
+    for(const id of failedIds){ await addOrderLog(id,'order_postponed',{reason:'رجوع للتوزيع بعد تعذّر التسليم'}); }
+  }
+  // المُوصّلة بس → مكتمل
+  const deliveredIds=tripOrders.filter(o=>o.status==='delivered').map(o=>o.id);
+  if(deliveredIds.length)await db.from('orders').update({status:'completed',completed_at:nowC,updated_at:nowC}).in('id',deliveredIds);
+  await addTripLog(tripId,'trip_completed',{orders:deliveredIds.length});
+  for(const id of deliveredIds)await addOrderLog(id,'order_completed',{trip_id:tripId});
   // الطيار فعلاً وصّل واستحق يترتيب آخر الطابور
-  if(tripRow?.driver_id){
+  if(tripRow?.driver_id && deliveredIds.length){
     await db.from('drivers').update({last_completed_at:nowC}).eq('id',tripRow.driver_id);
   }
   showToast('✓ تم إنهاء الرحلة');await loadAll();showLoading(false);
