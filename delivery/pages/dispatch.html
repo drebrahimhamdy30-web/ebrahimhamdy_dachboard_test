@@ -1972,17 +1972,20 @@ function renderOrders(){
   if(billActive||codeActive){
     // نتائج البحث: الأحدث أولاً
     orders.sort((a,b)=> new Date(b.created_at||b.bill_date||0) - new Date(a.created_at||a.bill_date||0));
+  } else if(combined){
+    // العرض المدمج: جاهز → متوقف → مؤجل، والأحدث أولاً داخل كل مجموعة
+    orders.sort((a,b)=>{
+      const ga=postGroup(a), gb=postGroup(b);
+      if(ga!==gb) return ga-gb;
+      return new Date(b.created_at||b.bill_date||0) - new Date(a.created_at||a.bill_date||0);
+    });
   } else {
-  orders.sort((a,b)=>{
-    if(combined){   // هتتوزع (pending) قبل المؤجلة (postponed) دايمًا
-      const ga=a.status==='postponed'?1:0, gb=b.status==='postponed'?1:0;
-      if(ga!==gb)return ga-gb;
-    }
-    const ap=isLate(a)?0:{pending:1,postponed:2,assigned:3,picked:4}[a.status]||9;
-    const bp=isLate(b)?0:{pending:1,postponed:2,assigned:3,picked:4}[b.status]||9;
-    if(ap!==bp)return ap-bp;
-    return new Date(a.bill_date||a.created_at)-new Date(b.bill_date||b.created_at);
-  });
+    orders.sort((a,b)=>{
+      const ap=isLate(a)?0:{pending:1,postponed:2,assigned:3,picked:4}[a.status]||9;
+      const bp=isLate(b)?0:{pending:1,postponed:2,assigned:3,picked:4}[b.status]||9;
+      if(ap!==bp)return ap-bp;
+      return new Date(a.bill_date||a.created_at)-new Date(b.bill_date||b.created_at);
+    });
   }
 
   const grid=document.getElementById('ordersGrid');
@@ -1994,11 +1997,11 @@ function renderOrders(){
     // فاصل المجموعة (يظهر مرة واحدة فوق أول كارت في كل مجموعة) — في العرض المدمج فقط
     let _rowLbl='';
     if(combined){
-      const _g=o.status==='postponed'?'post':'pend';
+      const _g=postGroup(o);   // 0=جاهز · 1=متوقف · 2=مؤجل
       if(_g!==_lastGrp){ _lastGrp=_g;
-        _rowLbl = _g==='pend'
-          ? '<div class="orders-rowlabel">🟢 للتوزيع</div>'
-          : '<div class="orders-rowlabel">⏰ مؤجلة</div>';
+        _rowLbl = _g===0 ? '<div class="orders-rowlabel">🟢 للتوزيع</div>'
+                : _g===1 ? '<div class="orders-rowlabel">⏸️ متوقف (بدون تاريخ)</div>'
+                : '<div class="orders-rowlabel">⏰ مؤجل (بموعد)</div>';
       }
     }
     const sel=selectedOrders.has(o.id);
@@ -2690,6 +2693,11 @@ async function confirmDeliver(){
 // تاريخ بعيد جدًا = تأجيل بدون تاريخ (لا يعيده التوزيع التلقائي — تشغيل يدوي فقط)
 const PST_HOLD='2999-12-31T00:00:00.000Z';
 function isHoldPostpone(pt){ if(!pt)return false; const d=new Date(pt); return !isNaN(d)&&d.getFullYear()>=2900; }
+// تصنيف الطلب في العرض المدمج: 0=جاهز (pending) · 1=متوقف (مؤجل بدون تاريخ/تشغيل يدوي) · 2=مؤجل (بموعد)
+function postGroup(o){
+  if(!o || o.status!=='postponed') return 0;
+  return (isHoldPostpone(o.postpone_time) || !o.postpone_time) ? 1 : 2;
+}
 function pstToggleNoDate(){
   const on=document.getElementById('pst-nodate').checked;
   const g=document.getElementById('pst-time-group');
