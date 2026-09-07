@@ -901,8 +901,15 @@ async function endBreakManual(){
   load(false);
 }
 
+let _attReqBusy=false;
 async function requestAttendance(type){
   if(!driverRecord)return;
+  if(_attReqBusy) return;            // قفل: يمنع الضغط المتكرر السريع (طلبات مكررة)
+  _attReqBusy=true;
+  try{
+  // امنع طلب جديد طالما عنده طلب قيد الموافقة بالفعل
+  const {data:_last}=await db.from('driver_attendance').select('status').eq('driver_id',driverRecord.id).order('created_at',{ascending:false}).limit(1);
+  if(_last&&_last[0]&&String(_last[0].status).endsWith('_request')){ alert('عندك طلب قيد الموافقة بالفعل — استنى موافقة الإدارة قبل ما تبعت طلب تاني.'); return; }
 
   // طلب الحضور لازم يكون داخل نطاق الصيدلية
   if(type==='online'){
@@ -950,6 +957,7 @@ async function requestAttendance(type){
   }
   await loadAttendance();
   load(false);
+  }finally{ _attReqBusy=false; }
 }
 
 function renderHoursCard(records){

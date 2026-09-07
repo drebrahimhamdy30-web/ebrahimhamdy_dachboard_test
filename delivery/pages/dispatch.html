@@ -1178,7 +1178,12 @@ function fmWorkTime(mins){if(mins<60)return `${mins}د`;return `${Math.floor(min
 function renderAttNotif(){
   // فلترة طلبات الحضور على فرع الشاشة (الأدمن على «كل الفروع» يشوف الكل)
   const _attBranch = currentUser?.role==='admin' ? activeBranchId : (currentUser?.branch_id||null);
-  const pending=attendanceToday.filter(r=>r.status.endsWith('_request') && (!_attBranch || attReqBranch[r.driver_id]===_attBranch));
+  // آخر صف لكل طيار — نعرض طلب واحد بس لو ده فعلًا آخر حالته (لسه منتظر موافقة).
+  // كده الطلبات المكررة (ضغط أكتر من مرة) أو اللي اتوافق عليها (بقى أونلاين) ماتظهرش.
+  const _latestReq={};
+  attendanceToday.forEach(r=>{ const c=_latestReq[r.driver_id];
+    if(!c || new Date(r.created_at) > new Date(c.created_at)) _latestReq[r.driver_id]=r; });
+  const pending=Object.values(_latestReq).filter(r=>r.status.endsWith('_request') && (!_attBranch || attReqBranch[r.driver_id]===_attBranch));
   // رحلات بانتظار موافقة الإنهاء
   const pendingCompleteTrips=activeTrips.filter(t=>t.status==='pending_complete');
   // Update header button
