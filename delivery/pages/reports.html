@@ -941,6 +941,27 @@ function openCustomerLateOrders(name){
   const w=document.createElement('div'); w.innerHTML=html.trim(); document.body.appendChild(w.firstElementChild);
 }
 
+// فتح طلبات منطقة معيّنة المتأخرة (من جدول «حسب المنطقة») — كل طلب يفتح تشريحه
+function openRegionLateOrders(region, bid){
+  const list = (lateOrders||[]).filter(o=> (o.cust_region||'—')===region && String(o.branch_id||'')===String(bid))
+    .sort((a,b)=>(b._lateMin||0)-(a._lateMin||0));
+  if(!list.length){ alert('لا توجد طلبات متأخرة في هذه المنطقة'); return; }
+  const rows = list.map(o=>`<div onclick="openDelayAnatomy('${o.id}')" style="display:flex;justify-content:space-between;gap:.5rem;padding:.5rem .6rem;border:1px solid var(--border);border-radius:8px;margin-bottom:.35rem;cursor:pointer">
+      <span style="font-weight:700"><b style="color:var(--primary,#1a56db)">#${o.bill_no||(o.id||'').slice(0,6)}</b> · ${custName(o)}</span>
+      <span style="color:#b45309;font-weight:800;white-space:nowrap">${o._lateMin} د</span>
+    </div>`).join('');
+  const html=`<div data-anatomy="1" style="position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:1rem" onclick="if(event.target===this)this.remove()">
+    <div style="background:var(--surface,#fff);color:var(--text,#0f172a);max-width:460px;width:100%;max-height:86vh;overflow:auto;border-radius:16px;padding:1rem;font-family:'Cairo',sans-serif;direction:rtl">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+        <div style="font-weight:800;font-size:.9rem">📍 ${region} — طلبات متأخرة (${list.length})</div>
+        <button onclick="this.closest('[data-anatomy]').remove()" style="border:none;background:#f1f5f9;border-radius:8px;width:28px;height:28px;cursor:pointer;font-weight:800">✕</button>
+      </div>
+      <div style="font-size:.7rem;color:var(--text-muted);margin-bottom:.5rem">اضغط أي طلب لتشريح التأخير</div>
+      ${rows}
+    </div></div>`;
+  const w=document.createElement('div'); w.innerHTML=html.trim(); document.body.appendChild(w.firstElementChild);
+}
+
 // كاش لأسماء الطيارين عشان ما نجيبهاش كل مرة
 let driversCache = null;
 
@@ -1130,32 +1151,52 @@ function renderSlaAnalysis() {
       ${unknown>0?`<div style="flex:1;min-width:120px;background:var(--surface-3);border:1px solid var(--border);border-radius:10px;padding:.6rem;text-align:center"><div style="font-size:1.25rem;font-weight:800">${unknown}</div><div style="font-size:.72rem;color:var(--text-muted)">غير محدّد (لا تقييم طيار)</div></div>`:''}
     </div>` : '';
 
-  // حسب المنطقة (+ الفرع)
+  // حسب المنطقة (+ الفرع) — مع السبب الغالب + التجاوز + توصية + ضغط لفتح الطلبات
   const byReg = {};
   rated.forEach(o => {
-    const key = (o.cust_region||'—') + '|' + (o.branch_id||'');
-    if (!byReg[key]) byReg[key] = { region:o.cust_region||'—', branch:branchNameById[o.branch_id]||'—', total:0, late:0, sla:o.sla_minutes, sumActual:0 };
-    const x = byReg[key]; x.total++; if (o.sla_rating==='متأخر') x.late++;
-    x.sumActual += Number(o.sla_actual_minutes)||0;
+    const bid = String(o.branch_id||'');
+    const key = (o.cust_region||'—') + '|' + bid;
+    if (!byReg[key]) byReg[key] = { region:o.cust_region||'—', bid, branch:branchNameById[o.branch_id]||'—', total:0, late:0, byDriver:0, byPharmacy:0, sla:o.sla_minutes, sumActual:0 };
+    const x = byReg[key]; x.total++; x.sumActual += Number(o.sla_actual_minutes)||0;
     if (o.sla_minutes) x.sla = o.sla_minutes;
+    if (o.sla_rating==='متأخر'){ x.late++;
+      if (o.perf_rating==='متأخر') x.byDriver++;
+      else if (o.perf_rating) x.byPharmacy++;
+    }
   });
-  const rows = Object.values(byReg).sort((a,b)=>b.late-a.late).slice(0,30);
+  const rows = Object.values(byReg)
+    .map(x=>{ x.pct=x.total?Math.round(x.late/x.total*100):0; x.avg=x.total?x.sumActual/x.total:0;
+              x.over=x.sla!=null?Math.round(x.avg-x.sla):null; x.sev=x.total?(x.late*x.late/x.total):0; return x; })
+    .filter(x=>x.late>0).sort((a,b)=>b.sev-a.sev).slice(0,30);
   document.getElementById('slaByRegion').innerHTML = rows.length ? `
-    <div style="font-size:.8rem;font-weight:700;margin:.4rem 0">حسب المنطقة (الأكثر تأخيرًا):</div>
-    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.76rem">
+    <div style="font-size:.8rem;font-weight:700;margin:.4rem 0">حسب المنطقة (الأكثر تأخيرًا): <span style="font-size:.66rem;color:var(--text-muted);font-weight:400">— اضغط أي منطقة تشوف طلباتها المتأخرة وتشرّحها</span></div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.74rem">
       <thead><tr style="text-align:right;color:var(--text-muted);border-bottom:2px solid var(--border)">
-        <th style="padding:.4rem">المنطقة</th><th style="padding:.4rem">الفرع</th><th style="padding:.4rem">موصّل</th>
-        <th style="padding:.4rem">وقت المنطقة</th><th style="padding:.4rem">متوسط الفعلي</th><th style="padding:.4rem">متأخر</th><th style="padding:.4rem">% متأخر</th></tr></thead>
-      <tbody>${rows.map(x=>{ const pct=x.total?Math.round(x.late/x.total*100):0; const avg=x.total?x.sumActual/x.total:0;
-        const c = pct>=50?'#dc2626':pct>=25?'#ca8a04':'#16a34a';
-        return `<tr style="border-bottom:1px solid var(--border)">
+        <th style="padding:.4rem">المنطقة</th><th style="padding:.4rem">الفرع</th><th style="padding:.4rem">إجمالي</th>
+        <th style="padding:.4rem">متأخر</th><th style="padding:.4rem">%</th><th style="padding:.4rem">وقت المنطقة</th>
+        <th style="padding:.4rem">الفعلي</th><th style="padding:.4rem">التجاوز</th><th style="padding:.4rem">السبب</th><th style="padding:.4rem">الإجراء المقترح</th></tr></thead>
+      <tbody>${rows.map(x=>{
+        const c = x.pct>=50?'#dc2626':x.pct>=25?'#ca8a04':'#16a34a';
+        let cause='—', causeC='var(--text-muted)';
+        if(x.byPharmacy>x.byDriver){ cause='صيدلية'; causeC='#b91c1c'; }
+        else if(x.byDriver>x.byPharmacy){ cause='طيار'; causeC='#c2410c'; }
+        else if(x.byDriver>0||x.byPharmacy>0){ cause='مشترك'; causeC='#7c3aed'; }
+        let rec='—', recC='var(--text-muted)';
+        if(x.total<3){ rec='عيّنة صغيرة'; }
+        else if(x.byPharmacy>x.byDriver){ rec='مشكلة تجهيز — راجع الفرع'; recC='#b91c1c'; }
+        else if(x.byDriver>=x.byPharmacy && x.over!=null && x.over>=Math.max(10,(x.sla||0)*0.4)){ rec='راجع وقت المنطقة (SLA)'; recC='#c2410c'; }
+        else if(x.pct>=50){ rec='متابعة — نسبة تأخير عالية'; recC='#b45309'; }
+        return `<tr onclick="openRegionLateOrders(this.dataset.region,this.dataset.bid)" data-region="${String(x.region).replace(/"/g,'&quot;')}" data-bid="${x.bid}" title="اضغط لعرض طلبات المنطقة المتأخرة" style="border-bottom:1px solid var(--border);cursor:pointer">
           <td style="padding:.4rem;font-weight:700">${x.region}</td>
           <td style="padding:.4rem;color:var(--text-muted)">${x.branch}</td>
           <td style="padding:.4rem">${x.total}</td>
-          <td style="padding:.4rem">${x.sla??'—'} د</td>
-          <td style="padding:.4rem">${avg.toFixed(0)} د</td>
           <td style="padding:.4rem;color:#dc2626;font-weight:700">${x.late}</td>
-          <td style="padding:.4rem;color:${c};font-weight:800">${pct}%</td></tr>`;}).join('')}
+          <td style="padding:.4rem;color:${c};font-weight:800">${x.pct}%</td>
+          <td style="padding:.4rem">${x.sla??'—'} د</td>
+          <td style="padding:.4rem">${x.avg.toFixed(0)} د</td>
+          <td style="padding:.4rem;font-weight:800;color:${x.over>0?'#dc2626':'#16a34a'}">${x.over==null?'—':((x.over>0?'+':'')+x.over+' د')}</td>
+          <td style="padding:.4rem;color:${causeC};font-weight:700">${cause}</td>
+          <td style="padding:.4rem;color:${recC};font-weight:700;font-size:.7rem">${rec}</td></tr>`;}).join('')}
       </tbody></table></div>` : '<div class="empty-state"><p>لا يوجد طلبات مقيّمة</p></div>';
 }
 
