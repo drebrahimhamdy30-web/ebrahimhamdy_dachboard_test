@@ -69,6 +69,11 @@
     .up-map { display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:10px; }
     @media(max-width:640px){ .up-map{ grid-template-columns:1fr 1fr; } }
     .msg-ok { color:#15803d;font-weight:800; } .msg-err { color:var(--danger);font-weight:800; }
+    /* تصنيف الصنف الجديد — من عمود med في المخزون (stock_flat) مش تخمين */
+    .ni-type-tag { display:inline-block;font-size:0.68rem;font-weight:800;border-radius:6px;padding:1px 8px;white-space:nowrap; }
+    .ni-type-tag.med { background:#dbeafe;color:#1d4ed8; }
+    .ni-type-tag.non { background:var(--surface-3);color:var(--text-secondary); }
+
     /* «محاذاة على النص»: العمود على قد محتواه. .cr-table افتراضيًا width:100%
        فبيمطّط الأعمدة الرقمية الضيقة وتسيب فراغ كبير جنب عمود الاسم الطويل.
        هنا الوضع ده **مفتوح افتراضيًا** (عكس تبويب الطلبيات) لأن الجدول ده
@@ -292,6 +297,11 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         <div class="et-note">أصناف <b>ظهرت جديدة على المخزون</b> (كودها ما كانش موجود قبل كده). اضغط <b>«ربط بالمخازن»</b> عشان تدوّر على الصنف في أصناف المخازن غير المكوّدة وتديها كود الصنف ده — تقدر تحدد أكتر من مخزن مرة واحدة. وبعد ما تخلّص اضغط <b>«تم»</b> عشان يختفي من هنا. العدد: <span id="ni-count">—</span>.</div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
           <input type="text" class="form-input et-search" id="ni-search" placeholder="🔍 بحث بالكود أو الاسم..." oninput="renderNewItems()" style="max-width:280px;margin:0">
+          <select class="form-input" id="ni-type" onchange="renderNewItems()" style="max-width:190px;margin:0">
+            <option value="">كل الأنواع</option>
+            <option value="1">أدوية</option>
+            <option value="0">غير أدوية</option>
+          </select>
           <button class="cr-up-btn" id="ni-fit-btn" onclick="niToggleFit()" title="تصغير كل الأعمدة على حجم النص"><i class="fas fa-text-width"></i> محاذاة على النص</button>
         </div>
         <div class="cr-wrap" id="ni-wrap"></div>
@@ -1452,19 +1462,34 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       localStorage.setItem('ni_fit_v1', niFit ? '1' : '0');
       applyNiFit();
     }
+    // الشارة = الإجمالي المحتاج تكويد دايمًا (مش المعروض بعد الفلترة)
     function updateNiBadge() {
       const n = niData.length;
       const b = document.getElementById('ni-badge'); if (b) { b.textContent = n; b.style.display = n ? 'inline-block' : 'none'; }
       const c = document.getElementById('ni-count'); if (c) c.textContent = n;
+      // عدّاد كل نوع جنب اسمه في الفلتر — بيتحسب على كل البيانات
+      const med = niData.filter(r => Number(r.med) === 1).length;
+      const sel = document.getElementById('ni-type');
+      if (sel) {
+        const set = (v, lbl) => { const o = [...sel.options].find(x => x.value === v); if (o) o.textContent = lbl; };
+        set('',  'كل الأنواع (' + n + ')');
+        set('1', 'أدوية (' + med + ')');
+        set('0', 'غير أدوية (' + (n - med) + ')');
+      }
     }
     async function refreshNewItemsBadge() { await loadNewItems(); }
     function renderNewItems() {
       const wrap = document.getElementById('ni-wrap'); if (!wrap) return;
       const q = (document.getElementById('ni-search').value || '').trim().toLowerCase();
+      const typ = (document.getElementById('ni-type') || {}).value || '';   // '' كل الأنواع · '1' أدوية · '0' غير أدوية
       let rows = niData;
+      if (typ !== '') rows = rows.filter(r => String(Number(r.med) === 1 ? 1 : 0) === typ);
       if (q) rows = rows.filter(r => (r.itm_code||'').toLowerCase().includes(q) || (r.n||'').toLowerCase().includes(q));
-      if (!rows.length) { wrap.innerHTML = '<div class="et-note" style="text-align:center">' + (niData.length ? 'لا نتائج للبحث.' : '🎉 مفيش أصناف جديدة محتاجة تكويد حاليًا.') + '</div>'; return; }
-      const th = ['الكود','الاسم','الشركة','سعر البيع','المعمورة','سان ستيفانو','سيدى بشر','سعر مخزن؟','تكويد المخازن','إجراء'];
+      // «العدد» يوضّح المعروض مقابل الإجمالي لما يكون فيه فلترة شغّالة
+      const c = document.getElementById('ni-count');
+      if (c) c.textContent = (rows.length === niData.length) ? niData.length : (rows.length + ' من ' + niData.length);
+      if (!rows.length) { wrap.innerHTML = '<div class="et-note" style="text-align:center">' + (niData.length ? 'لا نتائج مطابقة للفلتر.' : '🎉 مفيش أصناف جديدة محتاجة تكويد حاليًا.') + '</div>'; return; }
+      const th = ['الكود','الاسم','الشركة','النوع','سعر البيع','المعمورة','سان ستيفانو','سيدى بشر','سعر مخزن؟','تكويد المخازن','إجراء'];
       let h = '<table class="cr-table"><thead><tr>' + th.map(t => '<th>' + t + '</th>').join('') + '</tr></thead><tbody>';
       rows.forEach(r => {
         const code = esc(r.itm_code||'');
@@ -1477,6 +1502,9 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           + '<td style="font-weight:700;white-space:nowrap">' + code + '</td>'
           + '<td>' + esc(r.n||'') + '</td>'
           + '<td style="color:var(--text-muted)">' + esc(r.co||'') + '</td>'
+          + '<td style="text-align:center">' + (Number(r.med) === 1
+              ? '<span class="ni-type-tag med">دواء</span>'
+              : '<span class="ni-type-tag non">غير دواء</span>') + '</td>'
           + '<td style="text-align:center">' + niPriceCell(r.itm_code) + '</td>'
           + '<td style="text-align:center">' + niQ(r.m_q) + '</td>'
           + '<td style="text-align:center">' + niQ(r.s_q) + '</td>'
@@ -1485,7 +1513,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           + '<td style="text-align:center"><button class="btn btn-sm" style="background:var(--surface-3);color:var(--text-primary);border:1px solid var(--surface-3);padding:4px 12px;border-radius:8px;cursor:pointer;font-weight:700" onclick="event.stopPropagation();toggleLinkPanel(\'' + jsCode + '\',\'' + jsName + '\',this)">🔗 ربط بالمخازن</button></td>'
           + '<td style="text-align:center"><button class="btn btn-sm" style="background:#0d9488;color:#fff;border:none;padding:4px 14px;border-radius:8px;cursor:pointer;font-weight:700" onclick="event.stopPropagation();markCoded(\'' + jsCode + '\', this)">تم ✓</button></td>'
           + '</tr>'
-          + '<tr class="nl-row" id="nl-row-' + code + '" style="display:none"><td colspan="10" style="padding:0 6px 10px"><div id="nl-panel-' + code + '"></div></td></tr>';
+          + '<tr class="nl-row" id="nl-row-' + code + '" style="display:none"><td colspan="11" style="padding:0 6px 10px"><div id="nl-panel-' + code + '"></div></td></tr>';
       });
       h += '</tbody></table>';
       wrap.innerHTML = h;
