@@ -843,7 +843,7 @@ function renderOrderList(elId, orders, countId, showLate) {
   document.getElementById(countId).textContent = `(${orders.length})`;
   if (!orders.length) { el.innerHTML = '<div class="empty-state"><p>لا يوجد</p></div>'; return; }
   el.innerHTML = orders.map(o=>`
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.45rem 0;border-bottom:1px solid var(--border);font-size:.76rem">
+    <div ${showLate?`onclick="openDelayAnatomy('${o.id}')" title="اضغط لتشريح التأخير"`:''} style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.45rem 0;border-bottom:1px solid var(--border);font-size:.76rem${showLate?';cursor:pointer':''}">
       <div style="flex:1;min-width:0">
         <span style="font-weight:700;color:var(--primary)">#${o.bill_no||(o.id||'').slice(0,6)}</span>
         <span style="color:var(--text-muted)"> · ${custName(o)}</span>
@@ -851,6 +851,71 @@ function renderOrderList(elId, orders, countId, showLate) {
       ${showLate ? `<span style="color:#b45309;font-weight:700;white-space:nowrap">${o._lateMin} د</span>` : `<span style="white-space:nowrap">${Number(o.total_bill_net||0).toLocaleString()} ج</span>`}
       <span style="color:var(--text-muted);white-space:nowrap">${new Date(o.created_at).toLocaleDateString('ar-EG',{day:'numeric',month:'numeric'})}</span>
     </div>`).join('');
+}
+
+// ===== تشريح التأخير: يوضّح المشكلة من الطيار ولا الصيدلية ولا التوزيع =====
+function _gapMins(a,b){ if(!a||!b) return null; const d=Math.round((new Date(b)-new Date(a))/60000); return d>=0?d:null; }
+function _fmtT(t){ if(!t) return '—'; try{ return new Date(t).toLocaleString('ar-EG',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }catch(e){ return '—'; } }
+function openDelayAnatomy(orderId){
+  const o = reportOrders.find(x=>x.id===orderId);
+  if(!o){ alert('الطلب غير موجود'); return; }
+  const activated = (o.last_activated_at && Math.abs(new Date(o.last_activated_at)-new Date(o.created_at))>60000) ? o.last_activated_at : null;
+  const startT = activated || o.created_at;
+  const seq = [
+    {label: activated?'تفعيل':'إنشاء', t:startT, resp:null},
+    {label:'تعيين طيار', t:o.assigned_at, resp:'التوزيع'},
+    {label:'استلام من الصيدلية', t:o.picked_at, resp:'الصيدلية/التجهيز'},
+    {label:'تسليم للعميل', t:o.delivered_at, resp:'الطيار (الطريق)'},
+  ].filter(s=>s.t);
+  const gaps=[];
+  for(let i=1;i<seq.length;i++){ const g=_gapMins(seq[i-1].t, seq[i].t); if(g!=null) gaps.push({from:seq[i-1].label,to:seq[i].label,mins:g,resp:seq[i].resp}); }
+  const maxGap = gaps.reduce((mx,g)=> (!mx||g.mins>mx.mins)?g:mx, null);
+  let verdict, vColor;
+  if(o.perf_rating==='متأخر'){ verdict='التأخير من الطيار — تعدّى الوقت المتوقع للتوصيل'; vColor='#dc2626'; }
+  else if(o.sla_rating==='متأخر' && o.perf_rating && o.perf_rating!=='متأخر'){ verdict='التأخير من الصيدلية/التجهيز — الطلب قعد قبل الاستلام والطيار كان في المعدل'; vColor='#b45309'; }
+  else if(maxGap){ verdict='أطول مرحلة: '+maxGap.from+' ← '+maxGap.to+' — غالبًا من '+maxGap.resp; vColor='#b45309'; }
+  else { verdict='بيانات التوقيت غير مكتملة'; vColor='#6b7280'; }
+  const bn = (typeof branchNameById!=='undefined' && branchNameById[o.branch_id]) || '';
+  const gapsHtml = gaps.length ? gaps.map(g=>{
+    const isMax = maxGap && g===maxGap;
+    return `<div style="display:flex;justify-content:space-between;gap:.5rem;padding:.4rem .6rem;border-radius:8px;margin-bottom:.3rem;background:${isMax?'#fef2f2':'#f8fafc'};border:1px solid ${isMax?'#fecaca':'var(--border)'}">
+      <span style="font-size:.78rem;font-weight:700;color:${isMax?'#dc2626':'#334155'}">${g.from} ← ${g.to}</span>
+      <span style="font-size:.82rem;font-weight:800;color:${isMax?'#dc2626':'#334155'}">${g.mins} د${isMax?' ⚠️':''}</span>
+    </div>`;
+  }).join('') : '<div style="color:var(--text-muted);font-size:.78rem">مفيش توقيتات كافية</div>';
+  const tlHtml = seq.map(s=>`<div style="display:flex;justify-content:space-between;gap:.5rem;font-size:.72rem;padding:.15rem 0"><span style="color:var(--text-muted)">${s.label}</span><span style="font-weight:700">${_fmtT(s.t)}</span></div>`).join('');
+  const html = `
+    <div data-anatomy="1" style="position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:1rem" onclick="if(event.target===this)this.remove()">
+      <div style="background:var(--surface,#fff);color:var(--text,#0f172a);max-width:460px;width:100%;max-height:88vh;overflow:auto;border-radius:16px;padding:1rem 1.1rem;font-family:'Cairo',sans-serif;direction:rtl">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
+          <div style="font-weight:800;font-size:.95rem">🔎 تشريح التأخير</div>
+          <button onclick="this.closest('[data-anatomy]').remove()" style="border:none;background:#f1f5f9;border-radius:8px;width:28px;height:28px;cursor:pointer;font-weight:800">✕</button>
+        </div>
+        <div style="font-size:.8rem;margin-bottom:.5rem;line-height:1.7">
+          <b style="color:var(--primary,#1a56db)">#${o.bill_no||(o.id||'').slice(0,6)}</b> · ${custName(o)}<br>
+          📍 ${o.cust_region||'—'} ${bn?('· 🏢 '+bn):''}<br>
+          🛵 ${o.deliveryman||'—'} · 💰 ${Number(o.total_bill_net||0).toLocaleString()} ج
+        </div>
+        <div style="background:${vColor}14;border:1px solid ${vColor}55;color:${vColor};font-weight:800;font-size:.82rem;border-radius:10px;padding:.55rem .7rem;margin-bottom:.7rem">⚖️ ${verdict}</div>
+        <div style="font-size:.8rem;font-weight:800;margin-bottom:.35rem">⏱ الوقت في كل مرحلة</div>
+        ${gapsHtml}
+        <div style="display:flex;gap:.5rem;margin:.7rem 0">
+          <div style="flex:1;background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:.5rem;text-align:center">
+            <div style="font-size:.66rem;color:var(--text-muted)">تقييم المنطقة (SLA)</div>
+            <div style="font-weight:800;font-size:.82rem;color:${o.sla_rating==='متأخر'?'#dc2626':'#16a34a'}">${o.sla_rating||'—'}</div>
+            <div style="font-size:.66rem;color:var(--text-muted)">فعلي ${o.sla_actual_minutes??'—'} / متوقع ${o.sla_minutes??'—'} د</div>
+          </div>
+          <div style="flex:1;background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:.5rem;text-align:center">
+            <div style="font-size:.66rem;color:var(--text-muted)">تقييم الطيار</div>
+            <div style="font-weight:800;font-size:.82rem;color:${o.perf_rating==='متأخر'?'#dc2626':(o.perf_rating?'#16a34a':'#6b7280')}">${o.perf_rating||'—'}</div>
+            <div style="font-size:.66rem;color:var(--text-muted)">فعلي ${o.actual_minutes??'—'} / متوقع ${o.expected_minutes??'—'} د</div>
+          </div>
+        </div>
+        <div style="font-size:.75rem;font-weight:800;margin-bottom:.2rem">🕘 التوقيتات</div>
+        ${tlHtml}
+      </div>
+    </div>`;
+  const wrap=document.createElement('div'); wrap.innerHTML=html.trim(); document.body.appendChild(wrap.firstElementChild);
 }
 
 // كاش لأسماء الطيارين عشان ما نجيبهاش كل مرة
