@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>تحضير الطلبات</title>
+<link rel="stylesheet" href="../tokens.css?v=20260906">
+<script>try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_dark")==="1"?"dark":"light");document.documentElement.setAttribute("data-theme",_t==="dark"?"dark":"light");}catch(e){}</script>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;font-family:'Cairo',sans-serif}
+body{margin:0;background:var(--bg,#f1f5f9);color:var(--text,#0f172a)}
+.top{position:sticky;top:0;background:var(--primary,#1a56db);color:#fff;padding:.7rem 1rem;display:flex;justify-content:space-between;align-items:center;z-index:5}
+.top h1{font-size:1.05rem;margin:0}
+.top .b{font-size:.75rem;opacity:.92;margin-top:.1rem}
+.wrap{max-width:640px;margin:0 auto;padding:.8rem}
+.count{font-size:.85rem;font-weight:800;margin:.3rem 0 .7rem;color:var(--text-muted)}
+.card{background:var(--surface,#fff);border:1px solid var(--border,#e5e7eb);border-right:6px solid #b45309;border-radius:14px;padding:.8rem .9rem;margin-bottom:.7rem;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.card.old{border-right-color:#dc2626}
+.nm{font-weight:800;font-size:1.05rem}
+.meta{font-size:.8rem;color:var(--text-muted);margin-top:.3rem;line-height:1.85}
+.wait{font-weight:900}
+.done{width:100%;margin-top:.65rem;padding:.75rem;border:none;border-radius:10px;background:#16a34a;color:#fff;font-weight:800;font-size:1rem;cursor:pointer}
+.done:disabled{opacity:.6}
+.empty{text-align:center;padding:3rem 1rem;color:var(--text-muted);font-size:.95rem}
+.logout{background:rgba(255,255,255,.18);border:none;color:#fff;border-radius:8px;padding:.35rem .8rem;font-weight:700;cursor:pointer;font-family:'Cairo',sans-serif}
+</style>
+</head>
+<body>
+<div class="top">
+  <div><h1>🧪 تحضير الطلبات</h1><div class="b" id="branchLbl"></div></div>
+  <button class="logout" onclick="doLogout()">خروج</button>
+</div>
+<div class="wrap">
+  <div class="count" id="count">جاري التحميل…</div>
+  <div id="list"></div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../config.js?v=20260904c"></script>
+<script src="../session.js?v=20260905"></script>
+<script src="../branches.js?v=20260904d"></script>
+<script src="../brand.js?v=20260904c"></script>
+<script src="supabase-config.js?v=20260901"></script>
+<script>
+let currentUser=null, branchId=null;
+function doLogout(){ try{ logout(); }catch(e){ location.href='auth.html'; } }
+function _mins(t){ return Math.max(0, Math.floor((Date.now()-new Date(t))/60000)); }
+function fm(m){ return m<60?(m+' د'):(Math.floor(m/60)+':'+String(m%60).padStart(2,'0')+' س'); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+async function resolveBranch(){
+  if(currentUser.branch_id) return currentUser.branch_id;
+  if(currentUser.branch){ try{ const {data}=await db.from('branches').select('id').eq('name',currentUser.branch).maybeSingle(); return data&&data.id||null; }catch(e){} }
+  return null;
+}
+
+async function loadPrep(){
+  let q=db.from('orders').select('*').eq('status','pending').is('driver_id',null).is('prep_done_at',null)
+        .order('created_at',{ascending:true}).limit(200);
+  if(branchId) q=q.eq('branch_id',branchId);
+  const { data, error } = await q;
+  const list=document.getElementById('list');
+  if(error){ document.getElementById('count').textContent='تعذّر التحميل — تأكد من الاتصال'; return; }
+  const orders=data||[];
+  document.getElementById('count').textContent = orders.length ? (orders.length+' طلب تحت التجهيز — الأقدم فوق') : '';
+  if(!orders.length){ list.innerHTML='<div class="empty">✅ لا توجد طلبات تحت التجهيز حاليًا</div>'; return; }
+  list.innerHTML=orders.map((o,i)=>{
+    const w=_mins(o.created_at);
+    const old = (i===0) || w>=20;
+    return `<div class="card ${old?'old':''}">
+      <div class="nm">${esc(o.customer_name||o.cust_name||'—')}</div>
+      <div class="meta">
+        🧾 <b>${esc(o.bill_no||'—')}</b> · كود ${esc(o.cust_code||'—')} · 💰 ${Number(o.total_bill_net||0).toLocaleString()} ج<br>
+        📍 ${esc(o.cust_region||'—')}<br>
+        🏠 ${esc(o.customer_address||o.cust_address||'—')}<br>
+        ⏱ منتظر تحضير: <span class="wait" style="color:${w>=20?'#dc2626':'#b45309'}">${fm(w)}</span>
+      </div>
+      <button class="done" onclick="markDone('${o.id}',this)">✓ تم التحضير</button>
+    </div>`;
+  }).join('');
+}
+
+async function markDone(id, btn){
+  btn.disabled=true; btn.textContent='… جاري الحفظ';
+  try{
+    const { error } = await db.from('orders').update({ prep_done_at:new Date().toISOString() }).eq('id',id);
+    if(error) throw error;
+    const card=btn.closest('.card'); if(card) card.remove();
+    const n=document.querySelectorAll('#list .card').length;
+    document.getElementById('count').textContent = n ? (n+' طلب تحت التجهيز — الأقدم فوق') : '';
+    if(!n) document.getElementById('list').innerHTML='<div class="empty">✅ لا توجد طلبات تحت التجهيز حاليًا</div>';
+  }catch(e){ btn.disabled=false; btn.textContent='✓ تم التحضير'; alert('تعذّر الحفظ — حاول تاني'); }
+}
+
+window.addEventListener('DOMContentLoaded', async()=>{
+  currentUser = getCurrentUser();
+  if(!currentUser){ location.href='auth.html'; return; }
+  if(!Session.tokenValid(60000)){
+    const ok=await Session.refresh(60000);
+    if(!ok && !sessionStorage.getItem('jwtRefreshDone')){ sessionStorage.setItem('jwtRefreshDone','1'); location.href='auth.html'; return; }
+  }
+  sessionStorage.removeItem('jwtRefreshDone');
+  document.getElementById('branchLbl').textContent = currentUser.branch || (currentUser.role==='admin'?'كل الفروع':'');
+  branchId = await resolveBranch();
+  await loadPrep();
+  setInterval(loadPrep, 20000);
+});
+</script>
+</body>
+</html>
