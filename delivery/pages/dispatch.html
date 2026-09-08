@@ -392,6 +392,8 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
     <button class="ftab" onclick="setFilter('postponed',this)">مؤجل/متعذّر <span id="f-postponed">0</span></button>
     <button class="ftab" onclick="setFilter('picked',this)">في الطريق <span id="f-picked">0</span></button>
     <button class="ftab" onclick="setFilter('late',this)">⚠️ متأخر <span id="f-late">0</span></button>
+    <button class="ftab" id="prepTab" onclick="setFilter('prep',this)" style="display:none;border-color:#c7d2fe;color:#4338ca;font-weight:700">🧪 تحت التجهيز <span id="f-prep">0</span></button>
+    <button class="ftab" id="prepToggle" onclick="togglePrepMode()" title="تفعيل/إيقاف وضع التحضير للفرع" style="font-weight:700">🧪 وضع التحضير: موقوف</button>
     <button class="ftab" onclick="setFilter('unclosed',this)" style="border-color:#fecaca;color:#b91c1c">🔴 طلبات لم تُغلق على B Connect</button>
     <button class="ftab" onclick="openHardTripsModal()" title="رحلات المناطق الصعبة النهاردة" style="border-color:#fed7aa;color:#c2410c;font-weight:700">🧭 المناطق الصعبة</button>
     <button class="ftab" onclick="openAddOrder()" style="background:var(--green-light);color:#15803d;border-color:#bbf7d0;font-weight:700">➕ إضافة طلب</button>
@@ -1787,6 +1789,27 @@ function renderTrips(){
 // ===== ORDERS =====
 function setFilter(f,el){currentFilter=f;document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('active'));el.classList.add('active');if(f==='unclosed')unclosedLoading=true;renderOrders();if(f==='unclosed')refreshUnclosed();}
 
+// «تحت التجهيز» = طلب جاهز (pending بلا طيار) لكنه لسه ماتحضّرش، والفرع مفعّل وضع التحضير.
+// لو الوضع موقوف بيرجّع false دايمًا (صفر تغيير في السلوك الحالي).
+function underPrep(o){ return !!(dispatchSettings && dispatchSettings.prep_required && o && o.status==='pending' && !o.driver_id && !o.prep_done_at); }
+async function togglePrepMode(){
+  const branchId=currentUser?.role==='admin'?activeBranchId:(currentUser?.branch_id||null);
+  if(!branchId){ showToast('اختر فرعًا أولاً لتفعيل وضع التحضير'); return; }
+  const cur=!!(dispatchSettings && dispatchSettings.prep_required);
+  const next=!cur;
+  if(!confirm(next?'تفعيل وضع التحضير للفرع؟ الطلبات الجديدة هتبقى «تحت التجهيز» لحد ما المحضّر يجهّزها، ومش هتتوزّع قبل كده.':'إيقاف وضع التحضير؟ كل الطلبات هتتوزّع عادي.')) return;
+  showLoading(true);
+  try{
+    let res;
+    if(dispatchSettings && dispatchSettings.id){ res=await db.from('dispatch_settings').update({prep_required:next}).eq('branch_id',branchId); }
+    else { res=await db.from('dispatch_settings').insert({branch_id:branchId, prep_required:next}); }
+    if(res && res.error) throw res.error;
+    showToast(next?'✓ اتفعّل وضع التحضير':'✓ اتوقف وضع التحضير');
+  }catch(e){ showToast('تعذّر تغيير وضع التحضير'); }
+  await loadAll();
+  showLoading(false);
+}
+
 // ===== طلبات لم تُغلق على B Connect (trip_review_flags غير المحلولة) =====
 // قراءة حية بحتة (بدون أي كتابة): نجيب أرقام فواتير B Connect المفتوحة دلوقتى،
 // ونعرض المكتمل منها والمتسلّم من طيار على Phalix — تقاطع برقم الفاتورة.
@@ -1945,20 +1968,27 @@ function renderOrders(){
   } else {
     orderSearchResults=null;             // خرجنا من وضع البحث
     orders=[...allOrders];
-    if(currentFilter==='pending') orders=orders.filter(o=>o.status==='pending');
+    if(currentFilter==='prep') orders=orders.filter(o=>underPrep(o));
+    else if(currentFilter==='pending') orders=orders.filter(o=>o.status==='pending'&&!underPrep(o));
     else if(currentFilter==='postponed') orders=orders.filter(o=>o.status==='postponed');
     else if(currentFilter==='picked') orders=orders.filter(o=>o.status==='picked');
     else if(currentFilter==='late') orders=orders.filter(o=>isLate(o));
-    else { orders=orders.filter(o=>(o.status==='pending'&&!o.driver_id)||o.status==='postponed'); combined=true; }
+    else { orders=orders.filter(o=>(((o.status==='pending'&&!o.driver_id)||o.status==='postponed')) && !underPrep(o)); combined=true; }
   }
 
+  // «تحت التجهيز»: عدّاد + إظهار التبويب + حالة زر الوضع (كله dormant لو الوضع موقوف)
+  const prepOn=!!(dispatchSettings && dispatchSettings.prep_required);
+  const prepCount=allOrders.filter(o=>underPrep(o)).length;
+  const _pt=document.getElementById('prepTab'); if(_pt){ _pt.style.display=prepOn?'':'none'; const _fp=document.getElementById('f-prep'); if(_fp)_fp.textContent=prepCount; }
+  const _ptg=document.getElementById('prepToggle'); if(_ptg){ _ptg.textContent='🧪 وضع التحضير: '+(prepOn?'مفعّل':'موقوف'); _ptg.style.background=prepOn?'#e0e7ff':''; _ptg.style.color=prepOn?'#4338ca':''; _ptg.style.borderColor=prepOn?'#c7d2fe':''; }
+
   const all=allOrders.filter(o=>
-    (o.status==='pending'&&!o.driver_id)||
+    (o.status==='pending'&&!o.driver_id&&!underPrep(o))||
     o.status==='postponed'||
     ['assigned','picked'].includes(o.status)
   );
   document.getElementById('f-all').textContent=all.length;
-  document.getElementById('f-pending').textContent=allOrders.filter(o=>o.status==='pending'&&!o.driver_id).length;
+  document.getElementById('f-pending').textContent=allOrders.filter(o=>o.status==='pending'&&!o.driver_id&&!underPrep(o)).length;
   document.getElementById('f-postponed').textContent=allOrders.filter(o=>o.status==='postponed').length;
   document.getElementById('f-picked').textContent=allOrders.filter(o=>['assigned','picked'].includes(o.status)).length;
   document.getElementById('f-late').textContent=allOrders.filter(o=>isLate(o)).length;
