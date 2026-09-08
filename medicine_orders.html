@@ -69,6 +69,15 @@
     .up-map { display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:10px; }
     @media(max-width:640px){ .up-map{ grid-template-columns:1fr 1fr; } }
     .msg-ok { color:#15803d;font-weight:800; } .msg-err { color:var(--danger);font-weight:800; }
+    /* «محاذاة على النص»: العمود على قد محتواه. .cr-table افتراضيًا width:100%
+       فبيمطّط الأعمدة الرقمية الضيقة وتسيب فراغ كبير جنب عمود الاسم الطويل.
+       هنا الوضع ده **مفتوح افتراضيًا** (عكس تبويب الطلبيات) لأن الجدول ده
+       أغلبه أرقام قصيرة. .cr-wrap عليها overflow:auto فبيتزحلق لو طوّل. */
+    #tab-newitems .cr-table.ni-fit { width:auto;min-width:0; }
+    #tab-newitems .cr-table.ni-fit th, #tab-newitems .cr-table.ni-fit td { white-space:nowrap; }
+    /* لوحة الربط في صف ممتد — لازم تفضل تلتف عادي مهما كان وضع المحاذاة */
+    #tab-newitems .cr-table.ni-fit tr.nl-row td { white-space:normal; }
+
     /* ===== لوحة ربط الصنف الجديد بأصناف المخازن (تكويد من نفس الشاشة) ===== */
     .nl-panel { background:var(--surface-2);border:1px solid var(--surface-3);border-radius:10px;padding:10px 12px;text-align:right; }
     .nl-head { display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px; }
@@ -281,7 +290,10 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       </div>
       <div id="tab-newitems" style="display:none">
         <div class="et-note">أصناف <b>ظهرت جديدة على المخزون</b> (كودها ما كانش موجود قبل كده). اضغط <b>«ربط بالمخازن»</b> عشان تدوّر على الصنف في أصناف المخازن غير المكوّدة وتديها كود الصنف ده — تقدر تحدد أكتر من مخزن مرة واحدة. وبعد ما تخلّص اضغط <b>«تم»</b> عشان يختفي من هنا. العدد: <span id="ni-count">—</span>.</div>
-        <input type="text" class="form-input et-search" id="ni-search" placeholder="🔍 بحث بالكود أو الاسم..." oninput="renderNewItems()" style="max-width:280px;margin-bottom:10px">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <input type="text" class="form-input et-search" id="ni-search" placeholder="🔍 بحث بالكود أو الاسم..." oninput="renderNewItems()" style="max-width:280px;margin:0">
+          <button class="cr-up-btn" id="ni-fit-btn" onclick="niToggleFit()" title="تصغير كل الأعمدة على حجم النص"><i class="fas fa-text-width"></i> محاذاة على النص</button>
+        </div>
         <div class="cr-wrap" id="ni-wrap"></div>
       </div>
       <div id="tab-settings" style="display:none">
@@ -1390,6 +1402,55 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         const j = await r.json(); niData = Array.isArray(j) ? j : [];
       } catch (e) { niData = []; if (wrap) wrap.innerHTML = '<div class="et-note">تعذّر التحميل.</div>'; return; }
       updateNiBadge(); renderNewItems();
+      loadNiPrices();   // الأسعار بتيجي ورا العرض عشان الجدول ما يستناش عليها
+    }
+
+    /* سعر البيع في المخزون — get_new_items مابترجّعوش، فبنجيبه من stock_flat
+       بالأكواد اللي ظهرت. الأسعار في الفروع الثلاثة بتطلع متطابقة لما تكون
+       موجودة، والصفر معناه الفرع ده مالوش رصيد أصلًا (مش إن السعر صفر) —
+       عشان كده بناخد أعلى قيمة غير صفرية، ولو اختلفت فعلًا بنبيّن ده. */
+    const niPrice = {};   // itm_code → { val, parts:[{br,p}] }
+    async function loadNiPrices() {
+      const codes = [...new Set(niData.map(r => r.itm_code).filter(Boolean))];
+      if (!codes.length) return;
+      const CH = 150;   // تقسيم عشان الـURL ما يطولش
+      for (let i = 0; i < codes.length; i += CH) {
+        const list = codes.slice(i, i + CH).map(c => '"' + String(c).replace(/"/g, '') + '"').join(',');
+        try {
+          const r = await fetch(REST + 'stock_flat?select=itm_code,m_p,s_p,b_p&itm_code=in.(' + encodeURIComponent(list) + ')', { headers: await sbH() });
+          if (!r.ok) continue;
+          (await r.json() || []).forEach(row => {
+            const parts = [['المعمورة', Number(row.m_p) || 0], ['سان ستيفانو', Number(row.s_p) || 0], ['سيدى بشر', Number(row.b_p) || 0]]
+              .filter(x => x[1] > 0);
+            if (!parts.length) return;
+            niPrice[row.itm_code] = { val: Math.max(...parts.map(x => x[1])), parts: parts };
+          });
+        } catch (e) { console.error('loadNiPrices', e); }
+      }
+      renderNewItems();
+    }
+    function niPriceCell(code) {
+      const p = niPrice[code];
+      if (!p) return '<span style="color:var(--text-muted)">—</span>';
+      const vals = [...new Set(p.parts.map(x => x[1]))];
+      const tip = p.parts.map(x => x[0] + ': ' + niQ(x[1])).join(' · ');
+      // اختلاف حقيقي بين الفروع — نبيّنه بدل ما نخفيه ورا رقم واحد
+      const warn = vals.length > 1 ? ' <span style="color:#d97706" title="السعر مختلف بين الفروع">⚠</span>' : '';
+      return '<span style="font-weight:700" title="' + esc(tip) + '">' + niQ(p.val) + '</span>' + warn;
+    }
+
+    // محاذاة الأعمدة على النص — مفتوحة افتراضيًا (مفيش مفتاح مخزّن = مفعّلة)
+    let niFit = localStorage.getItem('ni_fit_v1') !== '0';
+    function applyNiFit() {
+      const t = document.querySelector('#ni-wrap .cr-table');
+      if (t) t.classList.toggle('ni-fit', niFit);
+      const b = document.getElementById('ni-fit-btn');
+      if (b) { b.style.background = niFit ? '#16a34a' : 'var(--surface-3)'; b.style.color = niFit ? '#fff' : 'var(--text-primary)'; }
+    }
+    function niToggleFit() {
+      niFit = !niFit;
+      localStorage.setItem('ni_fit_v1', niFit ? '1' : '0');
+      applyNiFit();
     }
     function updateNiBadge() {
       const n = niData.length;
@@ -1403,7 +1464,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       let rows = niData;
       if (q) rows = rows.filter(r => (r.itm_code||'').toLowerCase().includes(q) || (r.n||'').toLowerCase().includes(q));
       if (!rows.length) { wrap.innerHTML = '<div class="et-note" style="text-align:center">' + (niData.length ? 'لا نتائج للبحث.' : '🎉 مفيش أصناف جديدة محتاجة تكويد حاليًا.') + '</div>'; return; }
-      const th = ['الكود','الاسم','الشركة','المعمورة','سان ستيفانو','سيدى بشر','سعر مخزن؟','تكويد المخازن','إجراء'];
+      const th = ['الكود','الاسم','الشركة','سعر البيع','المعمورة','سان ستيفانو','سيدى بشر','سعر مخزن؟','تكويد المخازن','إجراء'];
       let h = '<table class="cr-table"><thead><tr>' + th.map(t => '<th>' + t + '</th>').join('') + '</tr></thead><tbody>';
       rows.forEach(r => {
         const code = esc(r.itm_code||'');
@@ -1416,6 +1477,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           + '<td style="font-weight:700;white-space:nowrap">' + code + '</td>'
           + '<td>' + esc(r.n||'') + '</td>'
           + '<td style="color:var(--text-muted)">' + esc(r.co||'') + '</td>'
+          + '<td style="text-align:center">' + niPriceCell(r.itm_code) + '</td>'
           + '<td style="text-align:center">' + niQ(r.m_q) + '</td>'
           + '<td style="text-align:center">' + niQ(r.s_q) + '</td>'
           + '<td style="text-align:center">' + niQ(r.b_q) + '</td>'
@@ -1423,10 +1485,11 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           + '<td style="text-align:center"><button class="btn btn-sm" style="background:var(--surface-3);color:var(--text-primary);border:1px solid var(--surface-3);padding:4px 12px;border-radius:8px;cursor:pointer;font-weight:700" onclick="event.stopPropagation();toggleLinkPanel(\'' + jsCode + '\',\'' + jsName + '\',this)">🔗 ربط بالمخازن</button></td>'
           + '<td style="text-align:center"><button class="btn btn-sm" style="background:#0d9488;color:#fff;border:none;padding:4px 14px;border-radius:8px;cursor:pointer;font-weight:700" onclick="event.stopPropagation();markCoded(\'' + jsCode + '\', this)">تم ✓</button></td>'
           + '</tr>'
-          + '<tr class="nl-row" id="nl-row-' + code + '" style="display:none"><td colspan="9" style="padding:0 6px 10px"><div id="nl-panel-' + code + '"></div></td></tr>';
+          + '<tr class="nl-row" id="nl-row-' + code + '" style="display:none"><td colspan="10" style="padding:0 6px 10px"><div id="nl-panel-' + code + '"></div></td></tr>';
       });
       h += '</tbody></table>';
       wrap.innerHTML = h;
+      applyNiFit();
     }
     async function markCoded(code, btn) {
       if (btn) { btn.disabled = true; btn.textContent = '...'; }
