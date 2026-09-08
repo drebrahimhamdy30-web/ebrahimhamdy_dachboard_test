@@ -779,7 +779,8 @@ async function loadOrdersTab(from, to) {
 
   renderOrdKPIs(cancelled, late, failByDriver, totalFails);
   renderRankList('topCancelCustomers', groupCount(cancelled, custName), 'طلب');
-  renderRankList('topLateCustomers', groupCount(late, custName), 'طلب');
+  lateOrders = late;
+  renderRankList('topLateCustomers', groupCount(late, custName), 'طلب', 'openCustomerLateOrders');
   renderRankList('topFailDrivers', failByDriver, 'مرة');
   renderOrderList('cancelledList', cancelled, 'cancelledCount', false);
   renderOrderList('lateList', late, 'lateCount', true);
@@ -827,11 +828,11 @@ function renderOrdKPIs(cancelled, late, failByDriver, totalFails) {
     <div class="stat-card"><div class="stat-label">مرات تعذّر التوصيل</div><div class="stat-value" style="color:#7c3aed">${totalFails}</div></div>`;
 }
 
-function renderRankList(elId, entries, unit) {
+function renderRankList(elId, entries, unit, clickFn) {
   const el = document.getElementById(elId);
   if (!entries.length) { el.innerHTML = '<div class="empty-state"><p>لا يوجد</p></div>'; return; }
   el.innerHTML = entries.slice(0,10).map(([name,count],i)=>`
-    <div class="rank-item" style="display:flex;align-items:center;gap:.6rem;padding:.4rem 0;border-bottom:1px solid var(--border)">
+    <div class="rank-item" ${clickFn?`data-name="${String(name).replace(/"/g,'&quot;')}" onclick="${clickFn}(this.dataset.name)" title="اضغط للتفاصيل"`:''} style="display:flex;align-items:center;gap:.6rem;padding:.4rem 0;border-bottom:1px solid var(--border)${clickFn?';cursor:pointer':''}">
       <span class="rank-num ${i<3?'top3':''}" style="width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.7rem;font-weight:700;background:${i<3?'#92400e':'#f3f4f6'};color:${i<3?'#fff':'#6b7280'}">${i+1}</span>
       <span class="rank-name" style="flex:1;font-size:.78rem;font-weight:600">${name}</span>
       <span class="rank-val" style="font-size:.78rem;font-weight:700">${count} ${unit}</span>
@@ -916,6 +917,28 @@ function openDelayAnatomy(orderId){
       </div>
     </div>`;
   const wrap=document.createElement('div'); wrap.innerHTML=html.trim(); document.body.appendChild(wrap.firstElementChild);
+}
+
+// الطلبات المتأخرة الحالية (لفتح طلبات عميل معيّن من قايمة «أكثر العملاء تأخيرًا»)
+let lateOrders = [];
+function openCustomerLateOrders(name){
+  const list = (lateOrders||[]).filter(o=>custName(o)===name);
+  if(!list.length){ alert('لا توجد طلبات متأخرة لهذا العميل'); return; }
+  if(list.length===1){ openDelayAnatomy(list[0].id); return; }
+  const rows = list.map(o=>`<div onclick="openDelayAnatomy('${o.id}')" style="display:flex;justify-content:space-between;gap:.5rem;padding:.5rem .6rem;border:1px solid var(--border);border-radius:8px;margin-bottom:.35rem;cursor:pointer">
+      <span style="font-weight:700"><b style="color:var(--primary,#1a56db)">#${o.bill_no||(o.id||'').slice(0,6)}</b> · ${o.cust_region||'—'}</span>
+      <span style="color:#b45309;font-weight:800;white-space:nowrap">${o._lateMin} د</span>
+    </div>`).join('');
+  const html=`<div data-anatomy="1" style="position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:1rem" onclick="if(event.target===this)this.remove()">
+    <div style="background:var(--surface,#fff);color:var(--text,#0f172a);max-width:440px;width:100%;max-height:86vh;overflow:auto;border-radius:16px;padding:1rem;font-family:'Cairo',sans-serif;direction:rtl">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+        <div style="font-weight:800;font-size:.9rem">طلبات ${name} المتأخرة (${list.length})</div>
+        <button onclick="this.closest('[data-anatomy]').remove()" style="border:none;background:#f1f5f9;border-radius:8px;width:28px;height:28px;cursor:pointer;font-weight:800">✕</button>
+      </div>
+      <div style="font-size:.7rem;color:var(--text-muted);margin-bottom:.5rem">اضغط أي طلب لتشريح التأخير</div>
+      ${rows}
+    </div></div>`;
+  const w=document.createElement('div'); w.innerHTML=html.trim(); document.body.appendChild(w.firstElementChild);
 }
 
 // كاش لأسماء الطيارين عشان ما نجيبهاش كل مرة
