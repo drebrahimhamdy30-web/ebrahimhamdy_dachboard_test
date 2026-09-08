@@ -69,6 +69,23 @@
     .up-map { display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:10px; }
     @media(max-width:640px){ .up-map{ grid-template-columns:1fr 1fr; } }
     .msg-ok { color:#15803d;font-weight:800; } .msg-err { color:var(--danger);font-weight:800; }
+    /* ===== لوحة ربط الصنف الجديد بأصناف المخازن (تكويد من نفس الشاشة) ===== */
+    .nl-panel { background:var(--surface-2);border:1px solid var(--surface-3);border-radius:10px;padding:10px 12px;text-align:right; }
+    .nl-head { display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px; }
+    .nl-search { flex:1;min-width:200px;max-width:420px; }
+    .nl-count { font-size:0.72rem;color:var(--text-muted);font-weight:700; }
+    .nl-tbl { width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--surface-3);border-radius:8px;overflow:hidden; }
+    .nl-tbl th { background:var(--surface-3);color:var(--text-secondary);padding:6px 8px;font-size:0.7rem;font-weight:700;white-space:nowrap; }
+    .nl-tbl td { padding:5px 8px;font-size:0.76rem;border-bottom:1px solid var(--surface-3); }
+    .nl-tbl tbody tr:hover td { background:var(--surface-2); }
+    .nl-name { text-align:right; }
+    /* الصف اللي القاعدة نفسها رشّحته للكود ده (best_code) — مش مجرد تشابه نص */
+    .nl-sugg-badge { background:#dcfce7;color:#15803d;font-size:0.62rem;font-weight:800;border-radius:6px;padding:1px 6px;margin-inline-start:5px;white-space:nowrap; }
+    .nl-sim { font-weight:800;font-size:0.72rem;white-space:nowrap; }
+    .nl-sim.hi { color:#15803d; } .nl-sim.mid { color:#d97706; } .nl-sim.lo { color:var(--text-muted); }
+    .nl-empty { color:var(--text-muted);font-size:0.76rem;padding:14px;text-align:center; }
+    .nl-msg { font-size:0.74rem;font-weight:700;margin-inline-start:8px; }
+
     /* جداول التعديل */
     .et-note { background:var(--surface-2);border:1px solid var(--surface-3);border-radius:8px;padding:8px 10px;font-size:0.76rem;color:var(--text-secondary);margin-bottom:10px;line-height:1.7; }
     .et-table { width:100%;border-collapse:collapse;min-width:520px; }
@@ -263,7 +280,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         <div class="cr-wrap" id="et-wrap-archive"></div>
       </div>
       <div id="tab-newitems" style="display:none">
-        <div class="et-note">أصناف <b>ظهرت جديدة على المخزون</b> (كودها ما كانش موجود قبل كده). كوّدها في المخازن، وبعدين اضغط <b>«تم»</b> عشان تختفي من هنا. العدد: <span id="ni-count">—</span>.</div>
+        <div class="et-note">أصناف <b>ظهرت جديدة على المخزون</b> (كودها ما كانش موجود قبل كده). اضغط <b>«ربط بالمخازن»</b> عشان تدوّر على الصنف في أصناف المخازن غير المكوّدة وتديها كود الصنف ده — تقدر تحدد أكتر من مخزن مرة واحدة. وبعد ما تخلّص اضغط <b>«تم»</b> عشان يختفي من هنا. العدد: <span id="ni-count">—</span>.</div>
         <input type="text" class="form-input et-search" id="ni-search" placeholder="🔍 بحث بالكود أو الاسم..." oninput="renderNewItems()" style="max-width:280px;margin-bottom:10px">
         <div class="cr-wrap" id="ni-wrap"></div>
       </div>
@@ -1386,13 +1403,15 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       let rows = niData;
       if (q) rows = rows.filter(r => (r.itm_code||'').toLowerCase().includes(q) || (r.n||'').toLowerCase().includes(q));
       if (!rows.length) { wrap.innerHTML = '<div class="et-note" style="text-align:center">' + (niData.length ? 'لا نتائج للبحث.' : '🎉 مفيش أصناف جديدة محتاجة تكويد حاليًا.') + '</div>'; return; }
-      const th = ['الكود','الاسم','الشركة','المعمورة','سان ستيفانو','سيدى بشر','سعر مخزن؟','إجراء'];
+      const th = ['الكود','الاسم','الشركة','المعمورة','سان ستيفانو','سيدى بشر','سعر مخزن؟','تكويد المخازن','إجراء'];
       let h = '<table class="cr-table"><thead><tr>' + th.map(t => '<th>' + t + '</th>').join('') + '</tr></thead><tbody>';
       rows.forEach(r => {
         const code = esc(r.itm_code||'');
+        const jsCode = code.replace(/'/g,"\\'");
+        const jsName = esc(r.n||'').replace(/'/g,"\\'");
         const store = r.has_store
-          ? '<span style="color:#0d9488;font-weight:700">✓ له سعر</span>'
-          : '<span style="color:#dc2626;font-weight:700">لا يوجد</span>';
+          ? '<span style="color:#0d9488;font-weight:700" id="ni-store-' + code + '">✓ له سعر</span>'
+          : '<span style="color:#dc2626;font-weight:700" id="ni-store-' + code + '">لا يوجد</span>';
         h += '<tr>'
           + '<td style="font-weight:700;white-space:nowrap">' + code + '</td>'
           + '<td>' + esc(r.n||'') + '</td>'
@@ -1401,8 +1420,10 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           + '<td style="text-align:center">' + niQ(r.s_q) + '</td>'
           + '<td style="text-align:center">' + niQ(r.b_q) + '</td>'
           + '<td style="text-align:center">' + store + '</td>'
-          + '<td style="text-align:center"><button class="btn btn-sm" style="background:#0d9488;color:#fff;border:none;padding:4px 14px;border-radius:8px;cursor:pointer;font-weight:700" onclick="markCoded(\'' + code.replace(/'/g,"\\'") + '\', this)">تم ✓</button></td>'
-          + '</tr>';
+          + '<td style="text-align:center"><button class="btn btn-sm" style="background:var(--surface-3);color:var(--text-primary);border:1px solid var(--surface-3);padding:4px 12px;border-radius:8px;cursor:pointer;font-weight:700" onclick="event.stopPropagation();toggleLinkPanel(\'' + jsCode + '\',\'' + jsName + '\',this)">🔗 ربط بالمخازن</button></td>'
+          + '<td style="text-align:center"><button class="btn btn-sm" style="background:#0d9488;color:#fff;border:none;padding:4px 14px;border-radius:8px;cursor:pointer;font-weight:700" onclick="event.stopPropagation();markCoded(\'' + jsCode + '\', this)">تم ✓</button></td>'
+          + '</tr>'
+          + '<tr class="nl-row" id="nl-row-' + code + '" style="display:none"><td colspan="9" style="padding:0 6px 10px"><div id="nl-panel-' + code + '"></div></td></tr>';
       });
       h += '</tbody></table>';
       wrap.innerHTML = h;
@@ -1417,6 +1438,224 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         niData = niData.filter(x => x.itm_code !== code);
         updateNiBadge(); renderNewItems();
       } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'تم ✓'; } alert('تعذّر الحفظ، حاول تاني.'); }
+    }
+
+    /* ═══════════ ربط الصنف الجديد بأصناف المخازن (تكويد من نفس الشاشة) ═══════════
+       قبل كده كان لازم تفتح شاشة «أسعار وخصومات المخازن» وتدوّر على الصنف
+       هناك وتكوّده صف صف. دلوقتي البحث والتكويد من هنا.
+
+       ⚠️ الاتجاه معكوس عن شاشة المخازن: هناك الصف صنف مخزن **بدون كود**
+       وبتدوّر له على كود من المخزون؛ هنا الصنف **له كود** وبتدوّر له على
+       صفوف المخازن اللي تاخده. عشان كده مانستخدمش suggest_stock_codes.
+
+       مصدرين للنتايج، الاتنين من v_store_item_prices بدون أي دالة جديدة:
+         • «مرشَّح»: صفوف الـview اللي best_code بتاعها = كود الصنف ده —
+           ده ترشيح القاعدة نفسها (pg_trgm) مش مجرد تطابق نص.
+         • بحث نصي: نفس آلية شاشة المخازن — كل كلمة لازم تكون في الاسم
+           (ilike متكرر = AND في PostgREST)، مع تراجع تدريجي لو مفيش نتايج.
+       الترتيب بتشابه محسوب هنا بين اسم الصنف واسم صف المخزن (مش sim بتاع
+       الـview — دي بتقيس تشابه الصف مع **أفضل كود ليه** مش مع صنفنا). */
+    const nlState = {};   // code → { name, rows, sel:Set(id), timer }
+
+    // تطبيع عربي: ألف/ياء/تاء مربوطة + تشكيل + رموز — عشان المقارنة والبحث
+    function nlNorm(s) {
+      return String(s == null ? '' : s)
+        .replace(/[ً-ْـ]/g, '')
+        .replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه').replace(/ؤ/g, 'و').replace(/ئ/g, 'ي')
+        .replace(/[^ء-يa-zA-Z0-9]+/g, ' ')
+        .trim().toLowerCase();
+    }
+    // تشابه Dice على أزواج الحروف — نفس فكرة trigram بس على المتصفح
+    function nlSim(a, b) {
+      const A = nlNorm(a).replace(/\s+/g, ''), B = nlNorm(b).replace(/\s+/g, '');
+      if (!A || !B) return 0;
+      if (A === B) return 1;
+      const grams = x => { const m = {}; for (let i = 0; i < x.length - 1; i++) { const g = x.slice(i, i + 2); m[g] = (m[g] || 0) + 1; } return m; };
+      const ga = grams(A), gb = grams(B);
+      let inter = 0, na = 0, nb = 0;
+      for (const g in ga) { na += ga[g]; if (gb[g]) inter += Math.min(ga[g], gb[g]); }
+      for (const g in gb) nb += gb[g];
+      return (na + nb) ? (2 * inter) / (na + nb) : 0;
+    }
+    // كلمات البحث: الأطول أولًا (الأكثر تمييزًا)، ونتجاهل الأرقام/الحروف المفردة
+    function nlTokens(name) {
+      return nlNorm(name).split(/\s+/).filter(t => t.length >= 3 && !/^\d+$/.test(t))
+        .sort((a, b) => b.length - a.length);
+    }
+
+    const NL_SEL = 'id,item_name,store,price,discount_perc,code,best_code';
+    async function nlFetch(qs) {
+      try {
+        const r = await fetch(REST + 'v_store_item_prices?' + qs, { headers: await sbH() });
+        if (!r.ok) return [];
+        const j = await r.json();
+        return Array.isArray(j) ? j : [];
+      } catch (e) { console.error('nlFetch', e); return []; }
+    }
+
+    function toggleLinkPanel(code, name, btn) {
+      const row = document.getElementById('nl-row-' + code);
+      if (!row) return;
+      if (row.style.display !== 'none') {
+        row.style.display = 'none';
+        if (btn) btn.innerHTML = '🔗 ربط بالمخازن';
+        return;
+      }
+      row.style.display = 'table-row';
+      if (btn) btn.innerHTML = '🔗 إخفاء';
+      if (!nlState[code]) nlState[code] = { name: name, rows: [], sel: new Set(), timer: null };
+      const panel = document.getElementById('nl-panel-' + code);
+      panel.innerHTML =
+        '<div class="nl-panel">'
+        + '<div class="nl-head">'
+        +   '<input type="text" class="form-input nl-search" id="nl-q-' + code + '" placeholder="🔍 دوّر في أصناف المخازن غير المكوّدة..." oninput="nlOnType(\'' + code.replace(/'/g, "\\'") + '\')">'
+        +   '<label style="font-size:0.74rem;font-weight:700;display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="nl-all-' + code + '" onchange="nlToggleAll(\'' + code.replace(/'/g, "\\'") + '\')"> تحديد الكل</label>'
+        +   '<button class="btn btn-primary btn-sm" id="nl-apply-' + code + '" style="padding:5px 14px" disabled onclick="nlApply(\'' + code.replace(/'/g, "\\'") + '\')">كوّد المحدد</button>'
+        +   '<span class="nl-msg" id="nl-msg-' + code + '"></span>'
+        +   '<span class="nl-count" id="nl-cnt-' + code + '" style="margin-inline-start:auto"></span>'
+        + '</div>'
+        + '<div id="nl-body-' + code + '"><div class="nl-empty">⏳ جارٍ البحث...</div></div>'
+        + '</div>';
+      const q = document.getElementById('nl-q-' + code);
+      if (q) q.value = nlTokens(name).slice(0, 2).join(' ');
+      nlSearch(code);
+    }
+
+    function nlOnType(code) {
+      const st = nlState[code]; if (!st) return;
+      clearTimeout(st.timer);
+      st.timer = setTimeout(() => nlSearch(code), 300);
+    }
+
+    async function nlSearch(code) {
+      const st = nlState[code]; if (!st) return;
+      const body = document.getElementById('nl-body-' + code);
+      if (body) body.innerHTML = '<div class="nl-empty">⏳ جارٍ البحث...</div>';
+      const typed = (document.getElementById('nl-q-' + code) || {}).value || '';
+
+      // 1) ترشيح القاعدة نفسها لهذا الكود
+      const suggested = await nlFetch('select=' + NL_SEL + '&code=is.null&best_code=eq.' + encodeURIComponent(code) + '&limit=50');
+      const suggIds = new Set(suggested.map(r => r.id));
+
+      // 2) بحث نصي — كل الكلمات، وننقّص كلمة كل مرة لو مفيش نتايج
+      let toks = nlTokens(typed || st.name).slice(0, 4);
+      let found = [];
+      while (toks.length) {
+        const qs = 'select=' + NL_SEL + '&code=is.null&'
+          + toks.map(t => 'item_name=ilike.*' + encodeURIComponent(t) + '*').join('&')
+          + '&limit=60';
+        found = await nlFetch(qs);
+        if (found.length) break;
+        toks = toks.slice(0, -1);
+      }
+
+      // دمج بدون تكرار، وترتيب بالتشابه مع اسم الصنف (المرشَّح دايمًا فوق)
+      const byId = {};
+      suggested.forEach(r => { byId[r.id] = r; });
+      found.forEach(r => { if (!byId[r.id]) byId[r.id] = r; });
+      st.rows = Object.values(byId).map(r => ({ ...r, _sugg: suggIds.has(r.id), _sim: nlSim(st.name, r.item_name) }))
+        .sort((a, b) => (b._sugg - a._sugg) || (b._sim - a._sim));
+      // التحديد يفضل على الصفوف اللي لسه ظاهرة بس
+      const visible = new Set(st.rows.map(r => r.id));
+      st.sel = new Set([...st.sel].filter(id => visible.has(id)));
+      nlRender(code);
+    }
+
+    function nlRender(code) {
+      const st = nlState[code]; if (!st) return;
+      const body = document.getElementById('nl-body-' + code); if (!body) return;
+      const cnt = document.getElementById('nl-cnt-' + code);
+      if (cnt) cnt.textContent = st.rows.length ? (st.rows.length + ' صف مخزن غير مكوّد') : '';
+      if (!st.rows.length) {
+        body.innerHTML = '<div class="nl-empty">مفيش أصناف مخازن غير مكوّدة مطابقة — جرّب كلمة تانية في خانة البحث.</div>';
+        return;
+      }
+      const jc = code.replace(/'/g, "\\'");
+      body.innerHTML = '<table class="nl-tbl"><thead><tr>'
+        + '<th style="width:34px"></th><th class="nl-name">اسم الصنف في المخزن</th><th>المخزن</th><th>السعر</th><th>الخصم</th><th>التشابه</th>'
+        + '</tr></thead><tbody>'
+        + st.rows.map(r => {
+            const pct = Math.round((r._sim || 0) * 100);
+            const cls = pct >= 60 ? 'hi' : (pct >= 35 ? 'mid' : 'lo');
+            return '<tr>'
+              + '<td style="text-align:center"><input type="checkbox" ' + (st.sel.has(r.id) ? 'checked' : '') + ' onchange="nlPick(\'' + jc + '\',' + r.id + ',this.checked)"></td>'
+              + '<td class="nl-name">' + esc(r.item_name || '') + (r._sugg ? '<span class="nl-sugg-badge">مرشَّح</span>' : '') + '</td>'
+              + '<td style="text-align:center;color:var(--text-muted)">' + esc(r.store || '') + '</td>'
+              + '<td style="text-align:center">' + niQ(r.price) + '</td>'
+              + '<td style="text-align:center">' + niQ(r.discount_perc) + '%</td>'
+              + '<td style="text-align:center"><span class="nl-sim ' + cls + '">' + pct + '%</span></td>'
+              + '</tr>';
+          }).join('')
+        + '</tbody></table>';
+      nlSyncBtn(code);
+    }
+
+    function nlPick(code, id, on) {
+      const st = nlState[code]; if (!st) return;
+      if (on) st.sel.add(id); else st.sel.delete(id);
+      const all = document.getElementById('nl-all-' + code);
+      if (all) all.checked = st.rows.length > 0 && st.sel.size === st.rows.length;
+      nlSyncBtn(code);
+    }
+    function nlToggleAll(code) {
+      const st = nlState[code]; if (!st) return;
+      const on = (document.getElementById('nl-all-' + code) || {}).checked;
+      st.sel = on ? new Set(st.rows.map(r => r.id)) : new Set();
+      nlRender(code);
+      const all = document.getElementById('nl-all-' + code); if (all) all.checked = !!on;
+    }
+    function nlSyncBtn(code) {
+      const st = nlState[code]; if (!st) return;
+      const b = document.getElementById('nl-apply-' + code); if (!b) return;
+      b.disabled = !st.sel.size;
+      b.textContent = st.sel.size ? ('كوّد المحدد (' + st.sel.size + ')') : 'كوّد المحدد';
+    }
+
+    async function nlApply(code) {
+      const st = nlState[code]; if (!st || !st.sel.size) return;
+      const ids = [...st.sel];
+      const b = document.getElementById('nl-apply-' + code);
+      const msg = document.getElementById('nl-msg-' + code);
+      if (b) { b.disabled = true; b.textContent = '...'; }
+      if (msg) { msg.style.color = 'var(--text-muted)'; msg.textContent = 'جارٍ الحفظ...'; }
+
+      // ⚠️ نتتبّع الـid اللي نجح بعينه مش عدد بس — لو بعض الصفوف فشلت لازم
+      // تفضل ظاهرة ومتحدّدة عشان تعيد المحاولة عليها هي بالذات
+      const saved = new Set();
+      const CH = 6;   // دفعات صغيرة بدل ما نفتح 60 طلب مرة واحدة
+      for (let i = 0; i < ids.length; i += CH) {
+        const slice = ids.slice(i, i + CH);
+        const res = await Promise.all(slice.map(async id => {
+          try {
+            const r = await fetch(REST + 'store_item_prices?id=eq.' + id, {
+              method: 'PATCH',
+              headers: await sbH({ 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }),
+              body: JSON.stringify({ code: code })
+            });
+            return r.ok;
+          } catch (e) { return false; }
+        }));
+        res.forEach((okRow, j) => { if (okRow) saved.add(slice[j]); });
+      }
+      const ok = saved.size, fail = ids.length - ok;
+
+      if (ok) {
+        // الصفوف اللي اتكوّدت مابقتش «غير مكوّدة» — تختفي؛ الفاشلة تفضل محدّدة
+        st.rows = st.rows.filter(r => !saved.has(r.id));
+        st.sel = new Set([...st.sel].filter(id => !saved.has(id)));
+        // عمود «سعر مخزن؟» بقى ✓ فعلًا
+        const cell = document.getElementById('ni-store-' + code);
+        if (cell) { cell.textContent = '✓ له سعر'; cell.style.color = '#0d9488'; }
+        const it = niData.find(x => x.itm_code === code); if (it) it.has_store = true;
+      }
+      nlRender(code);
+      if (msg) {
+        msg.style.color = fail ? 'var(--danger,#dc2626)' : '#15803d';
+        msg.textContent = fail ? ('اتكوّد ' + ok + ' وفشل ' + fail + ' — الفاشل لسه محدّد، جرّب تاني')
+                               : ('✓ اتكوّد ' + ok + ' صف');
+        setTimeout(() => { if (msg) msg.textContent = ''; }, 8000);
+      }
+      nlSyncBtn(code);
     }
 
     (function () {
