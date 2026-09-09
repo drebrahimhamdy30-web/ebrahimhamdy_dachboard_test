@@ -16,7 +16,7 @@ body{margin:0;background:var(--bg,#f1f5f9);color:var(--text,#0f172a)}
 .logout{background:rgba(255,255,255,.18);border:none;color:#fff;border-radius:8px;padding:.35rem .8rem;font-weight:700;cursor:pointer;font-family:'Cairo',sans-serif}
 .bar{position:sticky;top:52px;background:var(--bg,#f1f5f9);z-index:5;padding:.6rem .8rem .2rem;max-width:640px;margin:0 auto}
 .tabs{display:flex;gap:.5rem;margin-bottom:.5rem}
-.ptab{flex:1;padding:.6rem .4rem;border-radius:12px;border:2px solid var(--border,#e5e7eb);background:var(--surface,#fff);color:var(--text-muted,#64748b);font-weight:800;font-size:.85rem;cursor:pointer;font-family:'Cairo',sans-serif;display:flex;align-items:center;justify-content:center;gap:.3rem}
+.ptab{flex:1;padding:.55rem .25rem;border-radius:12px;border:2px solid var(--border,#e5e7eb);background:var(--surface,#fff);color:var(--text-muted,#64748b);font-weight:800;font-size:.76rem;cursor:pointer;font-family:'Cairo',sans-serif;display:flex;align-items:center;justify-content:center;gap:.25rem}
 .ptab.active{border-color:var(--primary,#1a56db);color:var(--primary,#1a56db);background:#eff6ff}
 body.dark .ptab.active{background:#0f2748}
 .ptab .cnt{background:var(--primary,#1a56db);color:#fff;border-radius:10px;padding:.02rem .4rem;font-size:.72rem}
@@ -28,12 +28,19 @@ body.dark .ptab.active{background:#0f2748}
 .hint{font-size:.66rem;color:var(--text-muted);margin-top:.35rem;opacity:.8}
 .card.old{border-right-color:#dc2626}
 .card.ready{border-right-color:#16a34a}
+.card.held{border-right-color:#64748b;opacity:.92}
 .nm{font-weight:800;font-size:1.05rem}
 .meta{font-size:.8rem;color:var(--text-muted);margin-top:.3rem;line-height:1.85}
 .wait{font-weight:900}
 .btn{width:100%;margin-top:.65rem;padding:.75rem;border:none;border-radius:10px;color:#fff;font-weight:800;font-size:1rem;cursor:pointer;font-family:'Cairo',sans-serif}
 .btn-done{background:#16a34a}
 .btn-return{background:#b45309}
+.btn-hold{background:#64748b}
+.btn-resume{background:#0d9488}
+.btns{display:flex;gap:.5rem;margin-top:.65rem}
+.btns .btn{margin-top:0}
+.btns .btn-done{flex:2}
+.btns .btn-hold{flex:1}
 .btn:disabled{opacity:.6}
 .empty{text-align:center;padding:3rem 1rem;color:var(--text-muted);font-size:.95rem}
 .tag{display:inline-block;font-size:.68rem;font-weight:800;padding:.12rem .45rem;border-radius:6px;margin-top:.15rem}
@@ -66,7 +73,8 @@ body.dark .ptab.active{background:#0f2748}
 <div class="bar">
   <div class="tabs">
     <button class="ptab active" data-t="prep" onclick="setTab('prep')">🧪 تحت التجهيز <span class="cnt" id="cnt-prep">0</span></button>
-    <button class="ptab" data-t="ready" onclick="setTab('ready')">📦 اتحضّر — بانتظار الطيار <span class="cnt" id="cnt-ready">0</span></button>
+    <button class="ptab" data-t="ready" onclick="setTab('ready')">📦 اتحضّر <span class="cnt" id="cnt-ready">0</span></button>
+    <button class="ptab" data-t="hold" onclick="setTab('hold')">⏸️ موقوف <span class="cnt" id="cnt-hold">0</span></button>
   </div>
   <input type="text" class="search" id="search" placeholder="🔎 بحث بكود العميل أو الاسم" oninput="render()">
 </div>
@@ -148,12 +156,14 @@ function setTab(t){
 
 async function refreshCounts(){
   try{
-    let q1=db.from('orders').select('id',{count:'exact',head:true}).eq('status','pending').is('driver_id',null).is('prep_done_at',null);
+    let q1=db.from('orders').select('id',{count:'exact',head:true}).eq('status','pending').is('driver_id',null).is('prep_done_at',null).not('prep_hold','is',true);
     let q2=db.from('orders').select('id',{count:'exact',head:true}).not('prep_done_at','is',null).is('picked_at',null).in('status',['pending','assigned','postponed']);
-    if(branchId){ q1=q1.eq('branch_id',branchId); q2=q2.eq('branch_id',branchId); }
-    const [r1,r2]=await Promise.all([q1,q2]);
+    let q3=db.from('orders').select('id',{count:'exact',head:true}).eq('status','pending').is('driver_id',null).is('prep_done_at',null).is('prep_hold',true);
+    if(branchId){ q1=q1.eq('branch_id',branchId); q2=q2.eq('branch_id',branchId); q3=q3.eq('branch_id',branchId); }
+    const [r1,r2,r3]=await Promise.all([q1,q2,q3]);
     document.getElementById('cnt-prep').textContent = r1.count||0;
     document.getElementById('cnt-ready').textContent = r2.count||0;
+    document.getElementById('cnt-hold').textContent = r3.count||0;
   }catch(e){}
 }
 
@@ -162,7 +172,9 @@ async function load(){
   let q=db.from('orders').select('*');
   if(branchId) q=q.eq('branch_id',branchId);
   if(tab==='prep'){
-    q=q.eq('status','pending').is('driver_id',null).is('prep_done_at',null).order('created_at',{ascending:true});
+    q=q.eq('status','pending').is('driver_id',null).is('prep_done_at',null).not('prep_hold','is',true).order('created_at',{ascending:true});
+  }else if(tab==='hold'){
+    q=q.eq('status','pending').is('driver_id',null).is('prep_done_at',null).is('prep_hold',true).order('created_at',{ascending:true});
   }else{
     q=q.not('prep_done_at','is',null).is('picked_at',null)
        .in('status',['pending','assigned','postponed']).order('prep_done_at',{ascending:false});
@@ -190,18 +202,24 @@ function render(){
   document.getElementById('count').textContent = rows.length + (tab==='prep'?' طلب تحت التجهيز — الأقدم فوق':' طلب متحضّر بانتظار استلام الطيار');
 
   list.innerHTML=rows.map((o,i)=>{
-    if(tab==='prep'){
-      const w=_mins(o.created_at); const old=(i===0&&!term)||w>=20;
-      return `<div class="card ${old?'old':''}" onclick="openItems('${o.id}')">
+    if(tab==='prep'||tab==='hold'){
+      const w=_mins(o.created_at); const old=tab==='prep'&&((i===0&&!term)||w>=20);
+      const btns = tab==='prep'
+        ? `<div class="btns">
+             <button class="btn btn-done" onclick="event.stopPropagation();markDone('${o.id}',this)">✓ تم التحضير</button>
+             <button class="btn btn-hold" onclick="event.stopPropagation();holdOrder('${o.id}',this)">⏸ إيقاف</button>
+           </div>`
+        : `<button class="btn btn-resume" onclick="event.stopPropagation();resumeOrder('${o.id}',this)">▶ استئناف التحضير</button>`;
+      return `<div class="card ${old?'old':''} ${tab==='hold'?'held':''}" onclick="openItems('${o.id}')">
         <div class="nm">${esc(o.customer_name||o.cust_name||'—')}</div>
         <div class="meta">
           🧾 <b>${esc(o.bill_no||'—')}</b> · كود ${esc(o.cust_code||'—')} · 💰 ${Number(o.total_bill_net||0).toLocaleString()} ج<br>
           📍 ${esc(o.cust_region||'—')}<br>
           🏠 ${esc(o.customer_address||o.cust_address||'—')}<br>
-          ⏱ منتظر تحضير: <span class="wait" style="color:${w>=20?'#dc2626':'#b45309'}">${fm(w)}</span>
+          ⏱ ${tab==='prep'?'منتظر تحضير':'موقوف من'}: <span class="wait" style="color:${tab==='prep'&&w>=20?'#dc2626':'#b45309'}">${fm(w)}</span>
         </div>
         <div class="hint">👆 اضغط لعرض الأصناف والأسعار</div>
-        <button class="btn btn-done" onclick="event.stopPropagation();markDone('${o.id}',this)">✓ تم التحضير</button>
+        ${btns}
       </div>`;
     }else{
       const w=_mins(o.prep_done_at);
@@ -231,6 +249,22 @@ async function markDone(id, btn){
   }catch(e){ btn.disabled=false; btn.textContent='✓ تم التحضير'; alert('تعذّر الحفظ — حاول تاني'); }
 }
 
+async function holdOrder(id, btn){
+  btn.disabled=true; btn.textContent='…';
+  try{
+    const { error } = await db.from('orders').update({ prep_hold:true }).eq('id',id);
+    if(error) throw error;
+    allRows=allRows.filter(o=>o.id!==id); render(); refreshCounts();
+  }catch(e){ btn.disabled=false; btn.textContent='⏸ إيقاف'; alert('تعذّر الإيقاف — حاول تاني'); }
+}
+async function resumeOrder(id, btn){
+  btn.disabled=true; btn.textContent='…';
+  try{
+    const { error } = await db.from('orders').update({ prep_hold:false }).eq('id',id);
+    if(error) throw error;
+    allRows=allRows.filter(o=>o.id!==id); render(); refreshCounts();
+  }catch(e){ btn.disabled=false; btn.textContent='▶ استئناف التحضير'; alert('تعذّر الاستئناف — حاول تاني'); }
+}
 async function returnToPrep(id, btn){
   if(!confirm('رجوع الطلب للتحضير؟ لو على رحلة هيتشال من الطيار ويرجع «قيد التحضير» في التوزيع لحد ما يتحضّر تاني.')) return;
   btn.disabled=true; btn.textContent='… جاري الرجوع';
