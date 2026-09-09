@@ -23,7 +23,9 @@ body.dark .ptab.active{background:#0f2748}
 .search{width:100%;padding:.6rem .8rem;border-radius:10px;border:1.5px solid var(--border,#e5e7eb);background:var(--surface,#fff);color:var(--text,#0f172a);font-family:'Cairo',sans-serif;font-size:.9rem}
 .wrap{max-width:640px;margin:0 auto;padding:.2rem .8rem 1rem}
 .count{font-size:.8rem;font-weight:800;margin:.3rem 0 .6rem;color:var(--text-muted)}
-.card{background:var(--surface,#fff);border:1px solid var(--border,#e5e7eb);border-right:6px solid #b45309;border-radius:14px;padding:.8rem .9rem;margin-bottom:.7rem;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.card{background:var(--surface,#fff);border:1px solid var(--border,#e5e7eb);border-right:6px solid #b45309;border-radius:14px;padding:.8rem .9rem;margin-bottom:.7rem;box-shadow:0 1px 3px rgba(0,0,0,.06);cursor:pointer}
+.card:active{transform:scale(.995)}
+.hint{font-size:.66rem;color:var(--text-muted);margin-top:.35rem;opacity:.8}
 .card.old{border-right-color:#dc2626}
 .card.ready{border-right-color:#16a34a}
 .nm{font-weight:800;font-size:1.05rem}
@@ -37,6 +39,23 @@ body.dark .ptab.active{background:#0f2748}
 .tag{display:inline-block;font-size:.68rem;font-weight:800;padding:.12rem .45rem;border-radius:6px;margin-top:.15rem}
 .tag-drv{background:#e0e7ff;color:#4338ca}
 .tag-pool{background:#fef3c7;color:#b45309}
+/* مودال الأصناف */
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:20;display:none;align-items:flex-end;justify-content:center}
+.ov.open{display:flex}
+.sheet{background:var(--surface,#fff);width:100%;max-width:640px;max-height:85vh;border-radius:18px 18px 0 0;display:flex;flex-direction:column;overflow:hidden}
+.sheet-hd{padding:.8rem 1rem;border-bottom:1px solid var(--border,#e5e7eb);display:flex;justify-content:space-between;align-items:center;gap:.5rem;position:sticky;top:0;background:var(--surface,#fff)}
+.sheet-hd h3{margin:0;font-size:.95rem;font-weight:800}
+.sheet-x{background:var(--border,#e5e7eb);border:none;color:var(--text,#0f172a);width:30px;height:30px;border-radius:8px;font-size:1rem;cursor:pointer;font-weight:800}
+.sheet-bd{padding:.6rem 1rem 1.2rem;overflow-y:auto}
+.ihead{display:flex;justify-content:space-between;font-size:.68rem;font-weight:800;color:var(--text-muted);padding:.3rem 0;border-bottom:2px solid var(--border,#e5e7eb)}
+.irow{display:flex;justify-content:space-between;align-items:center;gap:.5rem;padding:.55rem .1rem;border-bottom:1px solid var(--border,#eef2f7)}
+.inm{font-weight:700;font-size:.9rem}
+.iunit{color:var(--text-muted);font-weight:600;font-size:.75rem}
+.iqp{display:flex;gap:.4rem;align-items:center;white-space:nowrap}
+.iq{background:#0A3D62;color:#fff;font-weight:800;font-size:.75rem;padding:.1rem .45rem;border-radius:6px}
+.ip{color:#b45309;font-weight:700;font-size:.78rem}
+.il{color:#16a34a;font-weight:800;font-size:.82rem;min-width:64px;text-align:left}
+.itot{margin-top:.6rem;padding-top:.5rem;border-top:2px solid var(--border,#e5e7eb);font-weight:800;display:flex;justify-content:space-between}
 </style>
 </head>
 <body>
@@ -55,6 +74,12 @@ body.dark .ptab.active{background:#0f2748}
   <div class="count" id="count">جاري التحميل…</div>
   <div id="list"></div>
 </div>
+<div class="ov" id="itemsOv" onclick="if(event.target===this)closeItems()">
+  <div class="sheet">
+    <div class="sheet-hd"><h3 id="itemsTitle">أصناف الطلب</h3><button class="sheet-x" onclick="closeItems()">✕</button></div>
+    <div class="sheet-bd" id="itemsBody"></div>
+  </div>
+</div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../config.js?v=20260904c"></script>
 <script src="../session.js?v=20260905"></script>
@@ -68,6 +93,46 @@ function doLogout(){ try{ logout(); }catch(e){ location.href='auth.html'; } }
 function _mins(t){ return Math.max(0, Math.floor((Date.now()-new Date(t))/60000)); }
 function fm(m){ return m<60?(m+' د'):(Math.floor(m/60)+':'+String(m%60).padStart(2,'0')+' س'); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+// ===== أصناف الطلب (اسم/كمية/سعر البيع) =====
+const SALES_ITEMS_WEBHOOK='https://agent.ebrahimhamdy.com/webhook/sales_item';
+const itemsCache={};
+function closeItems(){ document.getElementById('itemsOv').classList.remove('open'); }
+function renderItems(items){
+  if(!items||!items.length) return '<div class="empty">لا توجد أصناف في الفاتورة</div>';
+  let total=0;
+  const rows=items.map(it=>{
+    const q=Number(it.qty)||0, p=Number(it.price)||0, line=q*p; total+=line;
+    return `<div class="irow">
+      <div class="inm">${esc(it.name||'—')}${it.unit?` · <span class="iunit">${esc(it.unit)}</span>`:''}</div>
+      <div class="iqp"><span class="iq">×${esc(it.qty)}</span><span class="ip">${p.toLocaleString()} ج</span><span class="il">${line.toLocaleString()} ج</span></div>
+    </div>`;
+  }).join('');
+  return `<div class="ihead"><span>الصنف</span><span>كمية · سعر · إجمالي</span></div>${rows}<div class="itot"><span>الإجمالي (${items.length} صنف)</span><span>${total.toLocaleString()} ج</span></div>`;
+}
+async function openItems(oid){
+  const o=allRows.find(x=>x.id===oid); if(!o) return;
+  const body=document.getElementById('itemsBody');
+  document.getElementById('itemsTitle').innerHTML='🧾 أصناف '+esc(o.customer_name||o.cust_name||'—')+(o.bill_no?` · فاتورة ${esc(o.bill_no)}`:'');
+  document.getElementById('itemsOv').classList.add('open');
+  if(itemsCache[oid]){ body.innerHTML=renderItems(itemsCache[oid]); return; }
+  if(!o.bill_no){ body.innerHTML='<div class="empty">لا يوجد رقم فاتورة لهذا الطلب</div>'; return; }
+  body.innerHTML='<div class="empty">⏳ جاري جلب الأصناف…</div>';
+  try{
+    const r=await fetch(SALES_ITEMS_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch_id:o.branch_id||'',bill_no:String(o.bill_no)})});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data=await r.json();
+    const root=Array.isArray(data)?(data[0]||{}):(data||{});
+    const bills=(root&&root.Data)||[];
+    const bill=bills.find(b=>String(b.bill_no)===String(o.bill_no))||bills[0]||{};
+    const raw=(bill&&bill.Items)||[];
+    const items=raw.map(it=>({ name:(it.itm_name_ar||it.itm_name_en||'').toString().trim(), qty:it.itm_qty, unit:it.unit_name||'', price:it.unit_price }));
+    itemsCache[oid]=items;
+    body.innerHTML=renderItems(items);
+  }catch(e){
+    body.innerHTML='<div class="empty" style="color:#dc2626">❌ تعذّر جلب الأصناف<br><span style="font-size:.75rem">'+esc(e&&e.message||e)+'</span></div>';
+  }
+}
 
 async function resolveBranch(){
   if(currentUser.branch_id) return currentUser.branch_id;
@@ -127,7 +192,7 @@ function render(){
   list.innerHTML=rows.map((o,i)=>{
     if(tab==='prep'){
       const w=_mins(o.created_at); const old=(i===0&&!term)||w>=20;
-      return `<div class="card ${old?'old':''}">
+      return `<div class="card ${old?'old':''}" onclick="openItems('${o.id}')">
         <div class="nm">${esc(o.customer_name||o.cust_name||'—')}</div>
         <div class="meta">
           🧾 <b>${esc(o.bill_no||'—')}</b> · كود ${esc(o.cust_code||'—')} · 💰 ${Number(o.total_bill_net||0).toLocaleString()} ج<br>
@@ -135,12 +200,13 @@ function render(){
           🏠 ${esc(o.customer_address||o.cust_address||'—')}<br>
           ⏱ منتظر تحضير: <span class="wait" style="color:${w>=20?'#dc2626':'#b45309'}">${fm(w)}</span>
         </div>
-        <button class="btn btn-done" onclick="markDone('${o.id}',this)">✓ تم التحضير</button>
+        <div class="hint">👆 اضغط لعرض الأصناف والأسعار</div>
+        <button class="btn btn-done" onclick="event.stopPropagation();markDone('${o.id}',this)">✓ تم التحضير</button>
       </div>`;
     }else{
       const w=_mins(o.prep_done_at);
       const withDrv=!!o.driver_id;
-      return `<div class="card ready">
+      return `<div class="card ready" onclick="openItems('${o.id}')">
         <div class="nm">${esc(o.customer_name||o.cust_name||'—')}</div>
         <div class="meta">
           🧾 <b>${esc(o.bill_no||'—')}</b> · كود ${esc(o.cust_code||'—')} · 💰 ${Number(o.total_bill_net||0).toLocaleString()} ج<br>
@@ -148,7 +214,8 @@ function render(){
           ${withDrv?`<span class="tag tag-drv">🚗 مع الطيار: ${esc(o.deliveryman||'—')} — لسه ماستلمش</span>`:`<span class="tag tag-pool">📋 في التوزيع — بانتظار طيار</span>`}<br>
           ✅ اتحضّر من: <span class="wait">${fm(w)}</span>
         </div>
-        <button class="btn btn-return" onclick="returnToPrep('${o.id}',this)">↩ رجوع للتحضير</button>
+        <div class="hint">👆 اضغط لعرض الأصناف والأسعار</div>
+        <button class="btn btn-return" onclick="event.stopPropagation();returnToPrep('${o.id}',this)">↩ رجوع للتحضير</button>
       </div>`;
     }
   }).join('');
