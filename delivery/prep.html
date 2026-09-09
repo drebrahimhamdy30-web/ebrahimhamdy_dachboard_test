@@ -10,26 +10,46 @@
 <style>
 *{box-sizing:border-box;font-family:'Cairo',sans-serif}
 body{margin:0;background:var(--bg,#f1f5f9);color:var(--text,#0f172a)}
-.top{position:sticky;top:0;background:var(--primary,#1a56db);color:#fff;padding:.7rem 1rem;display:flex;justify-content:space-between;align-items:center;z-index:5}
+.top{position:sticky;top:0;background:var(--primary,#1a56db);color:#fff;padding:.7rem 1rem;display:flex;justify-content:space-between;align-items:center;z-index:6}
 .top h1{font-size:1.05rem;margin:0}
 .top .b{font-size:.75rem;opacity:.92;margin-top:.1rem}
-.wrap{max-width:640px;margin:0 auto;padding:.8rem}
-.count{font-size:.85rem;font-weight:800;margin:.3rem 0 .7rem;color:var(--text-muted)}
+.logout{background:rgba(255,255,255,.18);border:none;color:#fff;border-radius:8px;padding:.35rem .8rem;font-weight:700;cursor:pointer;font-family:'Cairo',sans-serif}
+.bar{position:sticky;top:52px;background:var(--bg,#f1f5f9);z-index:5;padding:.6rem .8rem .2rem;max-width:640px;margin:0 auto}
+.tabs{display:flex;gap:.5rem;margin-bottom:.5rem}
+.ptab{flex:1;padding:.6rem .4rem;border-radius:12px;border:2px solid var(--border,#e5e7eb);background:var(--surface,#fff);color:var(--text-muted,#64748b);font-weight:800;font-size:.85rem;cursor:pointer;font-family:'Cairo',sans-serif;display:flex;align-items:center;justify-content:center;gap:.3rem}
+.ptab.active{border-color:var(--primary,#1a56db);color:var(--primary,#1a56db);background:#eff6ff}
+body.dark .ptab.active{background:#0f2748}
+.ptab .cnt{background:var(--primary,#1a56db);color:#fff;border-radius:10px;padding:.02rem .4rem;font-size:.72rem}
+.search{width:100%;padding:.6rem .8rem;border-radius:10px;border:1.5px solid var(--border,#e5e7eb);background:var(--surface,#fff);color:var(--text,#0f172a);font-family:'Cairo',sans-serif;font-size:.9rem}
+.wrap{max-width:640px;margin:0 auto;padding:.2rem .8rem 1rem}
+.count{font-size:.8rem;font-weight:800;margin:.3rem 0 .6rem;color:var(--text-muted)}
 .card{background:var(--surface,#fff);border:1px solid var(--border,#e5e7eb);border-right:6px solid #b45309;border-radius:14px;padding:.8rem .9rem;margin-bottom:.7rem;box-shadow:0 1px 3px rgba(0,0,0,.06)}
 .card.old{border-right-color:#dc2626}
+.card.ready{border-right-color:#16a34a}
 .nm{font-weight:800;font-size:1.05rem}
 .meta{font-size:.8rem;color:var(--text-muted);margin-top:.3rem;line-height:1.85}
 .wait{font-weight:900}
-.done{width:100%;margin-top:.65rem;padding:.75rem;border:none;border-radius:10px;background:#16a34a;color:#fff;font-weight:800;font-size:1rem;cursor:pointer}
-.done:disabled{opacity:.6}
+.btn{width:100%;margin-top:.65rem;padding:.75rem;border:none;border-radius:10px;color:#fff;font-weight:800;font-size:1rem;cursor:pointer;font-family:'Cairo',sans-serif}
+.btn-done{background:#16a34a}
+.btn-return{background:#b45309}
+.btn:disabled{opacity:.6}
 .empty{text-align:center;padding:3rem 1rem;color:var(--text-muted);font-size:.95rem}
-.logout{background:rgba(255,255,255,.18);border:none;color:#fff;border-radius:8px;padding:.35rem .8rem;font-weight:700;cursor:pointer;font-family:'Cairo',sans-serif}
+.tag{display:inline-block;font-size:.68rem;font-weight:800;padding:.12rem .45rem;border-radius:6px;margin-top:.15rem}
+.tag-drv{background:#e0e7ff;color:#4338ca}
+.tag-pool{background:#fef3c7;color:#b45309}
 </style>
 </head>
 <body>
 <div class="top">
   <div><h1>🧪 تحضير الطلبات</h1><div class="b" id="branchLbl"></div></div>
   <button class="logout" onclick="doLogout()">خروج</button>
+</div>
+<div class="bar">
+  <div class="tabs">
+    <button class="ptab active" data-t="prep" onclick="setTab('prep')">🧪 تحت التجهيز <span class="cnt" id="cnt-prep">0</span></button>
+    <button class="ptab" data-t="ready" onclick="setTab('ready')">📦 اتحضّر — بانتظار الطيار <span class="cnt" id="cnt-ready">0</span></button>
+  </div>
+  <input type="text" class="search" id="search" placeholder="🔎 بحث بكود العميل أو الاسم" oninput="render()">
 </div>
 <div class="wrap">
   <div class="count" id="count">جاري التحميل…</div>
@@ -43,7 +63,7 @@ body{margin:0;background:var(--bg,#f1f5f9);color:var(--text,#0f172a)}
 <script src="supabase-config.js?v=20260901"></script>
 <script src="permissions.js"></script>
 <script>
-let currentUser=null, branchId=null;
+let currentUser=null, branchId=null, tab='prep', allRows=[];
 function doLogout(){ try{ logout(); }catch(e){ location.href='auth.html'; } }
 function _mins(t){ return Math.max(0, Math.floor((Date.now()-new Date(t))/60000)); }
 function fm(m){ return m<60?(m+' د'):(Math.floor(m/60)+':'+String(m%60).padStart(2,'0')+' س'); }
@@ -55,29 +75,82 @@ async function resolveBranch(){
   return null;
 }
 
-async function loadPrep(){
-  let q=db.from('orders').select('*').eq('status','pending').is('driver_id',null).is('prep_done_at',null)
-        .order('created_at',{ascending:true}).limit(200);
+function setTab(t){
+  tab=t;
+  document.querySelectorAll('.ptab').forEach(b=>b.classList.toggle('active', b.dataset.t===t));
+  load();
+}
+
+async function refreshCounts(){
+  try{
+    let q1=db.from('orders').select('id',{count:'exact',head:true}).eq('status','pending').is('driver_id',null).is('prep_done_at',null);
+    let q2=db.from('orders').select('id',{count:'exact',head:true}).not('prep_done_at','is',null).is('picked_at',null).in('status',['pending','assigned','postponed']);
+    if(branchId){ q1=q1.eq('branch_id',branchId); q2=q2.eq('branch_id',branchId); }
+    const [r1,r2]=await Promise.all([q1,q2]);
+    document.getElementById('cnt-prep').textContent = r1.count||0;
+    document.getElementById('cnt-ready').textContent = r2.count||0;
+  }catch(e){}
+}
+
+async function load(){
+  document.getElementById('count').textContent='جاري التحميل…';
+  let q=db.from('orders').select('*');
   if(branchId) q=q.eq('branch_id',branchId);
-  const { data, error } = await q;
+  if(tab==='prep'){
+    q=q.eq('status','pending').is('driver_id',null).is('prep_done_at',null).order('created_at',{ascending:true});
+  }else{
+    q=q.not('prep_done_at','is',null).is('picked_at',null)
+       .in('status',['pending','assigned','postponed']).order('prep_done_at',{ascending:false});
+  }
+  const { data, error } = await q.limit(300);
+  if(error){ document.getElementById('count').textContent='تعذّر التحميل — تأكد من الاتصال'; allRows=[]; render(); return; }
+  allRows=data||[];
+  render();
+  refreshCounts();
+}
+
+function render(){
+  const term=(document.getElementById('search').value||'').trim().toLowerCase();
+  let rows=allRows;
+  if(term) rows=rows.filter(o=>
+    String(o.cust_code||'').toLowerCase().includes(term) ||
+    String(o.customer_name||o.cust_name||'').toLowerCase().includes(term));
+
   const list=document.getElementById('list');
-  if(error){ document.getElementById('count').textContent='تعذّر التحميل — تأكد من الاتصال'; return; }
-  const orders=data||[];
-  document.getElementById('count').textContent = orders.length ? (orders.length+' طلب تحت التجهيز — الأقدم فوق') : '';
-  if(!orders.length){ list.innerHTML='<div class="empty">✅ لا توجد طلبات تحت التجهيز حاليًا</div>'; return; }
-  list.innerHTML=orders.map((o,i)=>{
-    const w=_mins(o.created_at);
-    const old = (i===0) || w>=20;
-    return `<div class="card ${old?'old':''}">
-      <div class="nm">${esc(o.customer_name||o.cust_name||'—')}</div>
-      <div class="meta">
-        🧾 <b>${esc(o.bill_no||'—')}</b> · كود ${esc(o.cust_code||'—')} · 💰 ${Number(o.total_bill_net||0).toLocaleString()} ج<br>
-        📍 ${esc(o.cust_region||'—')}<br>
-        🏠 ${esc(o.customer_address||o.cust_address||'—')}<br>
-        ⏱ منتظر تحضير: <span class="wait" style="color:${w>=20?'#dc2626':'#b45309'}">${fm(w)}</span>
-      </div>
-      <button class="done" onclick="markDone('${o.id}',this)">✓ تم التحضير</button>
-    </div>`;
+  if(!rows.length){
+    document.getElementById('count').textContent='';
+    list.innerHTML='<div class="empty">'+(term?'مفيش نتيجة للبحث ده':(tab==='prep'?'✅ لا توجد طلبات تحت التجهيز حاليًا':'لا توجد طلبات متحضّرة بانتظار الطيار'))+'</div>';
+    return;
+  }
+  document.getElementById('count').textContent = rows.length + (tab==='prep'?' طلب تحت التجهيز — الأقدم فوق':' طلب متحضّر بانتظار استلام الطيار');
+
+  list.innerHTML=rows.map((o,i)=>{
+    if(tab==='prep'){
+      const w=_mins(o.created_at); const old=(i===0&&!term)||w>=20;
+      return `<div class="card ${old?'old':''}">
+        <div class="nm">${esc(o.customer_name||o.cust_name||'—')}</div>
+        <div class="meta">
+          🧾 <b>${esc(o.bill_no||'—')}</b> · كود ${esc(o.cust_code||'—')} · 💰 ${Number(o.total_bill_net||0).toLocaleString()} ج<br>
+          📍 ${esc(o.cust_region||'—')}<br>
+          🏠 ${esc(o.customer_address||o.cust_address||'—')}<br>
+          ⏱ منتظر تحضير: <span class="wait" style="color:${w>=20?'#dc2626':'#b45309'}">${fm(w)}</span>
+        </div>
+        <button class="btn btn-done" onclick="markDone('${o.id}',this)">✓ تم التحضير</button>
+      </div>`;
+    }else{
+      const w=_mins(o.prep_done_at);
+      const withDrv=!!o.driver_id;
+      return `<div class="card ready">
+        <div class="nm">${esc(o.customer_name||o.cust_name||'—')}</div>
+        <div class="meta">
+          🧾 <b>${esc(o.bill_no||'—')}</b> · كود ${esc(o.cust_code||'—')} · 💰 ${Number(o.total_bill_net||0).toLocaleString()} ج<br>
+          📍 ${esc(o.cust_region||'—')}<br>
+          ${withDrv?`<span class="tag tag-drv">🚗 مع الطيار: ${esc(o.deliveryman||'—')} — لسه ماستلمش</span>`:`<span class="tag tag-pool">📋 في التوزيع — بانتظار طيار</span>`}<br>
+          ✅ اتحضّر من: <span class="wait">${fm(w)}</span>
+        </div>
+        <button class="btn btn-return" onclick="returnToPrep('${o.id}',this)">↩ رجوع للتحضير</button>
+      </div>`;
+    }
   }).join('');
 }
 
@@ -86,11 +159,21 @@ async function markDone(id, btn){
   try{
     const { error } = await db.from('orders').update({ prep_done_at:new Date().toISOString() }).eq('id',id);
     if(error) throw error;
-    const card=btn.closest('.card'); if(card) card.remove();
-    const n=document.querySelectorAll('#list .card').length;
-    document.getElementById('count').textContent = n ? (n+' طلب تحت التجهيز — الأقدم فوق') : '';
-    if(!n) document.getElementById('list').innerHTML='<div class="empty">✅ لا توجد طلبات تحت التجهيز حاليًا</div>';
+    allRows=allRows.filter(o=>o.id!==id);
+    render();
   }catch(e){ btn.disabled=false; btn.textContent='✓ تم التحضير'; alert('تعذّر الحفظ — حاول تاني'); }
+}
+
+async function returnToPrep(id, btn){
+  if(!confirm('رجوع الطلب للتحضير؟ لو على رحلة هيتشال من الطيار ويرجع «قيد التحضير» في التوزيع لحد ما يتحضّر تاني.')) return;
+  btn.disabled=true; btn.textContent='… جاري الرجوع';
+  try{
+    const { data, error } = await db.rpc('prep_return_to_prep',{ p_order_id:id, p_user_name:currentUser.full_name||'المحضّر' });
+    if(error) throw error;
+    if(data && data.success===false) throw new Error(data.error||'تعذّر الرجوع');
+    allRows=allRows.filter(o=>o.id!==id);
+    render();
+  }catch(e){ btn.disabled=false; btn.textContent='↩ رجوع للتحضير'; alert('تعذّر: '+(e.message||'حاول تاني')); }
 }
 
 window.addEventListener('DOMContentLoaded', async()=>{
@@ -103,8 +186,8 @@ window.addEventListener('DOMContentLoaded', async()=>{
   sessionStorage.removeItem('jwtRefreshDone');
   document.getElementById('branchLbl').textContent = currentUser.branch || (currentUser.role==='admin'?'كل الفروع':'');
   branchId = await resolveBranch();
-  await loadPrep();
-  setInterval(loadPrep, 20000);
+  await load();
+  setInterval(load, 20000);
 });
 </script>
 </body>
