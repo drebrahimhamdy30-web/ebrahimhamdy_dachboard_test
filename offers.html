@@ -62,7 +62,26 @@
       margin-bottom: 10px;
       white-space: pre-wrap;
       flex: 1;
+      /* التفاصيل الطويلة كانت بتطوّل الكارت وتخلّي كروت الصف كلها تتمطّط
+         معاه. بنقصّها على 4 سطور والنص الكامل في نافذة «التفاصيل». */
+      display: -webkit-box;
+      -webkit-line-clamp: 4;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      word-break: break-word;
     }
+    /* ===== نافذة تفاصيل العرض ===== */
+    .od-row { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid #334155; font-size: 0.82rem; }
+    .od-row:last-of-type { border-bottom: none; }
+    .od-label { color: #94a3b8; font-weight: 700; min-width: 92px; flex-shrink: 0; }
+    .od-val { color: #e2e8f0; font-weight: 600; }
+    .od-details-box {
+      background: #0f172a; border: 1px solid #334155; border-radius: 10px;
+      padding: 12px 14px; margin-top: 6px; color: #e2e8f0;
+      font-size: 0.86rem; line-height: 1.9; white-space: pre-wrap;
+      word-break: break-word; max-height: 320px; overflow-y: auto;
+    }
+    .od-details-box a { color: #38bdf8; text-decoration: underline; }
     .offer-footer {
       display: flex;
       justify-content: space-between;
@@ -186,6 +205,33 @@
     </div>
   </div>
 
+  <!-- Modal تفاصيل العرض (عرض فقط) -->
+  <div class="modal-overlay" id="details-modal" onclick="if(event.target===this)closeDetails()">
+    <div class="modal-box" style="max-width:560px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <span style="font-size:1rem;font-weight:700;color:#f1f5f9;">
+          <i class="fas fa-eye"></i> تفاصيل العرض
+        </span>
+        <button onclick="closeDetails()"
+          style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:1.2rem;">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <div id="od-body"></div>
+
+      <div class="modal-actions">
+        <button onclick="closeDetails()" class="btn"
+          style="background:#334155;color:#94a3b8;border:none;">
+          إغلاق
+        </button>
+        <button onclick="editFromDetails()" class="btn btn-primary" id="od-edit-btn">
+          <i class="fas fa-edit"></i> تعديل
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal الإضافة/التعديل -->
   <div class="modal-overlay" id="offer-modal">
     <div class="modal-box">
@@ -279,6 +325,19 @@
       }
     }
 
+    /* اسم العرض وتفاصيله بيكتبهم المستخدمون وكانوا بيتحطّوا في innerHTML
+       زي ما هم — أي علامة < في النص كانت تتفسّر HTML. بنهرّبهم دلوقتي. */
+    function offEsc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g,
+        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+    // الروابط جوّه التفاصيل تبقى قابلة للضغط — بنهرّب النص **الأول** بعدين
+    // نحوّل الروابط، عشان الهروب ما يبوّظش الوسم اللي عملناه
+    function offLinkify(s) {
+      return offEsc(s).replace(/(https?:\/\/[^\s<]+)/g,
+        m => '<a href="' + m + '" target="_blank" rel="noopener noreferrer">' + m + '</a>');
+    }
+
     function isExpired(offer) {
       if (!offer.expires_at || offer.expires_at === 'null' || offer.expires_at === '') return false;
       return new Date(offer.expires_at) < new Date();
@@ -335,10 +394,10 @@
         return `
           <div class="offer-card ${expired ? 'expired' : ''}">
             <div class="offer-type-badge ${typeClass}">
-              ${typeIcon} ${offer.type}
+              ${typeIcon} ${offEsc(offer.type)}
             </div>
-            <div class="offer-name">${offer.name || '---'}</div>
-            <div class="offer-details">${details}</div>
+            <div class="offer-name">${offEsc(offer.name) || '---'}</div>
+            <div class="offer-details">${offEsc(details)}</div>
             <div class="offer-footer">
               <div>
                 ${expired
@@ -351,6 +410,12 @@
                 }
               </div>
               <div class="offer-actions">
+                <button class="btn btn-sm btn-icon"
+                  onclick="openDetails('${offer.id}')"
+                  style="background:var(--surface-3);color:var(--text-primary);padding:5px 8px;"
+                  title="عرض التفاصيل كاملة">
+                  <i class="fas fa-eye"></i>
+                </button>
                 <button class="btn btn-sm btn-icon"
                   onclick="openEditModal('${offer.id}')"
                   style="background:var(--accent);color:#fff;padding:5px 8px;"
@@ -375,6 +440,58 @@
         type === 'شركة' ? 'اسم الشركة' : 'اسم الصنف';
       document.getElementById('btn-company').classList.toggle('active', type === 'شركة');
       document.getElementById('btn-item').classList.toggle('active',    type === 'صنف');
+    }
+
+    /* ===== نافذة التفاصيل =====
+       الكارت بيعرض 4 سطور بس من التفاصيل، وفيه بيانات مش ظاهرة فيه خالص
+       (الفرع، تاريخ الإضافة، آخر تعديل) — كلها هنا. */
+    let odCurrentId = null;
+    function openDetails(id) {
+      const o = allOffers.find(x => String(x.id) === String(id));
+      if (!o) return;
+      odCurrentId = id;
+      const details = o.detailes || o.details || '';
+      const expired = isExpired(o);
+      const fmt = t => {
+        if (!t || t === 'null') return null;
+        const d = new Date(t);
+        return isNaN(d) ? null : d.toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
+      };
+      const fmtDT = t => {
+        if (!t || t === 'null') return '—';
+        const d = new Date(t);
+        if (isNaN(d)) return '—';
+        // توقيت القاهرة صراحةً مش توقيت الجهاز
+        return d.toLocaleDateString('ar-EG', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Africa/Cairo' })
+          + ' ' + d.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Africa/Cairo' });
+      };
+      const exp = fmt(o.expires_at);
+      const status = expired
+        ? '<span style="color:#f87171;font-weight:800">❌ منتهي' + (exp ? ' — ' + exp : '') + '</span>'
+        : (exp ? '<span style="color:#4ade80;font-weight:800">✅ سارٍ حتى ' + offEsc(exp) + '</span>'
+               : '<span style="color:#4ade80;font-weight:800">✅ سارٍ بدون تاريخ انتهاء</span>');
+      const row = (lbl, val) => '<div class="od-row"><span class="od-label">' + lbl + '</span><span class="od-val">' + val + '</span></div>';
+
+      document.getElementById('od-body').innerHTML =
+          row('النوع', (o.type === 'شركة' ? '🏭 ' : '💊 ') + offEsc(o.type || '—'))
+        + row('الاسم', offEsc(o.name) || '—')
+        + (o.branch ? row('الفرع', offEsc(o.branch)) : '')
+        + row('الحالة', status)
+        + row('أُضيف', fmtDT(o.created_at))
+        + (o.updated_at && o.updated_at !== o.created_at ? row('آخر تعديل', fmtDT(o.updated_at)) : '')
+        + '<div style="margin-top:14px"><span class="od-label">التفاصيل</span>'
+        + '<div class="od-details-box">' + (details.trim() ? offLinkify(details) : '<span style="color:#64748b">مفيش تفاصيل مكتوبة</span>') + '</div></div>';
+
+      document.getElementById('details-modal').style.display = 'flex';
+    }
+    function closeDetails() {
+      document.getElementById('details-modal').style.display = 'none';
+      odCurrentId = null;
+    }
+    function editFromDetails() {
+      const id = odCurrentId;
+      closeDetails();
+      if (id != null) openEditModal(id);
     }
 
     function openAddModal() {
