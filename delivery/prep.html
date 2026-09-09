@@ -46,6 +46,7 @@ body.dark .ptab.active{background:#0f2748}
 .tag{display:inline-block;font-size:.68rem;font-weight:800;padding:.12rem .45rem;border-radius:6px;margin-top:.15rem}
 .tag-drv{background:#e0e7ff;color:#4338ca}
 .tag-pool{background:#fef3c7;color:#b45309}
+.tag-warn{background:#fee2e2;color:#b91c1c}
 /* مودال الأصناف */
 .ov{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:20;display:none;align-items:flex-end;justify-content:center}
 .ov.open{display:flex}
@@ -156,9 +157,9 @@ function setTab(t){
 
 async function refreshCounts(){
   try{
-    let q1=db.from('orders').select('id',{count:'exact',head:true}).eq('status','pending').is('driver_id',null).is('prep_done_at',null).not('prep_hold','is',true);
+    let q1=db.from('orders').select('id',{count:'exact',head:true}).is('prep_done_at',null).not('prep_hold','is',true).in('status',['pending','assigned','postponed']);
     let q2=db.from('orders').select('id',{count:'exact',head:true}).not('prep_done_at','is',null).is('picked_at',null).in('status',['pending','assigned','postponed']);
-    let q3=db.from('orders').select('id',{count:'exact',head:true}).eq('status','pending').is('driver_id',null).is('prep_done_at',null).is('prep_hold',true);
+    let q3=db.from('orders').select('id',{count:'exact',head:true}).is('prep_done_at',null).is('prep_hold',true).in('status',['pending','assigned','postponed']);
     if(branchId){ q1=q1.eq('branch_id',branchId); q2=q2.eq('branch_id',branchId); q3=q3.eq('branch_id',branchId); }
     const [r1,r2,r3]=await Promise.all([q1,q2,q3]);
     document.getElementById('cnt-prep').textContent = r1.count||0;
@@ -172,9 +173,10 @@ async function load(){
   let q=db.from('orders').select('*');
   if(branchId) q=q.eq('branch_id',branchId);
   if(tab==='prep'){
-    q=q.eq('status','pending').is('driver_id',null).is('prep_done_at',null).not('prep_hold','is',true).order('created_at',{ascending:true});
+    // كل طلب مش متحضّر ولسه ماتستلمش (جاهز/متعيّن/مؤجّل) — عشان مفيش طلب مش متحضّر يختفي
+    q=q.is('prep_done_at',null).not('prep_hold','is',true).in('status',['pending','assigned','postponed']).order('created_at',{ascending:true});
   }else if(tab==='hold'){
-    q=q.eq('status','pending').is('driver_id',null).is('prep_done_at',null).is('prep_hold',true).order('created_at',{ascending:true});
+    q=q.is('prep_done_at',null).is('prep_hold',true).in('status',['pending','assigned','postponed']).order('created_at',{ascending:true});
   }else{
     q=q.not('prep_done_at','is',null).is('picked_at',null)
        .in('status',['pending','assigned','postponed']).order('prep_done_at',{ascending:false});
@@ -216,6 +218,7 @@ function render(){
           🧾 <b>${esc(o.bill_no||'—')}</b> · كود ${esc(o.cust_code||'—')} · 💰 ${Number(o.total_bill_net||0).toLocaleString()} ج<br>
           📍 ${esc(o.cust_region||'—')}<br>
           🏠 ${esc(o.customer_address||o.cust_address||'—')}<br>
+          ${o.driver_id?`<span class="tag tag-warn">⚠️ متعيّن لطيار (${esc(o.deliveryman||'—')}) — لسه متحضّر!</span><br>`:(o.status==='postponed'?`<span class="tag tag-pool">⏰ مؤجّل — لسه متحضّر</span><br>`:'')}
           ⏱ ${tab==='prep'?'منتظر تحضير':'موقوف من'}: <span class="wait" style="color:${tab==='prep'&&w>=20?'#dc2626':'#b45309'}">${fm(w)}</span>
         </div>
         <div class="hint">👆 اضغط لعرض الأصناف والأسعار</div>
