@@ -137,6 +137,20 @@ try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_d
     </div>
   </div>
 
+  <div class="card" id="bank-settle-card" style="margin-bottom:14px;">
+    <div class="page-title"><i class="fas fa-building-columns" style="color:#0369a1"></i> تسوية تحويلات البنك (باي موب)</div>
+    <div class="hint" style="margin-bottom:10px;">ارفع ملف/ملفات إكسبورت البنك (CSV). هطابق المعاملات بالكود، أعلّمها «تم التحويل من البنك»، وأجمّع لكل صيدلية.</div>
+    <div class="toolbar" style="gap:12px;flex-wrap:wrap;">
+      <input type="file" id="bank-file" accept=".csv,text/csv" multiple style="font-family:var(--font);font-size:0.78rem;">
+      <span class="stat">في الملفات: <b id="bank-total">0</b></span>
+      <span class="stat">مطابَقة: <b id="bank-matched" style="color:#15803d;">0</b></span>
+      <span class="stat">غير موجودة: <b id="bank-missing" style="color:#b91c1c;">0</b></span>
+      <button class="btn btn-primary" id="bank-settle" disabled><i class="fas fa-check-double"></i> علّم كمُحوّل من البنك</button>
+      <button class="btn btn-ghost" id="bank-clear"><i class="fas fa-trash"></i> مسح</button>
+    </div>
+    <div id="bank-agg" style="margin-top:12px;"></div>
+  </div>
+
   <div id="confirm-bar">
     <span class="cb-tag"><i class="fas fa-link"></i> وضع المراجعة</span>
     <span class="cb-stat">المستورد: <b id="cb-right">0</b> (<span id="cb-right-sum">0.00</span> ج)</span>
@@ -985,6 +999,95 @@ function renderC2W(){
 }
 
 renderAll();
+
+/* ===== تسوية تحويلات البنك (باي موب): مطابقة ملف CSV بالكود → wallet.bank_settled + تجميع لكل صيدلية ===== */
+(function(){
+  const fileInp=$('#bank-file'); if(!fileInp) return;
+  const st={ fileIds:new Set(), rows:new Map(), seen:0 };
+  function parseIds(text){
+    const ids=[]; const lines=String(text||'').split(/\r\n|\n|\r/);
+    for(let i=0;i<lines.length;i++){
+      const cell=(lines[i]||'').split(',')[0].replace(/^\uFEFF/,'').replace(/"/g,'').trim();
+      if(/^\d{3,}$/.test(cell)) ids.push(cell);   // id رقمي (صف العنوان بيتجاهل تلقائيًا)
+    }
+    return ids;
+  }
+  async function refetch(){
+    const arr=[...st.fileIds]; st.seen=arr.length; st.rows=new Map();
+    for(let i=0;i<arr.length;i+=400){
+      const chunk=arr.slice(i,i+400).map(Number);
+      const {data,error}=await sdb.from('wallet').select('id,branch,ammount,fees,vat,netammount,bank_settled').in('id',chunk);
+      if(error){ toast('خطأ في القراءة: '+error.message,'err'); return; }
+      (data||[]).forEach(r=>st.rows.set(String(r.id),r));
+    }
+    $('#bank-total').textContent=st.seen;
+    $('#bank-matched').textContent=st.rows.size;
+    $('#bank-missing').textContent=Math.max(0, st.seen-st.rows.size);
+    $('#bank-settle').disabled = st.rows.size===0;
+    renderAgg();
+  }
+  function renderAgg(){
+    const rows=[...st.rows.values()]; const box=$('#bank-agg');
+    if(!rows.length){ box.innerHTML=''; return; }
+    const by={};
+    rows.forEach(r=>{ const b=r.branch||'—'; const g=by[b]||(by[b]={n:0,val:0,tax:0,net:0,settled:0});
+      g.n++; g.val+=(+r.ammount||0); g.tax+=(+r.fees||0)+(+r.vat||0); g.net+=(+r.netammount||0); if(r.bank_settled)g.settled++; });
+    const T={n:0,val:0,tax:0,net:0,settled:0};
+    Object.values(by).forEach(g=>{T.n+=g.n;T.val+=g.val;T.tax+=g.tax;T.net+=g.net;T.settled+=g.settled;});
+    const brs=Object.keys(by).sort();
+    let h='<table style="width:100%;border-collapse:collapse;font-size:0.8rem;">'
+      +'<thead><tr style="background:#f1f5f9;">'
+      +'<th style="text-align:right;padding:7px 10px;">الصيدلية</th>'
+      +'<th style="padding:7px 10px;">عدد</th>'
+      +'<th style="padding:7px 10px;">إجمالي القيمة</th>'
+      +'<th style="padding:7px 10px;">إجمالي الضريبة</th>'
+      +'<th style="padding:7px 10px;">صافي القيمة</th>'
+      +'<th style="padding:7px 10px;">محوّل</th></tr></thead><tbody>';
+    brs.forEach(b=>{ const g=by[b];
+      h+='<tr style="border-top:1px solid var(--border);">'
+        +'<td style="text-align:right;padding:7px 10px;font-weight:700;">'+b+'</td>'
+        +'<td style="text-align:center;padding:7px 10px;">'+g.n+'</td>'
+        +'<td style="text-align:center;padding:7px 10px;">'+fmtNum(g.val)+'</td>'
+        +'<td style="text-align:center;padding:7px 10px;color:#b45309;">'+fmtNum(g.tax)+'</td>'
+        +'<td style="text-align:center;padding:7px 10px;color:#15803d;font-weight:700;">'+fmtNum(g.net)+'</td>'
+        +'<td style="text-align:center;padding:7px 10px;">'+g.settled+'/'+g.n+'</td></tr>';
+    });
+    h+='</tbody><tfoot><tr style="border-top:2px solid var(--border);background:#f1f5f9;font-weight:800;">'
+      +'<td style="text-align:right;padding:8px 10px;">الإجمالي</td>'
+      +'<td style="text-align:center;padding:8px 10px;">'+T.n+'</td>'
+      +'<td style="text-align:center;padding:8px 10px;">'+fmtNum(T.val)+'</td>'
+      +'<td style="text-align:center;padding:8px 10px;color:#b45309;">'+fmtNum(T.tax)+'</td>'
+      +'<td style="text-align:center;padding:8px 10px;color:#15803d;">'+fmtNum(T.net)+'</td>'
+      +'<td style="text-align:center;padding:8px 10px;">'+T.settled+'/'+T.n+'</td></tr></tfoot></table>';
+    box.innerHTML=h;
+  }
+  fileInp.addEventListener('change',async e=>{
+    const files=[...e.target.files]; if(!files.length) return;
+    for(const f of files){ try{ const t=await f.text(); parseIds(t).forEach(id=>st.fileIds.add(id)); }catch(err){ toast('تعذّر قراءة '+f.name,'err'); } }
+    await refetch();
+    toast('اتقروا '+files.length+' ملف — '+st.rows.size+' مطابَقة','ok');
+  });
+  $('#bank-clear').onclick=()=>{ st.fileIds.clear(); st.rows.clear(); st.seen=0; fileInp.value='';
+    $('#bank-total').textContent='0'; $('#bank-matched').textContent='0'; $('#bank-missing').textContent='0';
+    $('#bank-settle').disabled=true; $('#bank-agg').innerHTML=''; };
+  $('#bank-settle').onclick=async()=>{
+    const ids=[...st.rows.keys()].map(Number); if(!ids.length) return;
+    const btn=$('#bank-settle'); const orig=btn.innerHTML; btn.disabled=true; btn.innerHTML='<i class="fas fa-spinner fa-spin"></i> جارٍ الحفظ...';
+    try{
+      const nowIso=new Date().toISOString();
+      for(let i=0;i<ids.length;i+=400){
+        const chunk=ids.slice(i,i+400);
+        const {error}=await sdb.from('wallet').update({bank_settled:true,bank_settled_at:nowIso}).in('id',chunk);
+        if(error) throw error;
+      }
+      st.rows.forEach(r=>{ r.bank_settled=true; });
+      renderAgg();
+      toast('تم تعليم '+ids.length+' معاملة كمُحوّلة من البنك ✓','ok');
+    }catch(err){ toast('فشل الحفظ: '+(err&&err.message||err),'err'); }
+    finally{ btn.disabled=false; btn.innerHTML=orig; }
+  };
+})();
+
 </script>
 </body>
 </html>
