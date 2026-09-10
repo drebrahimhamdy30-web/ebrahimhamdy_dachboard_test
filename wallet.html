@@ -1024,11 +1024,13 @@
       const b=_BANK_TERM2BR[r.term]; if(b) return b;
       return 'غير معروف';
     }
+    // الصافي = مجموع net_amount من الملف زي ما هو (المرتجعات بتتسوّى في تحويلة لاحقة، مش بتُطرح من دي).
+    // «مرتجعات» عمود معلوماتي فقط (مش مطروح). الملغي مُستبعد.
     function _aggRows(rows){ const g={n:0,sales:0,ref:0,fees:0,net:0};
-      rows.forEach(r=>{ if(r.isVoid) return; if(r.isRefund){ g.ref+=r.gross; } else { g.n++; g.sales+=r.gross; g.fees+=r.fees; g.net+=r.net; } });
-      g.settle=g.net-g.ref; return g; }
+      rows.forEach(r=>{ if(r.isVoid) return; if(r.isRefund){ g.ref+=r.gross; return; } g.n++; g.sales+=r.gross; g.fees+=r.fees; g.net+=r.net; });
+      g.settle=g.net; return g; }
     function _aggRowHtml(label,g,strong){ const st=strong?'style="font-weight:800;background:var(--surface-3);"':'';
-      return '<tr '+st+'><td><b>'+label+'</b></td><td>'+g.n+'</td><td><b>'+_fmt2(g.sales)+'</b></td><td style="color:#7c3aed;">'+(g.ref?('-'+_fmt2(g.ref)):'0.00')+'</td><td style="color:#c2410c;">'+_fmt2(g.fees)+'</td><td style="color:#15803d;font-weight:800;">'+_fmt2(g.settle)+'</td></tr>'; }
+      return '<tr '+st+'><td><b>'+label+'</b></td><td>'+g.n+'</td><td><b>'+_fmt2(g.sales)+'</b></td><td style="color:#7c3aed;" title="معلومة فقط — تُسوّى في تحويلة لاحقة ومش مطروحة من الصافي">'+(g.ref?_fmt2(g.ref):'0.00')+'</td><td style="color:#c2410c;">'+_fmt2(g.fees)+'</td><td style="color:#15803d;font-weight:800;">'+_fmt2(g.settle)+'</td></tr>'; }
     function renderBank(){
       const all=_allRows();
       _BANK_TERM2BR={};
@@ -1060,8 +1062,8 @@
       // (2) لكل صيدلية (على كل المعاملات، بدون تكرار id)
       const by={};
       all.forEach(r=>{ if(r.isVoid) return; const b=_bankBranchOf(r); const g=by[b]||(by[b]={n:0,sales:0,ref:0,fees:0,net:0});
-        if(r.isRefund){ g.ref+=r.gross; } else { g.n++; g.sales+=r.gross; g.fees+=r.fees; g.net+=r.net; } });
-      Object.values(by).forEach(g=>g.settle=g.net-g.ref);
+        if(r.isRefund){ g.ref+=r.gross; return; } g.n++; g.sales+=r.gross; g.fees+=r.fees; g.net+=r.net; });
+      Object.values(by).forEach(g=>g.settle=g.net);
       let btbl='<div class="cmp-sec-title" style="color:#0369a1;margin-top:14px;"><i class="fas fa-store"></i> لكل صيدلية</div>'
         +'<div class="cmp-scroll"><table class="cmp-tbl"><thead><tr><th>الصيدلية</th><th>عدد المبيعات</th><th>قيمة المبيعات</th><th>المرتجعات</th><th>الرسوم</th><th>صافي القيمة</th></tr></thead><tbody>';
       const PT={n:0,sales:0,ref:0,fees:0,net:0,settle:0};
@@ -1080,7 +1082,7 @@
         +'<button class="btn btn-primary" id="bank-do" onclick="bankSettle()" '+(matched.length?'':'disabled')+'><i class="fas fa-check-double"></i> علّم المطابَق كمُحوّل من البنك ('+matched.length+')</button>'
         +'<button class="btn" style="background:var(--surface-3);color:var(--text-secondary);border:1px solid var(--border);" onclick="bankClear()"><i class="fas fa-trash"></i> مسح</button>'
         +'</div>';
-      const note='<div class="cmp-note">كل ملف = تحويلة؛ <b>صافي القيمة للملف = مبلغ التحويلة</b>، وإجمالي الملفات = إجمالي التحويلات. المبيعات لوحدها، المرتجعات تُطرح، الملغي مُستبعد. «الرسوم» = عمود fees. المطابقة على id = wallet.id.</div>';
+      const note='<div class="cmp-note">كل ملف = تحويلة؛ <b>صافي القيمة للملف = مبلغ التحويلة</b> (= مجموع net_amount في الملف)، وإجمالي الملفات = إجمالي التحويلات. عمود «المرتجعات» معلومة فقط — <b>مش مطروح</b> (المرتجع بيتسوّى في تحويلة لاحقة). الملغي مُستبعد. المطابقة على id = wallet.id.</div>';
       document.getElementById('bank-body').innerHTML='<style>#bank-body .cmp-tbl th{top:0;}</style>'+note+kpis+ftbl+btbl+miss+actions;
     }
     function bankClear(){ _bank.files=[]; _bankWallet=new Map(); closeBank(); }
