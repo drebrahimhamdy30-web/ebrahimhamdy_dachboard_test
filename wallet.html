@@ -934,17 +934,18 @@
     function closeCmp(){ document.getElementById('cmpModal').style.display = 'none'; }
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeCmp(); });
 
-    /* ============ تسوية تحويلات البنك (باي موب): تجميع من الشيت المرفوع + عرض غير المطابق ============
-       التجميع من قيم الملف نفسه (كل الصفوف). المبيعات لوحدها، المرتجعات تتطرح، والملغي يُستبعد.
-       المطابقة على id = wallet.id عشان: (1) نعرف غير الموجود ونعرضه، (2) نحدّد الصيدلية،
-       (3) زر «علّم كمُحوّل من البنك» يشتغل على المطابَق فقط. يدعم أكتر من ملف (بتتجمّع). */
-    const _bank = { rows: new Map() };   // id -> {id,gross,fees,net,term,fbranch,date,order,isRefund,isVoid}
-    let _bankWallet = new Map();         // id -> {branch, settled}
-    let _BANK_TERM2BR = {};              // term -> branch (من المطابَق)
+    /* ============ تسوية تحويلات البنك (باي موب): تجميع لكل ملف (=تحويلة) + لكل صيدلية + غير المطابق ============
+       كل ملف مرفوع = تحويلة بنكية؛ «صافي القيمة» للملف المفروض يساوي مبلغ التحويلة.
+       المبيعات لوحدها، المرتجعات تُطرح من الصافي، والملغي مُستبعد.
+       المطابقة على id = wallet.id عشان نعرف غير الموجود + نحدّد الصيدلية + نعلّم المُحوّل (المطابَق فقط). */
+    const _bank = { files: [] };   // [{name, rows:[{id,gross,fees,net,term,fbranch,date,order,isRefund,isVoid}]}]
+    let _bankWallet = new Map();   // id -> {branch, settled}
+    let _BANK_TERM2BR = {};        // term -> branch (من المطابَق)
     function closeBank(){ document.getElementById('bankModal').style.display='none'; }
     function _bankId(v){ return String(v==null?'':v).trim().replace(/\.0+$/,'').replace(/[^0-9]/g,''); }
     function _bankNum(v){ return parseFloat(String(v==null?'':v).replace(/,/g,'').trim()) || 0; }
     function _bankTrue(v){ const s=String(v==null?'':v).trim().toLowerCase(); return s==='true'||s==='1'||s==='نعم'; }
+    function _fmt2(n){ return (Math.round(n*100)/100).toLocaleString('en-EG',{minimumFractionDigits:2,maximumFractionDigits:2}); }
     function _bankCols(sample){
       const keys=Object.keys(sample||{});
       const pick=(exact,subs)=> keys.find(k=>String(k).trim().toLowerCase()===exact)
@@ -964,6 +965,24 @@
         status: pick('__no_such__',['الحالة']),
       };
     }
+    function _parseBankRows(rows){
+      const c=_bankCols(rows[0]); if(!c.id) return null;
+      const out=new Map();
+      rows.forEach(r=>{
+        const id=_bankId(r[c.id]); if(!id||id.length<3) return;
+        const gross=c.gross?_bankNum(r[c.gross]):0;
+        const fees=c.fees?_bankNum(r[c.fees]):0;
+        const net=c.net?_bankNum(r[c.net]):(gross-fees);
+        const typeStr=c.type?String(r[c.type]||'').trim().toLowerCase():'';
+        const statusStr=c.status?String(r[c.status]||''):'';
+        const isRefund=(typeStr==='refund')||(c.refunded&&_bankTrue(r[c.refunded]))||/مرتجع/.test(statusStr);
+        const isVoid=(typeStr==='void'||typeStr==='voided')||(c.voided&&_bankTrue(r[c.voided]))||/ملغ/.test(statusStr);
+        out.set(id,{ id, gross, fees, net, isRefund, isVoid,
+          term:c.term?String(r[c.term]||'').trim():'', fbranch:c.fbranch?String(r[c.fbranch]||'').trim():'',
+          date:c.date?String(r[c.date]||'').trim():'', order:c.order?String(r[c.order]||'').trim():'' });
+      });
+      return [...out.values()];
+    }
     async function onBankFiles(ev){
       const files=[...(ev.target.files||[])]; ev.target.value='';
       if(!files.length) return;
@@ -975,31 +994,19 @@
           const ws=wb.Sheets[wb.SheetNames[0]];
           const rows=XLSX.utils.sheet_to_json(ws,{defval:''});
           if(!rows.length) continue;
-          const c=_bankCols(rows[0]);
-          if(!c.id){ unknown=true; continue; }
-          rows.forEach(r=>{
-            const id=_bankId(r[c.id]); if(!id||id.length<3) return;
-            const gross=c.gross?_bankNum(r[c.gross]):0;
-            const fees=c.fees?_bankNum(r[c.fees]):0;
-            const net=c.net?_bankNum(r[c.net]):(gross-fees);
-            const typeStr=c.type?String(r[c.type]||'').trim().toLowerCase():'';
-            const statusStr=c.status?String(r[c.status]||''):'';
-            const isRefund=(typeStr==='refund')||(c.refunded&&_bankTrue(r[c.refunded]))||/مرتجع/.test(statusStr);
-            const isVoid=(typeStr==='void'||typeStr==='voided')||(c.voided&&_bankTrue(r[c.voided]))||/ملغ/.test(statusStr);
-            _bank.rows.set(id,{ id, gross, fees, net, isRefund, isVoid,
-              term: c.term?String(r[c.term]||'').trim():'',
-              fbranch: c.fbranch?String(r[c.fbranch]||'').trim():'',
-              date: c.date?String(r[c.date]||'').trim():'',
-              order: c.order?String(r[c.order]||'').trim():'' });
-          });
+          const parsed=_parseBankRows(rows);
+          if(parsed===null){ unknown=true; continue; }
+          const ix=_bank.files.findIndex(x=>x.name===f.name);
+          if(ix>=0) _bank.files[ix]={name:f.name, rows:parsed}; else _bank.files.push({name:f.name, rows:parsed});
         }catch(err){ readErr++; }
       }
       if(readErr) alert('تعذّر قراءة '+readErr+' ملف');
-      if(!_bank.rows.size){ alert(unknown?'مش لاقي عمود «id» أو «رقم المعامله» في الملف — اتأكد إنه الإكسبورت الصحيح':'الملف مفيهوش معاملات'); return; }
+      if(!_bank.files.length){ alert(unknown?'مش لاقي عمود «id» أو «رقم المعامله» في الملف — اتأكد إنه الإكسبورت الصحيح':'الملف مفيهوش معاملات'); return; }
       await bankRefetch();
     }
+    function _allRows(){ const m=new Map(); _bank.files.forEach(f=>f.rows.forEach(r=>{ if(!m.has(r.id)) m.set(r.id,r); })); return [...m.values()]; }
     async function bankRefetch(){
-      const ids=[..._bank.rows.keys()]; _bankWallet=new Map();
+      const ids=_allRows().map(r=>r.id); _bankWallet=new Map();
       const body=document.getElementById('bank-body');
       body.innerHTML='<div class="cmp-ok">⏳ جاري المطابقة...</div>';
       document.getElementById('bankModal').style.display='flex';
@@ -1017,39 +1024,54 @@
       const b=_BANK_TERM2BR[r.term]; if(b) return b;
       return 'غير معروف';
     }
-    function _fmt2(n){ return (Math.round(n*100)/100).toLocaleString('en-EG',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+    function _aggRows(rows){ const g={n:0,sales:0,ref:0,fees:0,net:0};
+      rows.forEach(r=>{ if(r.isVoid) return; if(r.isRefund){ g.ref+=r.gross; } else { g.n++; g.sales+=r.gross; g.fees+=r.fees; g.net+=r.net; } });
+      g.settle=g.net-g.ref; return g; }
+    function _aggRowHtml(label,g,strong){ const st=strong?'style="font-weight:800;background:var(--surface-3);"':'';
+      return '<tr '+st+'><td><b>'+label+'</b></td><td>'+g.n+'</td><td><b>'+_fmt2(g.sales)+'</b></td><td style="color:#7c3aed;">'+(g.ref?('-'+_fmt2(g.ref)):'0.00')+'</td><td style="color:#c2410c;">'+_fmt2(g.fees)+'</td><td style="color:#15803d;font-weight:800;">'+_fmt2(g.settle)+'</td></tr>'; }
     function renderBank(){
-      const rows=[..._bank.rows.values()];
+      const all=_allRows();
       _BANK_TERM2BR={};
-      rows.forEach(r=>{ const w=_bankWallet.get(r.id); if(w&&w.branch&&r.term&&!_BANK_TERM2BR[r.term]) _BANK_TERM2BR[r.term]=w.branch; });
-      const total=rows.length;
-      const voidN=rows.filter(r=>r.isVoid).length;
-      const refundN=rows.filter(r=>r.isRefund&&!r.isVoid).length;
-      const matched=rows.filter(r=>_bankWallet.has(r.id));
-      const missing=rows.filter(r=>!_bankWallet.has(r.id));
+      all.forEach(r=>{ const w=_bankWallet.get(r.id); if(w&&w.branch&&r.term&&!_BANK_TERM2BR[r.term]) _BANK_TERM2BR[r.term]=w.branch; });
+      const total=all.length;
+      const voidN=all.filter(r=>r.isVoid).length;
+      const refundN=all.filter(r=>r.isRefund&&!r.isVoid).length;
+      const matched=all.filter(r=>_bankWallet.has(r.id));
+      const missing=all.filter(r=>!_bankWallet.has(r.id));
       const settledN=matched.filter(r=>_bankWallet.get(r.id).settled).length;
-      // تجميع لكل صيدلية: المبيعات لوحدها، المرتجعات تتطرح، الملغي مُستبعد
-      const by={};
-      rows.forEach(r=>{ if(r.isVoid) return; const b=_bankBranchOf(r); const g=by[b]||(by[b]={n:0,sales:0,ref:0,fees:0,net:0});
-        if(r.isRefund){ g.ref+=r.gross; } else { g.n++; g.sales+=r.gross; g.fees+=r.fees; g.net+=r.net; } });
-      const T={n:0,sales:0,ref:0,fees:0,net:0}; Object.values(by).forEach(g=>{T.n+=g.n;T.sales+=g.sales;T.ref+=g.ref;T.fees+=g.fees;T.net+=g.net;});
-      const brs=Object.keys(by).sort();
+
       const kpis='<div class="cmp-kpis">'
-        +'<div class="cmp-kpi" style="border-color:#93c5fd;"><span class="k-lbl">في الملفات</span><span class="k-val" style="color:#1d4ed8;">'+total+'</span></div>'
+        +'<div class="cmp-kpi" style="border-color:#93c5fd;"><span class="k-lbl">ملفات</span><span class="k-val" style="color:#1d4ed8;">'+_bank.files.length+'</span></div>'
+        +'<div class="cmp-kpi" style="border-color:#93c5fd;"><span class="k-lbl">معاملات</span><span class="k-val" style="color:#1d4ed8;">'+total+'</span></div>'
         +'<div class="cmp-kpi" style="border-color:#86efac;"><span class="k-lbl">مطابَقة</span><span class="k-val" style="color:#15803d;">'+matched.length+'</span></div>'
         +'<div class="cmp-kpi" style="border-color:#fca5a5;"><span class="k-lbl">غير موجودة عندنا</span><span class="k-val" style="color:#b91c1c;">'+missing.length+'</span></div>'
         +'<div class="cmp-kpi" style="border-color:#c4b5fd;"><span class="k-lbl">مرتجعات / ملغي</span><span class="k-val" style="color:#7c3aed;">'+refundN+' / '+voidN+'</span></div>'
         +'<div class="cmp-kpi" style="border-color:#fdba74;"><span class="k-lbl">محوّل بالفعل</span><span class="k-val" style="color:#c2410c;">'+settledN+'/'+matched.length+'</span></div>'
         +'</div>';
-      let tbl='<div class="cmp-scroll"><table class="cmp-tbl"><thead><tr><th>الصيدلية</th><th>عدد المبيعات</th><th>قيمة المبيعات</th><th>المرتجعات</th><th>الرسوم</th><th>صافي القيمة</th></tr></thead><tbody>';
-      brs.forEach(b=>{ const g=by[b]; const net=g.net-g.ref;
-        tbl+='<tr><td><b>'+b+'</b></td><td>'+g.n+'</td><td><b>'+_fmt2(g.sales)+'</b></td><td style="color:#7c3aed;">'+(g.ref?('-'+_fmt2(g.ref)):'0.00')+'</td><td style="color:#c2410c;">'+_fmt2(g.fees)+'</td><td style="color:#15803d;font-weight:800;">'+_fmt2(net)+'</td></tr>';
-      });
-      const gnet=T.net-T.ref;
-      tbl+='</tbody><tfoot><tr style="font-weight:800;background:var(--surface-3);"><td>الإجمالي</td><td>'+T.n+'</td><td>'+_fmt2(T.sales)+'</td><td style="color:#7c3aed;">'+(T.ref?('-'+_fmt2(T.ref)):'0.00')+'</td><td style="color:#c2410c;">'+_fmt2(T.fees)+'</td><td style="color:#15803d;">'+_fmt2(gnet)+'</td></tr></tfoot></table></div>';
+
+      // (1) لكل ملف = تحويلة: الصافي المفروض يساوي مبلغ التحويلة
+      let ftbl='<div class="cmp-sec-title" style="color:#0369a1;"><i class="fas fa-file-invoice-dollar"></i> لكل ملف (= تحويلة بنكية) — صافي القيمة يساوي مبلغ التحويلة</div>'
+        +'<div class="cmp-scroll"><table class="cmp-tbl"><thead><tr><th>الملف</th><th>عدد المبيعات</th><th>قيمة المبيعات</th><th>المرتجعات</th><th>الرسوم</th><th>صافي القيمة (= التحويلة)</th></tr></thead><tbody>';
+      const GT={n:0,sales:0,ref:0,fees:0,net:0,settle:0};
+      _bank.files.forEach(f=>{ const g=_aggRows(f.rows); GT.n+=g.n;GT.sales+=g.sales;GT.ref+=g.ref;GT.fees+=g.fees;GT.settle+=g.settle;
+        ftbl+=_aggRowHtml(f.name,g,false); });
+      ftbl+='</tbody><tfoot>'+_aggRowHtml('الإجمالي',GT,true)+'</tfoot></table></div>';
+
+      // (2) لكل صيدلية (على كل المعاملات، بدون تكرار id)
+      const by={};
+      all.forEach(r=>{ if(r.isVoid) return; const b=_bankBranchOf(r); const g=by[b]||(by[b]={n:0,sales:0,ref:0,fees:0,net:0});
+        if(r.isRefund){ g.ref+=r.gross; } else { g.n++; g.sales+=r.gross; g.fees+=r.fees; g.net+=r.net; } });
+      Object.values(by).forEach(g=>g.settle=g.net-g.ref);
+      let btbl='<div class="cmp-sec-title" style="color:#0369a1;margin-top:14px;"><i class="fas fa-store"></i> لكل صيدلية</div>'
+        +'<div class="cmp-scroll"><table class="cmp-tbl"><thead><tr><th>الصيدلية</th><th>عدد المبيعات</th><th>قيمة المبيعات</th><th>المرتجعات</th><th>الرسوم</th><th>صافي القيمة</th></tr></thead><tbody>';
+      const PT={n:0,sales:0,ref:0,fees:0,net:0,settle:0};
+      Object.keys(by).sort().forEach(b=>{ const g=by[b]; PT.n+=g.n;PT.sales+=g.sales;PT.ref+=g.ref;PT.fees+=g.fees;PT.settle+=g.settle; btbl+=_aggRowHtml(b,g,false); });
+      btbl+='</tbody><tfoot>'+_aggRowHtml('الإجمالي',PT,true)+'</tfoot></table></div>';
+
+      // (3) غير المطابق بالتفاصيل
       let miss='';
       if(missing.length){
-        miss='<div class="cmp-sec-title" style="color:#b91c1c;"><i class="fas fa-triangle-exclamation"></i> معاملات في الملف مش موجودة عندنا ('+missing.length+') — إجمالي '+_fmt2(missing.reduce((s,r)=>s+(r.isRefund?-r.gross:r.gross),0))+' ج</div>'
+        miss='<div class="cmp-sec-title" style="color:#b91c1c;margin-top:14px;"><i class="fas fa-triangle-exclamation"></i> معاملات في الملف مش موجودة عندنا ('+missing.length+')</div>'
           +'<div class="cmp-scroll"><table class="cmp-tbl"><thead><tr><th>رقم المعامله</th><th>النوع</th><th>القيمة</th><th>الرسوم</th><th>الصافي</th><th>المكينة</th><th>الفرع</th><th>التاريخ</th><th>رقم الطلب</th></tr></thead><tbody>'
           +missing.map(r=>'<tr><td class="mono">'+r.id+'</td><td>'+(r.isVoid?'<span style="color:#64748b;">ملغي</span>':(r.isRefund?'<span style="color:#7c3aed;">مرتجع</span>':'بيع'))+'</td><td><b>'+_fmt2(r.gross)+'</b></td><td>'+_fmt2(r.fees)+'</td><td>'+_fmt2(r.net)+'</td><td>'+(r.term||'—')+'</td><td>'+_bankBranchOf(r)+'</td><td>'+(r.date||'—')+'</td><td class="mono">'+(r.order||'—')+'</td></tr>').join('')
           +'</tbody></table></div>';
@@ -1058,12 +1080,12 @@
         +'<button class="btn btn-primary" id="bank-do" onclick="bankSettle()" '+(matched.length?'':'disabled')+'><i class="fas fa-check-double"></i> علّم المطابَق كمُحوّل من البنك ('+matched.length+')</button>'
         +'<button class="btn" style="background:var(--surface-3);color:var(--text-secondary);border:1px solid var(--border);" onclick="bankClear()"><i class="fas fa-trash"></i> مسح</button>'
         +'</div>';
-      const note='<div class="cmp-note">التجميع من <b>قيم الملف نفسه</b>. المبيعات لوحدها، <b>المرتجعات تُطرح</b> من الصافي، والملغي مُستبعد. «الرسوم» = عمود fees. المطابقة على <b>id = wallet.id</b>. تقدر ترفع أكتر من ملف.</div>';
-      document.getElementById('bank-body').innerHTML='<style>#bank-body .cmp-tbl th{top:0;}</style>'+note+kpis+tbl+miss+actions;
+      const note='<div class="cmp-note">كل ملف = تحويلة؛ <b>صافي القيمة للملف = مبلغ التحويلة</b>، وإجمالي الملفات = إجمالي التحويلات. المبيعات لوحدها، المرتجعات تُطرح، الملغي مُستبعد. «الرسوم» = عمود fees. المطابقة على id = wallet.id.</div>';
+      document.getElementById('bank-body').innerHTML='<style>#bank-body .cmp-tbl th{top:0;}</style>'+note+kpis+ftbl+btbl+miss+actions;
     }
-    function bankClear(){ _bank.rows.clear(); _bankWallet=new Map(); closeBank(); }
+    function bankClear(){ _bank.files=[]; _bankWallet=new Map(); closeBank(); }
     async function bankSettle(){
-      const ids=[..._bank.rows.keys()].filter(id=>_bankWallet.has(id)).map(Number);
+      const ids=_allRows().filter(r=>_bankWallet.has(r.id)).map(r=>Number(r.id));
       if(!ids.length) return;
       const btn=document.getElementById('bank-do'); const orig=btn.innerHTML; btn.disabled=true; btn.innerHTML='<i class="fas fa-spinner fa-spin"></i> جارٍ الحفظ...';
       try{
