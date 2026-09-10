@@ -207,6 +207,8 @@ body.dark .tc-timer2{color:#fff!important}
 
 /* ORDER CARD */
 .order-card{background:var(--surface);border-radius:12px;border:3px solid #e5e9f0;padding:.4rem .5rem;cursor:pointer;transition:all .18s;position:relative;box-shadow:var(--shadow-sm)}
+.order-card.prepped{background:#dcfce7}
+body.dark .order-card.prepped{background:#0f3d2e}
   .order-card:hover{box-shadow:var(--shadow-md);transform:translateY(-1px)}
 .order-card.sel{border-color:var(--primary)!important;background:var(--primary-light);box-shadow:0 0 0 2px rgba(37,99,235,.25),var(--shadow-sm)}
 @keyframes urg{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.3)}50%{box-shadow:0 0 0 5px rgba(220,38,38,0)}}
@@ -239,6 +241,7 @@ body.dark .tc-timer2{color:#fff!important}
 .p-paid{background:#dcfce7;color:#15803d}
 .oc-st{font-size:.6rem;font-weight:700;padding:.1rem .35rem;border-radius:6px}
 .s-pending{background:var(--green-light);color:#15803d}
+.s-prep{background:#fef3c7;color:#b45309}
 .s-assigned{background:var(--orange-light);color:#c2410c}
 .s-picked{background:var(--blue-light);color:#0e7490}
 .s-failed{background:var(--red-light);color:#b91c1c}
@@ -392,6 +395,8 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
     <button class="ftab" onclick="setFilter('postponed',this)">مؤجل/متعذّر <span id="f-postponed">0</span></button>
     <button class="ftab" onclick="setFilter('picked',this)">في الطريق <span id="f-picked">0</span></button>
     <button class="ftab" onclick="setFilter('late',this)">⚠️ متأخر <span id="f-late">0</span></button>
+    <button class="ftab" id="prepTab" onclick="setFilter('prep',this)" style="display:none;border-color:#c7d2fe;color:#4338ca;font-weight:700">🧪 تحت التجهيز <span id="f-prep">0</span></button>
+    <button class="ftab" id="prepToggle" onclick="togglePrepMode()" title="تفعيل/إيقاف وضع التحضير للفرع" style="font-weight:700">🧪 وضع التحضير: موقوف</button>
     <button class="ftab" onclick="setFilter('unclosed',this)" style="border-color:#fecaca;color:#b91c1c">🔴 طلبات لم تُغلق على B Connect</button>
     <button class="ftab" onclick="openHardTripsModal()" title="رحلات المناطق الصعبة النهاردة" style="border-color:#fed7aa;color:#c2410c;font-weight:700">🧭 المناطق الصعبة</button>
     <button class="ftab" onclick="openAddOrder()" style="background:var(--green-light);color:#15803d;border-color:#bbf7d0;font-weight:700">➕ إضافة طلب</button>
@@ -764,7 +769,7 @@ const SC={pending:'#16a34a',assigned:'#ea580c',picked:'#0891b2',delivered:'#ca8a
 const SL={pending:'جاهز',assigned:'على رحلة',picked:'استلم',delivered:'تم التوصيل',completed:'مكتمل',postponed:'مؤجل',cancelled:'ملغي',failed:'متعذر'};
 // التفرقة داخل «مؤجل»: سبب طيار (غير «أُزيل من الرحلة») = تعذّر توصيل فعلي؛ غير كده = تأجيل/إزالة من رحلة
 function isFailAttempt(o){ return o && o.status==='postponed' && o.postpone_reason && o.postpone_reason!=='أُزيل من الرحلة'; }
-function ordStatusLabel(o){ return isFailAttempt(o) ? 'تعذّر توصيل' : (SL[o.status]||o.status); }
+function ordStatusLabel(o){ return isFailAttempt(o) ? 'تعذّر توصيل' : underPrep(o) ? (o.prep_hold?'موقوف (تحضير)':'قيد التحضير') : (SL[o.status]||o.status); }
 function ordStatusColor(o){ return isFailAttempt(o) ? '#dc2626' : (SC[o.status]||'#64748b'); }
 const PL={cash:'كاش',visa:'فيزا',transfer:'تحويل',deferred:'آجل',paid:'خالص'};
 // لون حافة الكارت حسب الحالة (خلفية بيضا دايمًا) — أحمر للحالات اللي محتاجة انتباه
@@ -1787,6 +1792,34 @@ function renderTrips(){
 // ===== ORDERS =====
 function setFilter(f,el){currentFilter=f;document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('active'));el.classList.add('active');if(f==='unclosed')unclosedLoading=true;renderOrders();if(f==='unclosed')refreshUnclosed();}
 
+// «تحت التجهيز» = طلب جاهز (pending بلا طيار) لكنه لسه ماتحضّرش، والفرع مفعّل وضع التحضير.
+// لو الوضع موقوف بيرجّع false دايمًا (صفر تغيير في السلوك الحالي).
+function underPrep(o){ return !!(dispatchSettings && dispatchSettings.prep_required && o && o.status==='pending' && !o.driver_id && !o.prep_done_at); }
+async function togglePrepMode(){
+  const branchId=currentUser?.role==='admin'?activeBranchId:(currentUser?.branch_id||null);
+  if(!branchId){ showToast('اختر فرعًا أولاً لتفعيل وضع التحضير'); return; }
+  const cur=!!(dispatchSettings && dispatchSettings.prep_required);
+  const next=!cur;
+  if(!confirm(next?'تفعيل وضع التحضير للفرع؟ الطلبات الجديدة هتبقى «تحت التجهيز» لحد ما المحضّر يجهّزها، ومش هتتوزّع قبل كده.':'إيقاف وضع التحضير؟ كل الطلبات اللي تحت التجهيز هتتحسب مجهّزة وتنزل جاهزة للتوزيع فورًا.')) return;
+  showLoading(true);
+  try{
+    let res;
+    if(dispatchSettings && dispatchSettings.id){ res=await db.from('dispatch_settings').update({prep_required:next}).eq('branch_id',branchId); }
+    else { res=await db.from('dispatch_settings').insert({branch_id:branchId, prep_required:next}); }
+    if(res && res.error) throw res.error;
+    if(!next){
+      // إيقاف الوضع → اعتبر كل طلب لسه تحت التجهيز مجهّزًا فينزل جاهزًا للتوزيع (ويختفي من شاشة المحضّر)
+      const _now=new Date().toISOString();
+      const r2=await db.from('orders').update({prep_done_at:_now, prep_hold:false})
+        .eq('branch_id',branchId).is('prep_done_at',null).in('status',['pending','assigned','postponed']);
+      if(r2 && r2.error) throw r2.error;
+    }
+    showToast(next?'✓ اتفعّل وضع التحضير':'✓ اتوقف وضع التحضير — كل الطلبات نزلت جاهزة');
+  }catch(e){ showToast('تعذّر تغيير وضع التحضير'); }
+  await loadAll();
+  showLoading(false);
+}
+
 // ===== طلبات لم تُغلق على B Connect (trip_review_flags غير المحلولة) =====
 // قراءة حية بحتة (بدون أي كتابة): نجيب أرقام فواتير B Connect المفتوحة دلوقتى،
 // ونعرض المكتمل منها والمتسلّم من طيار على Phalix — تقاطع برقم الفاتورة.
@@ -1946,12 +1979,19 @@ function renderOrders(){
   } else {
     orderSearchResults=null;             // خرجنا من وضع البحث
     orders=[...allOrders];
-    if(currentFilter==='pending') orders=orders.filter(o=>o.status==='pending');
+    if(currentFilter==='prep') orders=orders.filter(o=>underPrep(o));
+    else if(currentFilter==='pending') orders=orders.filter(o=>o.status==='pending');
     else if(currentFilter==='postponed') orders=orders.filter(o=>o.status==='postponed');
     else if(currentFilter==='picked') orders=orders.filter(o=>o.status==='picked');
     else if(currentFilter==='late') orders=orders.filter(o=>isLate(o));
     else { orders=orders.filter(o=>(o.status==='pending'&&!o.driver_id)||o.status==='postponed'); combined=true; }
   }
+
+  // «تحت التجهيز»: عدّاد + إظهار التبويب + حالة زر الوضع (كله dormant لو الوضع موقوف)
+  const prepOn=!!(dispatchSettings && dispatchSettings.prep_required);
+  const prepCount=allOrders.filter(o=>underPrep(o)).length;
+  const _pt=document.getElementById('prepTab'); if(_pt){ _pt.style.display=prepOn?'':'none'; const _fp=document.getElementById('f-prep'); if(_fp)_fp.textContent=prepCount; }
+  const _ptg=document.getElementById('prepToggle'); if(_ptg){ _ptg.textContent='🧪 وضع التحضير: '+(prepOn?'مفعّل':'موقوف'); _ptg.style.background=prepOn?'#e0e7ff':''; _ptg.style.color=prepOn?'#4338ca':''; _ptg.style.borderColor=prepOn?'#c7d2fe':''; }
 
   const all=allOrders.filter(o=>
     (o.status==='pending'&&!o.driver_id)||
@@ -2007,11 +2047,11 @@ function renderOrders(){
     const pm=o.payment_method||(o.bill_type?.includes('فيزا')?'visa':'cash');
     const pmL=PL[pm]||o.bill_type||'كاش';
     const pmC=`p-${pm==='visa'?'visa':pm==='transfer'?'transfer':pm==='deferred'?'deferred':pm==='paid'?'paid':'cash'}`;
-    const stC=`s-${o.status}`;
+    const stC=underPrep(o)?'s-prep':`s-${o.status}`;
 
     let actions='';
     if(o.status==='pending'&&!o.driver_id){
-      actions+=`<button class="ab ab-assign" onclick="quickAssign('${o.id}',event)">تعيين</button>`;
+      if(!underPrep(o)) actions+=`<button class="ab ab-assign" onclick="quickAssign('${o.id}',event)">تعيين</button>`;
       actions+=`<button class="ab ab-postpone" onclick="openPostpone('${o.id}',event)">تأجيل</button>`;
       actions+=`<button class="ab ab-urgent" onclick="markUrgent('${o.id}',event)">عاجل</button>`;
       actions+=`<button class="ab ab-cancel" onclick="openCancel('${o.id}',event)">إلغاء</button>`;
@@ -2041,8 +2081,9 @@ function renderOrders(){
 
     const _bal=Number(o.current_customer_balance||0);
     const owesBal=_bal>=3, creditBal=_bal<=-3;
+    const prepped = !!o.prep_done_at && (o.status==='pending'||o.status==='postponed');
     const bColor = sel ? '' : `border-color:${ocBorder(o, late, owesBal)}`;
-    return _rowLbl+`<div class="order-card ${sel?'sel':''} ${(o.notes||'').includes('🚨')?'urgent':''}" id="oc-${o.id}" onclick="toggleSel('${o.id}',event)" style="${bColor}">
+    return _rowLbl+`<div class="order-card ${sel?'sel':''} ${prepped?'prepped':''} ${(o.notes||'').includes('🚨')?'urgent':''}" id="oc-${o.id}" onclick="toggleSel('${o.id}',event)" style="${bColor}">
       <div class="oc-check">${sel?'✓':''}</div>
       <div class="oc-timers">${buildTimers(o)}</div>
       ${postponeInfo(o)}
@@ -2056,6 +2097,7 @@ function renderOrders(){
         <span class="oc-amount">${Number(o.total_bill_net||0).toLocaleString()} ج</span>
         ${['delivered','completed'].includes(o.status)?`<span class="oc-pay ${pmC}" title="طريقة التحصيل">${pmL}</span>`:''}
         <span class="oc-st ${stC}">${ordStatusLabel(o)}</span>
+        ${prepped?`<span style="font-size:.6rem;font-weight:800;background:#16a34a;color:#fff;padding:.1rem .4rem;border-radius:5px">✓ اتحضّر</span>`:''}
         ${billItemsCard(o)}
       </div>
       ${owesBal?`<div style="font-size:.66rem;color:#fff;background:#dc2626;padding:.16rem .45rem;border-radius:5px;margin-bottom:.28rem;font-weight:800">💰 رصيد مستحق: ${_bal.toLocaleString()} ج</div>`
@@ -2428,6 +2470,7 @@ async function saveNewOrder(){
 
   showLoading(true);
   try{
+    payload.prep_done_at = now;   // الطلبات اليدوية تنزل جاهزة على طول (متحضّرة تلقائيًا) — ماتعديش على المحضّر
     const {data:ins, error} = await db.from('orders').insert(payload).select().single();
     if(error) throw error;
     await addOrderLog(ins.id, 'order_created', {
