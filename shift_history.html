@@ -892,7 +892,7 @@ function balRawEntries(closures,wtrans,mtrans){
       sid:c.id, raw:gt                                              // معرّف الشيفت + القيمة الموقّعة (للتعديل)
     });
   });
-  (wtrans||[]).forEach(t=>e.push({date:t.created_at, day:cairoDay(t.created_at), dir:'out', kind:'wallet', label:'تحويل محفظة — '+esc(t.display_name||'')+(t.reason?(' ('+(REASON_LABEL[t.reason]||esc(t.reason))+')'):''), amount:+t.amount||0}));
+  (wtrans||[]).forEach(t=>e.push({date:t.created_at, day:cairoDay(t.created_at), dir:'out', kind:'wallet', wid:t.id, label:'تحويل محفظة — '+esc(t.display_name||'')+(t.reason?(' ('+(REASON_LABEL[t.reason]||esc(t.reason))+')'):''), amount:+t.amount||0}));
   (mtrans||[]).forEach(t=>e.push({date:t.txn_date, day:cairoDay(t.txn_date), dir:'out', kind:'manual', mid:t.id, label:'صرف — '+esc(t.display_name||t.channel||'')+(t.reason?(' ('+esc(t.reason)+')'):'')+(t.note?(' · '+esc(t.note)):''), amount:+t.amount||0}));
   e.sort((a,b)=> (new Date(a.date)-new Date(b.date)) || (a.day<b.day?-1:a.day>b.day?1:0) );
   return e;
@@ -975,7 +975,7 @@ function balLedgerTable(entries, opts){
       <td>${ic(e.kind)}${e.label}</td>
       <td class="num" style="font-weight:800;color:${e.dir==='in'?'var(--success)':'var(--wal-c)'}">${e.dir==='in'?'+':'−'}${fmt(e.amount)}</td>
       <td class="num" style="font-weight:800;color:${e.balance<0?'var(--danger)':'inherit'}">${fmt(e.balance)}</td>
-      ${del?`<td class="num" style="white-space:nowrap">${e.kind==='manual'?`<button title="تعديل الصرف" onclick="editManualTransfer(${e.mid},${e.amount})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.8rem"><i class="fas fa-pen-to-square"></i></button> <button title="حذف الصرف" onclick="deleteManualTransfer(${e.mid},'${esc(opts.branch)}')" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:.8rem"><i class="fas fa-trash"></i></button>`:(e.sid!=null?`<button title="تعديل قيمة الإغلاق" onclick="editShiftValue(${e.sid},${e.raw})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.8rem"><i class="fas fa-pen-to-square"></i></button>`:'')}</td>`:''}
+      ${del?`<td class="num" style="white-space:nowrap">${e.kind==='manual'?`<button title="تعديل الصرف" onclick="editManualTransfer(${e.mid},${e.amount})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.8rem"><i class="fas fa-pen-to-square"></i></button> <button title="حذف الصرف" onclick="deleteManualTransfer(${e.mid},'${esc(opts.branch)}')" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:.8rem"><i class="fas fa-trash"></i></button>`:e.kind==='wallet'?`<button title="تعديل التحويل" onclick="editWalletTransfer(${e.wid},${e.amount})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.8rem"><i class="fas fa-pen-to-square"></i></button> <button title="حذف التحويل" onclick="deleteWalletTransfer(${e.wid},'${esc(opts.branch)}')" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:.8rem"><i class="fas fa-trash"></i></button>`:(e.sid!=null?`<button title="تعديل قيمة الإغلاق" onclick="editShiftValue(${e.sid},${e.raw})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.8rem"><i class="fas fa-pen-to-square"></i></button>`:'')}</td>`:''}
     </tr>`).join(''):`<tr><td colspan="${del?6:5}" class="empty" style="padding:24px">لا توجد حركات</td></tr>`}</tbody>
   </table></div>`;
 }
@@ -1100,6 +1100,51 @@ async function editManualTransfer(id, cur){
       await loadBalance();
     }catch(err){ toast('فشل الحفظ','err'); btn.disabled=false; btn.textContent='حفظ'; }
   };
+}
+
+// تعديل تحويل محفظة (قيمة/سبب/ملاحظات) — أدمن فقط
+async function editWalletTransfer(id, cur){
+  if(!isAdmin){toast('للأدمن فقط','err');return;}
+  let curReason='', curNote=''; try{ const r=await api(`pos_wallet_transfers?id=eq.${id}&select=reason,note&limit=1`); if(r&&r[0]){ curReason=r[0].reason||''; curNote=r[0].note||''; } }catch(e){}
+  const old=document.getElementById('ewtModal'); if(old) old.remove();
+  const ov=document.createElement('div'); ov.id='ewtModal';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:9999';
+  ov.innerHTML=`<div style="background:var(--surface);border-radius:12px;padding:18px 20px;width:340px;max-width:92vw;box-shadow:0 10px 40px rgba(0,0,0,.25)">
+    <div style="font-weight:800;margin-bottom:12px">تعديل تحويل المحفظة</div>
+    <label style="font-size:.75rem;font-weight:700;color:var(--muted)">القيمة</label>
+    <input type="number" id="ewtAmount" step="0.01" value="${cur}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 10px">
+    <label style="font-size:.75rem;font-weight:700;color:var(--muted)">السبب (اختياري)</label>
+    <input type="text" id="ewtReason" value="${esc(curReason)}" placeholder="السبب" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 10px">
+    <label style="font-size:.75rem;font-weight:700;color:var(--muted)">ملاحظات (اختياري)</label>
+    <input type="text" id="ewtNote" value="${esc(curNote)}" placeholder="ملاحظات" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 14px">
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="document.getElementById('ewtModal').remove()" style="padding:7px 14px;border:1px solid var(--border);background:var(--surface);border-radius:8px;cursor:pointer">إلغاء</button>
+      <button id="ewtSave" style="padding:7px 14px;border:none;background:#16a34a;color:#fff;border-radius:8px;cursor:pointer;font-weight:700">حفظ</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
+  document.getElementById('ewtSave').onclick=async()=>{
+    const v=parseFloat(document.getElementById('ewtAmount').value);
+    if(isNaN(v)||v<=0){toast('اكتب قيمة صحيحة','err');return;}
+    const reason=document.getElementById('ewtReason').value.trim();
+    const note=document.getElementById('ewtNote').value.trim();
+    const btn=document.getElementById('ewtSave'); btn.disabled=true; btn.textContent='جاري الحفظ...';
+    try{
+      await api(`pos_wallet_transfers?id=eq.${id}`,{method:'PATCH',body:JSON.stringify({amount:v, reason:reason||null, note:note||null})});
+      ov.remove(); toast('اتعدّل التحويل ✓');
+      await loadBalance();
+    }catch(err){ toast('فشل الحفظ','err'); btn.disabled=false; btn.textContent='حفظ'; }
+  };
+}
+
+async function deleteWalletTransfer(id, branch){
+  if(!isAdmin){toast('للأدمن فقط','err');return;}
+  if(!confirm('تأكيد حذف تحويل المحفظة ده؟'))return;
+  try{
+    await api(`pos_wallet_transfers?id=eq.${id}`,{method:'DELETE'});
+    toast('اتحذف ✓');
+    await loadBalance();
+  }catch(err){ toast('فشل الحذف','err'); }
 }
 
 init();
