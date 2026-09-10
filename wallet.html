@@ -1103,7 +1103,7 @@
         +'<button class="btn btn-primary" id="bank-do" onclick="bankSettle()" '+(matched.length?'':'disabled')+'><i class="fas fa-check-double"></i> علّم المطابَق كمُحوّل من البنك ('+matched.length+')</button>'
         +'<button class="btn" style="background:var(--surface-3);color:var(--text-secondary);border:1px solid var(--border);" onclick="bankClear()"><i class="fas fa-trash"></i> مسح</button>'
         +'</div>';
-      const note='<div class="cmp-note">صافي القيمة = <b>القيمة − الرسوم</b>. <b>المتوقع (=التحويلة) = صافي − المرتجعات − 3ج رسوم تحويل</b> — ده اللي المفروض يطابق كشف البنك لكل ملف، وإجماليه = إجمالي التحويلات. البيعة اللي اترجعت نفس اليوم بتتحسب بيع + المرتجع بيتخصم. الملغي مُستبعد. (رسوم التحويل الثابتة 3ج مش موجودة في الملف — لو اتغيّرت عدّلها في BANK_XFER_FEE.)</div>';
+      const note='<div class="cmp-note">صافي القيمة = <b>القيمة − الرسوم</b>. <b>المتوقع (=التحويلة) = صافي − المرتجعات − 3ج رسوم تحويل</b> — ده اللي المفروض يطابق كشف البنك لكل ملف، وإجماليه = إجمالي التحويلات. البيعة اللي اترجعت نفس اليوم بتتحسب بيع + المرتجع بيتخصم. الملغي مُستبعد. (رسوم التحويل الثابتة 3ج مش موجودة في الملف — لو اتغيّرت عدّلها في BANK_XFER_FEE.) <b>تعليم «محوّل من البنك» بيحسبها محصّلة تلقائيًا فتختفي من «غير المحصّل».</b></div>';
       document.getElementById('bank-body').innerHTML='<style>#bankModal .cmp-box{max-width:min(1320px,97vw);}#bank-body .cmp-tbl{font-size:0.7rem;}#bank-body .cmp-tbl th,#bank-body .cmp-tbl td{padding:4px 6px;}#bank-body .cmp-tbl th{top:0;}</style>'+note+kpis+btbl+ftbl+rateBox+miss+actions;
     }
     function bankClear(){ _bank.files=[]; _bankWallet=new Map(); closeBank(); }
@@ -1115,11 +1115,12 @@
         const nowIso=new Date().toISOString();
         for(let i=0;i<ids.length;i+=400){
           const chunk=ids.slice(i,i+400);
-          const { error } = await db.from('wallet').update({bank_settled:true,bank_settled_at:nowIso}).in('id',chunk);
+          const { error } = await db.from('wallet').update({bank_settled:true,bank_settled_at:nowIso,done:true}).in('id',chunk);   // اتحوّل من البنك = محصّل
           if(error) throw error;
         }
         ids.forEach(id=>{ const w=_bankWallet.get(String(id)); if(w) w.settled=true; });
         renderBank();
+        if(typeof loadWallet==='function') loadWallet();   // تحديث الشاشة: المحصّلة تختفي من «غير المحصّل»
       }catch(err){ alert('فشل الحفظ: '+(err&&err.message||err)); btn.disabled=false; btn.innerHTML=orig; }
     }
   </script>
