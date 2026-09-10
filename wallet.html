@@ -975,7 +975,7 @@
         const net=c.net?_bankNum(r[c.net]):(gross-fees);
         const typeStr=c.type?String(r[c.type]||'').trim().toLowerCase():'';
         const statusStr=c.status?String(r[c.status]||''):'';
-        const isRefund=(typeStr==='refund')||(c.refunded&&_bankTrue(r[c.refunded]))||/مرتجع/.test(statusStr);
+        const isRefund=(typeStr==='refund')||/مرتجع/.test(statusStr);   // صف مرتجع فعلي فقط؛ الدفعة المرتجعة (is_refunded) تفضل بيع
         const isVoid=(typeStr==='void'||typeStr==='voided')||(c.voided&&_bankTrue(r[c.voided]))||/ملغ/.test(statusStr);
         out.set(id,{ id, gross, fees, net, isRefund, isVoid,
           term:c.term?String(r[c.term]||'').trim():'', fbranch:c.fbranch?String(r[c.fbranch]||'').trim():'',
@@ -1026,11 +1026,16 @@
     }
     // الصافي = مجموع net_amount من الملف زي ما هو (المرتجعات بتتسوّى في تحويلة لاحقة، مش بتُطرح من دي).
     // «مرتجعات» عمود معلوماتي فقط (مش مطروح). الملغي مُستبعد.
+    const BANK_XFER_FEE=3;   // رسوم تحويل ثابتة يخصمها البنك لكل تحويلة (مش في الملف)
     function _aggRows(rows){ const g={n:0,sales:0,ref:0,fees:0,net:0};
       rows.forEach(r=>{ if(r.isVoid) return; if(r.isRefund){ g.ref+=r.gross; return; } g.n++; g.sales+=r.gross; g.fees+=r.fees; g.net+=r.net; });
-      g.settle=g.sales-g.fees; return g; }   // صافي القيمة = القيمة − الرسوم
-    function _aggRowHtml(label,g,strong){ const st=strong?'style="font-weight:800;background:var(--surface-3);"':'';
-      return '<tr '+st+'><td><b>'+label+'</b></td><td>'+g.n+'</td><td><b>'+_fmt2(g.sales)+'</b></td><td style="color:#7c3aed;" title="معلومة فقط — تُسوّى في تحويلة لاحقة ومش مطروحة من الصافي">'+(g.ref?_fmt2(g.ref):'0.00')+'</td><td style="color:#c2410c;">'+_fmt2(g.fees)+'</td><td style="color:#15803d;font-weight:800;">'+_fmt2(g.settle)+'</td></tr>'; }
+      g.settle=g.sales-g.fees;                 // صافي القيمة = القيمة − الرسوم
+      g.expected=g.settle-g.ref-BANK_XFER_FEE; // المتوقع من البنك (= التحويلة) = صافي − مرتجعات − رسوم التحويل
+      return g; }
+    function _aggRowHtml(label,g,strong,showExp){ const st=strong?'style="font-weight:800;background:var(--surface-3);"':'';
+      let h='<tr '+st+'><td><b>'+label+'</b></td><td>'+g.n+'</td><td><b>'+_fmt2(g.sales)+'</b></td><td style="color:#7c3aed;" title="مرتجعات فعلية — تُخصم في «المتوقع»">'+(g.ref?_fmt2(g.ref):'0.00')+'</td><td style="color:#c2410c;">'+_fmt2(g.fees)+'</td><td style="color:#15803d;font-weight:800;">'+_fmt2(g.settle)+'</td>';
+      if(showExp) h+='<td style="color:#0369a1;font-weight:800;">'+_fmt2(g.expected)+'</td>';
+      return h+'</tr>'; }
     function renderBank(){
       const all=_allRows();
       _BANK_TERM2BR={};
@@ -1053,11 +1058,11 @@
 
       // (1) لكل ملف = تحويلة: الصافي المفروض يساوي مبلغ التحويلة
       let ftbl='<div class="cmp-sec-title" style="color:#0369a1;"><i class="fas fa-file-invoice-dollar"></i> لكل ملف (= تحويلة بنكية) — صافي القيمة يساوي مبلغ التحويلة</div>'
-        +'<div class="cmp-scroll"><table class="cmp-tbl"><thead><tr><th>الملف</th><th>عدد المبيعات</th><th>قيمة المبيعات</th><th>المرتجعات</th><th>الرسوم</th><th>صافي القيمة (= التحويلة)</th></tr></thead><tbody>';
-      const GT={n:0,sales:0,ref:0,fees:0,net:0,settle:0};
-      _bank.files.forEach(f=>{ const g=_aggRows(f.rows); GT.n+=g.n;GT.sales+=g.sales;GT.ref+=g.ref;GT.fees+=g.fees;GT.settle+=g.settle;
-        ftbl+=_aggRowHtml(f.name,g,false); });
-      ftbl+='</tbody><tfoot>'+_aggRowHtml('الإجمالي',GT,true)+'</tfoot></table></div>';
+        +'<div class="cmp-scroll"><table class="cmp-tbl"><thead><tr><th>الملف</th><th>عدد المبيعات</th><th>قيمة المبيعات</th><th>المرتجعات</th><th>الرسوم</th><th>صافي القيمة</th><th>المتوقع (=التحويلة)</th></tr></thead><tbody>';
+      const GT={n:0,sales:0,ref:0,fees:0,net:0,settle:0,expected:0};
+      _bank.files.forEach(f=>{ const g=_aggRows(f.rows); GT.n+=g.n;GT.sales+=g.sales;GT.ref+=g.ref;GT.fees+=g.fees;GT.settle+=g.settle;GT.expected+=g.expected;
+        ftbl+=_aggRowHtml(f.name,g,false,true); });
+      ftbl+='</tbody><tfoot>'+_aggRowHtml('الإجمالي',GT,true,true)+'</tfoot></table></div>';
 
       // (2) لكل صيدلية (على كل المعاملات، بدون تكرار id)
       const by={};
@@ -1082,7 +1087,7 @@
         +'<button class="btn btn-primary" id="bank-do" onclick="bankSettle()" '+(matched.length?'':'disabled')+'><i class="fas fa-check-double"></i> علّم المطابَق كمُحوّل من البنك ('+matched.length+')</button>'
         +'<button class="btn" style="background:var(--surface-3);color:var(--text-secondary);border:1px solid var(--border);" onclick="bankClear()"><i class="fas fa-trash"></i> مسح</button>'
         +'</div>';
-      const note='<div class="cmp-note">كل ملف = تحويلة؛ <b>صافي القيمة للملف = مبلغ التحويلة</b> (= مجموع net_amount في الملف)، وإجمالي الملفات = إجمالي التحويلات. عمود «المرتجعات» معلومة فقط — <b>مش مطروح</b> (المرتجع بيتسوّى في تحويلة لاحقة). الملغي مُستبعد. المطابقة على id = wallet.id.</div>';
+      const note='<div class="cmp-note">صافي القيمة = <b>القيمة − الرسوم</b>. <b>المتوقع (=التحويلة) = صافي − المرتجعات − 3ج رسوم تحويل</b> — ده اللي المفروض يطابق كشف البنك لكل ملف، وإجماليه = إجمالي التحويلات. البيعة اللي اترجعت نفس اليوم بتتحسب بيع + المرتجع بيتخصم. الملغي مُستبعد. (رسوم التحويل الثابتة 3ج مش موجودة في الملف — لو اتغيّرت عدّلها في BANK_XFER_FEE.)</div>';
       document.getElementById('bank-body').innerHTML='<style>#bank-body .cmp-tbl th{top:0;}</style>'+note+kpis+ftbl+btbl+miss+actions;
     }
     function bankClear(){ _bank.files=[]; _bankWallet=new Map(); closeBank(); }
