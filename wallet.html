@@ -130,6 +130,8 @@
           <button class="btn" id="collect-mode-btn" style="background:var(--primary);color:#fff;" onclick="toggleCollectMode()"><i class="fas fa-hand-holding-dollar"></i> وضع التحصيل</button>
           <button class="btn" id="compare-btn" style="background:#7c3aed;color:#fff;" onclick="document.getElementById('cmpFile').click()" title="ارفع ملف Paymob (Excel/CSV) وقارنه بالمعاملات المعروضة"><i class="fas fa-file-excel"></i> قارن مع Excel</button>
           <input type="file" id="cmpFile" accept=".xlsx,.xls,.csv" style="display:none" onchange="onCompareFile(event)">
+          <button class="btn" id="banksettle-btn" style="background:#0369a1;color:#fff;" onclick="document.getElementById('bankFile').click()" title="ارفع ملف/ملفات تحويلات البنك (CSV) وعلّم المعاملات المُحوّلة كمستلمة من البنك"><i class="fas fa-building-columns"></i> تسوية تحويلات البنك</button>
+          <input type="file" id="bankFile" accept=".csv,.xlsx,.xls" multiple style="display:none" onchange="onBankFiles(event)">
           <button class="btn btn-primary" onclick="loadWallet()"><i class="fas fa-sync-alt"></i> تحديث</button>
         </div>
       </div>
@@ -209,6 +211,18 @@
       <div class="cmp-body" id="cmp-body"></div>
     </div>
   </div>
+
+  <!-- مودال تسوية تحويلات البنك -->
+  <div id="bankModal" class="cmp-modal" style="display:none;">
+    <div class="cmp-box">
+      <div class="cmp-head">
+        <span><i class="fas fa-building-columns" style="color:#0369a1;"></i> تسوية تحويلات البنك (باي موب)</span>
+        <button class="cmp-x" onclick="closeBank()">✕</button>
+      </div>
+      <div class="cmp-body" id="bank-body"></div>
+    </div>
+  </div>
+
 
   <script src="config.js?v=20260904c"></script>
   <script src="session.js?v=20260905"></script>
@@ -919,6 +933,98 @@
 
     function closeCmp(){ document.getElementById('cmpModal').style.display = 'none'; }
     document.addEventListener('keydown', e => { if (e.key === 'Escape') closeCmp(); });
+
+    /* ============ تسوية تحويلات البنك (باي موب): مطابقة بالكود → wallet.bank_settled + تجميع لكل صيدلية ============
+       ملف البنك أعمدته إنجليزية (id, gross_amount, ...) — بنطابق على id = wallet.id.
+       القيم بتتقرا من قاعدة البيانات (مش من الملف) عشان تبقى مضبوطة. يدعم أكتر من ملف (بتتجمّع). */
+    const _bank = { ids:new Set(), rows:new Map() };
+    function closeBank(){ document.getElementById('bankModal').style.display='none'; }
+    function _bankId(v){ return String(v==null?'':v).trim().replace(/\.0+$/,'').replace(/[^0-9]/g,''); }
+    function _bankIdsFromRows(rows){
+      if(!rows||!rows.length) return null;
+      const keys=Object.keys(rows[0]||{});
+      const idKey = keys.find(k=>String(k).trim().toLowerCase()==='id') || keys.find(k=>_normHeader(k).includes('رقم المعامل'));
+      if(!idKey) return null;
+      const out=[];
+      rows.forEach(r=>{ const id=_bankId(r[idKey]); if(id && id.length>=3) out.push(id); });
+      return out;
+    }
+    async function onBankFiles(ev){
+      const files=[...(ev.target.files||[])]; ev.target.value='';
+      if(!files.length) return;
+      let unknown=false, readErr=0;
+      for(const f of files){
+        try{
+          const buf=await f.arrayBuffer();
+          const wb=XLSX.read(buf,{type:'array'});
+          const ws=wb.Sheets[wb.SheetNames[0]];
+          const rows=XLSX.utils.sheet_to_json(ws,{defval:''});
+          const ids=_bankIdsFromRows(rows);
+          if(ids===null){ unknown=true; continue; }
+          ids.forEach(id=>_bank.ids.add(id));
+        }catch(err){ readErr++; }
+      }
+      if(readErr) alert('تعذّر قراءة '+readErr+' ملف');
+      if(!_bank.ids.size){ alert(unknown ? 'مش لاقي عمود «id» أو «رقم المعامله» في الملف — اتأكد إنه إكسبورت البنك الصحيح' : 'الملف مفيهوش معاملات'); return; }
+      await bankRefetch();
+    }
+    async function bankRefetch(){
+      const arr=[..._bank.ids]; _bank.rows=new Map();
+      const body=document.getElementById('bank-body');
+      body.innerHTML='<div class="cmp-ok">⏳ جاري المطابقة...</div>';
+      document.getElementById('bankModal').style.display='flex';
+      for(let i=0;i<arr.length;i+=400){
+        const chunk=arr.slice(i,i+400).map(Number);
+        const { data, error } = await db.from('wallet').select('id,branch,ammount,fees,vat,netammount,bank_settled').in('id',chunk);
+        if(error){ body.innerHTML='<div class="cmp-ok" style="color:#b91c1c;">خطأ في القراءة: '+error.message+'</div>'; return; }
+        (data||[]).forEach(r=>_bank.rows.set(String(r.id),r));
+      }
+      renderBank();
+    }
+    function renderBank(){
+      const rows=[..._bank.rows.values()];
+      const seen=_bank.ids.size, matched=rows.length, missing=Math.max(0,seen-matched);
+      const settledN=rows.filter(r=>r.bank_settled).length;
+      const by={};
+      rows.forEach(r=>{ const b=storeOf(r)||'—'; const g=by[b]||(by[b]={n:0,val:0,tax:0,net:0,s:0});
+        g.n++; g.val+=amountOf(r); g.tax+=feesOf(r)+vatOf(r); g.net+=netOf(r); if(r.bank_settled)g.s++; });
+      const T={n:0,val:0,tax:0,net:0,s:0};
+      Object.values(by).forEach(g=>{T.n+=g.n;T.val+=g.val;T.tax+=g.tax;T.net+=g.net;T.s+=g.s;});
+      const brs=Object.keys(by).sort();
+      const kpis='<div class="cmp-kpis">'
+        +'<div class="cmp-kpi" style="border-color:#93c5fd;"><span class="k-lbl">في الملفات</span><span class="k-val" style="color:#1d4ed8;">'+seen+'</span></div>'
+        +'<div class="cmp-kpi" style="border-color:#86efac;"><span class="k-lbl">مطابَقة</span><span class="k-val" style="color:#15803d;">'+matched+'</span></div>'
+        +'<div class="cmp-kpi" style="border-color:#fca5a5;"><span class="k-lbl">غير موجودة</span><span class="k-val" style="color:#b91c1c;">'+missing+'</span></div>'
+        +'<div class="cmp-kpi" style="border-color:#fdba74;"><span class="k-lbl">محوّل بالفعل</span><span class="k-val" style="color:#c2410c;">'+settledN+'/'+matched+'</span></div>'
+        +'</div>';
+      let tbl='<div class="cmp-scroll"><table class="cmp-tbl"><thead><tr><th>الصيدلية</th><th>عدد</th><th>إجمالي القيمة</th><th>إجمالي الضريبة</th><th>صافي القيمة</th><th>محوّل</th></tr></thead><tbody>';
+      brs.forEach(b=>{ const g=by[b];
+        tbl+='<tr><td><b>'+b+'</b></td><td>'+g.n+'</td><td><b>'+g.val.toFixed(2)+'</b></td><td style="color:#c2410c;">'+g.tax.toFixed(2)+'</td><td style="color:#15803d;font-weight:800;">'+g.net.toFixed(2)+'</td><td>'+g.s+'/'+g.n+'</td></tr>';
+      });
+      tbl+='</tbody><tfoot><tr style="font-weight:800;background:var(--surface-3);"><td>الإجمالي</td><td>'+T.n+'</td><td>'+T.val.toFixed(2)+'</td><td style="color:#c2410c;">'+T.tax.toFixed(2)+'</td><td style="color:#15803d;">'+T.net.toFixed(2)+'</td><td>'+T.s+'/'+T.n+'</td></tr></tfoot></table></div>';
+      const actions='<div class="cmp-actions" style="margin-top:12px;">'
+        +'<button class="btn btn-primary" id="bank-do" onclick="bankSettle()" '+(matched?'':'disabled')+'><i class="fas fa-check-double"></i> علّم المطابَق كمُحوّل من البنك ('+matched+')</button>'
+        +'<button class="btn" style="background:var(--surface-3);color:var(--text-secondary);border:1px solid var(--border);" onclick="bankClear()"><i class="fas fa-trash"></i> مسح</button>'
+        +(missing?'<span style="align-self:center;color:#b91c1c;font-size:0.74rem;font-weight:700;">'+missing+' معاملة في الملف مش موجودة عندنا (اتجاهلت)</span>':'')
+        +'</div>';
+      const note='<div class="cmp-note">المطابقة على <b>رقم المعامله (id)</b> — القيم من قاعدة البيانات. تقدر ترفع أكتر من ملف والمعاملات بتتجمّع. «الضريبة» = الرسوم + ض.القيمة المضافة.</div>';
+      document.getElementById('bank-body').innerHTML=note+kpis+tbl+actions;
+    }
+    function bankClear(){ _bank.ids.clear(); _bank.rows.clear(); closeBank(); }
+    async function bankSettle(){
+      const ids=[..._bank.rows.keys()].map(Number); if(!ids.length) return;
+      const btn=document.getElementById('bank-do'); const orig=btn.innerHTML; btn.disabled=true; btn.innerHTML='<i class="fas fa-spinner fa-spin"></i> جارٍ الحفظ...';
+      try{
+        const nowIso=new Date().toISOString();
+        for(let i=0;i<ids.length;i+=400){
+          const chunk=ids.slice(i,i+400);
+          const { error } = await db.from('wallet').update({bank_settled:true,bank_settled_at:nowIso}).in('id',chunk);
+          if(error) throw error;
+        }
+        _bank.rows.forEach(r=>{ r.bank_settled=true; });
+        renderBank();
+      }catch(err){ alert('فشل الحفظ: '+(err&&err.message||err)); btn.disabled=false; btn.innerHTML=orig; }
+    }
   </script>
 </body>
 </html>
