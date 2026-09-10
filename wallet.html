@@ -1081,12 +1081,15 @@
       const by={};
       all.forEach(r=>{ if(r.isVoid) return; const b=_bankBranchOf(r); const g=by[b]||(by[b]={n:0,sales:0,ref:0,fees:0,net:0});
         if(r.isRefund){ g.ref+=r.gross; return; } g.n++; g.sales+=r.gross; g.fees+=r.fees; g.net+=r.net; });
-      Object.values(by).forEach(g=>{ g.xfer=0; g.totfee=g.fees; g.settle=g.sales-g.fees; g.expected=g.settle-g.ref; });   // على مستوى الفرع: مفيش رسوم تحويل (بتتحسب لكل تحويلة)
-      let btbl='<div class="cmp-sec-title" style="color:#0369a1;margin-top:14px;"><i class="fas fa-store"></i> لكل صيدلية</div>'
+      // رسوم التحويل (3ج/تحويلة) موزّعة على الفروع بنسبة مبيعاتها عشان إجمالي المتوقع يطابق جدول الملفات
+      const _totXfer=_bank.files.length*BANK_XFER_FEE;
+      const _totSales=Object.values(by).reduce((s,g)=>s+g.sales,0);
+      Object.values(by).forEach(g=>{ g.xfer=_totSales>0?_totXfer*(g.sales/_totSales):0; g.totfee=g.fees+g.xfer; g.settle=g.sales-g.fees; g.expected=g.settle-g.ref-g.xfer; });
+      let btbl='<div class="cmp-sec-title" style="color:#0369a1;margin-top:14px;"><i class="fas fa-store"></i> لكل صيدلية <span style="font-weight:400;font-size:0.72rem;color:var(--text-muted);">(رسوم التحويل موزّعة بنسبة المبيعات)</span></div>'
         +'<div class="cmp-scroll"><table class="cmp-tbl"><thead><tr><th>الصيدلية</th><th>عدد المبيعات</th><th>قيمة المبيعات</th><th>المرتجعات</th><th>الرسوم (fees)</th><th>إجمالي الرسوم</th><th>صافي القيمة</th><th>نسبة الرسوم</th><th>المتوقع</th></tr></thead><tbody>';
       const PT={n:0,sales:0,ref:0,fees:0,net:0,settle:0,expected:0};
       Object.keys(by).sort().forEach(b=>{ const g=by[b]; PT.n+=g.n;PT.sales+=g.sales;PT.ref+=g.ref;PT.fees+=g.fees;PT.settle+=g.settle;PT.expected+=g.expected; btbl+=_aggRowHtml(b,g,false,{tot:true,rate:true,exp:true}); });
-      PT.xfer=0; PT.totfee=PT.fees;
+      PT.xfer=_totXfer; PT.totfee=PT.fees+_totXfer;
       btbl+='</tbody><tfoot>'+_aggRowHtml('الإجمالي',PT,true,{tot:true,rate:true,exp:true})+'</tfoot></table></div>';
 
       // (3) غير المطابق بالتفاصيل
