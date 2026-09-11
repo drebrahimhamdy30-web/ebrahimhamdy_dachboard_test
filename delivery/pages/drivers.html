@@ -69,7 +69,10 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
     <div style="font-size:.9rem;font-weight:700">إدارة الطيارين</div>
     <div style="font-size:.75rem;color:var(--text-muted)" id="driversCount">جاري التحميل...</div>
   </div>
-  <button class="btn btn-primary" onclick="openAddModal()">+ إضافة طيار</button>
+  <div style="display:flex;gap:.4rem">
+    <button class="btn btn-outline" onclick="openCoverage()">🔄 نقل طيار (تغطية)</button>
+    <button class="btn btn-primary" onclick="openAddModal()">+ إضافة طيار</button>
+  </div>
 </div>
 
 <div class="stats-bar" id="statsBar"></div>
@@ -221,6 +224,21 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
   </div>
 </div>
 
+<!-- Modal: Coverage (نقل فرع الطيار) -->
+<div class="modal-overlay" id="coverageModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">🔄 نقل طيار للتغطية</span>
+      <button class="modal-close" onclick="closeModal('coverageModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.5rem">اختَر الطيار وفرعه الجديد. تقدر تسحب طيار لفرعك أو تبعت طيارك لفرع تاني.</div>
+      <input type="text" class="search-input" id="covSearch" placeholder="🔍 بحث باسم الطيار أو الفرع..." oninput="renderCoverage()" style="width:100%;margin-bottom:.75rem">
+      <div id="covList" style="max-height:55vh;overflow-y:auto"></div>
+    </div>
+  </div>
+</div>
+
 <div class="loading-overlay" id="loadingOverlay"><div class="spinner"></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -242,6 +260,58 @@ let allDrivers=[], allBranches=[], allRegions=[], currentFilter='all';
 const style=document.createElement('style');
 style.textContent='.section-label-sm{font-size:.72rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.5rem;padding-bottom:.25rem;border-bottom:1px solid var(--border)}';
 document.head.appendChild(style);
+
+// ===== نقل فرع الطيار للتغطية =====
+function _esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+let covDrivers=[];
+async function openCoverage(){
+  document.getElementById('coverageModal').classList.add('open');
+  document.getElementById('covList').innerHTML='<div style="text-align:center;padding:1.2rem;color:var(--text-muted)">جاري التحميل...</div>';
+  try{
+    const {data,error}=await db.from('drivers').select('id,full_name,branch_id,branch,is_online,is_active').eq('is_active',true).order('branch').order('full_name');
+    if(error) throw error;
+    covDrivers=data||[];
+  }catch(e){ covDrivers=[]; document.getElementById('covList').innerHTML='<div style="color:#dc2626;text-align:center;padding:1.2rem">تعذّر التحميل</div>'; return; }
+  const s=document.getElementById('covSearch'); if(s) s.value='';
+  renderCoverage();
+}
+function renderCoverage(){
+  const q=(document.getElementById('covSearch').value||'').trim().toLowerCase();
+  let rows=covDrivers;
+  if(q) rows=rows.filter(d=>(d.full_name||'').toLowerCase().includes(q)||(d.branch||'').toLowerCase().includes(q));
+  const el=document.getElementById('covList');
+  if(!rows.length){ el.innerHTML='<div style="text-align:center;padding:1.2rem;color:var(--text-muted)">لا يوجد طيارين</div>'; return; }
+  const opts=allBranches.map(b=>`<option value="${b.id}">${_esc(b.name)}</option>`).join('');
+  el.innerHTML=rows.map(d=>`
+    <div style="display:flex;align-items:center;gap:.5rem;padding:.55rem .3rem;border-bottom:1px solid var(--border)">
+      <span style="width:9px;height:9px;border-radius:50%;background:${d.is_online?'#16a34a':'#94a3b8'};flex-shrink:0"></span>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:.85rem">${_esc(d.full_name||'—')}</div>
+        <div style="font-size:.7rem;color:var(--text-muted)">الفرع الحالي: ${_esc(d.branch||'—')}</div>
+      </div>
+      <select class="form-control" id="cov-b-${d.id}" style="width:135px;font-size:.75rem;padding:.3rem">${opts}</select>
+      <button class="btn btn-primary" style="padding:.35rem .7rem;font-size:.75rem" onclick="doCoverageMove('${d.id}')">نقل</button>
+    </div>`).join('');
+  rows.forEach(d=>{ const sb=document.getElementById('cov-b-'+d.id); if(sb&&d.branch_id) sb.value=d.branch_id; });
+}
+async function doCoverageMove(id){
+  const sel=document.getElementById('cov-b-'+id); if(!sel) return;
+  const branchId=sel.value; const d=covDrivers.find(x=>x.id===id);
+  if(!branchId){ alert('اختر الفرع'); return; }
+  if(d && d.branch_id===branchId){ alert('الطيار في نفس الفرع بالفعل'); return; }
+  const bName=(allBranches.find(b=>b.id===branchId)||{}).name||'';
+  if(!confirm(`نقل الطيار «${d?.full_name||''}» إلى فرع «${bName}»؟`)) return;
+  showLoading(true);
+  try{
+    const {data,error}=await db.rpc('change_driver_branch',{p_driver_id:id,p_branch_id:branchId,p_user_name:(getCurrentUser()&&getCurrentUser().full_name)||'—'});
+    if(error||(data&&data.success===false)) throw new Error((error&&error.message)||(data&&data.error)||'فشل النقل');
+    if(d){ d.branch_id=branchId; d.branch=bName; }
+    renderCoverage();
+    showToast('✓ اتنقل الطيار لفرع '+bName);
+    await init();
+  }catch(e){ alert('خطأ: '+e.message); }
+  showLoading(false);
+}
 
 async function init(){
   const user=getCurrentUser();if(!user)return;
