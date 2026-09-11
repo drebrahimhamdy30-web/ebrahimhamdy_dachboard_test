@@ -28,7 +28,7 @@ const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers
 function jsonRes(b: unknown, s = 200) { return new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "Content-Type": "application/json" } }); }
 function claimFromJwt(auth: string): any { try { const t = auth.replace(/^Bearer\s+/i, ""); return JSON.parse(atob(t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))); } catch { return null; } }
 const ADMIN_ROLES = ["admin", "manager", "inventory", "pharmacist"];
-function roleOf(claims: any) { return String(claims?.user_role ?? claims?.app_role ?? ""); }
+function roleOf(claims: any) { return String(claims?.user_role ?? claims?.app_metadata?.user_role ?? claims?.app_role ?? ""); }
 
 // ── حساب الوقت بتوقيت القاهرة (مش UTC ومش توقيت السيرفر) ────────
 function cf(ms: number) { const s = new Date(ms).toLocaleString("en-GB", { timeZone: "Africa/Cairo", hour12: false }); const [dm, tm] = s.split(", "); const [d, mo, y] = dm.split("/"); const [H, Mi, S] = tm.split(":"); return { y, mo, d, H, Mi, S }; }

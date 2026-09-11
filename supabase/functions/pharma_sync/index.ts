@@ -47,7 +47,7 @@ Deno.serve(async (req) => {
   const SYNC_KEY = Deno.env.get("SYNC_KEY");
   const isCron = !!SYNC_KEY && (req.headers.get("x-sync-key") || "") === SYNC_KEY;
   const claims = claimFromJwt(req.headers.get("Authorization") || "");
-  const isAdmin = !!claims && ADMIN_ROLES.includes(String(claims?.user_role ?? claims?.app_role ?? ""));
+  const isAdmin = !!claims && ADMIN_ROLES.includes(String(claims?.user_role ?? claims?.app_metadata?.user_role ?? claims?.app_role ?? ""));
   if (!isCron && !isAdmin) return jsonRes({ ok: false, error: "unauthorized" }, 403);
 
   let opt: any = {}; try { opt = await req.json(); } catch { /* */ }

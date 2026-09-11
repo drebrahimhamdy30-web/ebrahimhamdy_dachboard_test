@@ -73,7 +73,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
   const claims = claimFromJwt(req.headers.get("Authorization") || "");
-  const role = String(claims?.user_role ?? claims?.app_role ?? "");
+  const role = String(claims?.user_role ?? claims?.app_metadata?.user_role ?? claims?.app_role ?? "");
   if (!claims || !ALLOWED_ROLES.includes(role)) {
     return jsonRes({ ok: false, error: "unauthorized", hint: "يتطلب تسجيل دخول موظف" }, 403);
   }

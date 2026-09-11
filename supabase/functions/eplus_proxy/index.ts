@@ -7,9 +7,18 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
       محدودة الاستعمال — كل نداء بيروح لنفس النظام اللي الإنتاج شغّال
       عليه، والضغط المضاعف بيأثر على الشغل الفعلي.
 
-   ⚠️ الحراسة هنا **بالدور من التوكن** (`user_role`/`app_role`) —
-      أقوى من دوال الطيارين اللي بتفحص صلاحية قراءة بس. وverify_jwt=true
-      كمان، فمفيش نداء بلا توكن أصلًا.
+   ⚠️ الحراسة هنا **بالدور من التوكن** — أقوى من دوال الطيارين اللي
+      بتفحص صلاحية قراءة بس. وverify_jwt=true كمان، فمفيش نداء بلا توكن.
+
+   ⚠️⚠️ الدور بيتقرا من **تلات أماكن** عن قصد:
+        user_role أعلى التوكن            → توكن n8n
+        app_metadata.user_role           → توكن Supabase Auth ← ده بتاع الموظفين
+        app_role                         → قديم
+      الدالة كانت بتقرا الأول والتالت بس، فكل موظف مسجّل دخول كان
+      بياخد 403 «يتطلب تسجيل دخول موظف» — لأن Supabase Auth بيحط
+      الدور جوّه app_metadata مش فوق. مفيش custom access token hook
+      بينقله لفوق (اتأكدنا). ده نفس اللي public.jwt_app_role() في
+      القاعدة بتعمله من الأول — الدالة دي كانت الوحيدة اللي ناقصاها.
 
    ⚠️ بيانات الدخول من متغيّرات البيئة (مافيش سر في الملف):
       EPLUS_BRANCHES = {"اسم الفرع": {"base":"https://...","basic":"user:pass"}}
@@ -48,7 +57,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
   const claims = claimFromJwt(req.headers.get("Authorization") || "");
-  const role = String(claims?.user_role ?? claims?.app_role ?? "");
+  const role = String(claims?.user_role ?? claims?.app_metadata?.user_role ?? claims?.app_role ?? "");
   if (!claims || !ALLOWED_ROLES.includes(role)) {
     return jsonRes({ ok: false, error: "unauthorized", hint: "يتطلب تسجيل دخول موظف" }, 403);
   }
