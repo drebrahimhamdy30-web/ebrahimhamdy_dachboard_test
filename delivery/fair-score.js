@@ -51,7 +51,7 @@ function buildAttendanceSessions(records) {
         const next = recs[i + 1];
         end = next ? new Date(next.approved_at).getTime() : now;
       }
-      if (end > start) sessions.push({ driver_id, start, end });
+      if (end > start) sessions.push({ driver_id, start, end, branch_id: r.branch_id || null });
     });
   });
 
@@ -83,7 +83,7 @@ async function computeFairScores(from, to, branchId) {
       return oq;
     }),
     _fsFetchAll(() => db.from('driver_attendance')
-      .select('driver_id,status,approved_at,ended_at,date')
+      .select('driver_id,status,approved_at,ended_at,date,branch_id')
       .in('status', ['online', 'offline', 'break'])
       .not('approved_at', 'is', null)
       .gte('date', _attFrom).lte('date', to)
@@ -97,7 +97,7 @@ async function computeFairScores(from, to, branchId) {
 
   // فترات الحضور متصلة عبر منتصف الليل (شيفت ليلي) عبر ended_at، وكل فترة معاها فرع الطيار.
   const sessions = buildAttendanceSessions(attendanceRows || []);
-  sessions.forEach(s => { s.branch_id = driverBranch[s.driver_id] || null; });
+  sessions.forEach(s => { s.branch_id = s.branch_id || driverBranch[s.driver_id] || null; });
 
   // 3) لكل طلب: مين كان أونلاين لحظة **استلام** الطلب (مش التسليم)؟
   //    الاستلام بيحصل والطيار حاضر دايمًا، فمافيش داعي لتمديد الشيفت.

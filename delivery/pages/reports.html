@@ -561,16 +561,19 @@ async function loadIncentiveSettings() {
 
 // ساعات عمل لكل طيار من جلسات الحضور (نفس منطق fair-score: نبني الجلسات
 // من تسلسل online/offline لأن ended_at غالباً فاضي في البيانات)
-async function computeWorkedHours(from, to) {
+async function computeWorkedHours(from, to, branchId) {
   const rows = await _fsFetchAll(() => db.from('driver_attendance')
-    .select('driver_id,status,approved_at,ended_at,date')
+    .select('driver_id,status,approved_at,ended_at,date,branch_id')
     .in('status', ['online', 'offline', 'break'])
     .not('approved_at', 'is', null)
     .gte('date', from).lte('date', to)
     .order('date', { ascending: true }));
-  const sessions = buildAttendanceSessions(rows || []);
+  const sessions = buildAttendanceSessions(rows || []);   // كل جلسة معاها فرعها المختوم
   const m = {};
-  sessions.forEach(s => { const h = (s.end - s.start) / 3600000; if (h > 0) m[s.driver_id] = (m[s.driver_id]||0) + h; });
+  sessions.forEach(s => {
+    if (branchId && (s.branch_id || null) !== branchId) return;   // احسب ساعات الفرع المحدّد فقط (التغطية تروح لفرعها)
+    const h = (s.end - s.start) / 3600000; if (h > 0) m[s.driver_id] = (m[s.driver_id]||0) + h;
+  });
   return m;
 }
 
@@ -617,7 +620,8 @@ async function loadIncentivesTab(from, to) {
   // إحصائيات كل طيار من نفس أرقام جدول الأداء (طلبات/رحلات/مسافة/ساعات) — محسوبة في loadDriverPerfTab
   const drvByBranch = {};
   (driverPerfRows || []).forEach(r => {
-    const bid = branchByDrv[r.driver_id];
+    // لو فرع محدّد مختار: الطيار يتحسب على الفرع ده (حتى لو مغطّي من فرع تاني)؛ وإلا فرعه الحالي
+    const bid = effectiveBranch() || branchByDrv[r.driver_id];
     const s = incSettingsMap[bid];
     if (!s || s.incentive_enabled !== true) return;
     (drvByBranch[bid] = drvByBranch[bid] || []).push(r);
@@ -1247,7 +1251,7 @@ async function loadDriverPerfTab(from, to) {
 
   // 2) ساعات الحضور لكل طيار (نفس منطق fair-score من جلسات الحضور)
   let hoursByDrv = {};
-  try { hoursByDrv = await computeWorkedHours(from, to); } catch (e) { console.error(e); }
+  try { hoursByDrv = await computeWorkedHours(from, to, branchId); } catch (e) { console.error(e); }
 
   // 3) الأسماء
   if (!driversCache) { const { data } = await db.from('drivers').select('id,full_name'); driversCache = data || []; }
