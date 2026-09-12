@@ -304,10 +304,14 @@
     async function runNow(id){
       const jwt=authToken(); if(!jwt){ alert('لازم تسجّل دخول من جديد (توكن منتهي)'); return; }
       const destTable=(EPS.find(x=>x.id===id)||{}).dest_table||'—';
-      const bodyEl=document.getElementById('epb-'+id); if(bodyEl){ bodyEl.classList.add('open'); bodyEl.innerHTML='<div style="color:var(--text-muted);font-size:0.8rem;padding:6px 0;"><i class="fas fa-spinner fa-spin"></i> جارٍ التشغيل اليدوي الآن…</div>'; }
+      const opKey='run-'+id, ctrl=_startOp(opKey);
+      const bodyEl=document.getElementById('epb-'+id);
+      if(bodyEl){ bodyEl.classList.add('open');
+        bodyEl.innerHTML='<div style="color:var(--text-muted);font-size:0.8rem;padding:6px 0;"><i class="fas fa-spinner fa-spin"></i> جارٍ التشغيل اليدوي الآن… '
+          +'<button '+CANCEL_BTN+' onclick="cancelRun('+id+')">إلغاء الانتظار</button></div>'; }
       let html='';
       try{
-        const r=await fetch(FN+'eplus_sync',{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+jwt,'Content-Type':'application/json'},body:JSON.stringify({endpoint_id:id})});
+        const r=await fetch(FN+'eplus_sync',{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+jwt,'Content-Type':'application/json'},body:JSON.stringify({endpoint_id:id}),signal:ctrl.signal});
         const j=await r.json();
         if(j && j.error==='secret_not_set'){ document.getElementById('ig-setup').style.display='block'; }
         const res=(j&&j.results&&j.results[0])||null;
@@ -318,7 +322,14 @@
         } else {
           html = `<div class="res-bad" style="font-size:0.86rem">${esc((j&&(j.hint||j.error))||'فشل التشغيل')}</div>`;
         }
-      }catch(e){ html='<div class="res-bad" style="font-size:0.86rem">فشل الاتصال</div>'; }
+      }catch(e){
+        if(_isAbort(e) && ctrl._superseded) return;   // تشغيل أحدث بدأ — ما نكتبش فوقه
+        html = _isAbort(e)
+          ? '<div style="font-size:0.86rem;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:6px;padding:8px">'
+            +'بطّلنا الانتظار. <b>بس المزامنة نفسها لسه شغّالة على السيرفر</b> وهتكمّل وتكتب البيانات في <b>'+esc(destTable)+'</b> عادي.<br>'
+            +'حدّث الصفحة بعد شوية عشان تشوف نتيجتها في «آخر تشغيل».</div>'
+          : '<div class="res-bad" style="font-size:0.86rem">فشل الاتصال</div>';
+      }finally{ _endOp(opKey, ctrl); }
       await load();
       const el2=document.getElementById('epb-'+id); if(el2){ el2.classList.add('open'); el2.innerHTML=html; }
     }
@@ -348,6 +359,10 @@
     function _isAbort(err){ return !!err && (err.name==='AbortError' || /abort/i.test(err.message||'')); }
     function cancelTest(id){ _cancelOp('test-'+id); }
     function cancelSample(){ _cancelOp('sample'); }
+    // «تشغيل الآن» مختلف: المزامنة بتكتب بيانات فعلاً. قطع النداء بيوقف
+    // انتظارنا بس — eplus_sync هيكمّل على السيرفر ويكتب. عشان كده الزرار
+    // اسمه «إلغاء الانتظار» والرسالة بتقول كده صريح.
+    function cancelRun(id){ _cancelOp('run-'+id); }
     const CANCEL_BTN = 'style="margin-right:8px;background:#fee2e2;color:#991b1b;border:1px solid #fecaca;border-radius:6px;padding:2px 10px;font-family:inherit;font-size:0.75rem;font-weight:700;cursor:pointer"';
 
     // ===== اختبار عبر eplus_proxy =====
