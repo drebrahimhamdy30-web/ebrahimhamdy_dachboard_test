@@ -113,6 +113,28 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text);min-h
 .qbtn-badge{position:absolute;top:-6px;left:-6px;background:var(--red);color:#fff;font-size:.6rem;font-weight:800;min-width:16px;height:16px;padding:0 3px;border-radius:8px;display:none;align-items:center;justify-content:center;line-height:1;border:1.5px solid #fff}
 .q-divider{width:1px;height:22px;background:var(--border);margin:0 .2rem;flex-shrink:0}
 
+/* ===== مهام اليوم في البار السريع =====
+   اللوحة جوّه البار عن قصد مش رابط لشاشة «تنظيم المهام»: الشاشة دي
+   أزرار الإضافة/التعديل/الحذف فيها مش محميّة، فأي حد يفتحها يقدر يمسح
+   مهام كل الفروع. هنا الموظف يشوف مهام فرعه وبس ويعلّمها تمّت. */
+.tq-wrap{position:relative;flex-shrink:0}
+.tq-panel{position:absolute;top:calc(100% + 8px);left:0;width:340px;max-width:92vw;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 16px 44px rgba(0,0,0,.18);z-index:9000;display:none;overflow:hidden}
+.tq-panel.open{display:block}
+.tq-head{display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.6rem .75rem;border-bottom:1px solid var(--border);background:var(--gray-light)}
+.tq-head-t{font-size:.8rem;font-weight:800;color:var(--text)}
+.tq-branch{font-size:.68rem;font-weight:700;color:var(--text-muted);background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:2px 9px;font-family:'Cairo',sans-serif}
+select.tq-branch{cursor:pointer;max-width:130px}
+.tq-list{max-height:340px;overflow-y:auto;padding:.35rem}
+.tq-item{display:flex;align-items:flex-start;gap:.5rem;padding:.5rem .55rem;border-radius:8px;font-size:.78rem;color:var(--text)}
+.tq-item:hover{background:var(--gray-light)}
+.tq-item input{margin-top:.15rem;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:var(--primary)}
+.tq-item.done{opacity:.5}
+.tq-item.done .tq-t{text-decoration:line-through}
+.tq-t{font-weight:700;line-height:1.5}
+.tq-who{display:block;font-size:.67rem;color:var(--text-muted);font-weight:600;margin-top:1px}
+.tq-empty{text-align:center;color:var(--text-muted);font-size:.76rem;padding:22px 10px}
+.tq-foot{padding:.45rem .75rem;border-top:1px solid var(--border);font-size:.68rem;color:var(--text-muted);text-align:center}
+
 /* ===== شريط أيقونات مطوي (Desktop) — يتوسّع كطبقة فوق الشاشة عند المرور ثم يرجع ===== */
 @media(min-width:769px){
   .sidebar{width:var(--rail-w);overflow:hidden;
@@ -237,6 +259,24 @@ body.dark{     --text-light:#6b7a94;  --gray-light:#16223a; --primary-light:#124
         <div class="hs-results" id="hsResults"></div>
       </div>
       <div class="quick-links" id="quickLinks"></div>
+
+      <!-- مهام اليوم — الرقم = المتبقّي لسه (المستحق ناقص اللي اتعمل) -->
+      <div class="tq-wrap" id="tqWrap" style="display:none">
+        <button class="qbtn" id="tqBtn" title="مهام اليوم" onclick="tqToggle(event)">
+          <svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12l1.6 1.6L14 10"/></svg>
+          <span>مهام اليوم</span>
+          <span class="qbtn-badge" id="tqBadge">0</span>
+        </button>
+        <div class="tq-panel" id="tqPanel">
+          <div class="tq-head">
+            <span class="tq-head-t">مهام اليوم</span>
+            <span id="tqBranchWrap"></span>
+          </div>
+          <div class="tq-list" id="tqList"><div class="tq-empty">⏳ جارٍ التحميل…</div></div>
+          <div class="tq-foot" id="tqFoot"></div>
+        </div>
+      </div>
+
       <button class="header-btn" onclick="reloadCurrentPage()">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
         تحديث
@@ -454,6 +494,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   await loadAllowedPages();
   buildSidebar();
   buildQuickLinks();
+  // بعد ما الفروع توصل من الشبكة — التحقق من فرع المستخدم محتاج القايمة
+  // الحقيقية مش كاش قديم ممكن يكون ناقص فرع جديد
+  Branches.ready().then(tqInit);
   applyTheme();
   await loadHeaderStats();
   setInterval(loadHeaderStats, 60000);
@@ -607,6 +650,146 @@ function setQuickBadge(key, count) {
   b.textContent = count > 99 ? '99+' : count;
   b.style.display = count > 0 ? 'flex' : 'none';
 }
+
+/* ═══════════════ مهام اليوم في البار السريع ═══════════════
+   مصدر البيانات هو نفسه شاشة «تنظيم المهام»: tasks + task_assignee +
+   task_done. منطق «مستحقة النهاردة» (isDue) متكرر هنا بنفس القواعد —
+   لو اتغيّر هناك لازم يتغيّر هنا.
+
+   ⚠️ ليه لوحة جوّه البار مش رابط للشاشة: صلاحية صفحة tasks مفتوحة
+   للأدمن بس، وأزرار الإضافة/التعديل/الحذف جوّاها **مش محميّة** — يعني
+   فتحها لموظفي الفروع كان هيدّيهم حق مسح مهام كل الفروع. هنا الموظف
+   يشوف مهام فرعه ويعلّمها تمّت، والكتابة في task_done بس.
+
+   الرقم على الزر = **المتبقّي** (المستحق ناقص اللي اتعمل)، فلمّا اليوم
+   يخلص الشارة تختفي لوحدها. */
+const TQ = { tasks: [], assign: {}, done: new Set(), branch: '', busy: false };
+
+function tqTodayCairo() { return new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' }); }
+// نبني التاريخ من نص القاهرة عند الظهر — عشان اليوم/الشهر يطلعوا بتوقيت
+// القاهرة مش توقيت جهاز المستخدم (نفس ما بتعمل شاشة المهام)
+function tqCairoDate() { return new Date(tqTodayCairo() + 'T12:00:00'); }
+function tqIsDue(t, d) {
+  if (t.freq === 'daily') return true;
+  if (t.freq === 'weekly') return d.getDay() === Number(t.weekday);
+  const ld = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  const wanted = Math.min(Number(t.month_day) || 1, ld);
+  if (t.freq === 'monthly') return d.getDate() === wanted;
+  if (t.freq === 'yearly') return (d.getMonth() + 1) === Number(t.month) && d.getDate() === wanted;
+  return false;
+}
+const tqEsc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function tqInit() {
+  const wrap = document.getElementById('tqWrap');
+  if (!wrap || !currentUser) return;
+  const names = Branches.names();
+  const isAdmin = currentUser.role === 'admin';
+  const mine = Branches.toName(currentUser.branch || '');
+  // الأدمن يشوف كل الفروع؛ وغيره لازم يكون تابع لفرع معروف
+  if (!isAdmin && names.indexOf(mine) < 0) return;
+  TQ.branch = (names.indexOf(mine) >= 0) ? mine : names[0];
+  wrap.style.display = '';
+
+  document.getElementById('tqBranchWrap').innerHTML = isAdmin
+    ? '<select class="tq-branch" id="tqBranchSel" onchange="tqSetBranch(this.value)">'
+      + names.map(b => '<option value="' + tqEsc(b) + '"' + (b === TQ.branch ? ' selected' : '') + '>' + tqEsc(b) + '</option>').join('')
+      + '</select>'
+    : '<span class="tq-branch">' + tqEsc(TQ.branch) + '</span>';
+
+  tqLoad();
+  setInterval(tqLoad, 5 * 60 * 1000);   // تحديث هادي — المهام مابتتغيّرش كتير
+}
+
+function tqSetBranch(b) { TQ.branch = b; tqLoad(); }
+
+async function tqLoad() {
+  if (!TQ.branch) return;
+  const dstr = tqTodayCairo();
+  try {
+    const [t, a, dn] = await Promise.all([
+      db.from('tasks').select('id,title,freq,weekday,month_day,month,sort_order').eq('is_active', true),
+      db.from('task_assignee').select('task_id,branch,assignee'),
+      db.from('task_done').select('task_id').eq('branch', TQ.branch).eq('done_on', dstr)
+    ]);
+    TQ.tasks = t.data || [];
+    TQ.assign = {};
+    (a.data || []).forEach(r => { (TQ.assign[r.task_id] = TQ.assign[r.task_id] || {})[r.branch] = r.assignee; });
+    TQ.done = new Set((dn.data || []).map(r => r.task_id));
+  } catch (e) { console.error('tqLoad', e); }
+  tqRender();
+}
+
+function tqDueToday() {
+  const d = tqCairoDate();
+  return TQ.tasks.filter(t => tqIsDue(t, d))
+    .sort((x, y) => (x.sort_order || 0) - (y.sort_order || 0) || String(x.title).localeCompare(String(y.title), 'ar'));
+}
+
+function tqRender() {
+  const due = tqDueToday();
+  const remaining = due.filter(t => !TQ.done.has(t.id)).length;
+  const b = document.getElementById('tqBadge');
+  if (b) { b.textContent = remaining > 99 ? '99+' : remaining; b.style.display = remaining > 0 ? 'flex' : 'none'; }
+
+  const list = document.getElementById('tqList');
+  if (!list) return;
+  if (!due.length) { list.innerHTML = '<div class="tq-empty">🎉 مفيش مهام مستحقة النهاردة</div>'; }
+  else {
+    list.innerHTML = due.map(t => {
+      const done = TQ.done.has(t.id);
+      const who = (TQ.assign[t.id] && TQ.assign[t.id][TQ.branch]) || '';
+      return '<label class="tq-item' + (done ? ' done' : '') + '">'
+        + '<input type="checkbox" ' + (done ? 'checked' : '') + ' onchange="tqToggleDone(' + t.id + ',this.checked)">'
+        + '<span class="tq-t">' + tqEsc(t.title)
+        + (who ? '<span class="tq-who">👤 ' + tqEsc(who) + '</span>' : '<span class="tq-who">بدون مسؤول</span>')
+        + '</span></label>';
+    }).join('');
+  }
+  const foot = document.getElementById('tqFoot');
+  if (foot) foot.textContent = due.length ? ('تمّ ' + (due.length - remaining) + ' من ' + due.length) : '';
+}
+
+async function tqToggleDone(id, on) {
+  if (TQ.busy) return;
+  TQ.busy = true;
+  const dstr = tqTodayCairo();
+  if (on) TQ.done.add(id); else TQ.done.delete(id);
+  tqRender();                                  // تفاؤلي — الرجوع تحت لو فشل
+  try {
+    if (on) {
+      const { error } = await db.from('task_done')
+        .upsert({ task_id: id, branch: TQ.branch, done_on: dstr, done_by: currentUser && currentUser.full_name || null });
+      if (error) throw error;
+    } else {
+      const { error } = await db.from('task_done').delete()
+        .eq('task_id', id).eq('branch', TQ.branch).eq('done_on', dstr);
+      if (error) throw error;
+    }
+  } catch (e) {
+    console.error('tqToggleDone', e);
+    if (on) TQ.done.delete(id); else TQ.done.add(id);
+    tqRender();
+    alert('تعذّر حفظ حالة المهمة، حاول تاني.');
+  }
+  TQ.busy = false;
+}
+
+function tqToggle(e) {
+  if (e) e.stopPropagation();
+  const p = document.getElementById('tqPanel');
+  if (!p) return;
+  const opening = !p.classList.contains('open');
+  p.classList.toggle('open', opening);
+  if (opening) tqLoad();
+}
+document.addEventListener('click', e => {
+  const w = document.getElementById('tqWrap');
+  if (w && !w.contains(e.target)) document.getElementById('tqPanel').classList.remove('open');
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { const p = document.getElementById('tqPanel'); if (p) p.classList.remove('open'); }
+});
 
 async function loadHeaderStats() {
   try {
