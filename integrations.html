@@ -323,14 +323,43 @@
       const el2=document.getElementById('epb-'+id); if(el2){ el2.classList.add('open'); el2.innerHTML=html; }
     }
 
+    /* ═══ إلغاء العمليات الجارية ═══
+       نداء eplus ممكن ياخد دقيقة+ (بيضرب نظام خارجي عبر الوسيط)، والمستخدم
+       كان مستني من غير مخرج غير إنه يقفل الصفحة.
+       ⚠️ الإلغاء بيقطع **انتظارنا** إحنا — نظام eplus ممكن يكون لسه بينفّذ
+          الاستعلام. مابنوعدش المستخدم إننا وقّفنا الشغل هناك، بنقول
+          «اتلغت العملية» بس.
+       ⚠️ تشغيل جديد بنفس المفتاح بيقطع القديم — عشان ما يبقاش فيه نداءين
+          على نفس الصندوق والرد بتاع الأقدم يكتب فوق الأحدث. */
+    const _running = new Map();   // مفتاح → AbortController
+    function _startOp(key){
+      _cancelOp(key, true);       // الأقدم اتقطع لأن أحدث بدأ — مش إلغاء من المستخدم
+      const c = new AbortController();
+      _running.set(key, c);
+      return c;
+    }
+    // superseded=true يعني القطع سببه تشغيل أحدث، فالقديم **مايكتبش** في الشاشة
+    // (وإلا رده المتأخر هيكتب «اتلغت العملية» فوق النداء الجديد وهو شغال)
+    function _cancelOp(key, superseded){
+      const c=_running.get(key);
+      if(c){ c._superseded=!!superseded; c.abort(); _running.delete(key); }
+    }
+    function _endOp(key, ctrl){ if(_running.get(key)===ctrl) _running.delete(key); }
+    function _isAbort(err){ return !!err && (err.name==='AbortError' || /abort/i.test(err.message||'')); }
+    function cancelTest(id){ _cancelOp('test-'+id); }
+    function cancelSample(){ _cancelOp('sample'); }
+    const CANCEL_BTN = 'style="margin-right:8px;background:#fee2e2;color:#991b1b;border:1px solid #fecaca;border-radius:6px;padding:2px 10px;font-family:inherit;font-size:0.75rem;font-weight:700;cursor:pointer"';
+
     // ===== اختبار عبر eplus_proxy =====
     async function runTest(id){
       const e=EPS.find(x=>x.id===id); if(!e) return;
       const branch=document.getElementById('ig-branch').value;
       const bodyEl=document.getElementById('epb-'+id); bodyEl.classList.add('open');
-      bodyEl.innerHTML='<div style="color:var(--text-muted);font-size:0.8rem;padding:6px 0;"><i class="fas fa-spinner fa-spin"></i> جارٍ الاستدعاء لفرع '+esc(branch)+'…</div>';
       const jwt=authToken();
       if(!jwt){ bodyEl.innerHTML='<div class="res-bad" style="font-size:0.82rem;">لازم تسجّل دخول من جديد (توكن منتهي) — الدالة بتتطلب موظف مسجّل.</div>'; return; }
+      const opKey='test-'+id, ctrl=_startOp(opKey);
+      bodyEl.innerHTML='<div style="color:var(--text-muted);font-size:0.8rem;padding:6px 0;"><i class="fas fa-spinner fa-spin"></i> جارٍ الاستدعاء لفرع '+esc(branch)+'… '
+        +'<button '+CANCEL_BTN+' onclick="cancelTest('+id+')">إلغاء</button></div>';
       // حلّ التعبيرات وقت النداء (ثابت يتبعت كما هو، تعبير يتحسب)
       const rparams=(e.params||[]).map(p=>({ key:p.key, enabled:p.enabled, value:(p.mode==='expr'?resolveTemplate(p.value,{branch}):p.value) }));
       const rbody = e.body ? resolveTemplate(e.body,{branch}) : null;
@@ -338,12 +367,18 @@
         const r=await fetch(FN+'eplus_proxy',{
           method:'POST',
           headers:{ apikey:SB_KEY, Authorization:'Bearer '+jwt, 'Content-Type':'application/json' },
-          body:JSON.stringify({ branch, path:e.path, method:(e.method||'GET'), params:rparams, body:rbody, preview:true, previewN:50 })
+          body:JSON.stringify({ branch, path:e.path, method:(e.method||'GET'), params:rparams, body:rbody, preview:true, previewN:50 }),
+          signal:ctrl.signal
         });
         const j=await r.json();
         if(j && j.error==='secret_not_set'){ document.getElementById('ig-setup').style.display='block'; }
         renderResult(bodyEl, j, e, branch);
-      }catch(err){ bodyEl.innerHTML='<div class="res-bad" style="font-size:0.82rem;">فشل الاتصال: '+esc(err.message)+'</div>'; }
+      }catch(err){
+        if(_isAbort(err) && ctrl._superseded) return;   // نداء أحدث شغّال — ما نكتبش فوقه
+        bodyEl.innerHTML = _isAbort(err)
+          ? '<div style="color:var(--text-muted);font-size:0.82rem;padding:6px 0;">اتلغت العملية — ملحوظة: نظام eplus ممكن يكون لسه بينفّذ الاستعلام عنده.</div>'
+          : '<div class="res-bad" style="font-size:0.82rem;">فشل الاتصال: '+esc(err.message)+'</div>';
+      }finally{ _endOp(opKey, ctrl); }
     }
     function renderResult(box, j, e, branch){
       if(!j){ box.innerHTML='<div class="res-bad">لا يوجد رد</div>'; return; }
@@ -479,9 +514,11 @@
       const method=document.getElementById('f-method').value, path=document.getElementById('f-path').value.trim();
       const rparams=collectParams().map(p=>({key:p.key,enabled:p.enabled,value:p.mode==='expr'?resolveTemplate(p.value,{branch}):p.value}));
       const rbody=document.getElementById('f-body').value.trim();
-      const msg=document.getElementById('dest-msg'); msg.textContent='⏳ جلب عيّنة…'; msg.style.color='var(--text-muted)';
+      const msg=document.getElementById('dest-msg'); msg.style.color='var(--text-muted)';
+      const opKey='sample', ctrl=_startOp(opKey);
+      msg.innerHTML='⏳ جلب عيّنة… <button '+CANCEL_BTN+' onclick="cancelSample()">إلغاء</button>';
       try{
-        const r=await fetch(FN+'eplus_proxy',{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+jwt,'Content-Type':'application/json'},body:JSON.stringify({branch,path,method,params:rparams,body:(method!=='GET'&&rbody)?resolveTemplate(rbody,{branch}):null,preview:true,previewN:1})});
+        const r=await fetch(FN+'eplus_proxy',{method:'POST',headers:{apikey:SB_KEY,Authorization:'Bearer '+jwt,'Content-Type':'application/json'},body:JSON.stringify({branch,path,method,params:rparams,body:(method!=='GET'&&rbody)?resolveTemplate(rbody,{branch}):null,preview:true,previewN:1}),signal:ctrl.signal});
         const j=await r.json();
         let data=null; try{ data=JSON.parse(j.output); }catch(_){}
         const row=data&&Array.isArray(data.Data)&&data.Data[0];
@@ -489,7 +526,11 @@
         document.getElementById('f-map').innerHTML='';
         Object.keys(row).forEach(k=>addMap({src:k,dst:sanitizeCol(k),type:guessType(row[k])}));
         msg.textContent='تم اقتراح '+Object.keys(row).length+' حقل ✓'; msg.style.color='#15803d';
-      }catch(e){ msg.textContent='فشل الجلب'; msg.style.color='var(--danger)'; }
+      }catch(e){
+        if(_isAbort(e) && ctrl._superseded) return;     // نداء أحدث شغّال
+        if(_isAbort(e)){ msg.textContent='اتلغت العملية'; msg.style.color='var(--text-muted)'; }
+        else { msg.textContent='فشل الجلب'; msg.style.color='var(--danger)'; }
+      }finally{ _endOp(opKey, ctrl); }
     }
     async function createDestTable(){
       const table=document.getElementById('f-dest').value.trim(), key=document.getElementById('f-destkey').value.trim();
