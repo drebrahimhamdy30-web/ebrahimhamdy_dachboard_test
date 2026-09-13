@@ -135,6 +135,20 @@ select.tq-branch{cursor:pointer;max-width:130px}
 .tq-empty{text-align:center;color:var(--text-muted);font-size:.76rem;padding:22px 10px}
 .tq-foot{padding:.45rem .75rem;border-top:1px solid var(--border);font-size:.68rem;color:var(--text-muted);text-align:center}
 
+/* ===== تحصيلات الموردين — نفس لوحة المهام، مجمّعة بالفرع ===== */
+.sc-search{width:100%;font-family:'Cairo',sans-serif;font-size:.76rem;padding:.35rem .55rem;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);outline:none}
+.sc-search:focus{border-color:var(--primary)}
+.sc-br{display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.4rem .55rem;margin-top:.3rem;background:var(--gray-light);border-radius:7px;font-size:.74rem;font-weight:800;color:var(--text)}
+.sc-br-n{font-size:.67rem;font-weight:700;color:var(--text-muted)}
+.sc-row{display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.35rem .55rem;font-size:.75rem;border-bottom:1px solid var(--border)}
+.sc-row:last-child{border-bottom:none}
+.sc-nm{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sc-t{font-size:.62rem;font-weight:800;border-radius:5px;padding:1px 6px;margin-inline-start:4px;white-space:nowrap}
+.sc-t.cash{background:#dcfce7;color:#15803d}
+.sc-t.credit{background:#fef3c7;color:#92400e}
+.sc-v{white-space:nowrap;font-variant-numeric:tabular-nums;font-size:.72rem}
+.sc-v b{color:var(--primary)}
+
 /* ===== شريط أيقونات مطوي (Desktop) — يتوسّع كطبقة فوق الشاشة عند المرور ثم يرجع ===== */
 @media(min-width:769px){
   .sidebar{width:var(--rail-w);overflow:hidden;
@@ -274,6 +288,32 @@ body.dark{     --text-light:#6b7a94;  --gray-light:#16223a; --primary-light:#124
           </div>
           <div class="tq-list" id="tqList"><div class="tq-empty">⏳ جارٍ التحميل…</div></div>
           <div class="tq-foot" id="tqFoot"></div>
+        </div>
+      </div>
+
+      <!-- تحصيلات الموردين — نفس فكرة زر المهام، مجمّعة بالفرع -->
+      <div class="tq-wrap" id="scWrap" style="display:none">
+        <button class="qbtn" id="scBtn" title="تحصيلات الموردين" onclick="scToggle(event)">
+          <svg viewBox="0 0 24 24"><path d="M3 7h18v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 7l2.5-4h13L21 7"/><line x1="12" y1="11" x2="12" y2="16"/><path d="M14 12.2a2 2 0 0 0-2-.7c-1 0-1.7.5-1.7 1.2 0 1.8 3.4.9 3.4 2.7 0 .7-.8 1.2-1.7 1.2a2 2 0 0 1-2-.7"/></svg>
+          <span>التحصيلات</span>
+          <span class="qbtn-badge" id="scBadge">0</span>
+        </button>
+        <div class="tq-panel" id="scPanel" style="width:400px">
+          <div class="tq-head">
+            <span class="tq-head-t">تحصيلات الموردين</span>
+            <span>
+              <select class="tq-branch" id="scPeriod" onchange="scSetPeriod(this.value)">
+                <option value="latest" selected>آخر تحديث</option>
+                <option value="day">النهاردة</option>
+                <option value="month">الشهر ده</option>
+              </select>
+            </span>
+          </div>
+          <div style="padding:.45rem .6rem;border-bottom:1px solid var(--border)">
+            <input type="search" id="scQ" class="sc-search" placeholder="🔍 بحث باسم المورد..." oninput="scRender()">
+          </div>
+          <div class="tq-list" id="scList"><div class="tq-empty">⏳ جارٍ التحميل…</div></div>
+          <div class="tq-foot" id="scFoot"></div>
         </div>
       </div>
 
@@ -496,7 +536,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   buildQuickLinks();
   // بعد ما الفروع توصل من الشبكة — التحقق من فرع المستخدم محتاج القايمة
   // الحقيقية مش كاش قديم ممكن يكون ناقص فرع جديد
-  Branches.ready().then(tqInit);
+  Branches.ready().then(() => { tqInit(); scInit(); });
   applyTheme();
   await loadHeaderStats();
   setInterval(loadHeaderStats, 60000);
@@ -774,6 +814,135 @@ async function tqToggleDone(id, on) {
   }
   TQ.busy = false;
 }
+
+/* ═══════════════ تحصيلات الموردين في البار السريع ═══════════════
+   بتتسجّل من «طلب جديد» ← تحصيلات الشركات، والعرض الكامل في تبويب
+   «التحصيلات» جوّه أرصدة الموردين. هنا نظرة سريعة مجمّعة بالفرع.
+
+   ⚠️ التجميع بالتاريخ بيتعمل **في المتصفح بتوقيت القاهرة** مش بفلتر
+   على السيرفر: فلتر created_at>=X محتاج أوفست ثابت، وده بيقع مع
+   التوقيت الصيفي. بنجيب آخر ~40 يوم (عدد صفوف صغير) ونبوّبهم هنا
+   بـtoLocaleDateString('en-CA',{timeZone:'Africa/Cairo'}) — دقيق
+   وماينفعش يتأثر بساعة الجهاز ولا بالـDST.
+
+   ⚠️ الصافي للآجل بس — الكاش فاتورته الجاية لسه مش معروفة فصافيه NULL. */
+let SC = { rows: null, period: 'latest', branch: '' };
+
+function scCairoDay(t) { return new Date(t).toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' }); }
+const scFmt = n => (n === null || n === undefined) ? '—'
+  : (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function scInit() {
+  const wrap = document.getElementById('scWrap');
+  if (!wrap || !currentUser) return;
+  const names = Branches.names();
+  const mine = Branches.toName(currentUser.branch || '');
+  const isAdmin = currentUser.role === 'admin';
+  if (!isAdmin && names.indexOf(mine) < 0) return;
+  SC.branch = isAdmin ? '' : mine;          // الأدمن يشوف كل الفروع، وغيره فرعه
+  wrap.style.display = '';
+  scLoad();
+  setInterval(scLoad, 10 * 60 * 1000);
+}
+
+async function scLoad() {
+  try {
+    const since = new Date(Date.now() - 40 * 86400000).toISOString();
+    let q = db.from('supplier_collections')
+      .select('branch,supplier_name,supplier_type,invoices_total,returns_total,net_total,created_at')
+      .gte('created_at', since).order('created_at', { ascending: false });
+    if (SC.branch) q = q.eq('branch', SC.branch);
+    const { data, error } = await q;
+    if (error) { console.error('scLoad', error); SC.rows = []; }
+    else SC.rows = data || [];
+  } catch (e) { console.error('scLoad', e); SC.rows = []; }
+  scRender();
+}
+
+function scInPeriod(r) {
+  if (SC.period === 'latest') return true;      // كل النافذة، والتجميع بياخد الأحدث
+  const d = scCairoDay(r.created_at);
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' });
+  return SC.period === 'day' ? (d === today) : (d.slice(0, 7) === today.slice(0, 7));
+}
+// تاريخ مختصر بتوقيت القاهرة — عشان يبان آخر تحديث كان امتى
+function scWhen(t) {
+  try {
+    return new Date(t).toLocaleDateString('ar-EG', { day: '2-digit', month: '2-digit', timeZone: 'Africa/Cairo' });
+  } catch (e) { return ''; }
+}
+
+function scSetPeriod(p) { SC.period = p; scRender(); }
+
+function scRender() {
+  const list = document.getElementById('scList');
+  const badge = document.getElementById('scBadge');
+  const foot = document.getElementById('scFoot');
+  if (!list) return;
+  if (SC.rows === null) { list.innerHTML = '<div class="tq-empty">⏳ جارٍ التحميل…</div>'; return; }
+
+  // **آخر تحديث لكل مورد**: الصفوف جاية مرتّبة تنازليًا بالتاريخ، فأول
+  // ظهور لـ(الفرع+المورد) هو الأحدث. اللوحة بتوريك حالة كل مورد
+  // دلوقتي، مش سجل كل الحركات.
+  const seen = new Set();
+  const latest = SC.rows.filter(scInPeriod).filter(r => {
+    const k = r.branch + ' ' + r.supplier_name;
+    if (seen.has(k)) return false;
+    seen.add(k); return true;
+  });
+
+  // الشارة = عدد الموردين المعروضين
+  if (badge) { badge.textContent = latest.length > 99 ? '99+' : latest.length; badge.style.display = latest.length > 0 ? 'flex' : 'none'; }
+
+  const q = (document.getElementById('scQ').value || '').trim().toLowerCase();
+  const rows = q ? latest.filter(r => String(r.supplier_name || '').toLowerCase().includes(q)) : latest;
+
+  if (!rows.length) {
+    list.innerHTML = '<div class="tq-empty">' + (latest.length ? 'مفيش مورد بالاسم ده' :
+      (SC.period === 'day' ? 'مفيش تحصيلات اتسجّلت النهاردة'
+       : SC.period === 'month' ? 'مفيش تحصيلات الشهر ده' : 'مفيش تحصيلات متسجّلة')) + '</div>';
+    if (foot) foot.textContent = '';
+    return;
+  }
+
+  const byBranch = {};
+  rows.forEach(r => { (byBranch[r.branch] = byBranch[r.branch] || []).push(r); });
+
+  list.innerHTML = Object.keys(byBranch).sort().map(br => {
+    const g = byBranch[br];
+    const ret = g.reduce((s, r) => s + (Number(r.returns_total) || 0), 0);
+    const net = g.filter(r => r.supplier_type === 'آجل').reduce((s, r) => s + (Number(r.net_total) || 0), 0);
+    return '<div class="sc-br"><span>' + tqEsc(br) + '</span>'
+      + '<span class="sc-br-n">' + g.length + ' مورد · مرتجعات ' + scFmt(ret) + (net ? ' · صافي ' + scFmt(net) : '') + '</span></div>'
+      + g.map(r => '<div class="sc-row">'
+          + '<span class="sc-nm">' + tqEsc(r.supplier_name)
+          + '<span class="sc-t ' + (r.supplier_type === 'كاش' ? 'cash' : 'credit') + '">' + r.supplier_type + '</span>'
+          + '<span class="sc-br-n" style="margin-inline-start:5px">' + scWhen(r.created_at) + '</span></span>'
+          + '<span class="sc-v">مرتجع ' + scFmt(r.returns_total)
+          + (r.supplier_type === 'آجل' ? ' · صافي <b>' + scFmt(r.net_total) + '</b>' : '') + '</span>'
+        + '</div>').join('');
+  }).join('');
+
+  const tRet = rows.reduce((s, r) => s + (Number(r.returns_total) || 0), 0);
+  const tNet = rows.filter(r => r.supplier_type === 'آجل').reduce((s, r) => s + (Number(r.net_total) || 0), 0);
+  if (foot) foot.textContent = rows.length + ' مورد · إجمالي المرتجعات ' + scFmt(tRet) + ' · صافي الآجل ' + scFmt(tNet);
+}
+
+function scToggle(e) {
+  if (e) e.stopPropagation();
+  const p = document.getElementById('scPanel');
+  if (!p) return;
+  const opening = !p.classList.contains('open');
+  p.classList.toggle('open', opening);
+  if (opening) scLoad();
+}
+document.addEventListener('click', e => {
+  const w = document.getElementById('scWrap');
+  if (w && !w.contains(e.target)) document.getElementById('scPanel').classList.remove('open');
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { const p = document.getElementById('scPanel'); if (p) p.classList.remove('open'); }
+});
 
 function tqToggle(e) {
   if (e) e.stopPropagation();
