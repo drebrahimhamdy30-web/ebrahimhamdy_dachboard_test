@@ -19,14 +19,18 @@
 # ═══════════════════════════════════════════════════════════════════
 set -euo pipefail
 
-REPO_URL="https://github.com/drebrahimhamdy30-web/ebrahimhamdy_dachboard_test"
-REPO_DIR="/root/phalix-repo"
-DEST="/root/supabase-project/volumes/functions"
-COMPOSE_DIR="/root/supabase-project"
-CONTAINER="supabase-edge-functions"
+# القيم دي قابلة للتجاوز بمتغيّرات بيئة — عشان نقدر نختبر السكربت
+# على مسارات وهمية من غير ما نلمس السيرفر
+REPO_URL="${PHALIX_REPO_URL:-https://github.com/drebrahimhamdy30-web/ebrahimhamdy_dachboard_test}"
+REPO_DIR="${PHALIX_REPO_DIR:-/root/phalix-repo}"
+DEST="${PHALIX_DEST:-/root/supabase-project/volumes/functions}"
+COMPOSE_DIR="${PHALIX_COMPOSE_DIR:-/root/supabase-project}"
+CONTAINER="${PHALIX_CONTAINER:-supabase-edge-functions}"
 SRC=""            # يتحدد من --from-dir أو من الريبو
 DRY=0
 RESTART=1
+QUIET=0
+NOTABLE=0         # حصل حاجة تستاهل التسجيل؟ (تغيير أو تحذير أو فشل)
 
 # الأسرار اللي الدوال بتحتاجها — بنفحص وجودها بس، مابنطبعش قيمها
 NEEDED_ENV=(SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY SERVICE_ROLE_KEY SYNC_KEY
@@ -36,6 +40,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -n|--dry-run)   DRY=1 ;;
     --no-restart)   RESTART=0 ;;
+    -q|--quiet)     QUIET=1 ;;
     --from-dir)     SRC="${2:-}"; shift ;;
     -h|--help)      sed -n '2,25p' "$0"; exit 0 ;;
     *) echo "خيار مش معروف: $1" >&2; exit 2 ;;
@@ -43,13 +48,39 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-say()  { printf '%s\n' "$*"; }
-step() { printf '\n\033[1m▸ %s\033[0m\n' "$*"; }
-ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
-warn() { printf '  \033[33m⚠\033[0m %s\n' "$*"; }
-die()  { printf '  \033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+# ── الوضع الصامت ───────────────────────────────────────────────────
+# الكرون بيشتغل كل ٥ دقايق. من غير ده هيكتب ٢٠ سطر × ٢٨٨ مرة يوميًا
+# حتى لو مفيش أي تغيير، واللوج يبقى مالوش لازمة ومحدش هيقراه.
+# بنجمّع الخرج، وفي الآخر نطبعه **بس لو** حصل تغيير أو تحذير أو فشل.
+# ⚠️ لازم يتنفّذ **قبل** فحص الألوان تحت — الفحص بيسأل «الخرج طرفية؟»،
+#    ولو اتسأل قبل التحويل هيقول أيوة ويحقن رموز ألوان جوّه اللوج.
+if [ "$QUIET" = 1 ]; then
+  LOGTMP="$(mktemp)"
+  exec 3>&1
+  exec >"$LOGTMP" 2>&1
+fi
+finish() {
+  if [ "$QUIET" = 1 ]; then
+    [ "$NOTABLE" = 1 ] && cat "$LOGTMP" >&3
+    rm -f "$LOGTMP"
+  fi
+}
+trap finish EXIT
 
-[ "$DRY" = 1 ] && say $'\033[33m═══ تجربة: مش هيتكتب أي حاجة ═══\033[0m'
+# ألوان في الطرفية بس — في الكرون الخرج بيروح لملف، والرموز دي بتوسّخه
+if [ -t 1 ]; then B=$'\033[1m'; G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; N=$'\033[0m'
+else B=''; G=''; Y=''; R=''; N=''; fi
+
+# طابع وقت في الملف بس — في الطرفية بيبقى ضجيج
+stamp() { [ -t 1 ] || printf '[%s] ' "$(date '+%Y-%m-%d %H:%M')"; }
+
+say()  { stamp; printf '%s\n' "$*"; }
+step() { printf '\n'; stamp; printf '%s▸ %s%s\n' "$B" "$*" "$N"; }
+ok()   { stamp; printf '  %s✓%s %s\n' "$G" "$N" "$*"; }
+warn() { NOTABLE=1; stamp; printf '  %s⚠%s %s\n' "$Y" "$N" "$*"; }
+die()  { NOTABLE=1; stamp; printf '  %s✗ %s%s\n' "$R" "$*" "$N"; exit 1; }
+
+[ "$DRY" = 1 ] && say "${Y}═══ تجربة: مش هيتكتب أي حاجة ═══${N}"
 
 # ── ١) تأكيدات قبل أي حاجة ─────────────────────────────────────────
 step "فحص البيئة"
@@ -131,7 +162,13 @@ fi
 # ── ٥) إعادة التشغيل ───────────────────────────────────────────────
 step "إعادة التشغيل"
 if [ "$RESTART" = 0 ]; then
-  warn "اتخطّت (--no-restart) — التعديلات ممكن ماتبانش لحد ما تعيد التشغيل"
+  # التحذير يستاهل يتسجّل بس لو فيه تغيير مستني يتفعّل. من غير الشرط ده
+  # الرسالة بتولع كل ٥ دقايق وبتكسر الوضع الصامت.
+  if [ "$((added+updated))" -gt 0 ]; then
+    warn "اتخطّت (--no-restart) — $((added+updated)) تغيير مش هيبان لحد ما تعيد التشغيل"
+  else
+    say "  اتخطّت (--no-restart) — مفيش تغيير أصلاً"
+  fi
 elif [ "$((added+updated))" -eq 0 ]; then
   ok "مفيش تغيير، مش محتاجة"
 elif [ "$DRY" = 1 ]; then
@@ -148,11 +185,14 @@ else
 fi
 
 # ── ٦) الخلاصة ─────────────────────────────────────────────────────
+[ "$((added+updated))" -gt 0 ] && NOTABLE=1   # فيه تغيير → يستاهل يتسجّل في اللوج
+
 total=$(find "$DEST" -maxdepth 1 -mindepth 1 -type d ! -name main | wc -l)
-printf '\n\033[1m── الخلاصة ──\033[0m\n'
-printf '  جديدة: %s · اتغيّرت: %s · زي ما هي: %s\n' "$added" "$updated" "$same"
-printf '  إجمالي الدوال على السيرفر: %s (+ main)\n' "$total"
-[ ${#missing[@]} -gt 0 ] && printf '  \033[33m⚠ أسرار ناقصة: %s\033[0m\n' "${#missing[@]}"
-printf '\n  للتأكد إن دالة بتتحمّل فعلاً:\n'
-printf '    docker logs --tail 30 %s\n' "$CONTAINER"
-printf '\n  \033[33m⚠ ماتشغّلش الكرون هنا والسحابة شغّالة — إشعارات مزدوجة للطيارين.\033[0m\n'
+printf '\n'; stamp; printf '%s── الخلاصة ──%s\n' "$B" "$N"
+stamp; printf '  جديدة: %s · اتغيّرت: %s · زي ما هي: %s\n' "$added" "$updated" "$same"
+stamp; printf '  إجمالي الدوال على السيرفر: %s (+ main)\n' "$total"
+[ ${#missing[@]} -gt 0 ] && { stamp; printf '  %s⚠ أسرار ناقصة: %s%s\n' "$Y" "${#missing[@]}" "$N"; }
+if [ -t 1 ]; then
+  printf '\n  للتأكد إن دالة بتتحمّل فعلاً:\n    docker logs --tail 30 %s\n' "$CONTAINER"
+  printf '\n  %s⚠ ماتشغّلش الكرون هنا والسحابة شغّالة — إشعارات مزدوجة للطيارين.%s\n' "$Y" "$N"
+fi
