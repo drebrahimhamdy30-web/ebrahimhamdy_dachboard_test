@@ -475,8 +475,10 @@ try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_d
        بس، والمرتجعات على الكل. جمع الاتنين مع بعض بيدّي رقم مضلّل. */
     async function loadCollections() {
       try {
+        // أسطر المرتجعات جاية متضمّنة (resource embedding) في نفس النداء
         const r = await fetch(SB_URL_API + '/rest/v1/supplier_collections'
-          + '?select=*&order=created_at.desc&limit=2000', { headers: await sbH() });
+          + '?select=*,supplier_collection_returns(kind,item_name,qty,unit_value,line_total,invoice_no)'
+          + '&order=created_at.desc&limit=2000', { headers: await sbH() });
         if (!r.ok) {
           const t = await r.text();
           // الجدول لسه ماتعملش — رسالة مفهومة بدل خطأ PostgREST خام
@@ -542,19 +544,34 @@ try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_d
               <th>الفواتير</th><th>المرتجعات</th><th>الصافي</th>
               <th style="text-align:right">ملاحظات</th><th>سجّلها</th><th>التاريخ</th>
             </tr></thead>
-            <tbody>${rows.map(r => {
+            <tbody>${rows.map((r, i) => {
               const isCash = r.supplier_type === 'كاش';
-              return `<tr>
-                <td style="text-align:right;font-weight:700">${esc(r.supplier_name)}</td>
+              const lines = r.supplier_collection_returns || [];
+              const open = state.colOpen === r.id;
+              // صف الأسطر بيتفتح بالضغط — بيوضّح المرتجع اتحسب منين بالظبط
+              const detail = (open && lines.length) ? `<tr><td colspan="9" style="padding:.4rem .6rem;background:var(--gray-light,#f9fafb)">
+                  <table style="width:100%;font-size:.76rem">
+                    <thead><tr style="color:var(--muted)">
+                      <th>النوع</th><th style="text-align:right">الصنف</th><th>العدد</th>
+                      <th>قيمة الوحدة</th><th>الإجمالي</th><th>رقم الفاتورة</th></tr></thead>
+                    <tbody>${lines.map(l => `<tr>
+                      <td><span class="badge-${l.kind === 'مرتجع' ? 'credit' : 'cash'}">${esc(l.kind)}</span></td>
+                      <td style="text-align:right">${esc(l.item_name)}</td>
+                      <td>${money(l.qty)}</td><td>${money(l.unit_value)}</td>
+                      <td style="font-weight:700">${money(l.line_total)}</td>
+                      <td>${esc(l.invoice_no || '—')}</td></tr>`).join('')}</tbody>
+                  </table></td></tr>` : '';
+              return `<tr${lines.length ? ` data-coll="${r.id}" style="cursor:pointer" title="اضغط لعرض أسطر المرتجعات"` : ''}>
+                <td style="text-align:right;font-weight:700">${lines.length ? (open ? '▾ ' : '▸ ') : ''}${esc(r.supplier_name)}</td>
                 <td><span class="badge-${isCash ? 'cash' : 'credit'}">${esc(r.supplier_type)}</span></td>
                 <td style="color:var(--muted)">${esc(r.branch)}</td>
                 <td>${money(r.invoices_total)}</td>
-                <td>${money(r.returns_total)}</td>
+                <td>${money(r.returns_total)}${lines.length ? ` <span style="font-size:.68rem;color:var(--muted)">(${lines.length} سطر)</span>` : ''}</td>
                 <td${isCash ? ' style="color:var(--muted)"' : ' style="font-weight:800;color:var(--primary)"'}>${money(r.net_total)}</td>
                 <td style="text-align:right;font-size:.74rem;color:var(--muted)">${r.notes ? esc(r.notes) : '—'}</td>
                 <td style="font-size:.74rem;color:var(--muted)">${esc(r.created_by || '—')}</td>
                 <td style="font-size:.72rem;color:var(--muted);white-space:nowrap">${when(r.created_at)}</td>
-              </tr>`;
+              </tr>${detail}`;
             }).join('')}</tbody>
           </table>
         </div>`;
@@ -656,6 +673,13 @@ try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_d
         if (active === 'coll' && !state.collections) { await loadCollections(); }
         render();
       });
+      // فتح/قفل أسطر مرتجعات المورد
+      document.querySelectorAll('[data-coll]').forEach(el => el.onclick = () => {
+        const id = Number(el.dataset.coll);
+        state.colOpen = (state.colOpen === id) ? null : id;
+        render();
+      });
+
       // فلاتر التحصيلات — بتطبّق فورًا زي باقي فلاتر الشاشة
       const colbr = document.getElementById('colbr');
       if (colbr) colbr.onchange = e => { state.colBranch = e.target.value; render(); };
