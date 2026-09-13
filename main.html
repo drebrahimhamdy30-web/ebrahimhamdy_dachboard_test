@@ -522,11 +522,10 @@
             <input type="number" id="collect-invoices" class="form-input" placeholder="0.00" min="0" step="0.01"
                    oninput="updateCollectNet()">
           </div>
-          <!-- الكاش: رقم واحد. الآجل: بيتحسب من أسطر المرتجعات تحت -->
-          <div class="field-group" id="collect-returns-wrap">
-            <label><i class="fas fa-rotate-left" style="margin-left:5px;"></i> المرتجعات</label>
-            <input type="number" id="collect-returns" class="form-input" placeholder="0.00" min="0" step="0.01"
-                   oninput="updateCollectNet()">
+          <!-- المرتجعات للنوعين بتتحسب من الأسطر تحت، مش خانة تتكتب -->
+          <div class="field-group">
+            <label><i class="fas fa-rotate-left" style="margin-left:5px;"></i> إجمالي المرتجعات</label>
+            <input type="text" id="collect-returns" class="form-input readonly-field" readonly value="0.00">
           </div>
           <div class="field-group" id="collect-net-wrap">
             <label><i class="fas fa-equals" style="margin-left:5px;"></i> صافي الفواتير</label>
@@ -536,7 +535,7 @@
         </div>
 
         <!-- ===== أسطر المرتجعات (للآجل بس) ===== -->
-        <div id="collect-ret-block" style="display:none">
+        <div id="collect-ret-block">
           <p class="section-title" style="margin-top:14px"><i class="fas fa-rotate-left"></i> المرتجعات وما لم يصل</p>
           <div class="ret-form">
             <div class="field-group">
@@ -1059,16 +1058,13 @@
       document.getElementById('ct-cash').classList.toggle('active', cash);
       document.getElementById('ct-credit').classList.toggle('active', !cash);
       document.getElementById('ct-hint').innerHTML = cash
-        ? 'المرتجعات بتتخصم من <b>الفاتورة الجاية</b> — ولسه قيمتها مش معروفة، فبنسجّل المرتجعات والملاحظات بس'
-        : 'المرتجعات بتتخصم من <b>الفواتير اللي استلمناها</b> — سجّل كل صنف بسطر ورقم فاتورته';
-      // الكاش: مفيش قيمة فواتير تتكتب، وبالتالي مفيش صافي يتحسب
+        ? 'المرتجعات بتتخصم من <b>الفاتورة الجاية</b> — ولسه قيمتها مش معروفة، فمفيش إجمالي فواتير ولا صافي'
+        : 'المرتجعات بتتخصم من <b>الفواتير اللي استلمناها</b>';
+      // الفرق الوحيد بين النوعين: الكاش مفيهوش إجمالي فواتير ولا صافي،
+      // لأن الفاتورة الجاية لسه قيمتها مش معروفة. أسطر المرتجعات زي بعض.
       document.getElementById('collect-invoices-wrap').style.display = cash ? 'none' : '';
       document.getElementById('collect-net-wrap').style.display      = cash ? 'none' : '';
-      // الآجل: المرتجعات بتتحسب من الأسطر، فخانة الرقم المجمّع بتختفي
-      document.getElementById('collect-returns-wrap').style.display  = cash ? '' : 'none';
-      document.getElementById('collect-ret-block').style.display     = cash ? 'none' : '';
-      if (cash) { document.getElementById('collect-invoices').value = ''; retLines = []; renderRetLines(); }
-      else { document.getElementById('collect-returns').value = ''; }
+      if (cash) document.getElementById('collect-invoices').value = '';
       updateCollectNet();
     }
 
@@ -1132,9 +1128,9 @@
 
     function updateCollectNet() {
       const inv = ctNum(document.getElementById('collect-invoices').value);
-      // الآجل بياخد المرتجعات من الأسطر، والكاش من الخانة المجمّعة
-      const ret = (collectType === 'كاش') ? ctNum(document.getElementById('collect-returns').value) : retSum();
-      document.getElementById('collect-net').value = ctFmt(inv - ret);
+      const ret = retSum();                       // النوعين بياخدوا المرتجعات من الأسطر
+      document.getElementById('collect-returns').value = ctFmt(ret);
+      document.getElementById('collect-net').value     = ctFmt(inv - ret);
     }
 
     // قائمة الموردين من أحدث لقطة أرصدة — الأسماء بتيجي من نفس مصدر
@@ -1167,8 +1163,7 @@
       const nameEl = document.getElementById('collect-supplier');
       const name  = nameEl.value.trim();
       const cash  = (collectType === 'كاش');
-      // الكاش: رقم مجمّع. الآجل: مجموع أسطر المرتجعات
-      const ret   = cash ? ctNum(document.getElementById('collect-returns').value) : retSum();
+      const ret   = retSum();                     // النوعين: مجموع أسطر المرتجعات
       // الكاش: الفواتير **مش معروفة** — null مش صفر. الفرق مهم: صفر يعني
       // «مفيش فواتير»، وnull يعني «لسه مانعرفهاش»
       const inv   = cash ? null : ctNum(document.getElementById('collect-invoices').value);
@@ -1176,7 +1171,7 @@
 
       if (!name) { alert('اكتب اسم المورد'); nameEl.focus(); return; }
       if (cash) {
-        if (!ret) { alert('اكتب قيمة المرتجعات'); document.getElementById('collect-returns').focus(); return; }
+        if (!retLines.length) { alert('أضف سطر مرتجع واحد على الأقل'); document.getElementById('ret-name').focus(); return; }
       } else {
         if (!inv) { alert('اكتب قيمة الفواتير'); document.getElementById('collect-invoices').focus(); return; }
         if (!retLines.length && !confirm('مفيش أسطر مرتجعات للمورد ده — تضيفه بالفواتير بس؟')) return;
@@ -1190,11 +1185,10 @@
         supplier_name: name, supplier_code: supplierCodeOf(name),
         supplier_type: collectType, invoices_total: inv, returns_total: ret,
         notes: notes || null,
-        lines: cash ? [] : retLines.slice()      // نسخة — عشان مسح الأسطر ما يمسّش المضاف
+        lines: retLines.slice()                  // نسخة — عشان مسح الأسطر ما يمسّش المضاف
       });
       nameEl.value = '';
       document.getElementById('collect-invoices').value  = '';
-      document.getElementById('collect-returns').value   = '';
       document.getElementById('collect-row-notes').value = '';
       retLines = []; renderRetLines();
       updateCollectNet();
