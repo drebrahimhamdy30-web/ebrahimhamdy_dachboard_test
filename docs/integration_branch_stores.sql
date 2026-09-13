@@ -60,10 +60,28 @@ grant select, insert, update, delete on public.integration_branch_stores to auth
 grant all on public.integration_branch_stores to service_role;
 revoke all on public.integration_branch_stores from anon;
 
--- المعمورة اتأكدنا منها بالاختبار؛ الفرعين التانيين يتملوا من الشاشة
-insert into public.integration_branch_stores (branch, api_store, save_as, note)
-values ('المعمورة', 'الصيدلية', null, 'اتأكد من اختبار نقطة item — 27,270 صنف مطابقة لـstock_mamora')
-on conflict (branch, api_store) do nothing;
+-- ── الماب: مصدره النظام نفسه مش تخمين ──────────────────────────────
+-- v_stock_units_full كانت بتكتب الأسماء دي **صريح في الكود**:
+--     stock_mamora → 'الصيدلية'          (المعمورة)
+--     stock_san    → 'ابراهيم حمدي 2'    (سان ستيفانو)
+--     stock_bishr  → 'ابراهيم حمدي 3'    (سيدى بشر)
+--
+-- وده بيفسّر عيّنة الصفحة ٢ من اختبار المعمورة: الصنف sr10 رجع بتلات
+-- أرصدة (112 / 228 / 398.82) — مش تلات مخازن جوّه فرع، دول **التلات
+-- فروع** كلهم باينين من نداء فرع واحد. الصح للمعمورة هو 228 بس.
+--
+-- save_as = اسم الفرع: الصفحات تتعامل مع اسم الفرع مباشرة من غير
+-- تحويل ولا أسماء مكتوبة في الكود.
+--
+-- ⚠️ المعمورة متأكَّد منها بالأرقام (27,270 = stock_mamora).
+--    الفرعين التانيين مصدرهم الـview القديمة — يتأكدوا باختبار نقطة
+--    item بعد تغيير الفرع من أعلى الشاشة.
+insert into public.integration_branch_stores (branch, api_store, save_as, note) values
+  ('المعمورة',     'الصيدلية',       'المعمورة',     'المصدر: v_stock_units_full + اختبار نقطة item (27,270 = stock_mamora)'),
+  ('سان ستيفانو',  'ابراهيم حمدي 2', 'سان ستيفانو',  'المصدر: v_stock_units_full — محتاج تأكيد باختبار الفرع'),
+  ('سيدى بشر',     'ابراهيم حمدي 3', 'سيدى بشر',     'المصدر: v_stock_units_full — محتاج تأكيد باختبار الفرع')
+on conflict (branch, api_store) do update
+  set save_as = excluded.save_as, note = excluded.note, updated_at = now();
 
 select branch as الفرع, api_store as مخزن_الـAPI,
        coalesce(save_as, '(زي ما هو)') as يتخزّن_باسم, is_active as مفعّل
