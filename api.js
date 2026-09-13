@@ -38,6 +38,24 @@ async function sbH(extra) {
   return extra ? { ...h, ...extra } : h;
 }
 
+/* ═══ التفرقة بين «الطلب غلط» و«جلستك انتهت» ═══
+   لما التوكن ينتهي، sbH() بترجع لمفتاح anon عشان العرض مايقعش — بس
+   anon صلاحيته اتسحبت من أغلب الجداول، فأي **كتابة** بترجع 401 والشاشة
+   كانت بتقول «فشل الإرسال» زي ما لو البيانات غلط. المستخدم يعيد
+   المحاولة ويفشل تاني وهو مش عارف إن المطلوب تسجيل دخول.
+
+   الاستعمال:  alert(sbFailMsg('فشل الإرسال ❌'))
+               أو sbFailMsg('تعذّر التحميل', res.status) لو معاك الرد. */
+function sbSessionDead() {
+  try { return !(Session.tokenValid && Session.tokenValid(30000)); }
+  catch (e) { return false; }     // مش متأكدين؟ منقولش إن الجلسة انتهت
+}
+function sbFailMsg(base, status) {
+  return (status === 401 || status === 403 || sbSessionDead())
+    ? '⏱️ جلستك انتهت — اعمل تحديث للصفحة أو سجّل دخول تاني وحاول كمان مرة'
+    : base;
+}
+
 const SB_TASK_HEADERS = {
   'Content-Type':  'application/json',
   'apikey':        SB_ANON_API,
@@ -79,10 +97,11 @@ async function sbTaskInsert(payload) {
       headers: await sbH({ 'Prefer': 'return=representation' }),
       body:    JSON.stringify(row)
     });
-    if (!r.ok) return { ok: false, data: null };
+    // بنرجّع الحالة كمان عشان الشاشة تفرّق بين 401 (جلسة منتهية) وغيره
+    if (!r.ok) return { ok: false, data: null, status: r.status };
     let data = null;
     try { const raw = await r.json(); data = Array.isArray(raw) ? (raw[0] || null) : raw; } catch (e) {}
-    return { ok: true, data };
+    return { ok: true, data, status: r.status };
   } catch (e) {
     console.error('sbTaskInsert error:', e);
     return { ok: false, data: null };

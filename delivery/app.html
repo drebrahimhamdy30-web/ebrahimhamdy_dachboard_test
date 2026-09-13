@@ -735,7 +735,17 @@ function setQuickBadge(key, count) {
 
    الرقم على الزر = **المتبقّي** (المستحق ناقص اللي اتعمل)، فلمّا اليوم
    يخلص الشارة تختفي لوحدها. */
-const TQ = { tasks: [], assign: {}, done: new Set(), branch: '', busy: false };
+const TQ = { tasks: [], assign: {}, done: new Set(), branch: '', busy: false, err: null };
+
+/* الخطأ ده بسبب الجلسة ولا حاجة تانية؟ supabase-js مابيرجّعش الحالة
+   دايمًا، فبنبص على الكود/الرسالة كمان. */
+function qbAuthErr(e) {
+  if (!e) return false;
+  const c = String(e.code || ''), m = String(e.message || '');
+  if (c === '401' || c === '403' || c === 'PGRST301' || c === '42501') return true;
+  if (/JWT|token|unauthor|permission denied/i.test(m)) return true;
+  try { return !(Session.tokenValid && Session.tokenValid(30000)); } catch (x) { return false; }
+}
 
 function tqTodayCairo() { return new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' }); }
 // نبني التاريخ من نص القاهرة عند الظهر — عشان اليوم/الشهر يطلعوا بتوقيت
@@ -784,11 +794,15 @@ async function tqLoad() {
       db.from('task_assignee').select('task_id,branch,assignee'),
       db.from('task_done').select('task_id').eq('branch', TQ.branch).eq('done_on', dstr)
     ]);
+    // ⚠️ فشل التحميل **مش** «مفيش مهام». لما التوكن ينتهي الاستعلام
+    // بيرجع 401 وكنا بنعرض قائمة فاضية — المستخدم يفتكر إنه خلّص شغله
+    // وهو أصلًا مشافش المهام. دلوقتي بنقول السبب.
+    TQ.err = (t.error || a.error || dn.error) ? (t.error || a.error || dn.error) : null;
     TQ.tasks = t.data || [];
     TQ.assign = {};
     (a.data || []).forEach(r => { (TQ.assign[r.task_id] = TQ.assign[r.task_id] || {})[r.branch] = r.assignee; });
     TQ.done = new Set((dn.data || []).map(r => r.task_id));
-  } catch (e) { console.error('tqLoad', e); }
+  } catch (e) { console.error('tqLoad', e); TQ.err = e; }
   tqRender();
 }
 
@@ -799,12 +813,22 @@ function tqDueToday() {
 }
 
 function tqRender() {
+  const list = document.getElementById('tqList');
+  const b = document.getElementById('tqBadge');
+  // فشل تحميل = رسالة صريحة، مش قائمة فاضية. والشارة بتتخفي عشان
+  // مانعرضش رقم غلط
+  if (TQ.err) {
+    if (b) b.style.display = 'none';
+    if (list) list.innerHTML = '<div class="tq-empty">⚠️ تعذّر تحميل المهام<br>'
+      + '<span style="font-size:.72rem">' + (qbAuthErr(TQ.err) ? 'جلستك انتهت — اعمل تحديث للصفحة' : 'جرّب تاني بعد شوية') + '</span></div>';
+    const f0 = document.getElementById('tqFoot'); if (f0) f0.textContent = '';
+    return;
+  }
+
   const due = tqDueToday();
   const remaining = due.filter(t => !TQ.done.has(t.id)).length;
-  const b = document.getElementById('tqBadge');
   if (b) { b.textContent = remaining > 99 ? '99+' : remaining; b.style.display = remaining > 0 ? 'flex' : 'none'; }
 
-  const list = document.getElementById('tqList');
   if (!list) return;
   if (!due.length) { list.innerHTML = '<div class="tq-empty">🎉 مفيش مهام مستحقة النهاردة</div>'; }
   else {
@@ -858,7 +882,7 @@ async function tqToggleDone(id, on) {
    وماينفعش يتأثر بساعة الجهاز ولا بالـDST.
 
    ⚠️ الصافي للآجل بس — الكاش فاتورته الجاية لسه مش معروفة فصافيه NULL. */
-let SC = { rows: null, period: 'latest', branch: '' };
+let SC = { rows: null, period: 'latest', branch: '', err: null };
 
 function scCairoDay(t) { return new Date(t).toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' }); }
 const scFmt = n => (n === null || n === undefined) ? '—'
@@ -888,9 +912,10 @@ async function scLoad() {
       .gte('created_at', since).order('created_at', { ascending: false });
     if (SC.branch) q = q.eq('branch', SC.branch);
     const { data, error } = await q;
-    if (error) { console.error('scLoad', error); SC.rows = []; }
-    else SC.rows = data || [];
-  } catch (e) { console.error('scLoad', e); SC.rows = []; }
+    // زي المهام: فشل التحميل مش «مفيش تحصيلات»
+    if (error) { console.error('scLoad', error); SC.rows = []; SC.err = error; }
+    else { SC.rows = data || []; SC.err = null; }
+  } catch (e) { console.error('scLoad', e); SC.rows = []; SC.err = e; }
   scRender();
 }
 
@@ -915,6 +940,13 @@ function scRender() {
   const foot = document.getElementById('scFoot');
   if (!list) return;
   if (SC.rows === null) { list.innerHTML = '<div class="tq-empty">⏳ جارٍ التحميل…</div>'; return; }
+  if (SC.err) {
+    if (badge) badge.style.display = 'none';
+    list.innerHTML = '<div class="tq-empty">⚠️ تعذّر تحميل التحصيلات<br>'
+      + '<span style="font-size:.72rem">' + (qbAuthErr(SC.err) ? 'جلستك انتهت — اعمل تحديث للصفحة' : 'جرّب تاني بعد شوية') + '</span></div>';
+    if (foot) foot.textContent = '';
+    return;
+  }
 
   // **آخر تحديث لكل مورد**: الصفوف جاية مرتّبة تنازليًا بالتاريخ، فأول
   // ظهور لـ(الفرع+المورد) هو الأحدث. اللوحة بتوريك حالة كل مورد
