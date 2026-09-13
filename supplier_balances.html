@@ -97,6 +97,25 @@ try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_d
   .sec-title h3{font-size:.85rem;font-weight:800}
   .empty{padding:1.6rem;text-align:center;color:var(--muted);font-size:.82rem;background:var(--surface);border-radius:10px;border:1px dashed var(--border)}
   .warn{background:#fffbeb;border:1px solid #fde68a;color:#854d0e;padding:.6rem .85rem;border-radius:9px;font-size:.8rem;margin-top:.7rem}
+  /* ===== كروت أرصدة الموردين (محتاجة سبب) ===== */
+  .bal-card{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:.6rem .75rem;margin-bottom:.5rem}
+  .bal-card.need{border-inline-start:4px solid var(--red,#dc2626)}
+  .bal-top{display:flex;align-items:center;justify-content:space-between;gap:.6rem;flex-wrap:wrap}
+  .bal-nm{font-size:.84rem;font-weight:700;min-width:0}
+  .bal-en{display:block;font-size:.68rem;color:var(--muted);direction:ltr;text-align:right;font-weight:600}
+  .bal-amt{font-size:.95rem;font-weight:900;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .bal-amt.up{color:#15803d} .bal-amt.down{color:#dc2626}
+  .bal-old{background:var(--gray-light,#f3f4f6);border-radius:8px;padding:.4rem .6rem;margin-top:.45rem;font-size:.76rem;line-height:1.7}
+  .bal-meta{color:var(--muted);font-size:.7rem}
+  .bal-chg{color:#b45309;font-weight:800;font-size:.74rem;margin-top:.2rem}
+  .bal-hist-list{margin-top:.4rem;border-top:1px dashed var(--border);padding-top:.35rem}
+  .bal-hist-row{padding:.3rem 0;border-bottom:1px dashed var(--border);font-size:.75rem}
+  .bal-hist-row:last-child{border-bottom:none}
+  .bal-write{display:flex;gap:.4rem;align-items:center;margin-top:.45rem;flex-wrap:wrap}
+  .bal-in{flex:1;min-width:180px;font-family:inherit;font-size:.8rem;padding:.4rem .6rem;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)}
+  .bal-in:focus{border-color:var(--primary);outline:none}
+  .bal-save{padding:.35rem .8rem;font-size:.78rem}
+
   /* ===== تبويب التحصيلات ===== */
   .kpi-box{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.6rem .75rem;text-align:center}
   .kpi-l{font-size:.7rem;color:var(--muted);font-weight:700}
@@ -152,7 +171,8 @@ try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_d
     const wattr = () => canEdit ? '' : 'disabled title="محتاج صلاحية تعديل على الشاشة دي"';
 
     // ===== حالة الشاشة =====
-    let state = { branches: [], exclusions: [], threshold: 0.01, cache: {} };
+    let state = { branches: [], exclusions: [], threshold: 0.01, cache: {},
+                  notes: {}, notesAll: {}, histKey: null, forceNote: null };
     let active = null;        // اسم الفرع أو 'ex' أو 'set'
     let draft = {};           // نص اللصق قبل التحليل (لكل فرع)
     let filter = {};          // بحث داخل النتائج (لكل فرع)
@@ -208,6 +228,56 @@ try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_d
         prev: snaps[1] || null,          // اللي قبله = هدف التراجع
         run
       };
+      await loadNotes(branch);
+    }
+
+    /* ملاحظات أسباب الأرصدة — الجدول append-only، فبناخد **آخر** ملاحظة
+       لكل (فرع+كود) عشان نعرف الرصيد اتفسّر عند أنهي قيمة. التاريخ كله
+       بيتحمّل مرة واحدة هنا (الأعداد صغيرة) بدل نداء لكل مورد. */
+    async function loadNotes(branch) {
+      try {
+        const r = await fetch(SB_URL_API + '/rest/v1/supplier_balance_notes'
+          + '?select=*&branch=eq.' + encodeURIComponent(branch)
+          + '&order=created_at.desc&limit=4000', { headers: await sbH() });
+        if (!r.ok) {
+          const t = await r.text();
+          state.notesErr = (r.status === 404 || /schema cache|does not exist/i.test(t))
+            ? 'جدول أسباب الأرصدة لسه ماتعملش — شغّل docs/migrate_13_supplier_balance_notes.sql'
+            : null;
+          return;
+        }
+        const all = await r.json();
+        state.notesAll = state.notesAll || {};
+        state.notes    = state.notes || {};
+        (Array.isArray(all) ? all : []).forEach(n => {
+          const k = n.branch + '|' + n.code;
+          (state.notesAll[k] = state.notesAll[k] || []).push(n);
+          if (!state.notes[k]) state.notes[k] = n;        // الأحدث (الترتيب تنازلي)
+        });
+        state.notesErr = null;
+      } catch (e) { console.error('loadNotes', e); }
+    }
+
+    async function saveBalanceNote(branch, code, txt) {
+      const c = state.cache[branch] || {};
+      const row = (c.snapshot && c.snapshot.rows) ? c.snapshot.rows[code] : null;
+      if (!row) { toast('المورد مش موجود في الكشف', true); return; }
+      try {
+        const r = await fetch(SB_URL_API + '/rest/v1/supplier_balance_notes', {
+          method: 'POST',
+          headers: await sbH({ 'Content-Type': 'application/json', Prefer: 'return=representation' }),
+          // الرصيد بيتخزّن مع الملاحظة — هو ده اللي بيحدد إمتى نسأل تاني
+          body: JSON.stringify({ branch, code: String(code), supplier_name: row.a || null,
+            balance: Number(row.b) || 0, note: txt, created_by: WHO })
+        });
+        if (!r.ok) { toast(sbFailMsg('تعذّر حفظ السبب', r.status), true); return; }
+        const saved = (await r.json())[0];
+        const k = branch + '|' + code;
+        state.notes[k] = saved;
+        (state.notesAll[k] = state.notesAll[k] || []).unshift(saved);
+        toast('اتحفظ السبب');
+        render();
+      } catch (e) { toast('تعذّر حفظ السبب', true); }
     }
 
     // ===== الإجراءات (كلها بتعدّي على act) =====
@@ -332,7 +402,7 @@ try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_d
         <div class="page-head">
           <div>
             <h1><i class="fas fa-scale-balanced" style="color:var(--primary)"></i> متابعة أرصدة الموردين</h1>
-            <div class="sub">الصق كشف الفرع، وتظهر لك الموردين اللي رصيدهم اتغيّر عن آخر لصق محفوظ.</div>
+            <div class="sub">المفروض كل مورد رصيده صفر. الصق الكشف، واللي رصيده مش صفر هيظهر لك تكتب سببه.</div>
           </div>
           ${!canEdit ? '<div class="ro-badge"><i class="fas fa-eye"></i> عرض فقط — التعديل مقفول لدورك</div>' : ''}
         </div>
@@ -369,36 +439,88 @@ try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_d
           ${!snap ? '<div class="warn">ده أول لصق للفرع ده — مفيش مرجع نقارن بيه. هيتسجّل كنقطة بداية، والمقارنة تبدأ من اللصق اللي بعده.</div>' : ''}
         </div>`;
 
-      if (!run || !run.result) return head + paste +
-        '<div class="card"><div class="empty">لسه مفيش مقارنة للفرع ده. الصق الكشف واضغط «قارن واحفظ كمرجع».</div></div>';
+      if (!snap || !snap.rows) return head + paste +
+        '<div class="card"><div class="empty">لسه مفيش كشف محفوظ للفرع ده. الصق الكشف واضغط «قارن واحفظ كمرجع».</div></div>';
 
-      const r = run.result; const ex = exSet();
+      /* ═══ المنطق: كل رصيد المفروض يبقى صفر ═══
+         أي مورد رصيده ≠ صفر لازم المراجع يكتب سببه فيختفي من القائمة.
+         ولما الكشف يتسحب تاني ويطلع الرصيد **اتغيّر**، المورد يرجع
+         يظهر عشان يتكتب سبب جديد — والقديم بيفضل ظاهر تحته.
+         الهامش (الإعدادات، افتراضي 0.01): أي رصيد أصغر منه = صفر،
+         عشان أرصدة القروش ما تغرقش القايمة. */
+      const ex = exSet();
+      const thr = Number(state.threshold) || 0.01;
+      const notes = state.notes || {};                    // "branch|code" → آخر ملاحظة
+      const rows = Object.keys(snap.rows).map(code => {
+        const x = snap.rows[code] || {};
+        return { code: String(code), name: x.a || '', en: x.e || '', bal: Number(x.b) || 0 };
+      }).filter(x => !ex.has(x.code) && Math.abs(x.bal) > thr);
+
+      // مفسَّر = فيه ملاحظة اتكتبت على **نفس** الرصيد الحالي
+      const noteOf = x => notes[branch + '|' + x.code] || null;
+      const explained = x => { const n = noteOf(x); return !!n && Math.abs(Number(n.balance) - x.bal) <= thr; };
+      const need = rows.filter(x => !explained(x));
+      const done = rows.filter(explained);
+
       const q = (filter[branch] || '').trim().toLowerCase();
-      const match = x => !ex.has(String(x.code)) && (!q || String(x.code).includes(q) || String(x.name || '').toLowerCase().includes(q) || String(x.en || '').toLowerCase().includes(q));
-      const ch = (r.changed || []).filter(match), ad = (r.added || []).filter(match), rm = (r.removed || []).filter(match);
-      const chAll = (r.changed || []).filter(x => !ex.has(String(x.code)));
-      const up = chAll.filter(x => x.diff > 0).length, dn = chAll.length - up;
+      const match = x => !q || x.code.includes(q) || String(x.name).toLowerCase().includes(q) || String(x.en).toLowerCase().includes(q);
+      const needF = need.filter(match), doneF = done.filter(match);
+      const zero = Object.keys(snap.rows).length - rows.length - ex.size;
 
-      let out = head + paste + `<div class="card">
-        <h2><i class="fas fa-list-check"></i> نتيجة المقارنة — ${esc(branch)}</h2>
-        <p class="hint">${r.baseline ? 'مقارنة بآخر كشف محفوظ للفرع.' : 'أول كشف: كل الموردين اتسجّلوا كنقطة بداية.'}${r.skipped ? ` (${r.skipped} سطر اتخطيناه لأنه مش صف بيانات)` : ''}</p>
+      return head + paste + `<div class="card">
+        <h2><i class="fas fa-scale-balanced"></i> أرصدة محتاجة سبب — ${esc(branch)}</h2>
+        <p class="hint">المفروض كل رصيد = صفر. اللي مش صفر بيظهر هنا لحد ما تكتب سببه.
+          أي رصيد أقل من ${thr} بيتعتبر صفر (غيّره من الإعدادات).</p>
         <div class="chips">
-          <div class="chip"><b>${chAll.length}</b><span>رصيده اتغيّر</span></div>
-          <div class="chip c-up"><b>${up}</b><span>زاد</span></div>
-          <div class="chip c-down"><b>${dn}</b><span>نقص</span></div>
-          <div class="chip c-new"><b>${(r.added || []).filter(x => !ex.has(String(x.code))).length}</b><span>مورد جديد</span></div>
-          <div class="chip"><b>${r.total || 0}</b><span>إجمالي الكشف</span></div>
+          <div class="chip c-down"><b>${need.length}</b><span>محتاج سبب</span></div>
+          <div class="chip c-up"><b>${done.length}</b><span>اتكتب سببه</span></div>
+          <div class="chip"><b>${zero > 0 ? zero : 0}</b><span>رصيده صفر</span></div>
+          <div class="chip"><b>${Object.keys(snap.rows).length}</b><span>إجمالي الكشف</span></div>
         </div>
         <div class="row">
           <input type="text" id="q" class="grow" placeholder="ابحث بالكود أو الاسم…" value="${esc(filter[branch] || '')}">
           <button class="btn ghost" id="csv"><i class="fas fa-file-csv"></i> تنزيل CSV</button>
         </div>
-        <div class="sec-title"><h3>أرصدة اتغيّرت (${ch.length})</h3></div>
-        ${ch.length ? tableHtml(ch, 'ch') : '<div class="empty">مفيش رصيد اتغيّر عن آخر لصق.</div>'}
-        ${(r.added || []).filter(x => !ex.has(String(x.code))).length ? `<div class="sec-title"><h3>موردين ظهروا لأول مرة (${ad.length})</h3></div>` + tableHtml(ad, 'ad') : ''}
-        ${(r.removed || []).filter(x => !ex.has(String(x.code))).length ? `<div class="sec-title"><h3>موردين مش موجودين في الكشف الجديد (${rm.length})</h3></div>` + tableHtml(rm, 'rm') : ''}
+
+        <div class="sec-title"><h3>محتاجة سبب (${needF.length})</h3></div>
+        ${needF.length ? needF.map(x => balCard(x, branch, noteOf(x), true)).join('')
+          : '<div class="empty">🎉 كل الأرصدة صفر أو اتكتب سببها.</div>'}
+
+        ${doneF.length ? `<div class="sec-title"><h3>اتكتب سببها (${doneF.length})</h3></div>`
+          + doneF.map(x => balCard(x, branch, noteOf(x), false)).join('') : ''}
       </div>`;
-      return out;
+    }
+
+    /* كارت المورد: الرصيد + آخر ملاحظة (لو فيه) + خانة كتابة سبب جديد.
+       الملاحظة القديمة بتفضل ظاهرة وقت كتابة الجديدة — عشان المراجع
+       يشوف الرصيد كان كام والسبب كان إيه قبل ما يقرر. */
+    function balCard(x, branch, note, needsNote) {
+      const changed = note && Math.abs(Number(note.balance) - x.bal) > (Number(state.threshold) || 0.01);
+      const key = esc(branch) + '|' + esc(x.code);
+      if (state.forceNote === key) needsNote = true;      // «تعديل السبب»
+      const hist = (state.histKey === key) ? (state.notesAll[branch + '|' + x.code] || []) : null;
+      return `<div class="bal-card${needsNote ? ' need' : ''}">
+        <div class="bal-top">
+          <div class="bal-nm"><span class="code">${esc(x.code)}</span> ${esc(x.name || '—')}
+            ${x.en && x.en !== x.name ? `<span class="bal-en">${esc(x.en)}</span>` : ''}</div>
+          <div class="bal-amt ${x.bal > 0 ? 'up' : 'down'}">${fmt(x.bal)}</div>
+        </div>
+        ${note ? `<div class="bal-old">
+            <b>آخر سبب مكتوب</b> ${esc(note.note)}
+            <span class="bal-meta">— رصيد وقتها ${fmt(note.balance)} · ${esc(note.created_by || '—')} · ${when(note.created_at)}</span>
+            ${changed ? '<div class="bal-chg">⚠️ الرصيد اتغيّر عن آخر مرة — محتاج سبب جديد</div>' : ''}
+            <button class="mini bal-hist" data-hist="${key}">${hist ? 'إخفاء التاريخ' : 'كل الملاحظات'}</button>
+            ${hist ? `<div class="bal-hist-list">${hist.map(h => `<div class="bal-hist-row">
+                <span class="bal-meta">${when(h.created_at)} · رصيد ${fmt(h.balance)} · ${esc(h.created_by || '—')}</span>
+                <div>${esc(h.note)}</div></div>`).join('')}</div>` : ''}
+          </div>` : ''}
+        ${needsNote ? `<div class="bal-write">
+            <input type="text" class="bal-in" data-note="${key}" placeholder="اكتب سبب الرصيد…" ${canEdit ? '' : 'disabled'}>
+            <button class="btn bal-save" data-save="${key}" ${wattr()}>حفظ السبب</button>
+            <button class="mini" data-ex="${esc(x.code)}" ${wattr()}>استثناء</button>
+          </div>` : `<div class="bal-write"><button class="mini" data-renote="${key}" ${wattr()}>تعديل السبب</button>
+            <button class="mini" data-ex="${esc(x.code)}" ${wattr()}>استثناء</button></div>`}
+      </div>`;
     }
 
     function tableHtml(rows, kind) {
@@ -673,6 +795,28 @@ try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_d
         if (active === 'coll' && !state.collections) { await loadCollections(); }
         render();
       });
+      // ===== أسباب الأرصدة =====
+      const saveNote = key => {
+        const i = String(key).indexOf('|');
+        const br = String(key).slice(0, i), code = String(key).slice(i + 1);
+        const inp = document.querySelector('input.bal-in[data-note="' + key.replace(/"/g, '\\"') + '"]');
+        const txt = inp ? inp.value.trim() : '';
+        if (!txt) { toast('اكتب السبب الأول', true); if (inp) inp.focus(); return; }
+        state.forceNote = null;
+        saveBalanceNote(br, code, txt);
+      };
+      document.querySelectorAll('[data-save]').forEach(el => el.onclick = () => act(() => saveNote(el.dataset.save)));
+      document.querySelectorAll('input.bal-in').forEach(el => el.onkeydown = ev => {
+        if (ev.key === 'Enter') { ev.preventDefault(); act(() => saveNote(el.dataset.note)); }
+      });
+      // «تعديل السبب» بيفتح خانة الكتابة من غير ما نستنى الرصيد يتغيّر
+      document.querySelectorAll('[data-renote]').forEach(el => el.onclick = () => act(() => {
+        state.forceNote = el.dataset.renote; render();
+      }));
+      document.querySelectorAll('[data-hist]').forEach(el => el.onclick = () => {
+        state.histKey = (state.histKey === el.dataset.hist) ? null : el.dataset.hist; render();
+      });
+
       // فتح/قفل أسطر مرتجعات المورد
       document.querySelectorAll('[data-coll]').forEach(el => el.onclick = () => {
         const id = Number(el.dataset.coll);
