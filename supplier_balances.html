@@ -116,24 +116,7 @@ try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_d
   .bal-in:focus{border-color:var(--primary);outline:none}
   .bal-save{padding:.35rem .8rem;font-size:.78rem}
 
-  /* ===== تبويب التحصيلات ===== */
-  .kpi-box{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.6rem .75rem;text-align:center}
-  .kpi-l{font-size:.7rem;color:var(--muted);font-weight:700}
-  .kpi-v{font-size:1.05rem;font-weight:900;margin-top:.15rem;font-variant-numeric:tabular-nums}
-  .badge-cash{background:#dcfce7;color:#15803d;font-size:.68rem;font-weight:800;border-radius:6px;padding:2px 8px;white-space:nowrap}
-  .badge-credit{background:#fef3c7;color:#92400e;font-size:.68rem;font-weight:800;border-radius:6px;padding:2px 8px;white-space:nowrap}
-  .filters select,.filters input{font-family:inherit;font-size:.8rem;padding:.4rem .55rem;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)}
-  .lock{max-width:460px;margin:4rem auto;text-align:center;background:var(--white);border:1px solid var(--border);border-radius:14px;padding:2.2rem 1.4rem}
-  .lock .ic{font-size:2.4rem;color:var(--muted);margin-bottom:.6rem}
-  .lock h2{font-size:1rem;font-weight:800;margin-bottom:.4rem}
-  .lock p{font-size:.84rem;color:var(--muted)}
 
-  .toast{position:fixed;bottom:1.4rem;left:50%;transform:translateX(-50%) translateY(20px);background:#1e293b;color:#fff;
-    padding:.65rem 1.2rem;border-radius:10px;font-size:.82rem;font-weight:600;opacity:0;pointer-events:none;transition:.25s;z-index:60}
-  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-  .toast.bad{background:var(--down)}
-  @media(max-width:600px){ .wrap{padding:.8rem} .meta{gap:.8rem} }
-  @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
 <body>
@@ -389,12 +372,10 @@ try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_d
         return `<button class="tab ${active === b ? 'active' : ''}" data-tab="${esc(b)}">${esc(b)}${n ? `<span class="dot">${n}</span>` : ''}</button>`;
       }).join('');
       tabs += `<button class="tab ${active === 'mov' ? 'active' : ''}" data-tab="mov"><i class="fas fa-right-left"></i> مصروفات الموردين</button>`;
-      tabs += `<button class="tab ${active === 'coll' ? 'active' : ''}" data-tab="coll"><i class="fas fa-hand-holding-dollar"></i> التحصيلات</button>`;
       tabs += `<button class="tab ${active === 'ex' ? 'active' : ''}" data-tab="ex">الاستثناءات<span class="dot">${state.exclusions.length}</span></button>`;
       tabs += `<button class="tab ${active === 'set' ? 'active' : ''}" data-tab="set">الإعدادات</button>`;
 
-      const body = active === 'mov' ? viewMovements() : active === 'coll' ? viewCollections()
-        : active === 'ex' ? viewExclusions() : active === 'set' ? viewSettings()
+      const body = active === 'mov' ? viewMovements() : active === 'ex' ? viewExclusions() : active === 'set' ? viewSettings()
         : state.branches.length ? viewBranch(active)
         : '<div class="empty">مفيش فرع متاح لدورك.</div>';
 
@@ -587,118 +568,6 @@ try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_d
 
     // ===== ربط الأحداث =====
     // ===== تاب مصروفات الموردين (وارد/منصرف من eplus) =====
-    /* ═══════════ تحصيلات الشركات ═══════════
-       بيتسجّلوا من شاشة «طلب جديد» (قسم تحصيلات الشركات) والمراجع بيدخّل
-       مورد ورا التاني. هنا العرض والمراجعة.
-
-       ⚠️ الكاش وضعه مختلف عن الآجل جوهريًا: فاتورته الجاية لسه قيمتها
-       مش معروفة، فـinvoices_total بيبقى NULL و net_total NULL معاه.
-       عشان كده كل الإجماليات هنا **بالنوع**: الفواتير والصافي على الآجل
-       بس، والمرتجعات على الكل. جمع الاتنين مع بعض بيدّي رقم مضلّل. */
-    async function loadCollections() {
-      try {
-        // أسطر المرتجعات جاية متضمّنة (resource embedding) في نفس النداء
-        const r = await fetch(SB_URL_API + '/rest/v1/supplier_collections'
-          + '?select=*,supplier_collection_returns(kind,item_name,qty,unit_value,line_total,invoice_no)'
-          + '&order=created_at.desc&limit=2000', { headers: await sbH() });
-        if (!r.ok) {
-          const t = await r.text();
-          // الجدول لسه ماتعملش — رسالة مفهومة بدل خطأ PostgREST خام
-          state.collectionsErr = (r.status === 404 || /schema cache|does not exist/i.test(t))
-            ? 'جدول التحصيلات لسه ماتعملش على السيرفر — شغّل docs/migrate_10_supplier_collections.sql'
-            : ('تعذّر التحميل: ' + (t || r.status));
-          state.collections = [];
-          return;
-        }
-        const j = await r.json();
-        state.collections = Array.isArray(j) ? j : [];
-        state.collectionsErr = null;
-      } catch (e) { state.collections = []; state.collectionsErr = 'تعذّر الاتصال بالسيرفر'; }
-    }
-
-    function viewCollections() {
-      if (state.collectionsErr) return `<div class="warn">${esc(state.collectionsErr)}</div>`;
-      const all = state.collections || [];
-      if (!all.length) return '<div class="empty">مفيش تحصيلات متسجّلة لسه. بتتسجّل من شاشة «طلب جديد» ← تحصيلات الشركات.</div>';
-
-      const bf = state.colBranch || '';
-      const tf = state.colType   || '';
-      const q  = (state.colQ || '').trim().toLowerCase();
-      const rows = all.filter(r =>
-        (!bf || r.branch === bf) &&
-        (!tf || r.supplier_type === tf) &&
-        (!q  || String(r.supplier_name || '').toLowerCase().includes(q)));
-
-      const money = n => (n === null || n === undefined) ? '—'
-        : (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const credit = rows.filter(r => r.supplier_type === 'آجل');
-      const cash   = rows.filter(r => r.supplier_type === 'كاش');
-      const tInv   = credit.reduce((s, r) => s + (Number(r.invoices_total) || 0), 0);
-      const tRetC  = credit.reduce((s, r) => s + (Number(r.returns_total) || 0), 0);
-      const tRetK  = cash.reduce((s, r) => s + (Number(r.returns_total) || 0), 0);
-
-      const branches = [...new Set(all.map(r => r.branch))].sort();
-      const opt = (v, cur, lbl) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}>${esc(lbl)}</option>`;
-
-      return `
-        <div class="filters" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin:.6rem 0">
-          <select id="colbr">${opt('', bf, 'كل الفروع')}${branches.map(b => opt(b, bf, b)).join('')}</select>
-          <select id="coltype">${opt('', tf, 'كل الأنواع')}${opt('كاش', tf, 'كاش')}${opt('آجل', tf, 'آجل')}</select>
-          <input id="colq" type="search" placeholder="🔍 اسم المورد..." value="${esc(state.colQ || '')}" style="min-width:180px">
-          <span style="margin-inline-start:auto;font-size:.78rem;color:var(--muted)">${rows.length} سطر من ${all.length}</span>
-        </div>
-
-        <div class="cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.6rem;margin-bottom:.6rem">
-          <div class="kpi-box"><div class="kpi-l">فواتير الآجل</div><div class="kpi-v">${money(tInv)}</div></div>
-          <div class="kpi-box"><div class="kpi-l">مرتجعات الآجل</div><div class="kpi-v">${money(tRetC)}</div></div>
-          <div class="kpi-box"><div class="kpi-l">صافي الآجل</div><div class="kpi-v" style="color:var(--primary)">${money(tInv - tRetC)}</div></div>
-          <div class="kpi-box"><div class="kpi-l">مرتجعات الكاش</div><div class="kpi-v" style="color:#b45309">${money(tRetK)}</div></div>
-        </div>
-        <div class="warn" style="font-size:.74rem">
-          الصافي على <b>الآجل</b> بس. مرتجعات الكاش (${money(tRetK)} من ${cash.length} سطر) بتتخصم من فواتير جاية
-          لسه قيمتها مش معروفة، فمش داخلة في الصافي.
-        </div>
-
-        <div class="table-wrap">
-          <table>
-            <thead><tr>
-              <th style="text-align:right">المورد</th><th>النوع</th><th>الفرع</th>
-              <th>الفواتير</th><th>المرتجعات</th><th>الصافي</th>
-              <th style="text-align:right">ملاحظات</th><th>سجّلها</th><th>التاريخ</th>
-            </tr></thead>
-            <tbody>${rows.map((r, i) => {
-              const isCash = r.supplier_type === 'كاش';
-              const lines = r.supplier_collection_returns || [];
-              const open = state.colOpen === r.id;
-              // صف الأسطر بيتفتح بالضغط — بيوضّح المرتجع اتحسب منين بالظبط
-              const detail = (open && lines.length) ? `<tr><td colspan="9" style="padding:.4rem .6rem;background:var(--gray-light,#f9fafb)">
-                  <table style="width:100%;font-size:.76rem">
-                    <thead><tr style="color:var(--muted)">
-                      <th>النوع</th><th style="text-align:right">الصنف</th><th>العدد</th>
-                      <th>قيمة الوحدة</th><th>الإجمالي</th><th>رقم الفاتورة</th></tr></thead>
-                    <tbody>${lines.map(l => `<tr>
-                      <td><span class="badge-${l.kind === 'مرتجع' ? 'credit' : 'cash'}">${esc(l.kind)}</span></td>
-                      <td style="text-align:right">${esc(l.item_name)}</td>
-                      <td>${money(l.qty)}</td><td>${money(l.unit_value)}</td>
-                      <td style="font-weight:700">${money(l.line_total)}</td>
-                      <td>${esc(l.invoice_no || '—')}</td></tr>`).join('')}</tbody>
-                  </table></td></tr>` : '';
-              return `<tr${lines.length ? ` data-coll="${r.id}" style="cursor:pointer" title="اضغط لعرض أسطر المرتجعات"` : ''}>
-                <td style="text-align:right;font-weight:700">${lines.length ? (open ? '▾ ' : '▸ ') : ''}${esc(r.supplier_name)}</td>
-                <td><span class="badge-${isCash ? 'cash' : 'credit'}">${esc(r.supplier_type)}</span></td>
-                <td style="color:var(--muted)">${esc(r.branch)}</td>
-                <td>${money(r.invoices_total)}</td>
-                <td>${money(r.returns_total)}${lines.length ? ` <span style="font-size:.68rem;color:var(--muted)">(${lines.length} سطر)</span>` : ''}</td>
-                <td${isCash ? ' style="color:var(--muted)"' : ' style="font-weight:800;color:var(--primary)"'}>${money(r.net_total)}</td>
-                <td style="text-align:right;font-size:.74rem;color:var(--muted)">${r.notes ? esc(r.notes) : '—'}</td>
-                <td style="font-size:.74rem;color:var(--muted)">${esc(r.created_by || '—')}</td>
-                <td style="font-size:.72rem;color:var(--muted);white-space:nowrap">${when(r.created_at)}</td>
-              </tr>${detail}`;
-            }).join('')}</tbody>
-          </table>
-        </div>`;
-    }
-
     async function loadMovements() {
       try {
         const r = await fetch(SB_URL_API + '/rest/v1/v_supplier_movements?select=*&order=doc_date.desc&limit=2000',
@@ -792,7 +661,6 @@ try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_d
         active = el.dataset.tab;
         if (state.branches.includes(active) && !state.cache[active]) { await loadBranch(active); }
         if (active === 'mov' && !state.movements) { await loadMovements(); }
-        if (active === 'coll' && !state.collections) { await loadCollections(); }
         render();
       });
       // ===== أسباب الأرصدة =====
@@ -816,24 +684,6 @@ try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_d
       document.querySelectorAll('[data-hist]').forEach(el => el.onclick = () => {
         state.histKey = (state.histKey === el.dataset.hist) ? null : el.dataset.hist; render();
       });
-
-      // فتح/قفل أسطر مرتجعات المورد
-      document.querySelectorAll('[data-coll]').forEach(el => el.onclick = () => {
-        const id = Number(el.dataset.coll);
-        state.colOpen = (state.colOpen === id) ? null : id;
-        render();
-      });
-
-      // فلاتر التحصيلات — بتطبّق فورًا زي باقي فلاتر الشاشة
-      const colbr = document.getElementById('colbr');
-      if (colbr) colbr.onchange = e => { state.colBranch = e.target.value; render(); };
-      const coltype = document.getElementById('coltype');
-      if (coltype) coltype.onchange = e => { state.colType = e.target.value; render(); };
-      const colq = document.getElementById('colq');
-      if (colq) colq.oninput = e => {
-        state.colQ = e.target.value; const pos = e.target.selectionStart; render();
-        const n = document.getElementById('colq'); if (n) { n.focus(); n.setSelectionRange(pos, pos); }
-      };
 
       const movbr = document.getElementById('movbr');
       if (movbr) movbr.onchange = e => { state.movBranch = e.target.value; render(); };

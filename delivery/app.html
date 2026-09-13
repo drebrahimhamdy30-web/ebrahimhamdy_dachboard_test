@@ -177,9 +177,7 @@ select.tq-branch{cursor:pointer;max-width:130px}
 .sd-br-v.up{color:#15803d} .sd-br-v.down{color:#dc2626}
 .sd-br-n{font-size:.75rem;margin-top:.3rem;line-height:1.7;background:var(--gray-light);border-radius:7px;padding:.3rem .5rem}
 .sd-br-old{margin-top:.25rem;padding-top:.25rem;border-top:1px dashed var(--border);font-size:.71rem;color:var(--text-muted)}
-.sd-coll{border:1px solid var(--border);border-radius:9px;padding:.4rem .6rem;margin-bottom:.35rem}
-.sd-coll-h{display:flex;align-items:center;gap:.35rem;font-size:.76rem;flex-wrap:wrap}
-.sd-coll-l{margin-top:.25rem;font-size:.72rem;color:var(--text-muted);line-height:1.8;border-top:1px dashed var(--border);padding-top:.25rem}
+
 .sc-v{white-space:nowrap;font-variant-numeric:tabular-nums;font-size:.72rem}
 .sc-v b{color:var(--primary)}
 
@@ -875,9 +873,9 @@ async function tqToggleDone(id, on) {
   TQ.busy = false;
 }
 
-/* ═══════════════ تحصيلات الموردين في البار السريع ═══════════════
-   بتتسجّل من «طلب جديد» ← تحصيلات الشركات، والعرض الكامل في تبويب
-   «التحصيلات» جوّه أرصدة الموردين. هنا نظرة سريعة مجمّعة بالفرع.
+/* ═══════════════ بحث عن مورد في البار السريع ═══════════════
+   بيوريك المورد واقف فين: رصيده في كل فرع وسبب الرصيد وتاريخه.
+   مصدر البيانات هو نفسه شاشة «متابعة أرصدة الموردين».
 
    ⚠️ التجميع بالتاريخ بيتعمل **في المتصفح بتوقيت القاهرة** مش بفلتر
    على السيرفر: فلتر created_at>=X محتاج أوفست ثابت، وده بيقع مع
@@ -886,7 +884,7 @@ async function tqToggleDone(id, on) {
    وماينفعش يتأثر بساعة الجهاز ولا بالـDST.
 
    ⚠️ الصافي للآجل بس — الكاش فاتورته الجاية لسه مش معروفة فصافيه NULL. */
-let SC = { snaps: [], notes: [], colls: [], index: null, branch: '', err: null };
+let SC = { snaps: [], notes: [], index: null, branch: '', err: null };
 
 function scCairoDay(t) { return new Date(t).toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' }); }
 const scFmt = n => (n === null || n === undefined) ? '—'
@@ -906,35 +904,29 @@ function scInit() {
 }
 
 /* ═══ فهرس الموردين: بنجمع الثلاث مصادر مرة واحدة ═══
-   الأرصدة (آخر لقطة لكل فرع) + أسباب الأرصدة + التحصيلات. البحث بعد
+   الأرصدة (آخر لقطة لكل فرع) + أسباب الأرصدة. البحث بعد
    كده كله في المتصفح — الأعداد صغيرة (مئات الموردين) والنتيجة فورية
    من غير نداء مع كل حرف. */
 async function scLoad() {
   SC.err = null;
   try {
-    const since = new Date(Date.now() - 120 * 86400000).toISOString();
-    const [snaps, notes, colls] = await Promise.all([
+    const [snaps, notes] = await Promise.all([
       db.from('supplier_balance_snapshots').select('branch,rows,taken_at,taken_by')
         .order('taken_at', { ascending: false }).limit(40),
       db.from('supplier_balance_notes').select('branch,code,supplier_name,balance,note,created_by,created_at')
-        .order('created_at', { ascending: false }).limit(3000),
-      db.from('supplier_collections')
-        .select('id,branch,supplier_name,supplier_type,invoices_total,returns_total,net_total,notes,created_by,created_at,'
-              + 'supplier_collection_returns(kind,item_name,qty,unit_value,line_total,invoice_no)')
-        .gte('created_at', since).order('created_at', { ascending: false })
+        .order('created_at', { ascending: false }).limit(3000)
     ]);
     // جدول أسباب الأرصدة ممكن يكون لسه ماتعملش — مش سبب نوقّف البحث كله
     if (snaps.error) throw snaps.error;
     SC.snaps  = snaps.data || [];
     SC.notes  = notes.error ? [] : (notes.data || []);
-    SC.colls  = colls.error ? [] : (colls.data || []);
     scBuildIndex();
   } catch (e) { console.error('scLoad', e); SC.err = e; SC.index = []; }
   scRender();
 }
 
 /* مورد واحد = اسم واحد عبر كل الفروع. الرصيد وآخر سبب بيتخزّنوا لكل
-   فرع على حدة، والتحصيلات كمان — عشان الكارت يوضّح المورد واقف فين في
+   فرع على حدة — عشان الكارت يوضّح المورد واقف فين في
    كل فرع مش رقم مجمّع مالوش معنى. */
 function scBuildIndex() {
   const byBranch = {};                       // آخر لقطة لكل فرع
@@ -944,7 +936,7 @@ function scBuildIndex() {
   const key = n => String(n || '').trim();
   const get = (name, code) => {
     const k = key(name) || ('#' + code);
-    return (sup[k] = sup[k] || { name: key(name) || '—', codes: new Set(), branches: {}, colls: [] });
+    return (sup[k] = sup[k] || { name: key(name) || '—', codes: new Set(), branches: {} });
   };
 
   Object.keys(byBranch).forEach(br => {
@@ -971,8 +963,6 @@ function scBuildIndex() {
     (e.branches[n.branch].notes = e.branches[n.branch].notes || []).push(n);
     if (!seenNote.has(nk)) { seenNote.add(nk); e.branches[n.branch].lastNote = n; }
   });
-
-  (SC.colls || []).forEach(c => { get(c.supplier_name, c.supplier_code).colls.push(c); });
 
   SC.index = Object.keys(sup).map(k => sup[k]).sort((a, b) => a.name.localeCompare(b.name, 'ar'));
 }
@@ -1031,7 +1021,6 @@ function scRender() {
     return '<div class="sc-row">'
       + '<span class="sc-nm">' + tqEsc(e.name) + tag + '</span>'
       + '<span class="sc-v">' + brs.length + ' فرع'
-      + (e.colls.length ? ' · ' + e.colls.length + ' تحصيل' : '')
       + '<button class="sc-more" data-sup="' + i + '" title="كل التفاصيل">تفاصيل</button></span>'
       + '</div>';
   }).join('');
@@ -1043,7 +1032,7 @@ function scRender() {
   if (foot) foot.textContent = hit.length + ' نتيجة' + (hit.length > 40 ? ' (معروض أول 40)' : '');
 }
 
-/* كارت المورد الكامل: رصيده في كل فرع + سبب الرصيد وتاريخه + تحصيلاته */
+/* كارت المورد الكامل: رصيده في كل فرع + سبب الرصيد وتاريخه */
 function scOpenSupplier(e) {
   if (!e) return;
   const thr = 0.01;
@@ -1073,25 +1062,10 @@ function scOpenSupplier(e) {
       + '</div>';
   }).join('') : '<div class="sd-br" style="color:var(--text-muted)">مفيش رصيد مسجّل للمورد ده</div>';
 
-  const collSec = e.colls.length ? e.colls.slice(0, 12).map(c => {
-    const lines = c.supplier_collection_returns || [];
-    const cash = c.supplier_type === 'كاش';
-    return '<div class="sd-coll">'
-      + '<div class="sd-coll-h"><span class="sc-t ' + (cash ? 'cash' : 'credit') + '">' + c.supplier_type + '</span> '
-      + tqEsc(c.branch) + ' <span class="bal-meta">' + when(c.created_at) + '</span>'
-      + '<span style="margin-inline-start:auto">مرتجع <b>' + money(c.returns_total) + '</b>'
-      + (cash ? '' : ' · صافي <b>' + money(c.net_total) + '</b>') + '</span></div>'
-      + (lines.length ? '<div class="sd-coll-l">' + lines.map(l =>
-          '<div>' + tqEsc(l.kind) + ' · ' + tqEsc(l.item_name) + ' — ' + money(l.qty) + ' × ' + money(l.unit_value)
-          + ' = <b>' + money(l.line_total) + '</b>' + (l.invoice_no ? ' · ' + tqEsc(l.invoice_no) : '') + '</div>').join('') + '</div>' : '')
-      + '</div>';
-  }).join('') : '<div style="color:var(--text-muted);font-size:.78rem">مفيش تحصيلات مسجّلة</div>';
-
   document.getElementById('scCardBody').innerHTML =
       '<div class="sd-head"><span class="sd-name">' + tqEsc(e.name) + '</span>'
     + '<span class="bal-meta">كود ' + [...e.codes].join(' / ') + '</span></div>'
-    + '<div class="sd-sec">الرصيد في كل فرع</div>' + balSec
-    + '<div class="sd-sec">التحصيلات' + (e.colls.length > 12 ? ' (أحدث 12 من ' + e.colls.length + ')' : '') + '</div>' + collSec;
+    + '<div class="sd-sec">الرصيد في كل فرع</div>' + balSec;
   document.getElementById('scCard').classList.add('open');
 }
 
