@@ -99,10 +99,12 @@
               <i class="fas fa-search field-icon"></i>
               <input type="text" id="ret-search" class="form-input" placeholder="بحث برقم المرتجع أو العميل..." oninput="retPage=1; renderReturns()" style="padding-right:34px;">
             </div>
+            <!-- الافتراضي «قيد الانتظار» — ده اللي لسه محتاج شغل -->
             <select id="ret-filter" class="form-select" style="width:auto;" onchange="retPage=1; renderReturns()">
-              <option value="unmatched">بدون فاتورة</option>
+              <option value="قيد الانتظار" selected>⏳ قيد الانتظار</option>
+              <option value="مقابل فاتورة">🧾 مقابل فاتورة</option>
+              <option value="رصيد">💰 رصيد</option>
               <option value="all">الكل</option>
-              <option value="matched">تم ربطها</option>
             </select>
             <button class="btn btn-primary" onclick="loadReturns()"><i class="fas fa-sync-alt"></i> تحديث</button>
           </div>
@@ -293,7 +295,7 @@
 <script src="branches.js?v=20260904d"></script>
 <script src="pages.js?v=20260904d"></script>
 <script src="brand.js?v=20260904c"></script>
-<script src="api.js?v=20260904c"></script>
+<script src="api.js?v=20260913sess"></script>
   <script>
     let activeUser = null;
     let userBranch = '';
@@ -372,15 +374,16 @@
       const body = document.getElementById('ret-body');
       const flt = document.getElementById('ret-filter').value;
       const q = document.getElementById('ret-search').value.trim().toLowerCase();
-      let data = RETURNS.filter(r=>{
-        if (flt==='matched' && !r.matched_invoice_bill_no) return false;
-        if (flt==='unmatched' && r.matched_invoice_bill_no) return false;
-        return true;
-      });
+      // الحالة بتيجي من الـRPC؛ لو قديمة من غير الحقل نستنتجها من وجود الفاتورة
+      const stOf = r => r.match_status || (r.matched_invoice_bill_no ? 'مقابل فاتورة' : 'قيد الانتظار');
+      let data = RETURNS.filter(r => flt === 'all' || stOf(r) === flt);
       if (q) data = data.filter(r=> [r.return_bill_no, r.cust_code, r.cust_name].some(v=>String(v||'').toLowerCase().includes(q)));
 
-      const matchedCount = RETURNS.filter(r=>r.matched_invoice_bill_no).length;
-      document.getElementById('ret-stats').textContent = `${RETURNS.length} مرتجع · ${matchedCount} مربوط · ${RETURNS.length-matchedCount} متبقّي`;
+      const cPend = RETURNS.filter(r=>stOf(r)==='قيد الانتظار').length;
+      const cInv  = RETURNS.filter(r=>stOf(r)==='مقابل فاتورة').length;
+      const cBal  = RETURNS.filter(r=>stOf(r)==='رصيد').length;
+      document.getElementById('ret-stats').textContent =
+        `${RETURNS.length} مرتجع · ⏳ ${cPend} قيد الانتظار · 🧾 ${cInv} مقابل فاتورة · 💰 ${cBal} رصيد`;
 
       if (!data.length){ body.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted)">لا توجد نتائج</td></tr>'; document.getElementById('ret-pager').innerHTML=''; return; }
 
@@ -390,9 +393,17 @@
 
       body.innerHTML = pageItems.map(r=>{
         const rb = retEsc(r.return_bill_no), br = retEsc(r.return_branch||'');
-        const action = r.matched_invoice_bill_no
-          ? `<span class="sc-badge-ok">✓ ${retEsc(r.matched_invoice_bill_no)}</span> <button class="btn btn-sm" style="background:var(--surface-3);margin-inline-start:6px" onclick="unmatchReturn('${rb}','${br}')">فك</button>`
-          : `<button class="btn btn-primary btn-sm" onclick="openPicker('${rb}','${br}')"><i class="fas fa-link"></i> اختر فاتورة</button>`;
+        // 3 حالات في قايمة واحدة بدل زر «اختر فاتورة». «مقابل فاتورة»
+        // بتفتح نافذة اختيار الفاتورة، والرجوع لـ«قيد الانتظار» بيفك الربط.
+        const st = stOf(r);
+        const action = `<select class="form-select ret-st" style="width:auto;min-width:150px"
+             onchange="setReturnStatus('${rb}','${br}',this.value,this)">
+            <option value="قيد الانتظار" ${st==='قيد الانتظار'?'selected':''}>⏳ قيد الانتظار</option>
+            <option value="مقابل فاتورة" ${st==='مقابل فاتورة'?'selected':''}>🧾 مقابل فاتورة</option>
+            <option value="رصيد" ${st==='رصيد'?'selected':''}>💰 رصيد</option>
+          </select>`
+          + (st==='مقابل فاتورة' && r.matched_invoice_bill_no
+              ? ` <span class="sc-badge-ok" style="margin-inline-start:6px">✓ ${retEsc(r.matched_invoice_bill_no)}</span>` : '');
         return `<tr>
           <td><code>${rb}</code></td>
           <td class="sc-mini">${retFmtDate(r.return_date)}</td>
@@ -477,9 +488,52 @@
         const res = await r.json();
         if (res && res.success===false){ alert('تعذّر الربط: '+(res.error||'')); return; }
         pickCurrent.matched_invoice_bill_no = invoiceBillNo;
+        pickCurrent.match_status = 'مقابل فاتورة';
         closePicker();
         renderReturns();
       } catch(e){ alert('تعذّر الربط، حاول تاني'); }
+    }
+
+    /* تغيير حالة المرتجع من القايمة — 3 حالات:
+         قيد الانتظار → فك أي ربط قديم (بيرجّع حالة الفاتورة كمان)
+         مقابل فاتورة → نافذة اختيار الفاتورة (الربط بيتم من جواها)
+         رصيد         → صف من غير فاتورة: المرتجع اتحسب رصيد للعميل
+       ⚠️ الانتقال بين «مقابل فاتورة» و«رصيد» بيفك الربط القديم الأول —
+          لأن فك الربط هو اللي بيرجّع حالة الفاتورة لأصلها. */
+    async function setReturnStatus(returnBillNo, branch, next, sel){
+      const row = RETURNS.find(r=>String(r.return_bill_no)===String(returnBillNo) && String(r.return_branch||'')===String(branch||''));
+      const cur = row ? (row.match_status || (row.matched_invoice_bill_no ? 'مقابل فاتورة' : 'قيد الانتظار')) : 'قيد الانتظار';
+      if (next === cur) return;
+      if (sel) sel.disabled = true;
+      const revert = () => { if (sel) { sel.value = cur; sel.disabled = false; } };
+
+      try {
+        if (cur !== 'قيد الانتظار') {
+          const r0 = await fetch(RPC + 'unmatch_contract_return', { method:'POST', headers: await CI_H(),
+            body: JSON.stringify({ p_return_bill_no: returnBillNo, p_return_branch: branch||'' }) });
+          const j0 = await r0.json();
+          if (!r0.ok || (j0 && j0.success===false)) { alert('تعذّر تغيير الحالة: '+((j0&&j0.error)||'')); revert(); return; }
+          if (row){ row.matched_invoice_bill_no=null; row.matched_at=null; row.match_status='قيد الانتظار'; }
+        }
+
+        if (next === 'قيد الانتظار'){ if (sel) sel.disabled=false; renderReturns(); return; }
+
+        if (next === 'رصيد'){
+          const r1 = await fetch(SB_URL_CI + '/rest/v1/contract_return_matches', { method:'POST',
+            headers: await CI_HW(),
+            body: JSON.stringify({ return_bill_no: String(returnBillNo), return_branch: branch||null,
+              status:'رصيد', return_value: (row && row.total_value) || 0, matched_by: ciReviewer() }) });
+          if (!r1.ok){ alert(sbFailMsg('تعذّر حفظ الحالة', r1.status)); revert(); return; }
+          if (row) row.match_status = 'رصيد';
+          if (sel) sel.disabled=false;
+          renderReturns(); return;
+        }
+
+        // مقابل فاتورة → نفس نافذة الاختيار القديمة
+        if (sel) sel.disabled=false;
+        openPicker(returnBillNo, branch);
+        renderReturns();
+      } catch(e){ alert('تعذّر تغيير الحالة'); revert(); }
     }
 
     async function unmatchReturn(returnBillNo, branch){
@@ -489,7 +543,7 @@
         const res = await r.json();
         if (res && res.success===false){ alert('تعذّر فك الربط: '+(res.error||'')); return; }
         const row = RETURNS.find(r=>String(r.return_bill_no)===String(returnBillNo) && String(r.return_branch||'')===String(branch||''));
-        if (row){ row.matched_invoice_bill_no=null; row.matched_at=null; }
+        if (row){ row.matched_invoice_bill_no=null; row.matched_at=null; row.match_status='قيد الانتظار'; }
         renderReturns();
       } catch(e){ alert('تعذّر فك الربط'); }
     }
