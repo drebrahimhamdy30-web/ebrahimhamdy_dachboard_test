@@ -170,6 +170,16 @@ select.tq-branch{cursor:pointer;max-width:130px}
 .sd-tbl th{background:var(--gray-light);color:var(--text-muted);padding:.45rem .5rem;font-size:.7rem;font-weight:800;white-space:nowrap}
 .sd-tbl td{padding:.42rem .5rem;border-bottom:1px solid var(--border);text-align:center}
 .sd-tbl tfoot td{font-weight:800;background:var(--gray-light);border-top:2px solid var(--border)}
+/* كارت المورد: رصيده في كل فرع + تحصيلاته */
+.sd-br{border:1px solid var(--border);border-radius:9px;padding:.45rem .6rem;margin-bottom:.4rem}
+.sd-br-h{display:flex;align-items:center;gap:.4rem;font-size:.8rem}
+.sd-br-v{margin-inline-start:auto;font-weight:900;font-variant-numeric:tabular-nums}
+.sd-br-v.up{color:#15803d} .sd-br-v.down{color:#dc2626}
+.sd-br-n{font-size:.75rem;margin-top:.3rem;line-height:1.7;background:var(--gray-light);border-radius:7px;padding:.3rem .5rem}
+.sd-br-old{margin-top:.25rem;padding-top:.25rem;border-top:1px dashed var(--border);font-size:.71rem;color:var(--text-muted)}
+.sd-coll{border:1px solid var(--border);border-radius:9px;padding:.4rem .6rem;margin-bottom:.35rem}
+.sd-coll-h{display:flex;align-items:center;gap:.35rem;font-size:.76rem;flex-wrap:wrap}
+.sd-coll-l{margin-top:.25rem;font-size:.72rem;color:var(--text-muted);line-height:1.8;border-top:1px dashed var(--border);padding-top:.25rem}
 .sc-v{white-space:nowrap;font-variant-numeric:tabular-nums;font-size:.72rem}
 .sc-v b{color:var(--primary)}
 
@@ -317,24 +327,18 @@ body.dark{     --text-light:#6b7a94;  --gray-light:#16223a; --primary-light:#124
 
       <!-- تحصيلات الموردين — نفس فكرة زر المهام، مجمّعة بالفرع -->
       <div class="tq-wrap" id="scWrap" style="display:none">
-        <button class="qbtn" id="scBtn" title="تحصيلات الموردين" onclick="scToggle(event)">
-          <svg viewBox="0 0 24 24"><path d="M3 7h18v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 7l2.5-4h13L21 7"/><line x1="12" y1="11" x2="12" y2="16"/><path d="M14 12.2a2 2 0 0 0-2-.7c-1 0-1.7.5-1.7 1.2 0 1.8 3.4.9 3.4 2.7 0 .7-.8 1.2-1.7 1.2a2 2 0 0 1-2-.7"/></svg>
-          <span>التحصيلات</span>
+        <button class="qbtn" id="scBtn" title="بحث عن مورد" onclick="scToggle(event)">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.6" y2="16.6"/></svg>
+          <span>بحث مورد</span>
           <span class="qbtn-badge" id="scBadge">0</span>
         </button>
-        <div class="tq-panel" id="scPanel" style="width:400px">
+        <div class="tq-panel" id="scPanel" style="width:420px">
           <div class="tq-head">
-            <span class="tq-head-t">تحصيلات الموردين</span>
-            <span>
-              <select class="tq-branch" id="scPeriod" onchange="scSetPeriod(this.value)">
-                <option value="latest" selected>آخر تحديث</option>
-                <option value="day">النهاردة</option>
-                <option value="month">الشهر ده</option>
-              </select>
-            </span>
+            <span class="tq-head-t">بحث عن مورد</span>
+            <span class="sc-br-n" id="scCount"></span>
           </div>
           <div style="padding:.45rem .6rem;border-bottom:1px solid var(--border)">
-            <input type="search" id="scQ" class="sc-search" placeholder="🔍 بحث باسم المورد..." oninput="scRender()">
+            <input type="search" id="scQ" class="sc-search" placeholder="🔍 اكتب اسم المورد أو كوده..." oninput="scRender()">
           </div>
           <div class="tq-list" id="scList"><div class="tq-empty">⏳ جارٍ التحميل…</div></div>
           <div class="tq-foot" id="scFoot"></div>
@@ -882,7 +886,7 @@ async function tqToggleDone(id, on) {
    وماينفعش يتأثر بساعة الجهاز ولا بالـDST.
 
    ⚠️ الصافي للآجل بس — الكاش فاتورته الجاية لسه مش معروفة فصافيه NULL. */
-let SC = { rows: null, period: 'latest', branch: '', err: null };
+let SC = { snaps: [], notes: [], colls: [], index: null, branch: '', err: null };
 
 function scCairoDay(t) { return new Date(t).toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' }); }
 const scFmt = n => (n === null || n === undefined) ? '—'
@@ -895,158 +899,202 @@ function scInit() {
   const mine = Branches.toName(currentUser.branch || '');
   const isAdmin = currentUser.role === 'admin';
   if (!isAdmin && names.indexOf(mine) < 0) return;
-  SC.branch = isAdmin ? '' : mine;          // الأدمن يشوف كل الفروع، وغيره فرعه
+  SC.branch = isAdmin ? '' : mine;          // للعرض بس — البحث بيطلّع كل الفروع
   wrap.style.display = '';
   scLoad();
   setInterval(scLoad, 10 * 60 * 1000);
 }
 
+/* ═══ فهرس الموردين: بنجمع الثلاث مصادر مرة واحدة ═══
+   الأرصدة (آخر لقطة لكل فرع) + أسباب الأرصدة + التحصيلات. البحث بعد
+   كده كله في المتصفح — الأعداد صغيرة (مئات الموردين) والنتيجة فورية
+   من غير نداء مع كل حرف. */
 async function scLoad() {
+  SC.err = null;
   try {
-    const since = new Date(Date.now() - 40 * 86400000).toISOString();
-    // أسطر المرتجعات جاية متضمّنة في نفس النداء — عشان زر التفاصيل
-    // مايعملش نداء تاني لكل مورد
-    let q = db.from('supplier_collections')
-      .select('id,branch,supplier_name,supplier_type,invoices_total,returns_total,net_total,notes,created_by,created_at,'
-            + 'supplier_collection_returns(kind,item_name,qty,unit_value,line_total,invoice_no)')
-      .gte('created_at', since).order('created_at', { ascending: false });
-    if (SC.branch) q = q.eq('branch', SC.branch);
-    const { data, error } = await q;
-    // زي المهام: فشل التحميل مش «مفيش تحصيلات»
-    if (error) { console.error('scLoad', error); SC.rows = []; SC.err = error; }
-    else { SC.rows = data || []; SC.err = null; }
-  } catch (e) { console.error('scLoad', e); SC.rows = []; SC.err = e; }
+    const since = new Date(Date.now() - 120 * 86400000).toISOString();
+    const [snaps, notes, colls] = await Promise.all([
+      db.from('supplier_balance_snapshots').select('branch,rows,taken_at,taken_by')
+        .order('taken_at', { ascending: false }).limit(40),
+      db.from('supplier_balance_notes').select('branch,code,supplier_name,balance,note,created_by,created_at')
+        .order('created_at', { ascending: false }).limit(3000),
+      db.from('supplier_collections')
+        .select('id,branch,supplier_name,supplier_type,invoices_total,returns_total,net_total,notes,created_by,created_at,'
+              + 'supplier_collection_returns(kind,item_name,qty,unit_value,line_total,invoice_no)')
+        .gte('created_at', since).order('created_at', { ascending: false })
+    ]);
+    // جدول أسباب الأرصدة ممكن يكون لسه ماتعملش — مش سبب نوقّف البحث كله
+    if (snaps.error) throw snaps.error;
+    SC.snaps  = snaps.data || [];
+    SC.notes  = notes.error ? [] : (notes.data || []);
+    SC.colls  = colls.error ? [] : (colls.data || []);
+    scBuildIndex();
+  } catch (e) { console.error('scLoad', e); SC.err = e; SC.index = []; }
   scRender();
 }
 
-function scInPeriod(r) {
-  if (SC.period === 'latest') return true;      // كل النافذة، والتجميع بياخد الأحدث
-  const d = scCairoDay(r.created_at);
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' });
-  return SC.period === 'day' ? (d === today) : (d.slice(0, 7) === today.slice(0, 7));
-}
-// تاريخ مختصر بتوقيت القاهرة — عشان يبان آخر تحديث كان امتى
-function scWhen(t) {
-  try {
-    return new Date(t).toLocaleDateString('ar-EG', { day: '2-digit', month: '2-digit', timeZone: 'Africa/Cairo' });
-  } catch (e) { return ''; }
+/* مورد واحد = اسم واحد عبر كل الفروع. الرصيد وآخر سبب بيتخزّنوا لكل
+   فرع على حدة، والتحصيلات كمان — عشان الكارت يوضّح المورد واقف فين في
+   كل فرع مش رقم مجمّع مالوش معنى. */
+function scBuildIndex() {
+  const byBranch = {};                       // آخر لقطة لكل فرع
+  (SC.snaps || []).forEach(s => { if (!byBranch[s.branch]) byBranch[s.branch] = s; });
+
+  const sup = {};                            // اسم المورد → بياناته
+  const key = n => String(n || '').trim();
+  const get = (name, code) => {
+    const k = key(name) || ('#' + code);
+    return (sup[k] = sup[k] || { name: key(name) || '—', codes: new Set(), branches: {}, colls: [] });
+  };
+
+  Object.keys(byBranch).forEach(br => {
+    const rows = byBranch[br].rows || {};
+    Object.keys(rows).forEach(code => {
+      const x = rows[code] || {};
+      const e = get(x.a, code);
+      e.codes.add(String(code));
+      e.branches[br] = e.branches[br] || {};
+      e.branches[br].balance = Number(x.b) || 0;
+      e.branches[br].code = String(code);
+      e.branches[br].en = x.e || '';
+      e.branches[br].takenAt = byBranch[br].taken_at;
+    });
+  });
+
+  // آخر سبب لكل (فرع+كود) — المصفوفة جاية مرتّبة تنازليًا
+  const seenNote = new Set();
+  (SC.notes || []).forEach(n => {
+    const nk = n.branch + '|' + n.code;
+    const e = get(n.supplier_name, n.code);
+    e.codes.add(String(n.code));
+    e.branches[n.branch] = e.branches[n.branch] || {};
+    (e.branches[n.branch].notes = e.branches[n.branch].notes || []).push(n);
+    if (!seenNote.has(nk)) { seenNote.add(nk); e.branches[n.branch].lastNote = n; }
+  });
+
+  (SC.colls || []).forEach(c => { get(c.supplier_name, c.supplier_code).colls.push(c); });
+
+  SC.index = Object.keys(sup).map(k => sup[k]).sort((a, b) => a.name.localeCompare(b.name, 'ar'));
 }
 
-function scSetPeriod(p) { SC.period = p; scRender(); }
+// تاريخ مختصر بتوقيت القاهرة
+function scWhen(t) {
+  try { return new Date(t).toLocaleDateString('ar-EG', { day: '2-digit', month: '2-digit', timeZone: 'Africa/Cairo' }); }
+  catch (e) { return ''; }
+}
 
 function scRender() {
   const list = document.getElementById('scList');
   const badge = document.getElementById('scBadge');
   const foot = document.getElementById('scFoot');
+  const cnt = document.getElementById('scCount');
   if (!list) return;
-  if (SC.rows === null) { list.innerHTML = '<div class="tq-empty">⏳ جارٍ التحميل…</div>'; return; }
+  if (badge) badge.style.display = 'none';        // ده زر بحث — مفيش رقم يتعرض
+
   if (SC.err) {
-    if (badge) badge.style.display = 'none';
-    list.innerHTML = '<div class="tq-empty">⚠️ تعذّر تحميل التحصيلات<br>'
+    list.innerHTML = '<div class="tq-empty">⚠️ تعذّر تحميل بيانات الموردين<br>'
       + '<span style="font-size:.72rem">' + (qbAuthErr(SC.err) ? 'جلستك انتهت — اعمل تحديث للصفحة' : 'جرّب تاني بعد شوية') + '</span></div>';
-    if (foot) foot.textContent = '';
+    if (foot) foot.textContent = ''; if (cnt) cnt.textContent = '';
     return;
   }
-
-  // **آخر تحديث لكل مورد**: الصفوف جاية مرتّبة تنازليًا بالتاريخ، فأول
-  // ظهور لـ(الفرع+المورد) هو الأحدث. اللوحة بتوريك حالة كل مورد
-  // دلوقتي، مش سجل كل الحركات.
-  const seen = new Set();
-  const latest = SC.rows.filter(scInPeriod).filter(r => {
-    const k = r.branch + ' ' + r.supplier_name;
-    if (seen.has(k)) return false;
-    seen.add(k); return true;
-  });
-
-  // الشارة = عدد الموردين المعروضين
-  if (badge) { badge.textContent = latest.length > 99 ? '99+' : latest.length; badge.style.display = latest.length > 0 ? 'flex' : 'none'; }
+  if (!SC.index) { list.innerHTML = '<div class="tq-empty">⏳ جارٍ التحميل…</div>'; return; }
+  if (cnt) cnt.textContent = SC.index.length + ' مورد';
 
   const q = (document.getElementById('scQ').value || '').trim().toLowerCase();
-  const rows = q ? latest.filter(r => String(r.supplier_name || '').toLowerCase().includes(q)) : latest;
-
-  if (!rows.length) {
-    list.innerHTML = '<div class="tq-empty">' + (latest.length ? 'مفيش مورد بالاسم ده' :
-      (SC.period === 'day' ? 'مفيش تحصيلات اتسجّلت النهاردة'
-       : SC.period === 'month' ? 'مفيش تحصيلات الشهر ده' : 'مفيش تحصيلات متسجّلة')) + '</div>';
+  if (!q) {
+    list.innerHTML = '<div class="tq-empty">اكتب اسم المورد أو كوده عشان تشوف تفاصيله</div>';
     if (foot) foot.textContent = '';
     return;
   }
+  const hit = SC.index.filter(e => e.name.toLowerCase().includes(q)
+    || [...e.codes].some(c => c.includes(q))
+    || Object.keys(e.branches).some(b => String(e.branches[b].en || '').toLowerCase().includes(q)));
 
-  const byBranch = {};
-  rows.forEach(r => { (byBranch[r.branch] = byBranch[r.branch] || []).push(r); });
+  if (!hit.length) { list.innerHTML = '<div class="tq-empty">مفيش مورد بالاسم ده</div>'; if (foot) foot.textContent = ''; return; }
 
-  list.innerHTML = Object.keys(byBranch).sort().map(br => {
-    const g = byBranch[br];
-    const ret = g.reduce((s, r) => s + (Number(r.returns_total) || 0), 0);
-    const net = g.filter(r => r.supplier_type === 'آجل').reduce((s, r) => s + (Number(r.net_total) || 0), 0);
-    return '<div class="sc-br"><span>' + tqEsc(br) + '</span>'
-      + '<span class="sc-br-n">' + g.length + ' مورد · مرتجعات ' + scFmt(ret) + (net ? ' · صافي ' + scFmt(net) : '') + '</span></div>'
-      + g.map(r => {
-          const lines = r.supplier_collection_returns || [];
-          return '<div class="sc-row">'
-            + '<span class="sc-nm">' + tqEsc(r.supplier_name)
-            + '<span class="sc-t ' + (r.supplier_type === 'كاش' ? 'cash' : 'credit') + '">' + r.supplier_type + '</span>'
-            + '<span class="sc-br-n" style="margin-inline-start:5px">' + scWhen(r.created_at) + '</span></span>'
-            + '<span class="sc-v">مرتجع ' + scFmt(r.returns_total)
-            + (r.supplier_type === 'آجل' ? ' · صافي <b>' + scFmt(r.net_total) + '</b>' : '')
-            + '<button class="sc-more" data-sc="' + r.id + '" title="كل التفاصيل">تفاصيل'
-            + (lines.length ? ' <span class="sc-br-n">' + lines.length + '</span>' : '') + '</button></span>'
-          + '</div>';
-        }).join('');
+  const thr = 0.01;
+  list.innerHTML = hit.slice(0, 40).map((e, i) => {
+    const brs = Object.keys(e.branches);
+    // الحالة = فيه رصيد مش صفر ومحتاج سبب؟
+    let need = 0, nonZero = 0;
+    brs.forEach(b => {
+      const v = e.branches[b];
+      if (Math.abs(v.balance || 0) > thr) {
+        nonZero++;
+        const n = v.lastNote;
+        if (!n || Math.abs(Number(n.balance) - v.balance) > thr) need++;
+      }
+    });
+    const tag = need ? '<span class="sc-t miss">محتاج سبب</span>'
+      : nonZero ? '<span class="sc-t credit">مفسَّر</span>'
+      : '<span class="sc-t cash">رصيده صفر</span>';
+    return '<div class="sc-row">'
+      + '<span class="sc-nm">' + tqEsc(e.name) + tag + '</span>'
+      + '<span class="sc-v">' + brs.length + ' فرع'
+      + (e.colls.length ? ' · ' + e.colls.length + ' تحصيل' : '')
+      + '<button class="sc-more" data-sup="' + i + '" title="كل التفاصيل">تفاصيل</button></span>'
+      + '</div>';
   }).join('');
 
-  // زر التفاصيل — كارت كبير، بعد الرسم عشان العناصر تكون موجودة
-  list.querySelectorAll('[data-sc]').forEach(el => el.onclick = ev => {
+  list.querySelectorAll('[data-sup]').forEach(el => el.onclick = ev => {
     ev.stopPropagation();
-    scOpenCard(Number(el.dataset.sc));
+    scOpenSupplier(hit[Number(el.dataset.sup)]);
   });
-
-  const tRet = rows.reduce((s, r) => s + (Number(r.returns_total) || 0), 0);
-  const tNet = rows.filter(r => r.supplier_type === 'آجل').reduce((s, r) => s + (Number(r.net_total) || 0), 0);
-  if (foot) foot.textContent = rows.length + ' مورد · إجمالي المرتجعات ' + scFmt(tRet) + ' · صافي الآجل ' + scFmt(tNet);
+  if (foot) foot.textContent = hit.length + ' نتيجة' + (hit.length > 40 ? ' (معروض أول 40)' : '');
 }
 
-/* كارت تفاصيل المورد — كل بيانات التحصيلة وأسطر المرتجعات/اللي لم يصل.
-   منفصل عن لوحة البار عن قصد: اللوحة ضيقة (400px) وجدول بستة أعمدة
-   مايبانش فيها. */
-function scOpenCard(id) {
-  const r = (SC.rows || []).find(x => x.id === id);
-  if (!r) return;
-  const lines = r.supplier_collection_returns || [];
-  const cash = r.supplier_type === 'كاش';
-  const kv = (k, v) => '<div class="sd-kv"><span>' + k + '</span><b>' + v + '</b></div>';
-  const when = t => { try { return new Date(t).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' }); } catch (e) { return '—'; } };
+/* كارت المورد الكامل: رصيده في كل فرع + سبب الرصيد وتاريخه + تحصيلاته */
+function scOpenSupplier(e) {
+  if (!e) return;
+  const thr = 0.01;
+  const brs = Object.keys(e.branches).sort();
+  const money = n => (n === null || n === undefined) ? '—'
+    : (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const when = t => { try { return new Date(t).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' }); } catch (x) { return '—'; } };
+
+  const balSec = brs.length ? brs.map(b => {
+    const v = e.branches[b];
+    const bal = Number(v.balance) || 0;
+    const zero = Math.abs(bal) <= thr;
+    const n = v.lastNote;
+    const stale = n && Math.abs(Number(n.balance) - bal) > thr;
+    const st = zero ? '<span class="sc-t cash">صفر</span>'
+      : (!n || stale) ? '<span class="sc-t miss">محتاج سبب</span>' : '<span class="sc-t credit">مفسَّر</span>';
+    return '<div class="sd-br">'
+      + '<div class="sd-br-h"><b>' + tqEsc(b) + '</b>' + st
+      + '<span class="sd-br-v ' + (bal > 0 ? 'up' : bal < 0 ? 'down' : '') + '">' + money(bal) + '</span></div>'
+      + (n ? '<div class="sd-br-n">📝 ' + tqEsc(n.note)
+          + '<span class="bal-meta"> — رصيد وقتها ' + money(n.balance) + ' · ' + tqEsc(n.created_by || '—') + ' · ' + when(n.created_at) + '</span>'
+          + (stale ? '<div style="color:#b45309;font-weight:800;font-size:.72rem">⚠️ الرصيد اتغيّر بعد السبب ده</div>' : '')
+          + ((v.notes && v.notes.length > 1) ? '<div class="sd-br-old">' + v.notes.slice(1).map(h =>
+              '<div>' + when(h.created_at) + ' · رصيد ' + money(h.balance) + ' — ' + tqEsc(h.note) + '</div>').join('') + '</div>' : '')
+        + '</div>'
+        : (zero ? '' : '<div class="sd-br-n" style="color:var(--text-muted)">مفيش سبب مكتوب لسه</div>'))
+      + '</div>';
+  }).join('') : '<div class="sd-br" style="color:var(--text-muted)">مفيش رصيد مسجّل للمورد ده</div>';
+
+  const collSec = e.colls.length ? e.colls.slice(0, 12).map(c => {
+    const lines = c.supplier_collection_returns || [];
+    const cash = c.supplier_type === 'كاش';
+    return '<div class="sd-coll">'
+      + '<div class="sd-coll-h"><span class="sc-t ' + (cash ? 'cash' : 'credit') + '">' + c.supplier_type + '</span> '
+      + tqEsc(c.branch) + ' <span class="bal-meta">' + when(c.created_at) + '</span>'
+      + '<span style="margin-inline-start:auto">مرتجع <b>' + money(c.returns_total) + '</b>'
+      + (cash ? '' : ' · صافي <b>' + money(c.net_total) + '</b>') + '</span></div>'
+      + (lines.length ? '<div class="sd-coll-l">' + lines.map(l =>
+          '<div>' + tqEsc(l.kind) + ' · ' + tqEsc(l.item_name) + ' — ' + money(l.qty) + ' × ' + money(l.unit_value)
+          + ' = <b>' + money(l.line_total) + '</b>' + (l.invoice_no ? ' · ' + tqEsc(l.invoice_no) : '') + '</div>').join('') + '</div>' : '')
+      + '</div>';
+  }).join('') : '<div style="color:var(--text-muted);font-size:.78rem">مفيش تحصيلات مسجّلة</div>';
 
   document.getElementById('scCardBody').innerHTML =
-      '<div class="sd-head"><span class="sd-name">' + tqEsc(r.supplier_name) + '</span>'
-    + '<span class="sc-t ' + (cash ? 'cash' : 'credit') + '">' + r.supplier_type + '</span></div>'
-    + '<div class="sd-grid">'
-    +   kv('الفرع', tqEsc(r.branch))
-    +   kv('التاريخ', when(r.created_at))
-    +   kv('قيمة الفواتير', cash ? '<span style="color:var(--text-muted)">مش معروفة</span>' : scFmt(r.invoices_total))
-    +   kv('إجمالي المرتجعات', scFmt(r.returns_total))
-    +   kv('الصافي', cash ? '<span style="color:var(--text-muted)">—</span>' : scFmt(r.net_total))
-    +   kv('سجّلها', tqEsc(r.created_by || '—'))
-    + '</div>'
-    + (cash ? '<div class="sd-note">الكاش: المرتجعات بتتخصم من الفاتورة الجاية — ولسه قيمتها مش معروفة، فمفيش صافي.</div>' : '')
-    + (r.notes ? '<div class="sd-note">📝 ' + tqEsc(r.notes) + '</div>' : '')
-    + (lines.length
-        ? '<div class="sd-sec">المرتجعات وما لم يصل (' + lines.length + ' سطر)</div>'
-          + '<div style="overflow-x:auto"><table class="sd-tbl"><thead><tr>'
-          + '<th>النوع</th><th style="text-align:right">اسم الصنف</th><th>العدد</th>'
-          + '<th>قيمة الوحدة</th><th>الإجمالي</th><th>رقم الفاتورة</th></tr></thead><tbody>'
-          + lines.map(l => '<tr>'
-              + '<td><span class="sc-t ' + (l.kind === 'مرتجع' ? 'credit' : 'miss') + '">' + tqEsc(l.kind) + '</span></td>'
-              + '<td style="text-align:right;font-weight:700">' + tqEsc(l.item_name) + '</td>'
-              + '<td>' + scFmt(l.qty) + '</td><td>' + scFmt(l.unit_value) + '</td>'
-              + '<td style="font-weight:800;color:var(--primary)">' + scFmt(l.line_total) + '</td>'
-              + '<td>' + tqEsc(l.invoice_no || '—') + '</td></tr>').join('')
-          + '</tbody><tfoot><tr><td colspan="4">الإجمالي</td>'
-          + '<td style="font-weight:900;color:var(--primary)">' + scFmt(r.returns_total) + '</td><td></td></tr></tfoot></table></div>'
-        : '<div class="sd-sec" style="color:var(--text-muted);font-weight:600">مفيش أسطر مرتجعات مسجّلة للمورد ده</div>');
-
+      '<div class="sd-head"><span class="sd-name">' + tqEsc(e.name) + '</span>'
+    + '<span class="bal-meta">كود ' + [...e.codes].join(' / ') + '</span></div>'
+    + '<div class="sd-sec">الرصيد في كل فرع</div>' + balSec
+    + '<div class="sd-sec">التحصيلات' + (e.colls.length > 12 ? ' (أحدث 12 من ' + e.colls.length + ')' : '') + '</div>' + collSec;
   document.getElementById('scCard').classList.add('open');
 }
+
 function scCloseCard() { const c = document.getElementById('scCard'); if (c) c.classList.remove('open'); }
 
 function scToggle(e) {
