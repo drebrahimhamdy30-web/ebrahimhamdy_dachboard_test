@@ -506,8 +506,10 @@
           </div>
         </div>
 
+        <!-- خانتي الفواتير والصافي بتختفوا للكاش: الفاتورة الجاية لسه
+             قيمتها مش معروفة، فمفيش حاجة تتكتب ولا صافي يتحسب -->
         <div class="grid-3-ct">
-          <div class="field-group">
+          <div class="field-group" id="collect-invoices-wrap">
             <label><i class="fas fa-file-invoice-dollar" style="margin-left:5px;"></i> قيمة الفواتير</label>
             <input type="number" id="collect-invoices" class="form-input" placeholder="0.00" min="0" step="0.01"
                    oninput="updateCollectNet()">
@@ -517,11 +519,16 @@
             <input type="number" id="collect-returns" class="form-input" placeholder="0.00" min="0" step="0.01"
                    oninput="updateCollectNet()">
           </div>
-          <div class="field-group">
+          <div class="field-group" id="collect-net-wrap">
             <label><i class="fas fa-equals" style="margin-left:5px;"></i> صافي الفواتير</label>
             <!-- محسوب، مش مكتوب — والقاعدة كمان بتحسبه كعمود GENERATED -->
             <input type="text" id="collect-net" class="form-input readonly-field" readonly value="0.00">
           </div>
+        </div>
+
+        <div class="field-group">
+          <label><i class="fas fa-sticky-note" style="margin-left:5px;"></i> ملاحظات المورد</label>
+          <input type="text" id="collect-row-notes" class="form-input" placeholder="ملاحظة على المورد ده (اختياري)">
         </div>
 
         <button class="btn-add-row" onclick="addCollectRow()">
@@ -537,18 +544,14 @@
                 <th>الفواتير</th>
                 <th>المرتجعات</th>
                 <th>الصافي</th>
+                <th style="text-align:right">ملاحظات</th>
                 <th></th>
               </tr>
             </thead>
             <tbody id="collect-body"></tbody>
             <tfoot id="collect-foot"></tfoot>
           </table>
-        </div>
-
-        <div class="field-group" style="margin-top:10px;">
-          <label><i class="fas fa-sticky-note" style="margin-left:5px;"></i> ملاحظات</label>
-          <textarea id="collect-notes" class="form-input" rows="2"
-            placeholder="أي ملاحظات على التحصيلات..." style="resize:vertical;"></textarea>
+          <div class="ct-hint" id="collect-cash-note" style="display:none;margin:6px 2px 0"></div>
         </div>
 
         <button class="btn-submit-full" id="collectBtn" onclick="submitCollect()">
@@ -996,11 +999,17 @@
 
     function setCollectType(t) {
       collectType = t;
-      document.getElementById('ct-cash').classList.toggle('active', t === 'كاش');
-      document.getElementById('ct-credit').classList.toggle('active', t === 'آجل');
-      document.getElementById('ct-hint').innerHTML = (t === 'كاش')
-        ? 'المرتجعات بتتخصم من <b>الفاتورة الجاية</b>'
+      const cash = (t === 'كاش');
+      document.getElementById('ct-cash').classList.toggle('active', cash);
+      document.getElementById('ct-credit').classList.toggle('active', !cash);
+      document.getElementById('ct-hint').innerHTML = cash
+        ? 'المرتجعات بتتخصم من <b>الفاتورة الجاية</b> — ولسه قيمتها مش معروفة، فبنسجّل المرتجعات والملاحظات بس'
         : 'المرتجعات بتتخصم من <b>الفواتير اللي استلمناها</b>';
+      // الكاش: مفيش قيمة فواتير تتكتب، وبالتالي مفيش صافي يتحسب
+      document.getElementById('collect-invoices-wrap').style.display = cash ? 'none' : '';
+      document.getElementById('collect-net-wrap').style.display      = cash ? 'none' : '';
+      if (cash) document.getElementById('collect-invoices').value = '';
+      updateCollectNet();
     }
 
     const ctNum = v => { const n = parseFloat(v); return isFinite(n) && n > 0 ? n : 0; };
@@ -1041,25 +1050,34 @@
 
     function addCollectRow() {
       const nameEl = document.getElementById('collect-supplier');
-      const name = nameEl.value.trim();
-      const inv  = ctNum(document.getElementById('collect-invoices').value);
-      const ret  = ctNum(document.getElementById('collect-returns').value);
+      const name  = nameEl.value.trim();
+      const cash  = (collectType === 'كاش');
+      const ret   = ctNum(document.getElementById('collect-returns').value);
+      // الكاش: الفواتير **مش معروفة** — null مش صفر. الفرق مهم: صفر يعني
+      // «مفيش فواتير»، وnull يعني «لسه مانعرفهاش»
+      const inv   = cash ? null : ctNum(document.getElementById('collect-invoices').value);
+      const notes = document.getElementById('collect-row-notes').value.trim();
+
       if (!name) { alert('اكتب اسم المورد'); nameEl.focus(); return; }
-      if (!inv && !ret) { alert('اكتب قيمة الفواتير أو المرتجعات'); return; }
-      if (ret > inv) {
-        if (!confirm('المرتجعات (' + ctFmt(ret) + ') أكبر من الفواتير (' + ctFmt(inv) + ') — الصافي هيطلع بالسالب. تكمّل؟')) return;
+      if (cash) {
+        if (!ret) { alert('اكتب قيمة المرتجعات'); document.getElementById('collect-returns').focus(); return; }
+      } else {
+        if (!inv) { alert('اكتب قيمة الفواتير'); document.getElementById('collect-invoices').focus(); return; }
+        if (ret > inv && !confirm('المرتجعات (' + ctFmt(ret) + ') أكبر من الفواتير (' + ctFmt(inv) + ') — الصافي هيطلع بالسالب. تكمّل؟')) return;
       }
       // نفس المورد مرتين في نفس الحفظة غالبًا غلط إدخال
-      if (collectRows.some(r => r.supplier_name === name)) {
-        if (!confirm('«' + name + '» مضاف قبل كده في القائمة. تضيفه تاني؟')) return;
-      }
+      if (collectRows.some(r => r.supplier_name === name)
+          && !confirm('«' + name + '» مضاف قبل كده في القائمة. تضيفه تاني؟')) return;
+
       collectRows.push({
         supplier_name: name, supplier_code: supplierCodeOf(name),
-        supplier_type: collectType, invoices_total: inv, returns_total: ret
+        supplier_type: collectType, invoices_total: inv, returns_total: ret,
+        notes: notes || null
       });
       nameEl.value = '';
-      document.getElementById('collect-invoices').value = '';
-      document.getElementById('collect-returns').value  = '';
+      document.getElementById('collect-invoices').value  = '';
+      document.getElementById('collect-returns').value   = '';
+      document.getElementById('collect-row-notes').value = '';
       updateCollectNet();
       renderCollectRows();
       nameEl.focus();
@@ -1078,21 +1096,40 @@
       const foot = document.getElementById('collect-foot');
       wrap.style.display = collectRows.length ? '' : 'none';
       body.innerHTML = collectRows.map((r, i) => {
-        const net = r.invoices_total - r.returns_total;
+        const cash = (r.supplier_type === 'كاش');
+        // «—» مش «0.00»: الفواتير مش معروفة، مش صفر
+        const invCell = cash ? '<span style="color:var(--text-muted)">—</span>' : ctFmt(r.invoices_total);
+        const netCell = cash ? '<span style="color:var(--text-muted)">—</span>'
+                             : '<span class="ct-net">' + ctFmt(r.invoices_total - r.returns_total) + '</span>';
         return '<tr>'
           + '<td class="ct-name">' + ctEsc(r.supplier_name) + '</td>'
-          + '<td><span class="ct-badge ' + (r.supplier_type === 'كاش' ? 'cash' : 'credit') + '">' + r.supplier_type + '</span></td>'
-          + '<td>' + ctFmt(r.invoices_total) + '</td>'
+          + '<td><span class="ct-badge ' + (cash ? 'cash' : 'credit') + '">' + r.supplier_type + '</span></td>'
+          + '<td>' + invCell + '</td>'
           + '<td>' + ctFmt(r.returns_total) + '</td>'
-          + '<td class="ct-net">' + ctFmt(net) + '</td>'
+          + '<td>' + netCell + '</td>'
+          + '<td style="text-align:right;font-size:.74rem;color:var(--text-muted)">' + (r.notes ? ctEsc(r.notes) : '—') + '</td>'
           + '<td><button class="ct-del" title="حذف" onclick="removeCollectRow(' + i + ')"><i class="fas fa-trash"></i></button></td>'
           + '</tr>';
       }).join('');
-      const tInv = collectRows.reduce((s, r) => s + r.invoices_total, 0);
-      const tRet = collectRows.reduce((s, r) => s + r.returns_total, 0);
+
+      // ⚠️ الإجماليات بالنوع: مينفعش نجمع مرتجعات الكاش في صافي، لأن
+      // الفواتير اللي هتتخصم منها لسه مش معروفة
+      const credit  = collectRows.filter(r => r.supplier_type === 'آجل');
+      const cashRow = collectRows.filter(r => r.supplier_type === 'كاش');
+      const tInv    = credit.reduce((s, r) => s + (r.invoices_total || 0), 0);
+      const tRetC   = credit.reduce((s, r) => s + r.returns_total, 0);
+      const tRetCash= cashRow.reduce((s, r) => s + r.returns_total, 0);
       foot.innerHTML = collectRows.length
-        ? '<tr><td class="ct-name">الإجمالي (' + collectRows.length + ' مورد)</td><td></td><td>'
-          + ctFmt(tInv) + '</td><td>' + ctFmt(tRet) + '</td><td class="ct-net">' + ctFmt(tInv - tRet) + '</td><td></td></tr>'
+        ? '<tr><td class="ct-name">الإجمالي (' + collectRows.length + ' مورد)</td><td></td>'
+          + '<td>' + ctFmt(tInv) + '</td>'
+          + '<td>' + ctFmt(tRetC + tRetCash) + '</td>'
+          + '<td class="ct-net">' + ctFmt(tInv - tRetC) + '</td><td></td><td></td></tr>'
+        : '';
+      const cashNote = document.getElementById('collect-cash-note');
+      cashNote.style.display = cashRow.length ? '' : 'none';
+      cashNote.innerHTML = cashRow.length
+        ? 'الصافي محسوب على الآجل بس. مرتجعات الكاش (<b>' + ctFmt(tRetCash) + '</b> من '
+          + cashRow.length + ' مورد) هتتخصم من فواتير جاية لسه قيمتها مش معروفة، فمش داخلة في الصافي.'
         : '';
     }
 
@@ -1107,15 +1144,16 @@
       const batch = (crypto && crypto.randomUUID) ? crypto.randomUUID()
                   : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
                       const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); });
-      const notes = document.getElementById('collect-notes').value.trim();
-      const by    = Session.fullName() || Session.username() || null;
-      // ⚠️ net_total مش مبعوت عن قصد — عمود GENERATED في القاعدة
+      const by = Session.fullName() || Session.username() || null;
+      // ⚠️ net_total مش مبعوت عن قصد — عمود GENERATED في القاعدة.
+      // وinvoices_total بيتبعت null للكاش (مش معروفة) مش صفر.
       const payload = collectRows.map(r => ({
         batch_id: batch, branch: branch,
         supplier_code: r.supplier_code, supplier_name: r.supplier_name,
         supplier_type: r.supplier_type,
-        invoices_total: r.invoices_total, returns_total: r.returns_total,
-        notes: notes || null, created_by: by
+        invoices_total: (r.supplier_type === 'كاش' ? null : r.invoices_total),
+        returns_total: r.returns_total,
+        notes: r.notes, created_by: by
       }));
 
       try {
@@ -1135,7 +1173,7 @@
         const n = collectRows.length;
         collectRows = [];
         renderCollectRows();
-        document.getElementById('collect-notes').value = '';
+        document.getElementById('collect-row-notes').value = '';
         alert('✅ اتحفظت تحصيلات ' + n + ' مورد لفرع ' + branch);
       } catch (e) {
         alert('تعذّر الحفظ: ' + e.message);
