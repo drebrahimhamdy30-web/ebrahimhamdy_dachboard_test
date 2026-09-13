@@ -67,6 +67,16 @@
     .prm-prev{ font-size:0.7rem;color:#15803d;font-family:ui-monospace,monospace;direction:ltr;text-align:left;margin:-2px 0 8px 30px;min-height:14px; }
     .prm-prev.err{ color:var(--danger); }
     .prm-add{ border:1.5px dashed var(--border);background:none;color:var(--primary-dark);border-radius:8px;padding:6px;font-family:inherit;font-size:0.76rem;font-weight:700;cursor:pointer;width:100%; }
+    /* مخازن الفروع */
+    .bs-card{ border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:14px; }
+    .bs-head{ display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-size:0.84rem; }
+    .bs-hint{ font-size:0.76rem;line-height:1.85;color:var(--text-muted);margin:10px 0; }
+    .bs-hint code{ font-family:ui-monospace,monospace;direction:ltr;background:var(--bg-alt,#f1f5f9);border-radius:4px;padding:1px 5px; }
+    .bsrow{ display:grid;grid-template-columns:1fr 1fr 1fr 58px 34px;gap:6px;align-items:center;margin-bottom:6px; }
+    .bsrow input[type=text]{ font-size:0.78rem;width:100%; }
+    .bs-th{ font-weight:800;font-size:0.72rem;color:var(--text-muted);margin-bottom:4px; }
+    .bs-foot{ display:flex;gap:10px;align-items:center;margin-top:10px; }
+    .bs-foot #bs-msg{ font-size:0.76rem;color:var(--text-muted); }
     .mrow{ display:grid;grid-template-columns:1fr auto 1fr 92px auto;gap:6px;align-items:center;margin-bottom:6px; }
     .mrow input{ font-family:ui-monospace,monospace;direction:ltr;font-size:0.78rem; }
     .mrow .arr{ color:var(--text-muted);font-weight:800; }
@@ -95,6 +105,32 @@
           <select id="ig-branch"></select>
         </div>
         <div style="font-size:0.78rem;color:var(--text-muted);">المسارات ثابتة لكل الفروع · الـ base بيتغيّر حسب الفرع</div>
+      </div>
+
+      <!-- مخازن الفروع — فلتر الصفوف وتسمية المخزن، بيتطبّق على كل نقطة ردّها فيه sto_name -->
+      <div class="bs-card">
+        <div class="bs-head" onclick="bsToggle()">
+          <b><i class="fas fa-warehouse"></i> مخازن الفروع — أي صفوف نحتفظ بيها وباسم إيه</b>
+          <span id="bs-caret">▼</span>
+        </div>
+        <div id="bs-wrap" style="display:none">
+          <div class="bs-hint">
+            نداء الفرع الواحد بيرجّع الصنف في <b>كل</b> المخازن، لكن البيانات الصحيحة هي بتاعة
+            <b>الفرع اللي بنسحب منه</b> بس — الباقي انعكاس مش موثوق.
+            اللي تحطه هنا بيتطبّق على <b>كل</b> نقطة ردّها فيه <code>sto_name</code>، دلوقتي وفي أي مزامنة جاية.
+            <br>⚠️ الفرع اللي <b>مالوش صف هنا</b> مابيتفلترش — بيتخزّن بكل مخازنه زي ما هو.
+            <br>«يتخزّن باسم» سيبه فاضي لو عايزه يتخزّن بنفس اسم الـAPI.
+          </div>
+          <div class="bsrow bs-th">
+            <span>الفرع</span><span>اسم المخزن في الـAPI</span><span>يتخزّن باسم</span><span>مفعّل</span><span></span>
+          </div>
+          <div id="bs-list"></div>
+          <button class="prm-add" onclick="bsAdd()"><i class="fas fa-plus"></i> إضافة مخزن</button>
+          <div class="bs-foot">
+            <button class="ep-btn b-test" onclick="bsSave()"><i class="fas fa-save"></i> حفظ المخازن</button>
+            <span id="bs-msg"></span>
+          </div>
+        </div>
       </div>
 
       <div class="ep-list" id="ep-list"><div style="padding:20px;color:var(--text-muted);">جارٍ التحميل…</div></div>
@@ -210,6 +246,94 @@
     const ROLE=(Session.role()||'').toLowerCase();
     const IS_ADMIN = ROLE==='admin';
     let EPS=[];
+
+    /* ═══ مخازن الفروع ═══
+       بيحدّد أي صفوف نستبقيها من رد eplus (اللي فيه sto_name) وباسم إيه نخزّنها.
+       نداء الفرع بيرجّع الصنف في كل المخازن، والصحيح هو بتاع الفرع اللي بنسحب
+       منه بس — والأخطر إن itm_code **مش فريد** عبر المخازن (sr10 رجع ٣ مرات
+       بأرصدة 112 / 228 / 398.82)، فمن غير الفلتر ده الأرصدة بتبوظ في صمت.
+       ⚠️ فرع مالوش صف هنا = مابيتفلترش. مقصود عشان إضافة الجدول ماتكسرش
+          نقاط شغّالة قبل ما المستخدم يملاه. */
+    const BS_URL = REST + 'integration_branch_stores';
+    let BS_DELETED = [];
+
+    function bsToggle(){
+      const w=document.getElementById('bs-wrap'), open=(w.style.display==='none');
+      w.style.display = open ? 'block' : 'none';
+      document.getElementById('bs-caret').textContent = open ? '▲' : '▼';
+      if(open && !document.getElementById('bs-list').children.length) bsLoad();
+    }
+
+    function bsRow(r){
+      r = r || {};
+      const d=document.createElement('div'); d.className='bsrow'; d.dataset.id=r.id||'';
+      d.innerHTML =
+        '<select class="bs-branch">'+BRANCHES.map(b=>`<option ${b===r.branch?'selected':''}>${esc(b)}</option>`).join('')+'</select>'
+        + `<input type="text" class="bs-api"  value="${esc(r.api_store||'')}" placeholder="زي: الصيدلية">`
+        + `<input type="text" class="bs-save" value="${esc(r.save_as||'')}" placeholder="(زي ما هو)">`
+        + `<label style="display:flex;justify-content:center"><input type="checkbox" class="bs-act" ${r.is_active===false?'':'checked'}></label>`
+        + '<button class="ep-btn b-del" onclick="bsDel(this)"><i class="fas fa-trash-can"></i></button>';
+      return d;
+    }
+
+    async function bsLoad(){
+      const msg=document.getElementById('bs-msg'); msg.style.color='var(--text-muted)'; msg.textContent='جارٍ التحميل…';
+      try{
+        const r=await fetch(BS_URL+'?select=*&order=branch,api_store',{ headers: await H() });
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        const rows=await r.json();
+        const list=document.getElementById('bs-list'); list.innerHTML='';
+        rows.forEach(x=>list.appendChild(bsRow(x)));
+        if(!rows.length) list.appendChild(bsRow());
+        BS_DELETED=[];
+        msg.textContent = rows.length ? rows.length+' مخزن محفوظ' : 'فاضي — ضيف مخازن الفروع';
+      }catch(e){ msg.style.color='var(--danger)'; msg.textContent='فشل التحميل: '+(e.message||''); }
+    }
+
+    function bsAdd(){ document.getElementById('bs-list').appendChild(bsRow()); }
+    function bsDel(btn){
+      const row=btn.closest('.bsrow');
+      if(row.dataset.id) BS_DELETED.push(row.dataset.id);   // يتشال من القاعدة عند الحفظ
+      row.remove();
+    }
+
+    async function bsSave(){
+      const msg=document.getElementById('bs-msg');
+      const rows=[...document.querySelectorAll('#bs-list .bsrow')].map(r=>({
+        branch:     r.querySelector('.bs-branch').value,
+        api_store:  r.querySelector('.bs-api').value.trim(),
+        save_as:    r.querySelector('.bs-save').value.trim() || null,
+        is_active:  r.querySelector('.bs-act').checked,
+        updated_at: new Date().toISOString()
+      })).filter(x=>x.api_store);
+
+      // ⚠️ (فرع + مخزن) مكرر: الـupsert هيكتب فوق نفسه ويضيّع صف من غير رسالة
+      const seen=new Set();
+      for(const x of rows){
+        const k=x.branch+'|'+x.api_store;
+        if(seen.has(k)){ msg.style.color='var(--danger)'; msg.textContent='⛔ «'+x.api_store+'» متكرر في فرع '+x.branch; return; }
+        seen.add(k);
+      }
+
+      msg.style.color='var(--text-muted)'; msg.textContent='جارٍ الحفظ…';
+      try{
+        for(const id of BS_DELETED){
+          const d=await fetch(BS_URL+'?id=eq.'+encodeURIComponent(id),{ method:'DELETE', headers: await H() });
+          if(!d.ok) throw new Error('حذف: HTTP '+d.status);
+        }
+        BS_DELETED=[];
+        if(rows.length){
+          const u=await fetch(BS_URL+'?on_conflict=branch,api_store',{
+            method:'POST',
+            headers: await H({ Prefer:'resolution=merge-duplicates,return=minimal' }),
+            body: JSON.stringify(rows)
+          });
+          if(!u.ok) throw new Error('حفظ: HTTP '+u.status+' — '+(await u.text()).slice(0,120));
+        }
+        await bsLoad();
+        msg.style.color='#15803d'; msg.textContent='اتحفظ ✓';
+      }catch(e){ msg.style.color='var(--danger)'; msg.textContent='فشل: '+(e.message||''); }
+    }
 
     function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
     function authToken(){
