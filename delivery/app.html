@@ -146,6 +146,30 @@ select.tq-branch{cursor:pointer;max-width:130px}
 .sc-t{font-size:.62rem;font-weight:800;border-radius:5px;padding:1px 6px;margin-inline-start:4px;white-space:nowrap}
 .sc-t.cash{background:#dcfce7;color:#15803d}
 .sc-t.credit{background:#fef3c7;color:#92400e}
+.sc-t.miss{background:#fee2e2;color:#b91c1c}
+.sc-more{margin-inline-start:.4rem;border:1px solid var(--border);background:var(--surface);color:var(--primary);
+  font-family:'Cairo',sans-serif;font-size:.65rem;font-weight:800;border-radius:6px;padding:1px 7px;cursor:pointer;white-space:nowrap}
+.sc-more:hover{background:var(--primary);color:#fff;border-color:var(--primary)}
+
+/* ===== كارت تفاصيل المورد ===== */
+.sd-overlay{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10000;display:none;align-items:center;justify-content:center;padding:1rem}
+.sd-overlay.open{display:flex}
+.sd-card{background:var(--surface);border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.3);width:min(760px,96vw);
+  max-height:88vh;overflow-y:auto;padding:1.1rem 1.25rem;position:relative;text-align:right}
+.sd-x{position:absolute;top:.6rem;left:.7rem;background:none;border:none;font-size:1rem;cursor:pointer;color:var(--text-muted)}
+.sd-x:hover{color:var(--text)}
+.sd-head{display:flex;align-items:center;gap:.5rem;margin-bottom:.9rem;padding-inline-end:1.5rem}
+.sd-name{font-size:1.05rem;font-weight:800;color:var(--text)}
+.sd-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.5rem;margin-bottom:.8rem}
+.sd-kv{background:var(--gray-light);border-radius:9px;padding:.45rem .6rem;font-size:.75rem}
+.sd-kv span{display:block;color:var(--text-muted);font-weight:700;font-size:.68rem;margin-bottom:.1rem}
+.sd-kv b{font-variant-numeric:tabular-nums;color:var(--text)}
+.sd-note{background:#fffbeb;border:1px solid #fde68a;color:#854d0e;border-radius:9px;padding:.45rem .7rem;font-size:.74rem;margin-bottom:.6rem;line-height:1.7}
+.sd-sec{font-size:.82rem;font-weight:800;color:var(--text);margin:.9rem 0 .45rem}
+.sd-tbl{width:100%;border-collapse:collapse;font-size:.78rem;min-width:520px}
+.sd-tbl th{background:var(--gray-light);color:var(--text-muted);padding:.45rem .5rem;font-size:.7rem;font-weight:800;white-space:nowrap}
+.sd-tbl td{padding:.42rem .5rem;border-bottom:1px solid var(--border);text-align:center}
+.sd-tbl tfoot td{font-weight:800;background:var(--gray-light);border-top:2px solid var(--border)}
 .sc-v{white-space:nowrap;font-variant-numeric:tabular-nums;font-size:.72rem}
 .sc-v b{color:var(--primary)}
 
@@ -314,6 +338,14 @@ body.dark{     --text-light:#6b7a94;  --gray-light:#16223a; --primary-light:#124
           </div>
           <div class="tq-list" id="scList"><div class="tq-empty">⏳ جارٍ التحميل…</div></div>
           <div class="tq-foot" id="scFoot"></div>
+        </div>
+      </div>
+
+      <!-- كارت تفاصيل المورد — برّه لوحة البار عشان ياخد عرض كافي -->
+      <div class="sd-overlay" id="scCard" onclick="if(event.target===this)scCloseCard()">
+        <div class="sd-card">
+          <button class="sd-x" onclick="scCloseCard()" title="إغلاق">✕</button>
+          <div id="scCardBody"></div>
         </div>
       </div>
 
@@ -848,8 +880,11 @@ function scInit() {
 async function scLoad() {
   try {
     const since = new Date(Date.now() - 40 * 86400000).toISOString();
+    // أسطر المرتجعات جاية متضمّنة في نفس النداء — عشان زر التفاصيل
+    // مايعملش نداء تاني لكل مورد
     let q = db.from('supplier_collections')
-      .select('branch,supplier_name,supplier_type,invoices_total,returns_total,net_total,created_at')
+      .select('id,branch,supplier_name,supplier_type,invoices_total,returns_total,net_total,notes,created_by,created_at,'
+            + 'supplier_collection_returns(kind,item_name,qty,unit_value,line_total,invoice_no)')
       .gte('created_at', since).order('created_at', { ascending: false });
     if (SC.branch) q = q.eq('branch', SC.branch);
     const { data, error } = await q;
@@ -914,19 +949,73 @@ function scRender() {
     const net = g.filter(r => r.supplier_type === 'آجل').reduce((s, r) => s + (Number(r.net_total) || 0), 0);
     return '<div class="sc-br"><span>' + tqEsc(br) + '</span>'
       + '<span class="sc-br-n">' + g.length + ' مورد · مرتجعات ' + scFmt(ret) + (net ? ' · صافي ' + scFmt(net) : '') + '</span></div>'
-      + g.map(r => '<div class="sc-row">'
-          + '<span class="sc-nm">' + tqEsc(r.supplier_name)
-          + '<span class="sc-t ' + (r.supplier_type === 'كاش' ? 'cash' : 'credit') + '">' + r.supplier_type + '</span>'
-          + '<span class="sc-br-n" style="margin-inline-start:5px">' + scWhen(r.created_at) + '</span></span>'
-          + '<span class="sc-v">مرتجع ' + scFmt(r.returns_total)
-          + (r.supplier_type === 'آجل' ? ' · صافي <b>' + scFmt(r.net_total) + '</b>' : '') + '</span>'
-        + '</div>').join('');
+      + g.map(r => {
+          const lines = r.supplier_collection_returns || [];
+          return '<div class="sc-row">'
+            + '<span class="sc-nm">' + tqEsc(r.supplier_name)
+            + '<span class="sc-t ' + (r.supplier_type === 'كاش' ? 'cash' : 'credit') + '">' + r.supplier_type + '</span>'
+            + '<span class="sc-br-n" style="margin-inline-start:5px">' + scWhen(r.created_at) + '</span></span>'
+            + '<span class="sc-v">مرتجع ' + scFmt(r.returns_total)
+            + (r.supplier_type === 'آجل' ? ' · صافي <b>' + scFmt(r.net_total) + '</b>' : '')
+            + '<button class="sc-more" data-sc="' + r.id + '" title="كل التفاصيل">تفاصيل'
+            + (lines.length ? ' <span class="sc-br-n">' + lines.length + '</span>' : '') + '</button></span>'
+          + '</div>';
+        }).join('');
   }).join('');
+
+  // زر التفاصيل — كارت كبير، بعد الرسم عشان العناصر تكون موجودة
+  list.querySelectorAll('[data-sc]').forEach(el => el.onclick = ev => {
+    ev.stopPropagation();
+    scOpenCard(Number(el.dataset.sc));
+  });
 
   const tRet = rows.reduce((s, r) => s + (Number(r.returns_total) || 0), 0);
   const tNet = rows.filter(r => r.supplier_type === 'آجل').reduce((s, r) => s + (Number(r.net_total) || 0), 0);
   if (foot) foot.textContent = rows.length + ' مورد · إجمالي المرتجعات ' + scFmt(tRet) + ' · صافي الآجل ' + scFmt(tNet);
 }
+
+/* كارت تفاصيل المورد — كل بيانات التحصيلة وأسطر المرتجعات/اللي لم يصل.
+   منفصل عن لوحة البار عن قصد: اللوحة ضيقة (400px) وجدول بستة أعمدة
+   مايبانش فيها. */
+function scOpenCard(id) {
+  const r = (SC.rows || []).find(x => x.id === id);
+  if (!r) return;
+  const lines = r.supplier_collection_returns || [];
+  const cash = r.supplier_type === 'كاش';
+  const kv = (k, v) => '<div class="sd-kv"><span>' + k + '</span><b>' + v + '</b></div>';
+  const when = t => { try { return new Date(t).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' }); } catch (e) { return '—'; } };
+
+  document.getElementById('scCardBody').innerHTML =
+      '<div class="sd-head"><span class="sd-name">' + tqEsc(r.supplier_name) + '</span>'
+    + '<span class="sc-t ' + (cash ? 'cash' : 'credit') + '">' + r.supplier_type + '</span></div>'
+    + '<div class="sd-grid">'
+    +   kv('الفرع', tqEsc(r.branch))
+    +   kv('التاريخ', when(r.created_at))
+    +   kv('قيمة الفواتير', cash ? '<span style="color:var(--text-muted)">مش معروفة</span>' : scFmt(r.invoices_total))
+    +   kv('إجمالي المرتجعات', scFmt(r.returns_total))
+    +   kv('الصافي', cash ? '<span style="color:var(--text-muted)">—</span>' : scFmt(r.net_total))
+    +   kv('سجّلها', tqEsc(r.created_by || '—'))
+    + '</div>'
+    + (cash ? '<div class="sd-note">الكاش: المرتجعات بتتخصم من الفاتورة الجاية — ولسه قيمتها مش معروفة، فمفيش صافي.</div>' : '')
+    + (r.notes ? '<div class="sd-note">📝 ' + tqEsc(r.notes) + '</div>' : '')
+    + (lines.length
+        ? '<div class="sd-sec">المرتجعات وما لم يصل (' + lines.length + ' سطر)</div>'
+          + '<div style="overflow-x:auto"><table class="sd-tbl"><thead><tr>'
+          + '<th>النوع</th><th style="text-align:right">اسم الصنف</th><th>العدد</th>'
+          + '<th>قيمة الوحدة</th><th>الإجمالي</th><th>رقم الفاتورة</th></tr></thead><tbody>'
+          + lines.map(l => '<tr>'
+              + '<td><span class="sc-t ' + (l.kind === 'مرتجع' ? 'credit' : 'miss') + '">' + tqEsc(l.kind) + '</span></td>'
+              + '<td style="text-align:right;font-weight:700">' + tqEsc(l.item_name) + '</td>'
+              + '<td>' + scFmt(l.qty) + '</td><td>' + scFmt(l.unit_value) + '</td>'
+              + '<td style="font-weight:800;color:var(--primary)">' + scFmt(l.line_total) + '</td>'
+              + '<td>' + tqEsc(l.invoice_no || '—') + '</td></tr>').join('')
+          + '</tbody><tfoot><tr><td colspan="4">الإجمالي</td>'
+          + '<td style="font-weight:900;color:var(--primary)">' + scFmt(r.returns_total) + '</td><td></td></tr></tfoot></table></div>'
+        : '<div class="sd-sec" style="color:var(--text-muted);font-weight:600">مفيش أسطر مرتجعات مسجّلة للمورد ده</div>');
+
+  document.getElementById('scCard').classList.add('open');
+}
+function scCloseCard() { const c = document.getElementById('scCard'); if (c) c.classList.remove('open'); }
 
 function scToggle(e) {
   if (e) e.stopPropagation();
@@ -941,7 +1030,11 @@ document.addEventListener('click', e => {
   if (w && !w.contains(e.target)) document.getElementById('scPanel').classList.remove('open');
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { const p = document.getElementById('scPanel'); if (p) p.classList.remove('open'); }
+  if (e.key !== 'Escape') return;
+  // الكارت الأول: لو مفتوح، Escape بتقفله هو بس مش اللوحة كمان
+  const c = document.getElementById('scCard');
+  if (c && c.classList.contains('open')) { c.classList.remove('open'); return; }
+  const p = document.getElementById('scPanel'); if (p) p.classList.remove('open');
 });
 
 function tqToggle(e) {
