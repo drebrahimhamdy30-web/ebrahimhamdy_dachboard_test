@@ -56,14 +56,11 @@
     .ct-net { font-weight:800; color:#0d9488; }
     .ct-del { background:none; border:none; color:var(--danger); cursor:pointer; font-size:0.9rem; }
     .ct-table tfoot td { font-weight:900; background:var(--surface-2); border-top:2px solid var(--border); }
-    /* سطر إدخال المرتجع: 6 خانات في صف واحد على الديسكتوب */
-    .ret-form { display:grid; grid-template-columns:110px 1fr 80px 110px 110px 130px; gap:8px; align-items:end; }
-    @media(max-width:860px){ .ret-form { grid-template-columns:1fr 1fr; } }
-    .ret-form .field-group { margin-bottom:0; }
-    .ret-form label { font-size:0.72rem; }
-    .ret-kind { font-size:0.68rem; font-weight:800; border-radius:6px; padding:2px 8px; white-space:nowrap; }
-    .ret-kind.ret  { background:#dbeafe; color:#1d4ed8; }
-    .ret-kind.miss { background:#fee2e2; color:#b91c1c; }
+    /* أسطر المرتجعات بتتكتب جوّه الجدول مباشرة */
+    .ret-table { min-width:720px; }
+    .ret-table td { padding:4px 5px; }
+    .rl-in { width:100%; padding:5px 7px; font-size:0.8rem; margin:0; }
+    .ret-table .rl-total { font-variant-numeric:tabular-nums; }
     .field-group { margin-bottom: 16px; }
     .field-group label { display: block; font-size: 0.82rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 6px; }
     .field-icon-wrap { position: relative; }
@@ -537,48 +534,23 @@
         <!-- ===== أسطر المرتجعات (للآجل بس) ===== -->
         <div id="collect-ret-block">
           <p class="section-title" style="margin-top:14px"><i class="fas fa-rotate-left"></i> المرتجعات وما لم يصل</p>
-          <div class="ret-form">
-            <div class="field-group">
-              <label>النوع</label>
-              <select id="ret-kind" class="form-select">
-                <option value="مرتجع">مرتجع</option>
-                <option value="لم يصل">لم يصل</option>
-              </select>
-            </div>
-            <div class="field-group">
-              <label>اسم الصنف</label>
-              <input type="text" id="ret-name" class="form-input" placeholder="اسم الصنف">
-            </div>
-            <div class="field-group">
-              <label>العدد</label>
-              <input type="number" id="ret-qty" class="form-input" placeholder="0" min="0" step="any" oninput="updateRetLineTotal()">
-            </div>
-            <div class="field-group">
-              <label>قيمة الوحدة</label>
-              <input type="number" id="ret-val" class="form-input" placeholder="0.00" min="0" step="0.01" oninput="updateRetLineTotal()">
-            </div>
-            <div class="field-group">
-              <label>الإجمالي</label>
-              <input type="text" id="ret-total" class="form-input readonly-field" readonly value="0.00">
-            </div>
-            <div class="field-group">
-              <label>رقم الفاتورة</label>
-              <input type="text" id="ret-inv" class="form-input" placeholder="رقم الفاتورة">
-            </div>
-          </div>
-          <button class="btn-add-row" onclick="addRetLine()">
-            <i class="fas fa-plus-circle"></i> إضافة السطر
-          </button>
-          <div class="table-wrap" id="ret-table-wrap" style="display:none;margin-top:8px">
-            <table class="items-table ct-table">
+          <!-- الأسطر بتتكتب جوّه الجدول مباشرة والإجمالي بيتحدّث مع الكتابة.
+               (قبل كده كان فيه فورم فوق + زر «إضافة» — شكله زي صف في
+               الجدول فالناس كانت تكتب فيه وتستنى الإجمالي يتحرّك.) -->
+          <div class="table-wrap" id="ret-table-wrap" style="margin-top:8px">
+            <table class="items-table ct-table ret-table">
               <thead><tr>
-                <th>النوع</th><th style="text-align:right">الصنف</th><th>العدد</th>
-                <th>قيمة الوحدة</th><th>الإجمالي</th><th>رقم الفاتورة</th><th></th>
+                <th style="width:110px">النوع</th><th style="text-align:right">اسم الصنف</th>
+                <th style="width:80px">العدد</th><th style="width:110px">قيمة الوحدة</th>
+                <th style="width:110px">الإجمالي</th><th style="width:130px">رقم الفاتورة</th><th style="width:40px"></th>
               </tr></thead>
               <tbody id="ret-body"></tbody>
               <tfoot id="ret-foot"></tfoot>
             </table>
           </div>
+          <button class="btn-add-row" onclick="addRetLine()">
+            <i class="fas fa-plus-circle"></i> إضافة سطر
+          </button>
         </div>
 
         <div class="field-group">
@@ -851,6 +823,7 @@
       if (currentType === 'تحصيلات') {
         document.getElementById('section-collect').classList.add('visible');
         loadCollectSuppliers();
+        renderRetLines();      // بيرسم سطر فاضي جاهز للكتابة
         return;
       }
 
@@ -1074,51 +1047,66 @@
        والقاعدة كمان بتحسبه بتريجر فمستحيل يختلف عن الأسطر. */
     let retLines = [];
 
-    function updateRetLineTotal() {
-      const q = ctNum(document.getElementById('ret-qty').value);
-      const v = ctNum(document.getElementById('ret-val').value);
-      document.getElementById('ret-total').value = ctFmt(q * v);
-    }
-    const retSum = () => retLines.reduce((s, l) => s + (l.qty * l.unit_value), 0);
+    // السطر «فاضي» لو مفيهوش أي حاجة — بنتجاهله عند الحفظ بدل ما نجبر
+    // المستخدم يمسحه
+    const retEmpty = l => !l.item_name.trim() && !l.qty && !l.unit_value && !l.invoice_no.trim();
+    const retSum = () => retLines.reduce((s, l) => s + ((Number(l.qty) || 0) * (Number(l.unit_value) || 0)), 0);
+    const retFilled = () => retLines.filter(l => !retEmpty(l));
 
     function addRetLine() {
-      const name = document.getElementById('ret-name').value.trim();
-      const qty  = ctNum(document.getElementById('ret-qty').value);
-      const val  = ctNum(document.getElementById('ret-val').value);
-      const inv  = document.getElementById('ret-inv').value.trim();
-      const kind = document.getElementById('ret-kind').value;
-      if (!name) { alert('اكتب اسم الصنف'); document.getElementById('ret-name').focus(); return; }
-      if (!qty)  { alert('اكتب العدد');    document.getElementById('ret-qty').focus();  return; }
-      if (!inv)  { alert('اكتب رقم الفاتورة'); document.getElementById('ret-inv').focus(); return; }
-      retLines.push({ kind: kind, item_name: name, qty: qty, unit_value: val, invoice_no: inv });
-      document.getElementById('ret-name').value = '';
-      document.getElementById('ret-qty').value  = '';
-      document.getElementById('ret-val').value  = '';
-      updateRetLineTotal();
+      retLines.push({ kind: 'مرتجع', item_name: '', qty: '', unit_value: '', invoice_no: '' });
       renderRetLines();
-      document.getElementById('ret-name').focus();
+      const inputs = document.querySelectorAll('#ret-body tr:last-child .rl-name');
+      if (inputs.length) inputs[0].focus();
     }
-    function removeRetLine(i) { retLines.splice(i, 1); renderRetLines(); }
+    function removeRetLine(i) {
+      retLines.splice(i, 1);
+      if (!retLines.length) retLines.push({ kind: 'مرتجع', item_name: '', qty: '', unit_value: '', invoice_no: '' });
+      renderRetLines();
+    }
+
+    /* التعديل بيغيّر النموذج ويحدّث الأرقام **من غير إعادة رسم الجدول** —
+       إعادة الرسم مع كل حرف بتضيّع مكان المؤشر في الخانة. */
+    function retEdit(i, field, val) {
+      if (!retLines[i]) return;
+      retLines[i][field] = val;
+      const row = document.querySelector('#ret-body tr[data-i="' + i + '"]');
+      if (row) {
+        const t = row.querySelector('.rl-total');
+        if (t) t.textContent = ctFmt((Number(retLines[i].qty) || 0) * (Number(retLines[i].unit_value) || 0));
+      }
+      retFoot();
+      updateCollectNet();
+    }
+    function retFoot() {
+      const foot = document.getElementById('ret-foot');
+      if (!foot) return;
+      const n = retFilled().length;
+      foot.innerHTML = `<tr><td colspan="4" class="ct-name">إجمالي المرتجعات${n ? ' (' + n + ' سطر)' : ''}</td>
+          <td class="ct-net">${ctFmt(retSum())}</td><td></td><td></td></tr>`;
+    }
 
     function renderRetLines() {
-      const wrap = document.getElementById('ret-table-wrap');
       const body = document.getElementById('ret-body');
-      const foot = document.getElementById('ret-foot');
-      if (!wrap) return;
-      wrap.style.display = retLines.length ? '' : 'none';
-      body.innerHTML = retLines.map((l, i) => `<tr>
-          <td><span class="ret-kind ${l.kind === 'مرتجع' ? 'ret' : 'miss'}">${l.kind}</span></td>
-          <td class="ct-name">${ctEsc(l.item_name)}</td>
-          <td>${ctFmt(l.qty)}</td>
-          <td>${ctFmt(l.unit_value)}</td>
-          <td class="ct-net">${ctFmt(l.qty * l.unit_value)}</td>
-          <td>${ctEsc(l.invoice_no)}</td>
-          <td><button class="ct-del" title="حذف" onclick="removeRetLine(${i})"><i class="fas fa-trash"></i></button></td>
+      if (!body) return;
+      if (!retLines.length) retLines.push({ kind: 'مرتجع', item_name: '', qty: '', unit_value: '', invoice_no: '' });
+      body.innerHTML = retLines.map((l, i) => `<tr data-i="${i}">
+          <td><select class="form-select rl-in" onchange="retEdit(${i},'kind',this.value)">
+                <option value="مرتجع"${l.kind === 'مرتجع' ? ' selected' : ''}>مرتجع</option>
+                <option value="لم يصل"${l.kind === 'لم يصل' ? ' selected' : ''}>لم يصل</option>
+              </select></td>
+          <td><input type="text" class="form-input rl-in rl-name" placeholder="اسم الصنف"
+                     value="${ctEsc(l.item_name)}" oninput="retEdit(${i},'item_name',this.value)"></td>
+          <td><input type="number" class="form-input rl-in" placeholder="0" min="0" step="any"
+                     value="${l.qty}" oninput="retEdit(${i},'qty',this.value)"></td>
+          <td><input type="number" class="form-input rl-in" placeholder="0.00" min="0" step="0.01"
+                     value="${l.unit_value}" oninput="retEdit(${i},'unit_value',this.value)"></td>
+          <td class="ct-net rl-total">${ctFmt((Number(l.qty) || 0) * (Number(l.unit_value) || 0))}</td>
+          <td><input type="text" class="form-input rl-in" placeholder="رقم الفاتورة"
+                     value="${ctEsc(l.invoice_no)}" oninput="retEdit(${i},'invoice_no',this.value)"></td>
+          <td><button class="ct-del" title="حذف السطر" onclick="removeRetLine(${i})"><i class="fas fa-trash"></i></button></td>
         </tr>`).join('');
-      foot.innerHTML = retLines.length
-        ? `<tr><td colspan="4" class="ct-name">إجمالي المرتجعات (${retLines.length} سطر)</td>
-             <td class="ct-net">${ctFmt(retSum())}</td><td></td><td></td></tr>`
-        : '';
+      retFoot();
       updateCollectNet();
     }
 
@@ -1169,12 +1157,20 @@
       const inv   = cash ? null : ctNum(document.getElementById('collect-invoices').value);
       const notes = document.getElementById('collect-row-notes').value.trim();
 
+      const filled = retFilled();
       if (!name) { alert('اكتب اسم المورد'); nameEl.focus(); return; }
+      // أي سطر بدأ يتكتب لازم يكتمل — سطر ناقص بيضيع بهدوء وقت الحفظ
+      for (let k = 0; k < filled.length; k++) {
+        const l = filled[k];
+        if (!l.item_name.trim())     { alert('السطر ' + (k + 1) + ': اكتب اسم الصنف'); return; }
+        if (!(Number(l.qty) > 0))    { alert('السطر ' + (k + 1) + ' (' + l.item_name + '): اكتب العدد'); return; }
+        if (!l.invoice_no.trim())    { alert('السطر ' + (k + 1) + ' (' + l.item_name + '): اكتب رقم الفاتورة'); return; }
+      }
       if (cash) {
-        if (!retLines.length) { alert('أضف سطر مرتجع واحد على الأقل'); document.getElementById('ret-name').focus(); return; }
+        if (!filled.length) { alert('أضف سطر مرتجع واحد على الأقل'); return; }
       } else {
         if (!inv) { alert('اكتب قيمة الفواتير'); document.getElementById('collect-invoices').focus(); return; }
-        if (!retLines.length && !confirm('مفيش أسطر مرتجعات للمورد ده — تضيفه بالفواتير بس؟')) return;
+        if (!filled.length && !confirm('مفيش أسطر مرتجعات للمورد ده — تضيفه بالفواتير بس؟')) return;
         if (ret > inv && !confirm('المرتجعات (' + ctFmt(ret) + ') أكبر من الفواتير (' + ctFmt(inv) + ') — الصافي هيطلع بالسالب. تكمّل؟')) return;
       }
       // نفس المورد مرتين في نفس الحفظة غالبًا غلط إدخال
@@ -1185,7 +1181,9 @@
         supplier_name: name, supplier_code: supplierCodeOf(name),
         supplier_type: collectType, invoices_total: inv, returns_total: ret,
         notes: notes || null,
-        lines: retLines.slice()                  // نسخة — عشان مسح الأسطر ما يمسّش المضاف
+        // الأسطر المكتملة بس، بأرقام حقيقية — الفاضية بتتجاهل
+        lines: filled.map(l => ({ kind: l.kind, item_name: l.item_name.trim(),
+          qty: Number(l.qty), unit_value: Number(l.unit_value) || 0, invoice_no: l.invoice_no.trim() }))
       });
       nameEl.value = '';
       document.getElementById('collect-invoices').value  = '';
