@@ -34,6 +34,28 @@
     .type-btn:hover { border-color: var(--accent); }
     .form-section { display: none; }
     .form-section.visible { display: block; }
+
+    /* ===== تحصيلات الشركات ===== */
+    .grid-3-ct { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
+    @media(max-width:640px){ .grid-3-ct { grid-template-columns:1fr; } }
+    .ct-type { display:flex; gap:8px; }
+    .ct-type-btn {
+      flex:1; padding:10px; border:2px solid var(--border); border-radius:10px;
+      background:var(--surface-2); color:var(--text-secondary);
+      font-family:var(--font); font-size:0.85rem; font-weight:700; cursor:pointer; transition:all .15s;
+    }
+    .ct-type-btn.active { border-color:var(--accent); background:#e0f2fe; color:var(--accent-dark); }
+    /* قاعدة الخصم بتختلف حسب النوع — بنكتبها قدام المراجع بدل ما يفتكرها */
+    .ct-hint { font-size:0.72rem; color:var(--text-muted); margin-top:5px; font-weight:600; }
+    .ct-table th { font-size:0.75rem; white-space:nowrap; }
+    .ct-table td { font-size:0.82rem; text-align:center; }
+    .ct-table td.ct-name { text-align:right; font-weight:700; }
+    .ct-badge { font-size:0.68rem; font-weight:800; border-radius:6px; padding:2px 8px; white-space:nowrap; }
+    .ct-badge.cash   { background:#dcfce7; color:#15803d; }
+    .ct-badge.credit { background:#fef3c7; color:#92400e; }
+    .ct-net { font-weight:800; color:#0d9488; }
+    .ct-del { background:none; border:none; color:var(--danger); cursor:pointer; font-size:0.9rem; }
+    .ct-table tfoot td { font-weight:900; background:var(--surface-2); border-top:2px solid var(--border); }
     .field-group { margin-bottom: 16px; }
     .field-group label { display: block; font-size: 0.82rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 6px; }
     .field-icon-wrap { position: relative; }
@@ -145,6 +167,10 @@
         </button>
         <button class="type-btn" onclick="setType('عدم_وصول', this)">
           <i class="fas fa-truck" style="color:#ef4444;"></i> لم يصل من الشركات
+        </button>
+        <!-- للمراجع والأدمن بس — بيتعرض في handleRoleVisibility() -->
+        <button class="type-btn" id="btn-type-collect" style="display:none" onclick="setType('تحصيلات', this)">
+          <i class="fas fa-hand-holding-dollar" style="color:#0d9488;"></i> تحصيلات الشركات
         </button>
       </div>
 
@@ -440,6 +466,96 @@
         </button>
       </div>
 
+      <!-- ===== قسم: تحصيلات الشركات (للمراجع) ===== -->
+      <div class="form-section" id="section-collect">
+        <div class="grid-2" style="margin-bottom:4px;">
+          <div class="field-group">
+            <label><i class="fas fa-store" style="margin-left:5px;"></i> الفرع اللي بتراجع له</label>
+            <div class="field-icon-wrap">
+              <i class="fas fa-store field-icon"></i>
+              <select data-branches id="collect-branch" class="form-select" onchange="clearCollectRows()">
+                <option value="" disabled selected>اختر الفرع...</option>
+              </select>
+            </div>
+          </div>
+          <div class="field-group">
+            <label><i class="fas fa-calendar-alt" style="margin-left:5px;"></i> التاريخ</label>
+            <div class="date-display" id="collect-date"></div>
+          </div>
+        </div>
+
+        <p class="section-title"><i class="fas fa-hand-holding-dollar"></i> إضافة مورد</p>
+
+        <div class="grid-2">
+          <div class="field-group">
+            <label><i class="fas fa-building" style="margin-left:5px;"></i> اسم المورد</label>
+            <div class="field-icon-wrap">
+              <i class="fas fa-building field-icon"></i>
+              <input type="text" id="collect-supplier" class="form-input" list="collect-suppliers"
+                     placeholder="اكتب أو اختر من القائمة" autocomplete="off">
+            </div>
+            <datalist id="collect-suppliers"></datalist>
+          </div>
+          <div class="field-group">
+            <label><i class="fas fa-tags" style="margin-left:5px;"></i> نوع المورد</label>
+            <div class="ct-type">
+              <button type="button" class="ct-type-btn active" id="ct-cash" onclick="setCollectType('كاش')">💵 كاش</button>
+              <button type="button" class="ct-type-btn" id="ct-credit" onclick="setCollectType('آجل')">🧾 آجل</button>
+            </div>
+            <div class="ct-hint" id="ct-hint">المرتجعات بتتخصم من <b>الفاتورة الجاية</b></div>
+          </div>
+        </div>
+
+        <div class="grid-3-ct">
+          <div class="field-group">
+            <label><i class="fas fa-file-invoice-dollar" style="margin-left:5px;"></i> قيمة الفواتير</label>
+            <input type="number" id="collect-invoices" class="form-input" placeholder="0.00" min="0" step="0.01"
+                   oninput="updateCollectNet()">
+          </div>
+          <div class="field-group">
+            <label><i class="fas fa-rotate-left" style="margin-left:5px;"></i> المرتجعات</label>
+            <input type="number" id="collect-returns" class="form-input" placeholder="0.00" min="0" step="0.01"
+                   oninput="updateCollectNet()">
+          </div>
+          <div class="field-group">
+            <label><i class="fas fa-equals" style="margin-left:5px;"></i> صافي الفواتير</label>
+            <!-- محسوب، مش مكتوب — والقاعدة كمان بتحسبه كعمود GENERATED -->
+            <input type="text" id="collect-net" class="form-input readonly-field" readonly value="0.00">
+          </div>
+        </div>
+
+        <button class="btn-add-row" onclick="addCollectRow()">
+          <i class="fas fa-plus-circle"></i> إضافة المورد للقائمة
+        </button>
+
+        <div class="table-wrap" id="collect-table-wrap" style="display:none;margin-top:10px;">
+          <table class="items-table ct-table">
+            <thead>
+              <tr>
+                <th style="text-align:right">المورد</th>
+                <th>النوع</th>
+                <th>الفواتير</th>
+                <th>المرتجعات</th>
+                <th>الصافي</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="collect-body"></tbody>
+            <tfoot id="collect-foot"></tfoot>
+          </table>
+        </div>
+
+        <div class="field-group" style="margin-top:10px;">
+          <label><i class="fas fa-sticky-note" style="margin-left:5px;"></i> ملاحظات</label>
+          <textarea id="collect-notes" class="form-input" rows="2"
+            placeholder="أي ملاحظات على التحصيلات..." style="resize:vertical;"></textarea>
+        </div>
+
+        <button class="btn-submit-full" id="collectBtn" onclick="submitCollect()">
+          <i class="fas fa-save"></i> حفظ التحصيلات
+        </button>
+      </div>
+
     </div>
   </div>
 
@@ -575,9 +691,19 @@
         userBranch = (Session.branch() || 'المعمورة').trim();
         initDates();
         addItemRow();
+        handleRoleVisibility();
         handleTypeInit();
       }
     });
+
+    // «تحصيلات الشركات» شغل المراجع — بيراجع لكل الفروع فبيختار الفرع بنفسه
+    function handleRoleVisibility() {
+      const role = (Session.role() || '').trim();
+      if (role === 'reviewer' || role === 'admin') {
+        const b = document.getElementById('btn-type-collect');
+        if (b) b.style.display = '';
+      }
+    }
 
     function initDates() {
       const now     = new Date();
@@ -587,6 +713,7 @@
       document.getElementById('missing-date').textContent  = dateStr;
       document.getElementById('contract-branch').value     = userBranch;
       document.getElementById('missing-branch').value      = userBranch;
+      document.getElementById('collect-date').textContent  = dateStr;
     }
 
     function setType(type, btn) {
@@ -649,6 +776,7 @@
       document.getElementById('section-original').classList.remove('visible');
       document.getElementById('section-contract').classList.remove('visible');
       document.getElementById('section-missing').classList.remove('visible');
+      document.getElementById('section-collect').classList.remove('visible');
       document.getElementById('block-alert').classList.remove('show');
 
       Array.from(document.getElementById('branch').options).forEach(opt => { opt.hidden = false; });
@@ -660,6 +788,11 @@
       }
       if (currentType === 'عدم_وصول') {
         document.getElementById('section-missing').classList.add('visible');
+        return;
+      }
+      if (currentType === 'تحصيلات') {
+        document.getElementById('section-collect').classList.add('visible');
+        loadCollectSuppliers();
         return;
       }
 
@@ -846,6 +979,169 @@
         btn.disabled  = false;
         btn.innerHTML = '<i class="fas fa-paper-plane"></i> إرسال الطلب';
       }
+    }
+
+    /* ═══════════════ تحصيلات الشركات ═══════════════
+       المراجع بيضيف مورد ورا التاني في قائمة، وفي الآخر يحفظ الكل مرة
+       واحدة بـbatch واحد. الصافي = الفواتير − المرتجعات، **محسوب** مش
+       مكتوب — والقاعدة كمان بتحسبه كعمود GENERATED فمستحيل يتخزّن رقم
+       مايساويش الفرق.
+
+       نوع المورد بيحدد **مقابل إيه** بتتخصم المرتجعات:
+         كاش → من الفاتورة الجاية · آجل → من الفواتير المستلمة
+       الشاشة بتسجّل النوع وبتفكّر المراجع بالقاعدة؛ الخصم نفسه قرار
+       محاسبي برّه الشاشة. */
+    let collectType = 'كاش';
+    let collectRows = [];
+
+    function setCollectType(t) {
+      collectType = t;
+      document.getElementById('ct-cash').classList.toggle('active', t === 'كاش');
+      document.getElementById('ct-credit').classList.toggle('active', t === 'آجل');
+      document.getElementById('ct-hint').innerHTML = (t === 'كاش')
+        ? 'المرتجعات بتتخصم من <b>الفاتورة الجاية</b>'
+        : 'المرتجعات بتتخصم من <b>الفواتير اللي استلمناها</b>';
+    }
+
+    const ctNum = v => { const n = parseFloat(v); return isFinite(n) && n > 0 ? n : 0; };
+    const ctFmt = n => (Number(n) || 0).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const ctEsc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+    function updateCollectNet() {
+      const inv = ctNum(document.getElementById('collect-invoices').value);
+      const ret = ctNum(document.getElementById('collect-returns').value);
+      document.getElementById('collect-net').value = ctFmt(inv - ret);
+    }
+
+    // قائمة الموردين من أحدث لقطة أرصدة — الأسماء بتيجي من نفس مصدر
+    // شاشة «أرصدة الموردين» عشان ما يبقاش عندنا تهجئتين لنفس المورد
+    async function loadCollectSuppliers() {
+      const dl = document.getElementById('collect-suppliers');
+      if (!dl || dl.dataset.loaded) return;
+      try {
+        const r = await fetch(`${SB_URL_API}/rest/v1/supplier_balance_snapshots`
+          + '?select=rows&order=taken_at.desc&limit=1', { headers: await sbH() });
+        if (!r.ok) return;
+        const snap = (await r.json())[0];
+        if (!snap || !snap.rows) return;
+        const names = [];
+        Object.keys(snap.rows).forEach(k => {
+          const nm = snap.rows[k] && snap.rows[k].a;
+          if (nm && names.indexOf(nm) < 0) names.push({ code: k, name: nm });
+        });
+        dl.innerHTML = names.map(x => '<option data-code="' + ctEsc(x.code) + '" value="' + ctEsc(x.name) + '">').join('');
+        dl.dataset.loaded = '1';
+      } catch (e) { console.error('loadCollectSuppliers', e); }
+    }
+
+    function supplierCodeOf(name) {
+      const opt = document.querySelector('#collect-suppliers option[value="' + String(name).replace(/"/g, '\\"') + '"]');
+      return opt ? opt.getAttribute('data-code') : null;
+    }
+
+    function addCollectRow() {
+      const nameEl = document.getElementById('collect-supplier');
+      const name = nameEl.value.trim();
+      const inv  = ctNum(document.getElementById('collect-invoices').value);
+      const ret  = ctNum(document.getElementById('collect-returns').value);
+      if (!name) { alert('اكتب اسم المورد'); nameEl.focus(); return; }
+      if (!inv && !ret) { alert('اكتب قيمة الفواتير أو المرتجعات'); return; }
+      if (ret > inv) {
+        if (!confirm('المرتجعات (' + ctFmt(ret) + ') أكبر من الفواتير (' + ctFmt(inv) + ') — الصافي هيطلع بالسالب. تكمّل؟')) return;
+      }
+      // نفس المورد مرتين في نفس الحفظة غالبًا غلط إدخال
+      if (collectRows.some(r => r.supplier_name === name)) {
+        if (!confirm('«' + name + '» مضاف قبل كده في القائمة. تضيفه تاني؟')) return;
+      }
+      collectRows.push({
+        supplier_name: name, supplier_code: supplierCodeOf(name),
+        supplier_type: collectType, invoices_total: inv, returns_total: ret
+      });
+      nameEl.value = '';
+      document.getElementById('collect-invoices').value = '';
+      document.getElementById('collect-returns').value  = '';
+      updateCollectNet();
+      renderCollectRows();
+      nameEl.focus();
+    }
+
+    function removeCollectRow(i) { collectRows.splice(i, 1); renderCollectRows(); }
+    function clearCollectRows() {
+      if (!collectRows.length) return;
+      if (!confirm('تغيير الفرع هيمسح قائمة الموردين اللي أضفتها. تكمّل؟')) return;
+      collectRows = []; renderCollectRows();
+    }
+
+    function renderCollectRows() {
+      const wrap = document.getElementById('collect-table-wrap');
+      const body = document.getElementById('collect-body');
+      const foot = document.getElementById('collect-foot');
+      wrap.style.display = collectRows.length ? '' : 'none';
+      body.innerHTML = collectRows.map((r, i) => {
+        const net = r.invoices_total - r.returns_total;
+        return '<tr>'
+          + '<td class="ct-name">' + ctEsc(r.supplier_name) + '</td>'
+          + '<td><span class="ct-badge ' + (r.supplier_type === 'كاش' ? 'cash' : 'credit') + '">' + r.supplier_type + '</span></td>'
+          + '<td>' + ctFmt(r.invoices_total) + '</td>'
+          + '<td>' + ctFmt(r.returns_total) + '</td>'
+          + '<td class="ct-net">' + ctFmt(net) + '</td>'
+          + '<td><button class="ct-del" title="حذف" onclick="removeCollectRow(' + i + ')"><i class="fas fa-trash"></i></button></td>'
+          + '</tr>';
+      }).join('');
+      const tInv = collectRows.reduce((s, r) => s + r.invoices_total, 0);
+      const tRet = collectRows.reduce((s, r) => s + r.returns_total, 0);
+      foot.innerHTML = collectRows.length
+        ? '<tr><td class="ct-name">الإجمالي (' + collectRows.length + ' مورد)</td><td></td><td>'
+          + ctFmt(tInv) + '</td><td>' + ctFmt(tRet) + '</td><td class="ct-net">' + ctFmt(tInv - tRet) + '</td><td></td></tr>'
+        : '';
+    }
+
+    async function submitCollect() {
+      const btn    = document.getElementById('collectBtn');
+      const branch = document.getElementById('collect-branch').value;
+      if (!branch) { alert('اختر الفرع اللي بتراجع له'); return; }
+      if (!collectRows.length) { alert('أضف مورد واحد على الأقل للقائمة'); return; }
+
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
+      const batch = (crypto && crypto.randomUUID) ? crypto.randomUUID()
+                  : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+                      const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); });
+      const notes = document.getElementById('collect-notes').value.trim();
+      const by    = Session.fullName() || Session.username() || null;
+      // ⚠️ net_total مش مبعوت عن قصد — عمود GENERATED في القاعدة
+      const payload = collectRows.map(r => ({
+        batch_id: batch, branch: branch,
+        supplier_code: r.supplier_code, supplier_name: r.supplier_name,
+        supplier_type: r.supplier_type,
+        invoices_total: r.invoices_total, returns_total: r.returns_total,
+        notes: notes || null, created_by: by
+      }));
+
+      try {
+        const res = await fetch(`${SB_URL_API}/rest/v1/supplier_collections`, {
+          method: 'POST',
+          headers: await sbH({ 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }),
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+          const txt = await res.text();
+          // الجدول لسه ماتعملش — رسالة مفهومة بدل خطأ PostgREST خام
+          if (res.status === 404 || /supplier_collections/.test(txt) && /does not exist|schema cache/i.test(txt)) {
+            throw new Error('جدول التحصيلات لسه ماتعملش على السيرفر — شغّل docs/migrate_10_supplier_collections.sql');
+          }
+          throw new Error(txt || ('خطأ ' + res.status));
+        }
+        const n = collectRows.length;
+        collectRows = [];
+        renderCollectRows();
+        document.getElementById('collect-notes').value = '';
+        alert('✅ اتحفظت تحصيلات ' + n + ' مورد لفرع ' + branch);
+      } catch (e) {
+        alert('تعذّر الحفظ: ' + e.message);
+      }
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-save"></i> حفظ التحصيلات';
     }
 
     async function submitContract() {
