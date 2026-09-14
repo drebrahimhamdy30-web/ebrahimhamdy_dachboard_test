@@ -805,9 +805,9 @@ function fontStep(d){
   applyTheme();
 }
 try{ applyTheme(); }catch(e){}
-const LOG_C={order_created:'#16a34a',driver_assigned:'#1a56db',order_picked:'#0891b2',order_delivered:'#ca8a04',order_completed:'#6b7280',order_postponed:'#7c3aed',order_cancelled:'#dc2626',order_edited:'#0891b2',order_urgent:'#dc2626',trip_created:'#1a56db',trip_completed:'#6b7280',order_transferred:'#d97706',order_recovered:'#7c3aed',order_failed:'#dc2626',unclosed_on_erp:'#b91c1c',order_payment_changed:'#0891b2',order_amount_approved:'#16a34a',order_gift:'#d97706'};
-const LOG_I={order_created:'📦',driver_assigned:'🚗',order_picked:'▶️',order_delivered:'✅',order_completed:'✔️',order_postponed:'⚠️',order_cancelled:'❌',order_edited:'✏️',order_urgent:'🚨',trip_created:'🗺️',trip_completed:'🏁',order_transferred:'🔄',order_recovered:'♻️',order_failed:'⚠️',unclosed_on_erp:'🔴',order_payment_changed:'💳',order_amount_approved:'✅',order_gift:'🎁'};
-const LOG_A={order_created:'تم إنشاء الطلب',driver_assigned:'تم تعيين طيار',order_picked:'الطيار استلم الطلب',order_delivered:'تم التسليم للعميل',order_completed:'تم إنهاء الطلب',order_postponed:'تعذّر التوصيل',order_cancelled:'تم الإلغاء',order_edited:'تم تعديل الطلب',order_urgent:'تحديد كعاجل',trip_created:'إنشاء رحلة',trip_completed:'إنهاء الرحلة',order_transferred:'نقل بين الطيارين',order_recovered:'استرداد تلقائي',order_failed:'تعذّر التسليم',unclosed_on_erp:'لم تُغلق على B Connect',order_payment_changed:'تغيير طريقة الدفع',order_amount_approved:'اعتماد قيمة التحصيل',order_gift:'هدية للعميل'};
+const LOG_C={order_created:'#16a34a',driver_assigned:'#1a56db',order_picked:'#0891b2',order_delivered:'#ca8a04',order_completed:'#6b7280',order_postponed:'#7c3aed',order_cancelled:'#dc2626',order_edited:'#0891b2',order_urgent:'#dc2626',trip_created:'#1a56db',trip_completed:'#6b7280',order_transferred:'#d97706',order_recovered:'#7c3aed',order_failed:'#dc2626',unclosed_on_erp:'#b91c1c',order_payment_changed:'#0891b2',order_amount_approved:'#16a34a',order_gift:'#d97706',order_prepared:'#b45309'};
+const LOG_I={order_created:'📦',driver_assigned:'🚗',order_picked:'▶️',order_delivered:'✅',order_completed:'✔️',order_postponed:'⚠️',order_cancelled:'❌',order_edited:'✏️',order_urgent:'🚨',trip_created:'🗺️',trip_completed:'🏁',order_transferred:'🔄',order_recovered:'♻️',order_failed:'⚠️',unclosed_on_erp:'🔴',order_payment_changed:'💳',order_amount_approved:'✅',order_gift:'🎁',order_prepared:'🧪'};
+const LOG_A={order_created:'تم إنشاء الطلب',driver_assigned:'تم تعيين طيار',order_picked:'الطيار استلم الطلب',order_delivered:'تم التسليم للعميل',order_completed:'تم إنهاء الطلب',order_postponed:'تعذّر التوصيل',order_cancelled:'تم الإلغاء',order_edited:'تم تعديل الطلب',order_urgent:'تحديد كعاجل',trip_created:'إنشاء رحلة',trip_completed:'إنهاء الرحلة',order_transferred:'نقل بين الطيارين',order_recovered:'استرداد تلقائي',order_failed:'تعذّر التسليم',unclosed_on_erp:'لم تُغلق على B Connect',order_payment_changed:'تغيير طريقة الدفع',order_amount_approved:'اعتماد قيمة التحصيل',order_gift:'هدية للعميل',order_prepared:'تم التحضير'};
 
 let allOrders=[],allDrivers=[],activeTrips=[],tripOrdersMap={};
 let unclosedFlags=[]; // طلبات مكتملة على Phalix لكن لم تُغلق على B Connect (trip_review_flags غير المحلولة)
@@ -881,6 +881,19 @@ function getTimerBase(o){
   if(o.last_activated_at) return new Date(o.last_activated_at);
   return getBillDate(o);
 }
+// إجمالي ثواني الإيقاف (بسبب العميل — تتطرح من وقت الصيدلية)، شاملة الإيقاف الجاري
+function holdSecs(o){
+  let s=+o.prep_hold_seconds||0;
+  if(o.prep_hold && o.prep_hold_started_at) s+=(Date.now()-new Date(o.prep_hold_started_at))/1000;
+  return s<0?0:s;
+}
+// وقت الطلب الحقيقي (دقائق): من آخر تفعيل − مدة الإيقاف؛ التحضير محسوب؛ يتجمّد عند التوصيل/التعذّر
+function realOrderMins(o){
+  const to=(o.status==='delivered'&&o.delivered_at)?new Date(o.delivered_at):((o.status==='failed'&&o.updated_at)?new Date(o.updated_at):new Date());
+  let secs=(to-getTimerBase(o))/1000 - holdSecs(o);
+  if(secs<0) secs=0;
+  return Math.floor(secs/60);
+}
 function isLate(o){
   if(['completed','cancelled','delivered'].includes(o.status))return false;
   const base=getTimerBase(o);
@@ -904,10 +917,12 @@ function buildTimers(o){
   const alert=isStageAlert(o);
   let html='';
 
-  // إنشاء منذ — وقت من إنشاء الطلب لحد دلوقتي
-  const t1=dm(base);
+  // منذ الإنشاء — وقت خام من إنشاء الطلب (مابيوقفش، للعلم بس)
+  const t1=dm(getBillDate(o));
   const t1cls=late?'t-late':alert?'t2':'t1';
-  html+=`<span class="oc-t ${t1cls}"><span class="ti">منذ</span> ${fm(t1)}</span>`;
+  html+=`<span class="oc-t ${t1cls}"><span class="ti">منذ الإنشاء</span> ${fm(t1)}</span>`;
+  // وقت الطلب الحقيقي — من آخر تفعيل بدون التأجيل والإيقاف (أساس تقييم الصيدلية)
+  html+=`<span class="oc-t" style="background:#0f172a;color:#fff;font-weight:800" title="وقت الطلب الحقيقي: من آخر تفعيل، بدون التأجيل والإيقاف، والتحضير محسوب"><span class="ti" style="opacity:.85">وقت الطلب</span> ${fm(realOrderMins(o))}</span>`;
 
   // تعيين منذ — وقت من التعيين لحد دلوقتي (لو assigned وما استلمش)
   if(o.assigned_at && !o.picked_at){
@@ -1752,7 +1767,7 @@ function renderTrips(){
           }
           // عدّاد إضافي: الوقت الحقيقي للطلب من آخر تشغيل (last_activated_at) — يتجمّد عند التوصيل/التعذّر
           const _realTo=(o.status==='delivered'&&o.delivered_at)?new Date(o.delivered_at):((o.status==='failed'&&o.updated_at)?new Date(o.updated_at):new Date());
-          const _realMins=dm(getTimerBase(o),_realTo);
+          const _realMins=realOrderMins(o);
           const _code=(o.cust_code&&String(o.cust_code).trim()&&String(o.cust_code)!=='null')?o.cust_code:(o.bill_no||o.id?.slice(0,6));
           return `<div class="tc-row ${rowCls} ${over?'st-over':''}" onclick="openTripOrderDetail('${o.id}','${trip.id}')">
             <div style="flex:1;min-width:0">
@@ -3184,6 +3199,7 @@ function openDetail(id){
   stg2.push({label:'إنشاء',time:base2,color:'#475569',icon:'📦'});
   if(o.last_activated_at && Math.abs(new Date(o.last_activated_at)-base2)>60000)
     stg2.push({label:'إعادة تفعيل',time:new Date(o.last_activated_at),color:'#5b21b6',icon:'🔄'});
+  if(o.prep_done_at) stg2.push({label:'تحضير',time:new Date(o.prep_done_at),color:'#b45309',icon:'🧪'});
   if(o.assigned_at) stg2.push({label:'تعيين',time:new Date(o.assigned_at),color:'#1e40af',icon:'🚗'});
   if(o.picked_at) stg2.push({label:'استلام',time:new Date(o.picked_at),color:'#0e7490',icon:'▶️'});
   if(o.delivered_at) stg2.push({label:'توصيل',time:new Date(o.delivered_at),color:'#15803d',icon:'✅'});
@@ -3201,7 +3217,8 @@ function openDetail(id){
     <div class="d-row"><span class="d-lbl">المبلغ</span><strong class="d-val">${Number(o.total_bill_net||0).toLocaleString()} ج.م</strong></div>
     ${o.collected_amount?`<div class="d-row"><span class="d-lbl">المحصل</span><strong class="d-val" style="color:var(--green)">${Number(o.collected_amount).toLocaleString()} ج</strong></div>`:''}
     <div class="d-row"><span class="d-lbl">طريقة الدفع</span><span class="d-val">${pmL}</span></div>
-    <div class="d-row"><span class="d-lbl">الحالة</span><span class="d-val">${ordStatusLabel(o)}</span></div>${o.perf_rating?`<div class="d-row"><span class="d-lbl">أداء الطيار</span><span class="d-val">فعلي ${o.actual_minutes} / متوقع ${o.expected_minutes} د · <strong style="color:${o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.perf_rating}</strong></span></div>`:''}${o.sla_rating?`<div class="d-row"><span class="d-lbl">أداء الفرع</span><span class="d-val">فعلي ${o.sla_actual_minutes} / المسموح ${o.sla_minutes} د · <strong style="color:${o.sla_rating==='ممتاز'?'#16a34a':o.sla_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.sla_rating}</strong></span></div>`:''}
+    <div class="d-row"><span class="d-lbl">الحالة</span><span class="d-val">${ordStatusLabel(o)}</span></div>
+    <div class="d-row"><span class="d-lbl">وقت الطلب الحقيقي</span><span class="d-val" title="من آخر تفعيل، بدون التأجيل والإيقاف، والتحضير محسوب">${fm(realOrderMins(o))}${holdSecs(o)>60?(' · إيقاف '+fm(Math.round(holdSecs(o)/60))):''}</span></div>${o.perf_rating?`<div class="d-row"><span class="d-lbl">أداء الطيار</span><span class="d-val">فعلي ${o.actual_minutes} / متوقع ${o.expected_minutes} د · <strong style="color:${o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.perf_rating}</strong></span></div>`:''}${o.sla_rating?`<div class="d-row"><span class="d-lbl">أداء الفرع</span><span class="d-val">فعلي ${o.sla_actual_minutes} / المسموح ${o.sla_minutes} د · <strong style="color:${o.sla_rating==='ممتاز'?'#16a34a':o.sla_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.sla_rating}</strong></span></div>`:''}
     <div class="d-row"><span class="d-lbl">الطيار</span><span class="d-val">${o.deliveryman||'—'}</span></div>
     <div class="d-row"><span class="d-lbl">الموظف</span><span class="d-val">${o.employee_name||'—'}</span></div>
     <div class="d-row"><span class="d-lbl">الأصناف</span><span class="d-val">${o.count_of_items||0}</span></div>
@@ -3308,7 +3325,8 @@ if(o.delivered_at){
     order_delivered:{label:'تم التوصيل',color:'#15803d',icon:'✅'},
     order_postponed:{label:'تعذر التوصيل',color:'#b45309',icon:'⚠️'},
     order_cancelled:{label:'إلغاء الطلب',color:'#b91c1c',icon:'❌'},
-    order_completed:{label:'اكتمال الرحلة',color:'#334155',icon:'🏁'}
+    order_completed:{label:'اكتمال الرحلة',color:'#334155',icon:'🏁'},
+    order_prepared:{label:'تم التحضير',color:'#b45309',icon:'🧪'}
   };
   const stages=[];
   // ابدأ دائماً بإنشاء الطلب (وقت الفاتورة الحقيقي)
@@ -3333,7 +3351,8 @@ if(o.delivered_at){
     <div class="d-row"><span class="d-lbl">المنطقة</span><span class="d-val">${o.cust_region||'—'}</span></div>
     <div class="d-row"><span class="d-lbl">المبلغ</span><strong class="d-val">${Number(o.total_bill_net||0).toLocaleString()} ج.م</strong></div>
     <div class="d-row"><span class="d-lbl">طريقة الدفع</span><span class="d-val">${pmL}</span></div>
-    <div class="d-row"><span class="d-lbl">الحالة</span><span class="d-val">${ordStatusLabel(o)}</span></div>${o.perf_rating?`<div class="d-row"><span class="d-lbl">أداء الطيار</span><span class="d-val">فعلي ${o.actual_minutes} / متوقع ${o.expected_minutes} د · <strong style="color:${o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.perf_rating}</strong></span></div>`:''}${o.sla_rating?`<div class="d-row"><span class="d-lbl">أداء الفرع</span><span class="d-val">فعلي ${o.sla_actual_minutes} / المسموح ${o.sla_minutes} د · <strong style="color:${o.sla_rating==='ممتاز'?'#16a34a':o.sla_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.sla_rating}</strong></span></div>`:''}
+    <div class="d-row"><span class="d-lbl">الحالة</span><span class="d-val">${ordStatusLabel(o)}</span></div>
+    <div class="d-row"><span class="d-lbl">وقت الطلب الحقيقي</span><span class="d-val" title="من آخر تفعيل، بدون التأجيل والإيقاف، والتحضير محسوب">${fm(realOrderMins(o))}${holdSecs(o)>60?(' · إيقاف '+fm(Math.round(holdSecs(o)/60))):''}</span></div>${o.perf_rating?`<div class="d-row"><span class="d-lbl">أداء الطيار</span><span class="d-val">فعلي ${o.actual_minutes} / متوقع ${o.expected_minutes} د · <strong style="color:${o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.perf_rating}</strong></span></div>`:''}${o.sla_rating?`<div class="d-row"><span class="d-lbl">أداء الفرع</span><span class="d-val">فعلي ${o.sla_actual_minutes} / المسموح ${o.sla_minutes} د · <strong style="color:${o.sla_rating==='ممتاز'?'#16a34a':o.sla_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.sla_rating}</strong></span></div>`:''}
     <div class="d-row"><span class="d-lbl">الطيار</span><span class="d-val">${o.deliveryman||'—'}</span></div>
     <div class="d-row"><span class="d-lbl">الموظف</span><span class="d-val">${o.employee_name||'—'}</span></div>
     <div class="d-row"><span class="d-lbl">الأصناف</span><span class="d-val">${o.count_of_items||0}</span></div>
