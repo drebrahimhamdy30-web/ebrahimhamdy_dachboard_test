@@ -895,9 +895,9 @@ function scInit() {
   if (!wrap || !currentUser) return;
   const names = Branches.names();
   const mine = Branches.toName(currentUser.branch || '');
-  const isAdmin = currentUser.role === 'admin';
+  const isAdmin = ['admin', 'accountant', 'reviewer'].includes(currentUser.role);
   if (!isAdmin && names.indexOf(mine) < 0) return;
-  SC.branch = isAdmin ? '' : mine;          // للعرض بس — البحث بيطلّع كل الفروع
+  SC.branch = isAdmin ? '' : mine;          // غير الأدمن/المحاسب/المراجع: البحث يقتصر على فرعه بس
   wrap.style.display = '';
   scLoad();
   setInterval(scLoad, 10 * 60 * 1000);
@@ -930,7 +930,10 @@ async function scLoad() {
    كل فرع مش رقم مجمّع مالوش معنى. */
 function scBuildIndex() {
   const byBranch = {};                       // آخر لقطة لكل فرع
-  (SC.snaps || []).forEach(s => { if (!byBranch[s.branch]) byBranch[s.branch] = s; });
+  (SC.snaps || []).forEach(s => {
+    if (SC.branch && !Branches.same(s.branch, SC.branch)) return;   // مدير/موظف الفرع: فرعه بس
+    if (!byBranch[s.branch]) byBranch[s.branch] = s;
+  });
 
   const sup = {};                            // اسم المورد → بياناته
   const key = n => String(n || '').trim();
@@ -956,6 +959,7 @@ function scBuildIndex() {
   // آخر سبب لكل (فرع+كود) — المصفوفة جاية مرتّبة تنازليًا
   const seenNote = new Set();
   (SC.notes || []).forEach(n => {
+    if (SC.branch && !Branches.same(n.branch, SC.branch)) return;   // مدير/موظف الفرع: فرعه بس
     const nk = n.branch + '|' + n.code;
     const e = get(n.supplier_name, n.code);
     e.codes.add(String(n.code));
