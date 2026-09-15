@@ -48,8 +48,11 @@ new Date(r.return_bill_date).toISOString()      // ⛔ ممنوع
 
 | المفتاح | القيمة (تعبير n8n) |
 |---|---|
-| `bill_from_date_search` | `={{ $now.minus({hours:2}).toFormat('yyyy-MM-dd HH:mm:ss') }}` |
-| `bill_to_date_search` | `={{ $now.toFormat('yyyy-MM-dd HH:mm:ss') }}` |
+| `bill_from_date_search` | `={{ $now.minus({hours:2}).format('yyyy-MM-dd HH:mm:ss') }}` |
+| `bill_to_date_search` | `={{ $now.format('yyyy-MM-dd HH:mm:ss') }}` |
+
+⚠️ `.format()` هي الصيغة الشغّالة في n8n (اتجرّبت). `.toFormat()` الـLuxon الأصلية
+مش مضمونة هنا — ونفس `.format()` هي اللي مستعملة في نقاط شاشة الربط، فالصيغة موحّدة.
 
 ⚠️ النافذة **ساعتين** والجولة **كل ساعة** — التداخل مقصود: لو جولة فشلت،
 اللي بعدها بتغطّي مكانها. والـupsert بيمنع التكرار.
