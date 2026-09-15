@@ -82,27 +82,57 @@ new Date(r.return_bill_date).toISOString()      // ⛔ ممنوع
 
 ## نود Code — التحويل
 
+⚠️ **الفرع بيتحدد من `store_name` اللي في الرد، مش من ثابت مكتوب بالإيد.**
+
+الثابت سبّب غلطة حقيقية يوم 2026-09-15: نود سيدى بشر اشتغل وفيه
+`BRANCH='المعمورة'`، فمرتجع بشر (فاتورة 24139 بـ250 ج) اتسجّل على المعمورة.
+مفيش خطأ ظهر ومفيش تكرار اتكشف — البيانات غلط وخلاص.
+
+اتأكدنا من `store_name` على **932 عيّنة حقيقية**: موجود في ١٠٠٪ منها
+ومتطابق مع جدول `integration_branch_stores`.
+
 ```javascript
-const BRANCH = 'المعمورة';          // غيّرها في نسخة كل فرع
+/* نفس الكود بالحرف في التلات نودات. مافيش حاجة تتغيّر بالإيد. */
 
-const rows = $input.first().json.Data || [];
+const STORE_TO_BRANCH = {
+  'الصيدلية':       'المعمورة',
+  'ابراهيم حمدي 2': 'سان ستيفانو',
+  'ابراهيم حمدي 3': 'سيدى بشر',
+};
 
-return rows.map(r => ({ json: {
-  branch:      BRANCH,
-  bill_no:     r.return_bill_no,
-  return_type: r.return_bill_type,
-  return_date: r.return_bill_date,   // ⚠️ نص زي ما هو — ممنوع new Date()
-  itm_code:    r.itm_code,
-  itm_name_ar: r.itm_name,
-  unit_ar:     r.u_name_ar,
-  unit_en:     r.u_name_en,
-  back_qty:    r.itm_back_qty,
-  back_price:  r.itm_back_price,
-  int_code:    r.int_code,
-  cust_code:   r.cust_code,
-  cust_name:   r.cust_name,
-}}));
+const res = $input.first().json;
+
+if (res?.Message !== 'Success') {
+  throw new Error('رد مش ناجح من eplus: ' + (res?.Error || 'مجهول'));
+}
+
+const rows = res.Data || [];
+
+return rows.map((r, i) => {
+  const branch = STORE_TO_BRANCH[r.store_name];
+  if (!branch) {
+    throw new Error(`مخزن مش معروف في الصف ${i}: "${r.store_name}"`);
+  }
+  return { json: {
+    branch,
+    bill_no:     r.return_bill_no,
+    return_type: r.return_bill_type,
+    return_date: r.return_bill_date,   // ⚠️ نص زي ما هو — ممنوع new Date()
+    itm_code:    r.itm_code,
+    itm_name_ar: r.itm_name,
+    unit_ar:     r.u_name_ar,
+    unit_en:     r.u_name_en,
+    back_qty:    r.itm_back_qty,
+    back_price:  r.itm_back_price,
+    int_code:    r.int_code,
+    cust_code:   r.cust_code,
+    cust_name:   r.cust_name,
+  }};
+});
 ```
+
+⚠️ `return_value` عمود **مولّد** (`back_qty × back_price`) — ماتبعتوش،
+بوستجرس بيرفض الكتابة فيه.
 
 ## نود Postgres
 
