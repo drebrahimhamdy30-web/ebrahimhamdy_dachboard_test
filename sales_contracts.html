@@ -319,11 +319,9 @@
     async function updateData(p){
       try{
         const stamp = new Date().toISOString(), by = ciReviewer();
-        if(p.type === 'contract_merge'){
-          const r1 = await fetch(CI_URL+'?id=eq.'+encodeURIComponent(p.bill_a_id), {method:'PATCH', headers: await CI_HW(), body:JSON.stringify({total_bill:ciNum(p.new_total), reviewed_at:stamp, reviewed_by:by})});
-          const r2 = await fetch(CI_URL+'?id=eq.'+encodeURIComponent(p.bill_b_id), {method:'PATCH', headers: await CI_HW(), body:JSON.stringify({bill_state:'مدموجة', merged_into:(p.bill_a_no||null), reviewed_at:stamp, reviewed_by:by})});
-          return r1.ok && r2.ok;
-        }
+        // ⚠️ الدمج اتشال من هنا: كان PATCHين منفصلين، لو التاني فشل تبقى
+        //    قيمة الأب زادت والابن لسه فاتورة تقدر تدخل مطالبة = ازدواج.
+        //    بقى RPC واحدة merge_contract_invoices في ترانزاكشن واحدة.
         if(p.type === 'contract_new'){
           const row = {bill_no:p.bill_no||null, bill_date:p.bill_date||null, cust_code:p.cust_code||null, cust_name_ar:p.cust_name_ar||null, total_bill:ciNum(p.total_bill), employee_name:p.employee_name||null, bill_type:p.bill_type||null, payment_type:p.payment_type||null, bill_state:p.bill_state||null, branch:p.branch||null, serial_no:p.serial_no||null, reviewed_at:stamp, reviewed_by:by};
           const r = await fetch(CI_URL, {method:'POST', headers: await CI_HW(), body:JSON.stringify(row)});
@@ -677,12 +675,15 @@ function getNextSerial(billType) {
         const serialBadge = (item.serial_no && item.serial_no !== 'null' && item.serial_no !== '0')
           ? `<span style="font-size:0.7rem;background:#dcfce7;color:#15803d;padding:2px 8px;border-radius:20px;">م ${item.serial_no}</span>`
           : '';
+        const mergedBadge = (state === 'مدموجة' && item.merged_into)
+          ? `<span style="font-size:0.7rem;background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:20px;">🔗 في ${item.merged_into}</span>`
+          : '';
 
         return `
           <tr>
             <td>
               <code style="font-size:0.82rem;color:var(--text-secondary);">${item.bill_no || '---'}</code>
-              ${claimBadge}${serialBadge}
+              ${claimBadge}${serialBadge}${mergedBadge}
             </td>
             <td style="font-size:0.75rem;line-height:1.4;">
               ${dateStr}<br>
@@ -726,12 +727,19 @@ function getNextSerial(billType) {
                   title="تعديل">
                   <i class="fas fa-edit"></i>
                 </button>
-                <button class="btn btn-sm btn-icon"
-                  onclick="openMergeModal('${item.id}')"
-                  style="background:#8b5cf6;color:#fff;padding:5px 8px;"
-                  title="دمج مع فاتورة أخرى">
-                  <i class="fas fa-compress-arrows-alt"></i>
-                </button>
+                ${state === 'مدموجة'
+                  ? `<button class="btn btn-sm btn-icon"
+                      onclick="unmergeInvoice('${item.id}')"
+                      style="background:#f59e0b;color:#fff;padding:5px 8px;"
+                      title="فك الدمج من فاتورة ${item.merged_into || ''}">
+                      <i class="fas fa-expand-arrows-alt"></i>
+                    </button>`
+                  : `<button class="btn btn-sm btn-icon"
+                      onclick="openMergeModal('${item.id}')"
+                      style="background:#8b5cf6;color:#fff;padding:5px 8px;"
+                      title="دمج مع فاتورة أخرى">
+                      <i class="fas fa-compress-arrows-alt"></i>
+                    </button>`}
               </div>
             </td>
           </tr>`;
@@ -1037,29 +1045,82 @@ function getNextSerial(billType) {
       const itemB = allData.find(x => String(x.id) === String(bId));
 
       if (!itemA || !itemB) return;
-      if (!confirm(`تأكيد دمج فاتورة ${itemB.bill_no} في فاتورة ${itemA.bill_no}؟`)) return;
+
+      let msg = `تأكيد دمج فاتورة ${itemB.bill_no} في فاتورة ${itemA.bill_no}؟`;
+      if (hasClaim(itemA)) {
+        msg += `\n\n⚠️ فاتورة ${itemA.bill_no} داخلة مطالبة رقم ${itemA.claim_id} — الدمج هيغيّر قيمتها جوّه المطالبة.`;
+      }
+      if (!confirm(msg)) return;
 
       const btn = document.getElementById('merge-save-btn');
       btn.disabled  = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الدمج...';
 
-      const totalA   = parseFloat(itemA.total_bill || 0);
-      const totalB   = parseFloat(itemB.total_bill || 0);
-      const newTotal = totalA + totalB;
+      // RPC واحدة: بتعدّل الفاتورتين في ترانزاكشن واحدة وبتسجّل الدمج
+      // في contract_merge_log عشان يبقى قابل للفك. كل التحقّقات (نفس
+      // الفرع، نفس العميل، مش مدموجة قبل كده) على السيرفر مش على الشاشة.
+      let out = null, ok = false;
+      try {
+        const r = await fetch(RPC + 'merge_contract_invoices', {
+          method:'POST', headers: await CI_H(),
+          body: JSON.stringify({ p_parent_id: Number(aId), p_child_id: Number(bId), p_user: ciReviewer() })
+        });
+        try { out = await r.json(); } catch(e) { out = null; }
+        ok = r.ok && out && out.success !== false;
+        if (!ok && !(out && out.error)) out = { error: sbFailMsg('فشل الدمج', r.status) };
+      } catch(e) { out = { error: sbFailMsg('فشل الدمج', 0) }; }
 
-      const success = await updateData({
-        type:      "contract_merge",
-        bill_a_id: aId,
-        bill_a_no: itemA.bill_no,
-        bill_b_id: bId,
-        new_total: newTotal
-      });
-
-      if (success) { closeMergeModal(); await loadData(); }
-      else { alert('❌ فشل الدمج'); }
+      if (ok) { closeMergeModal(); await loadData(); }
+      else    { alert('❌ ' + ((out && out.error) || 'فشل الدمج')); }
 
       btn.disabled  = false;
       btn.innerHTML = '<i class="fas fa-compress-arrows-alt"></i> تأكيد الدمج';
+    }
+
+    function hasClaim(item) {
+      const c = item && item.claim_id;
+      return !!c && !['', '0', 'null'].includes(String(c).trim());
+    }
+
+    // ===== فك الدمج =====
+    async function unmergeInvoice(id) {
+      const item = allData.find(x => String(x.id) === String(id));
+      if (!item) return;
+
+      // بنجيب المبلغ اللي اتضاف من السجل عشان المحاسب يشوفه قبل ما يأكّد
+      let info = null;
+      try {
+        const r = await fetch(SB_URL_CI + '/rest/v1/contract_merge_log'
+          + '?child_id=eq.' + encodeURIComponent(id)
+          + '&undone_at=is.null&select=added_value,parent_bill_no,is_legacy&limit=1',
+          { headers: await CI_H() });
+        if (r.ok) { const j = await r.json(); info = Array.isArray(j) ? j[0] : null; }
+      } catch(e) {}
+
+      if (!info) { alert('❌ مفيش دمج مسجّل مفتوح للفاتورة دي — التعديل لازم يكون يدوي'); return; }
+
+      const amt = Number(info.added_value || 0);
+      let msg = `فك دمج فاتورة ${item.bill_no} من فاتورة ${info.parent_bill_no}؟\n\n`
+              + `هيتخصم ${amt} جنيه من قيمة فاتورة ${info.parent_bill_no}، `
+              + `وفاتورة ${item.bill_no} هترجع «فاتورة» تاني.`;
+      if (info.is_legacy) {
+        msg += `\n\n⚠️ ده دمج قديم من قبل ما نسجّل الدمجات — المبلغ متحسب من قيمة الفاتورة/بنودها، راجعه قبل ما تأكّد.`;
+      }
+      if (!confirm(msg)) return;
+
+      let out = null, ok = false;
+      try {
+        const r = await fetch(RPC + 'unmerge_contract_invoice', {
+          method:'POST', headers: await CI_H(),
+          body: JSON.stringify({ p_child_id: Number(id), p_user: ciReviewer() })
+        });
+        try { out = await r.json(); } catch(e) { out = null; }
+        ok = r.ok && out && out.success !== false;
+        if (!ok && !(out && out.error)) out = { error: sbFailMsg('فشل فك الدمج', r.status) };
+      } catch(e) { out = { error: sbFailMsg('فشل فك الدمج', 0) }; }
+
+      if (ok) await loadData();
+      else    alert('❌ ' + ((out && out.error) || 'فشل فك الدمج'));
     }
 
     document.getElementById('edit-modal').addEventListener('click', function(e) {
