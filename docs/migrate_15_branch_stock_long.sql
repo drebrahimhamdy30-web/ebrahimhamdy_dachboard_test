@@ -11,6 +11,17 @@
       بعد تنفيذه النظام بيشتغل من الطريق القديم زي ما هو بالظبط، والجديد
       بيشتغل في الظل عشان نقارن.
 
+   ⚠️ **المقارنة بتتم ضد الإنتاج، مش ضد نسخة السيرفر.**
+      لو شغّلناه على السيرفر وقارنّاه بجداوله المحلية، البيانات دي واقفة من
+      يوم النقل (n8n بيكتب على السحابة مباشرة) — فالقديم والجديد هيبقوا نفس
+      البيانات الميتة، والمقارنة تقول «مطابق ١٠٠٪» من غير ما تثبت أي حاجة.
+
+      عشان كده public.stock_src_schema() بترجّع:
+        · cloudsrc  لو إحنا على السيرفر → بنبني ونقارن ببيانات الإنتاج الحيّة
+        · public    لو إحنا على السحابة → وده الصح هناك
+      ومافيش حاجة تتظبط يدويًا: بعد التحويل النهائي لما cloudsrc تتشال،
+      بترجع public لوحدها.
+
    الترتيب: نفّذه على البرودكشن (سحابة) الأول، وبالحرف على السيرفر الذاتي بعدين.
    الرجوع: آخر السكربت (القسم 9) — مسح اللي اتضاف وخلاص.
 
@@ -217,15 +228,36 @@ grant execute on function public.commit_branch_stock(text, integer)       to ser
    مؤقت: طول فترة التشغيل المزدوج، n8n بيفضل يكتب في stock_<الفرع> زي ما هو،
    والدالة دي بتنقل منها للجدول الجديد. بتتشال في خطوة التبديل.
    ─────────────────────────────────────────────────────────────────────────── */
+/* ───────────────────────────────────────────────────────────────────────────
+   0) مصدر بيانات المقارنة — السحابة أو محلي؟
+   ───────────────────────────────────────────────────────────────────────────
+   على **السيرفر** فيه سكيما cloudsrc = جداول السحابة الحيّة عبر postgres_fdw
+   (اتعملت في migrate_01). يعني نقدر نبني الشكل الجديد من **بيانات الإنتاج
+   الحقيقية** ونقارنه بـstock_flat بتاع الإنتاج — وده الاختبار اللي بيثبت حاجة.
+
+   بديل ده كان إننا نقارن السيرفر بنفسه، وبياناته واقفة من يوم النقل، فالقديم
+   والجديد هيبقوا نفس البيانات الميتة والمقارنة تقول «مطابق» من غير ما تثبت شيء.
+
+   على **السحابة** مفيش cloudsrc، فبترجع public — وده الصح هناك.
+   وبعد التحويل النهائي لما cloudsrc تتشال، بترجع public لوحدها. مافيش
+   حاجة تتعدّل يدويًا في الحالتين.
+   ─────────────────────────────────────────────────────────────────────────── */
+create or replace function public.stock_src_schema()
+returns text language sql stable as $fn$
+  select case when to_regclass('cloudsrc.stock_flat') is not null
+              then 'cloudsrc' else 'public' end
+$fn$;
+
 create or replace function public.sync_branch_stock_from_legacy()
 returns jsonb language plpgsql security definer set search_path = public as $fn$
-declare r record; src text; n int; out_j jsonb := '{}'::jsonb;
+declare r record; src text; n int; out_j jsonb := '{}'::jsonb; src_ns text;
 begin
   perform public.ensure_branch_partitions();
+  src_ns := public.stock_src_schema();          -- cloudsrc على السيرفر، public على السحابة
   for r in select code from public.branches where is_active and code is not null order by sort_order loop
     src := 'stock_' || r.code;
     if not exists (select 1 from pg_class c join pg_namespace ns on ns.oid = c.relnamespace
-                   where ns.nspname = 'public' and c.relname = src and c.relkind = 'r') then
+                   where ns.nspname = src_ns and c.relname = src and c.relkind in ('r','f')) then
       continue;                                  -- فرع جديد لسه مالوش جدول قديم — عادي
     end if;
     execute format('truncate public.%I', public.branch_part_name('branch_stock', r.code));
@@ -236,7 +268,7 @@ begin
              itm_sell_price_big, itm_sell_price_medium, itm_sell_price_small,
              unit_big_medium_coeff, unit_big_small_coeff, itm_ismedicine, "Company_Name_Ar",
              insert_date, update_date, last_trans_date, updated_at
-      from public.%I $q$, public.branch_part_name('branch_stock', r.code), r.code, src);
+      from %I.%I $q$, public.branch_part_name('branch_stock', r.code), r.code, src_ns, src);
     get diagnostics n = row_count;
     out_j := out_j || jsonb_build_object(r.code, n);
   end loop;
@@ -352,10 +384,13 @@ create table if not exists public.stock_flat_compare_log (
 
 create or replace function public.compare_stock_flat()
 returns jsonb language plpgsql security definer set search_path = public as $fn$
-declare res jsonb;
+declare res jsonb; src_ns text;
 begin
+  src_ns := public.stock_src_schema();          -- بنقارن بالإنتاج مش بنسخة السيرفر الواقفة
+  execute format($q$
   select jsonb_build_object(
-    'live_rows',   (select count(*) from public.stock_flat),
+    'source',      %L,
+    'live_rows',   (select count(*) from %I.stock_flat),
     'shadow_rows', (select count(*) from public.stock_flat_shadow),
     'missing_rows', count(*) filter (where o.itm_code is null or s.itm_code is null),
     'diff_name',    count(*) filter (where o.n   is distinct from s.n),
@@ -366,8 +401,9 @@ begin
     'diff_qty',     count(*) filter (where o.m_q is distinct from s.m_q or o.s_q is distinct from s.s_q or o.b_q is distinct from s.b_q),
     'diff_price',   count(*) filter (where o.m_p is distinct from s.m_p or o.s_p is distinct from s.s_p or o.b_p is distinct from s.b_p),
     'diff_search',  count(*) filter (where o.n_norm is distinct from s.n_norm or o.n_fw is distinct from s.n_fw or o.n_fw_sorted is distinct from s.n_fw_sorted)
-  ) into res
-  from public.stock_flat o full outer join public.stock_flat_shadow s on s.itm_code = o.itm_code;
+  )
+  from %I.stock_flat o full outer join public.stock_flat_shadow s on s.itm_code = o.itm_code $q$,
+    src_ns, src_ns, src_ns) into res;
 
   insert into public.stock_flat_compare_log(result) values (res);
   return res;
