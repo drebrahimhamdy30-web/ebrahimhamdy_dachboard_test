@@ -1517,7 +1517,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           + '<td style="text-align:center">' + niQ(r.b_q) + '</td>'
           + '<td style="text-align:center">' + store + '</td>'
           + '<td style="text-align:center"><button class="btn btn-sm" style="background:var(--surface-3);color:var(--text-primary);border:1px solid var(--surface-3);padding:4px 12px;border-radius:8px;cursor:pointer;font-weight:700" onclick="event.stopPropagation();toggleLinkPanel(\'' + jsCode + '\',\'' + jsName + '\',this)">🔗 ربط بالمخازن</button></td>'
-          + '<td style="text-align:center"><button class="btn btn-sm" style="background:#0d9488;color:#fff;border:none;padding:4px 14px;border-radius:8px;cursor:pointer;font-weight:700" onclick="event.stopPropagation();markCoded(\'' + jsCode + '\', this)">تم ✓</button></td>'
+          + '<td style="text-align:center"><button class="btn btn-sm" style="background:#0d9488;color:#fff;border:none;padding:4px 14px;border-radius:8px;cursor:pointer;font-weight:700" title="بيكوّد صفوف المخازن المحددة في بانل الربط (لو فيه تحديد) وبعدين يسجّل الصنف كمكوّد ويخفيه" onclick="event.stopPropagation();markCoded(\'' + jsCode + '\', this)">تم ✓</button></td>'
           + '</tr>'
           + '<tr class="nl-row" id="nl-row-' + code + '" style="display:none"><td colspan="11" style="padding:0 6px 10px"><div id="nl-panel-' + code + '"></div></td></tr>';
       });
@@ -1525,14 +1525,39 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       wrap.innerHTML = h;
       applyNiFit();
     }
+    /* «تم ✓» بيعمل الاتنين مع بعض: يكوّد صفوف المخازن المحددة في بانل الربط
+       (لو البانل مفتوح وفيه تحديد) وبعدين يسجّل الصنف كمكوّد ويخفيه.
+       ⚠️ لو الربط فشل مابنسجّلش الصنف كمكوّد — عشان ما يختفيش من القائمة
+          وهو لسه مش مربوط بأي مخزن، وساعتها بيضيع الطريق السهل للربط. */
     async function markCoded(code, btn) {
+      const st  = nlState[code];
+      const ids = (st && st.sel.size) ? [...st.sel] : [];
+      const it  = niData.find(x => x.itm_code === code);
+      // مفيش تحديد والصنف لسه مالوش سعر مخزن = غالبًا اتنسي الربط، نسأله
+      if (!ids.length && it && !it.has_store &&
+          !confirm('الصنف ده لسه مش مربوط بأي صنف في المخازن.\nلو كمّلت هيتسجّل كمكوّد ويختفي من القائمة من غير ربط.\n\nتكمّل؟')) return;
       if (btn) { btn.disabled = true; btn.textContent = '...'; }
+      if (ids.length) {
+        const saved = await nlSaveCodes(code, ids);
+        nlAfterSave(code, saved);
+        if (saved.size < ids.length) {
+          nlRender(code); nlSyncBtn(code);
+          const msg = document.getElementById('nl-msg-' + code);
+          if (msg) {
+            msg.style.color = 'var(--danger,#dc2626)';
+            msg.textContent = 'فشل تكويد ' + (ids.length - saved.size) + ' صف — الصنف مااتسجّلش كمكوّد، جرّب تاني';
+          }
+          if (btn) { btn.disabled = false; btn.textContent = 'تم ✓'; }
+          return;
+        }
+      }
       try {
         // نفس ملاحظة tasks: userName مفتاح ميت — الترميز يتنسب للشخص
         const by = (Session.fullName() || Session.username() || 'coded');
         const r = await fetch(REST + 'rpc/mark_item_coded', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body: JSON.stringify({ p_code: code, p_by: by }) });
         if (!r.ok) throw new Error('fail');
         niData = niData.filter(x => x.itm_code !== code);
+        delete nlState[code];
         updateNiBadge(); renderNewItems();
       } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'تم ✓'; } alert('تعذّر الحفظ، حاول تاني.'); }
     }
@@ -1708,16 +1733,10 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       b.textContent = st.sel.size ? ('كوّد المحدد (' + st.sel.size + ')') : 'كوّد المحدد';
     }
 
-    async function nlApply(code) {
-      const st = nlState[code]; if (!st || !st.sel.size) return;
-      const ids = [...st.sel];
-      const b = document.getElementById('nl-apply-' + code);
-      const msg = document.getElementById('nl-msg-' + code);
-      if (b) { b.disabled = true; b.textContent = '...'; }
-      if (msg) { msg.style.color = 'var(--text-muted)'; msg.textContent = 'جارٍ الحفظ...'; }
-
-      // ⚠️ نتتبّع الـid اللي نجح بعينه مش عدد بس — لو بعض الصفوف فشلت لازم
-      // تفضل ظاهرة ومتحدّدة عشان تعيد المحاولة عليها هي بالذات
+    /* كتابة الكود على صفوف المخازن المحددة — مشتركة بين «كوّد المحدد» و«تم ✓».
+       ⚠️ بنرجّع الـid اللي نجح بعينه مش عدد بس — لو بعض الصفوف فشلت لازم
+       تفضل ظاهرة ومتحدّدة عشان تعيد المحاولة عليها هي بالذات. */
+    async function nlSaveCodes(code, ids) {
       const saved = new Set();
       const CH = 6;   // دفعات صغيرة بدل ما نفتح 60 طلب مرة واحدة
       for (let i = 0; i < ids.length; i += CH) {
@@ -1734,17 +1753,32 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         }));
         res.forEach((okRow, j) => { if (okRow) saved.add(slice[j]); });
       }
-      const ok = saved.size, fail = ids.length - ok;
+      return saved;
+    }
 
-      if (ok) {
-        // الصفوف اللي اتكوّدت مابقتش «غير مكوّدة» — تختفي؛ الفاشلة تفضل محدّدة
-        st.rows = st.rows.filter(r => !saved.has(r.id));
-        st.sel = new Set([...st.sel].filter(id => !saved.has(id)));
-        // عمود «سعر مخزن؟» بقى ✓ فعلًا
-        const cell = document.getElementById('ni-store-' + code);
-        if (cell) { cell.textContent = '✓ له سعر'; cell.style.color = '#0d9488'; }
-        const it = niData.find(x => x.itm_code === code); if (it) it.has_store = true;
-      }
+    // بعد حفظ ناجح: الصفوف اللي اتكوّدت مابقتش «غير مكوّدة» فتختفي، والفاشلة تفضل محدّدة
+    function nlAfterSave(code, saved) {
+      const st = nlState[code];
+      if (!st || !saved.size) return;
+      st.rows = st.rows.filter(r => !saved.has(r.id));
+      st.sel  = new Set([...st.sel].filter(id => !saved.has(id)));
+      // عمود «سعر مخزن؟» بقى ✓ فعلًا
+      const cell = document.getElementById('ni-store-' + code);
+      if (cell) { cell.textContent = '✓ له سعر'; cell.style.color = '#0d9488'; }
+      const it = niData.find(x => x.itm_code === code); if (it) it.has_store = true;
+    }
+
+    async function nlApply(code) {
+      const st = nlState[code]; if (!st || !st.sel.size) return;
+      const ids = [...st.sel];
+      const b = document.getElementById('nl-apply-' + code);
+      const msg = document.getElementById('nl-msg-' + code);
+      if (b) { b.disabled = true; b.textContent = '...'; }
+      if (msg) { msg.style.color = 'var(--text-muted)'; msg.textContent = 'جارٍ الحفظ...'; }
+
+      const saved = await nlSaveCodes(code, ids);
+      const ok = saved.size, fail = ids.length - ok;
+      nlAfterSave(code, saved);
       nlRender(code);
       if (msg) {
         msg.style.color = fail ? 'var(--danger,#dc2626)' : '#15803d';
