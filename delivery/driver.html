@@ -1205,7 +1205,7 @@ function getMyLocation(){
       navigator.geolocation.getCurrentPosition(
         pos => onDone({lat:pos.coords.latitude, lng:pos.coords.longitude, acc:pos.coords.accuracy}),
         err => onDone(null, err),
-        { enableHighAccuracy:highAcc, timeout, maximumAge:60000 }
+        { enableHighAccuracy:highAcc, timeout, maximumAge:10000 }
       );
     };
 
@@ -1239,10 +1239,14 @@ async function checkPickupLocation(){
   }
 
   const dist = distanceMeters(loc.lat, loc.lng, plat, plng);
-  if(dist > radius){
-    return {ok:false, distance:dist, noLoc:false, acc:loc.acc, lat:loc.lat, lng:loc.lng};
+  const acc = loc.acc || 0;
+  // نطرح عدم يقين الـGPS: نعتبره «بره» بس لو مؤكّد بره حتى مع هامش دقة الجهاز.
+  // كده الطيار اللي جوّه الصيدلية وGPS ضعيف (دقة كبيرة، شائع جوّه المباني) مايتمنعش بالغلط.
+  if(dist - acc > radius){
+    return {ok:false, distance:dist, noLoc:false, acc, lat:loc.lat, lng:loc.lng};
   }
-  return {ok:true, distance:dist, lat:loc.lat, lng:loc.lng, acc:loc.acc};
+  // داخل النطاق (أو الدقة ضعيفة فمش مؤكّد إنه بره) → نسمح، ونعلّم القراءة الضعيفة للمراجعة
+  return {ok:true, distance:dist, acc, weak: acc>radius, lat:loc.lat, lng:loc.lng};
 }
 
 // يعرض تنبيه المخالفة (الاستلام بيتم برضه)
