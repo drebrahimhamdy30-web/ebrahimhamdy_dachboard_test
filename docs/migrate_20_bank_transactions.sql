@@ -118,16 +118,16 @@ BEGIN
   DROP TABLE IF EXISTS _in, _new;
   -- ⚠️ صف واحد بتاريخ أو مبلغ بايظ كان بيوقّع الرفع كله — دلوقتي بيتعدّ «غير صالح» ويتساب
   CREATE TEMP TABLE _in ON COMMIT DROP AS
-  SELECT CASE WHEN (r ->> 'tx_at') ~ '^d{4}-d{2}-d{2} d{2}:d{2}(:d{2})?$'
+  SELECT CASE WHEN (r ->> 'tx_at') ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$'
               THEN (r ->> 'tx_at')::timestamp AT TIME ZONE 'Africa/Cairo' END      AS tx_at,
-         CASE WHEN (r ->> 'value_date') ~ '^d{4}-d{2}-d{2}$' THEN (r ->> 'value_date')::date END AS value_date,
-         CASE WHEN (r ->> 'amount') ~ '^-?d+(.d+)?$' THEN round((r ->> 'amount')::numeric, 2) END AS amount,
+         CASE WHEN (r ->> 'value_date') ~ '^\d{4}-\d{2}-\d{2}$' THEN (r ->> 'value_date')::date END AS value_date,
+         CASE WHEN (r ->> 'amount') ~ '^-?\d+(\.\d+)?$' THEN round((r ->> 'amount')::numeric, 2) END AS amount,
          nullif(btrim(r ->> 'description'),'')                                     AS description,
          nullif(btrim(r ->> 'bank_no'),'')                                         AS bank_no,
          nullif(btrim(r ->> 'ref_no'),'')                                          AS ref_no,
          nullif(btrim(r ->> 'doc_no'),'')                                          AS doc_no,
          nullif(btrim(r ->> 'tx_code'),'')                                         AS tx_code,
-         CASE WHEN (r ->> 'balance_after') ~ '^-?d+(.d+)?$' THEN (r ->> 'balance_after')::numeric END AS balance_after
+         CASE WHEN (r ->> 'balance_after') ~ '^-?\d+(\.\d+)?$' THEN (r ->> 'balance_after')::numeric END AS balance_after
     FROM jsonb_array_elements(p_rows) r;
 
   SELECT count(*), count(*) FILTER (WHERE tx_at IS NULL OR amount IS NULL OR bank_no IS NULL)
