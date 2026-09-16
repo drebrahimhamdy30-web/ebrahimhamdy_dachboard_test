@@ -132,6 +132,7 @@ select.tq-branch{cursor:pointer;max-width:130px}
 .tq-item.done .tq-t{text-decoration:line-through}
 .tq-t{font-weight:700;line-height:1.5}
 .tq-who{display:block;font-size:.67rem;color:var(--text-muted);font-weight:600;margin-top:1px}
+.tq-late{display:inline-block;font-size:.62rem;font-weight:800;color:#b91c1c;background:#fee2e2;border-radius:20px;padding:0 6px;margin-inline-start:4px}
 .tq-empty{text-align:center;color:var(--text-muted);font-size:.76rem;padding:22px 10px}
 .tq-foot{padding:.45rem .75rem;border-top:1px solid var(--border);font-size:.68rem;color:var(--text-muted);text-align:center}
 
@@ -737,7 +738,7 @@ function setQuickBadge(key, count) {
 
    الرقم على الزر = **المتبقّي** (المستحق ناقص اللي اتعمل)، فلمّا اليوم
    يخلص الشارة تختفي لوحدها. */
-const TQ = { tasks: [], assign: {}, done: new Set(), branch: '', busy: false, err: null };
+const TQ = { tasks: [], assign: {}, done: new Set(), doneMap: {}, branch: '', busy: false, err: null };
 
 /* الخطأ ده بسبب الجلسة ولا حاجة تانية؟ supabase-js مابيرجّعش الحالة
    دايمًا، فبنبص على الكود/الرسالة كمان. */
@@ -762,6 +763,37 @@ function tqIsDue(t, d) {
   if (t.freq === 'yearly') return (d.getMonth() + 1) === Number(t.month) && d.getDate() === wanted;
   return false;
 }
+/* ═══ ترحيل المهام غير اليومية ═══
+   المهمة الأسبوعية/الشهرية/السنوية لو ماتعلّمتش «تمّت» يوم ميعادها بتفضل
+   ظاهرة الأيام اللي بعده (متأخرة) لحد ما تتعلّم — عشان ماتتنسيش.
+   اليومية مش بتترحّل: كده كده هتظهر تاني بكرة.
+   • آخر ميعاد (occ) = أقرب يوم ≤ النهاردة المهمة مستحقة فيه
+   • لو اتعلّمت «تمّت» في أي يوم من occ لحد امبارح → خلصت، ماتظهرش
+   • لو ميعادها قبل ما المهمة تتعمل (created_at) → ماتترحّلش
+   • لو ميعاد جديد جه قبل ما تخلص → بتبقى مهمة واحدة (الميعاد الجديد) */
+function tkYmd(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function tkState(t, d, doneDates){
+  const today = tkYmd(d), dd = doneDates || new Set();
+  if (t.freq === 'daily') return { show:true, late:false, occ:today, doneToday: dd.has(today) };
+  let o = null;
+  for (let i = 0; i <= 366; i++){
+    const x = new Date(d.getFullYear(), d.getMonth(), d.getDate() - i, 12);
+    if (tqIsDue(t, x)) { o = x; break; }
+  }
+  if (!o) return { show:false };
+  const occ = tkYmd(o);
+  const created = t.created_at ? new Date(t.created_at).toLocaleDateString('en-CA', { timeZone:'Africa/Cairo' }) : '';
+  if (created && occ < created) return { show:false };
+  const doneToday = dd.has(today);
+  if (occ === today) return { show:true, late:false, occ, doneToday };
+  for (const x of dd) if (x >= occ && x < today) return { show:false };
+  return { show:true, late:true, occ, occDate:o, doneToday };
+}
+function tkLateLabel(st){
+  const W = ['الأحد','الإثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+  const o = st.occDate; return o ? 'متأخرة من ' + W[o.getDay()] + ' ' + o.getDate() + '/' + (o.getMonth()+1) : 'متأخرة';
+}
+function tkBackDate(d){ return tkYmd(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 370, 12)); }
 const tqEsc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function tqInit() {
@@ -792,9 +824,11 @@ async function tqLoad() {
   const dstr = tqTodayCairo();
   try {
     const [t, a, dn] = await Promise.all([
-      db.from('tasks').select('id,title,freq,weekday,month_day,month,sort_order').eq('is_active', true),
+      db.from('tasks').select('id,title,freq,weekday,month_day,month,sort_order,created_at').eq('is_active', true),
       db.from('task_assignee').select('task_id,branch,assignee'),
-      db.from('task_done').select('task_id').eq('branch', TQ.branch).eq('done_on', dstr)
+      // سنة لورا عشان نعرف المهام المتأخرة اتعملت ولا لأ
+      db.from('task_done').select('task_id,done_on').eq('branch', TQ.branch)
+        .gte('done_on', tkBackDate(tqCairoDate())).lte('done_on', dstr)
     ]);
     // ⚠️ فشل التحميل **مش** «مفيش مهام». لما التوكن ينتهي الاستعلام
     // بيرجع 401 وكنا بنعرض قائمة فاضية — المستخدم يفتكر إنه خلّص شغله
@@ -803,15 +837,19 @@ async function tqLoad() {
     TQ.tasks = t.data || [];
     TQ.assign = {};
     (a.data || []).forEach(r => { (TQ.assign[r.task_id] = TQ.assign[r.task_id] || {})[r.branch] = r.assignee; });
-    TQ.done = new Set((dn.data || []).map(r => r.task_id));
+    TQ.doneMap = {};
+    (dn.data || []).forEach(r => { (TQ.doneMap[r.task_id] = TQ.doneMap[r.task_id] || new Set()).add(r.done_on); });
+    TQ.done = new Set((dn.data || []).filter(r => r.done_on === dstr).map(r => r.task_id));
   } catch (e) { console.error('tqLoad', e); TQ.err = e; }
   tqRender();
 }
 
 function tqDueToday() {
   const d = tqCairoDate();
-  return TQ.tasks.filter(t => tqIsDue(t, d))
-    .sort((x, y) => (x.sort_order || 0) - (y.sort_order || 0) || String(x.title).localeCompare(String(y.title), 'ar'));
+  // المتأخرة الأول — دي اللي ممكن تتنسي
+  return TQ.tasks.map(t => Object.assign({}, t, { _st: tkState(t, d, TQ.doneMap[t.id]) }))
+    .filter(t => t._st.show)
+    .sort((x, y) => (y._st.late - x._st.late) || (x.sort_order || 0) - (y.sort_order || 0) || String(x.title).localeCompare(String(y.title), 'ar'));
 }
 
 function tqRender() {
@@ -839,7 +877,7 @@ function tqRender() {
       const who = (TQ.assign[t.id] && TQ.assign[t.id][TQ.branch]) || '';
       return '<label class="tq-item' + (done ? ' done' : '') + '">'
         + '<input type="checkbox" ' + (done ? 'checked' : '') + ' onchange="tqToggleDone(' + t.id + ',this.checked)">'
-        + '<span class="tq-t">' + tqEsc(t.title)
+        + '<span class="tq-t">' + tqEsc(t.title) + (t._st.late ? '<span class="tq-late">' + tkLateLabel(t._st) + '</span>' : '')
         + (who ? '<span class="tq-who">👤 ' + tqEsc(who) + '</span>' : '<span class="tq-who">بدون مسؤول</span>')
         + '</span></label>';
     }).join('');

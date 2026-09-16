@@ -53,6 +53,8 @@
     .tk-who { font-weight:700; color:var(--primary-dark); }
     .tk-empty { padding:16px; text-align:center; color:var(--text-muted); font-size:0.8rem; }
     .tk-due-badge { font-size:0.62rem; font-weight:800; color:#15803d; background:#dcfce7; border-radius:20px; padding:1px 7px; }
+    .tk-late-badge { font-size:0.62rem; font-weight:800; color:#b91c1c; background:#fee2e2; border-radius:20px; padding:1px 7px; }
+    .tk-item.late { border-color:#fca5a5; }
 
     .badge-freq { font-size:0.68rem; font-weight:800; border-radius:20px; padding:2px 9px; white-space:nowrap; }
     .bf-daily{ background:#ccfbf1; color:#0f766e; } .bf-weekly{ background:#dbeafe; color:#1d4ed8; }
@@ -178,7 +180,7 @@
     // يعني «مين خلّص المهمة» كان بيتسجّل «كل الفروع» بدل اسم الموظف.
     const me = (Session.fullName() || Session.username() || USER_BRANCH_RAW).trim();
 
-    let TASKS = [], ASSIGN = {}, DONE = new Set(), editId = null;
+    let TASKS = [], ASSIGN = {}, DONE = new Set(), DONE_MAP = {}, editId = null;
 
     function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
     function todayCairo(){ return new Date().toLocaleDateString('en-CA', { timeZone:'Africa/Cairo' }); }
@@ -194,6 +196,37 @@
       if (t.freq === 'yearly') return (d.getMonth()+1) === Number(t.month) && d.getDate() === wanted;
       return false;
     }
+    /* ═══ ترحيل المهام غير اليومية ═══
+       المهمة الأسبوعية/الشهرية/السنوية لو ماتعلّمتش «تمّت» يوم ميعادها بتفضل
+       ظاهرة الأيام اللي بعده (متأخرة) لحد ما تتعلّم — عشان ماتتنسيش.
+       اليومية مش بتترحّل: كده كده هتظهر تاني بكرة.
+       • آخر ميعاد (occ) = أقرب يوم ≤ النهاردة المهمة مستحقة فيه
+       • لو اتعلّمت «تمّت» في أي يوم من occ لحد امبارح → خلصت، ماتظهرش
+       • لو ميعادها قبل ما المهمة تتعمل (created_at) → ماتترحّلش
+       • لو ميعاد جديد جه قبل ما تخلص → بتبقى مهمة واحدة (الميعاد الجديد) */
+    function tkYmd(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+    function tkState(t, d, doneDates){
+      const today = tkYmd(d), dd = doneDates || new Set();
+      if (t.freq === 'daily') return { show:true, late:false, occ:today, doneToday: dd.has(today) };
+      let o = null;
+      for (let i = 0; i <= 366; i++){
+        const x = new Date(d.getFullYear(), d.getMonth(), d.getDate() - i, 12);
+        if (isDue(t, x)) { o = x; break; }
+      }
+      if (!o) return { show:false };
+      const occ = tkYmd(o);
+      const created = t.created_at ? new Date(t.created_at).toLocaleDateString('en-CA', { timeZone:'Africa/Cairo' }) : '';
+      if (created && occ < created) return { show:false };
+      const doneToday = dd.has(today);
+      if (occ === today) return { show:true, late:false, occ, doneToday };
+      for (const x of dd) if (x >= occ && x < today) return { show:false };
+      return { show:true, late:true, occ, occDate:o, doneToday };
+    }
+    function tkLateLabel(st){
+      const W = ['الأحد','الإثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+      const o = st.occDate; return o ? 'متأخرة من ' + W[o.getDay()] + ' ' + o.getDate() + '/' + (o.getMonth()+1) : 'متأخرة';
+    }
+    function tkBackDate(d){ return tkYmd(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 370, 12)); }
     function dayLabel(t){
       if (t.freq === 'daily')  return 'كل يوم';
       if (t.freq === 'weekly') return 'كل ' + (WD[t.weekday] || '—');
@@ -235,9 +268,12 @@
     async function loadDone(){
       const dstr = document.getElementById('tk-date').value || todayCairo();
       try {
-        const rows = await (await fetch(REST+'task_done?select=task_id&branch=eq.'+encodeURIComponent(selectedBranch)+'&done_on=eq.'+dstr, { headers: await H() })).json();
-        DONE = new Set(rows.map(r=>r.task_id));
-      } catch(e){ DONE = new Set(); }
+        // سنة لورا عشان نعرف المهام المتأخرة اتعملت ولا لأ (مش النهاردة بس)
+        const from = tkBackDate(new Date(dstr + 'T12:00:00'));
+        const rows = await (await fetch(REST+'task_done?select=task_id,done_on&branch=eq.'+encodeURIComponent(selectedBranch)+'&done_on=gte.'+from+'&done_on=lte.'+dstr, { headers: await H() })).json();
+        DONE_MAP = {}; rows.forEach(r=>{ (DONE_MAP[r.task_id] = DONE_MAP[r.task_id] || new Set()).add(r.done_on); });
+        DONE = new Set(rows.filter(r=>r.done_on===dstr).map(r=>r.task_id));
+      } catch(e){ DONE = new Set(); DONE_MAP = {}; }
     }
 
     async function renderSchedule(){
@@ -247,15 +283,18 @@
       document.getElementById('tk-dayname').textContent = WD[d.getDay()] + '، ' + d.getDate() + ' ' + MO[d.getMonth()] + ' ' + d.getFullYear();
       await loadDone();
       const active = TASKS.filter(t=>t.is_active);
-      document.getElementById('tk-daycount').textContent = 'مهام اليوم: ' + active.filter(t=>isDue(t,d)).length;
+      const ST = {}; active.forEach(t=>{ ST[t.id] = tkState(t, d, DONE_MAP[t.id]); });
+      const lateN = active.filter(t=>ST[t.id].show && ST[t.id].late).length;
+      document.getElementById('tk-daycount').textContent = 'مهام اليوم: ' + active.filter(t=>ST[t.id].show).length + (lateN ? ' (منها ' + lateN + ' متأخرة)' : '');
 
       document.getElementById('tk-sections').innerHTML = FREQ_ORDER.map(fq=>{
         const list = active.filter(t=>t.freq===fq);
         const items = list.map(t=>{
-          const due = isDue(t,d), done = DONE.has(t.id), who = whoOf(t.id, selectedBranch);
+          const st = ST[t.id], due = st.show, done = DONE.has(t.id), who = whoOf(t.id, selectedBranch);
           const chk = due ? '<input type="checkbox" class="tk-chk" '+(done?'checked':'')+' onchange="toggleDone('+t.id+',this.checked)">' : '<span style="width:19px"></span>';
-          return '<div class="tk-item '+(due?'due ':'')+(done?'done':'')+'">'+chk
-            + '<div class="tk-body"><div class="tk-title">'+esc(t.title)+(due?' <span class="tk-due-badge">اليوم</span>':'')+'</div>'
+          const tag = !due ? '' : (st.late ? ' <span class="tk-late-badge">'+tkLateLabel(st)+'</span>' : ' <span class="tk-due-badge">اليوم</span>');
+          return '<div class="tk-item '+(due?'due ':'')+(st.late?'late ':'')+(done?'done':'')+'">'+chk
+            + '<div class="tk-body"><div class="tk-title">'+esc(t.title)+tag+'</div>'
             + '<div class="tk-meta"><span><i class="fas fa-clock"></i> '+dayLabel(t)+'</span>'
             + '<span class="tk-who"><i class="fas fa-user"></i> '+(who?esc(who):'— بدون مسؤول')+'</span></div></div></div>';
         }).join('');
