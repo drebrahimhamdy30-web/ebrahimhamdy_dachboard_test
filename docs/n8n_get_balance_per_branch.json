@@ -16,63 +16,153 @@
     },
     {
       "parameters": {
-        "jsCode": "// ═══ تجهيز الطلب ═══\n// الفرع بيتحوّل لاسم المخزن في eplus، والطلب بيتبعت للوسيط اللي\n// بيختار سيرفر الفرع نفسه (مش سيرفر المعمورة لكل الفروع زي قبل كده).\n\nconst q      = $('Webhook').first().json.query || {};\nconst code   = String(q.code   ?? '').trim();\nconst branch = String(q.branch ?? '').trim();\n\n// نفس aliases في جدول branches — لو ضفت فرع جديد ضيفه هنا كمان\nconst STORE = {\n  'المعمورة':    'الصيدلية',\n  'سان ستيفانو': 'ابراهيم حمدي 2',\n  'سيدى بشر':    'ابراهيم حمدي 3',\n  'سيدي بشر':    'ابراهيم حمدي 3'\n};\n\n// ⚠️ الرد القديم كان بيرجّع balance:0 من غير أي خطأ لو الفرع غلط أو ناقص،\n//    فالشاشة كانت بتعرض صفر كأنه رصيد حقيقي. دلوقتي بيرجّع سبب واضح.\nconst fail = (error, extra) => [{ json: Object.assign(\n  { found: false, in_branch: false, balance: 0, itm_name_ar: '', ok: false, error },\n  extra || {}\n) }];\n\nif (!code)   return fail('الكود ناقص');\nif (!branch) return fail('الفرع ناقص — الشاشة مابعتتش فرع');\nif (!STORE[branch]) return fail('فرع غير معروف: ' + branch, { known: Object.keys(STORE) });\n\nreturn [{ json: {\n  ok: true,\n  code,\n  branch,\n  store: STORE[branch],\n  proxy: {\n    branch: branch,                 // ← الوسيط بيختار base + بيانات دخول الفرع ده\n    method: 'PATCH',\n    path: '/api/Item/SearchItem',\n    params: [{ key: 'itm_code_search', value: code, enabled: true }],\n    preview: false                  // من غيرها بترجّع 50 صف بس\n  }\n} }];"
+        "jsCode": "// ═══ تجهيز الطلب ═══\n// بيتحقق من الكود والفرع، وبيحوّل اسم الفرع لاسم المخزن في eplus.\n// السويتش اللي بعده بيوجّه كل فرع لسيرفره.\n\nconst q      = $('Webhook').first().json.query || {};\nconst code   = String(q.code   ?? '').trim();\nconst branch = String(q.branch ?? '').trim();\n\n// نفس aliases في جدول branches — أي فرع جديد يتضاف هنا وفي السويتش\nconst STORE = {\n  'المعمورة':    'الصيدلية',\n  'سان ستيفانو': 'ابراهيم حمدي 2',\n  'سيدى بشر':    'ابراهيم حمدي 3',\n  'سيدي بشر':    'ابراهيم حمدي 3'\n};\n\n// ⚠️ قبل كده أي فرع غلط أو ناقص كان بيرجّع balance:0 من غير خطأ،\n//    فالشاشة تعرض صفر كأنه رصيد حقيقي وموظف الجرد يسجّل فرق وهمي.\nconst fail = (error, extra) => [{ json: Object.assign(\n  { found: false, in_branch: false, balance: 0, itm_name_ar: '', error },\n  extra || {}\n) }];\n\nif (!code)   return fail('الكود ناقص');\nif (!branch) return fail('الفرع ناقص — الشاشة مابعتتش فرع');\nif (!STORE[branch]) return fail('فرع غير معروف: ' + branch, { known: Object.keys(STORE) });\n\n// store = مفتاح التوجيه في السويتش\nreturn [{ json: { code, branch, store: STORE[branch] } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-3824, 1344],
+      "position": [-3840, 1344],
       "id": "a1c4f0de-1f2b-4a77-9b3e-0d5f6c118801",
       "name": "تجهيز الطلب"
     },
     {
       "parameters": {
-        "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
-          "conditions": [
+        "rules": {
+          "values": [
             {
-              "id": "e6f1a0c2-7b44-4b21-9a55-3c8e2d5f7a10",
-              "leftValue": "={{ $json.ok }}",
-              "rightValue": "",
-              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+                "conditions": [
+                  {
+                    "id": "s1",
+                    "leftValue": "={{ $json.store }}",
+                    "rightValue": "الصيدلية",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "المعمورة"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+                "conditions": [
+                  {
+                    "id": "s2",
+                    "leftValue": "={{ $json.store }}",
+                    "rightValue": "ابراهيم حمدي 2",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "سان ستيفانو"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+                "conditions": [
+                  {
+                    "id": "s3",
+                    "leftValue": "={{ $json.store }}",
+                    "rightValue": "ابراهيم حمدي 3",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "سيدى بشر"
             }
-          ],
-          "combinator": "and"
+          ]
         },
         "looseTypeValidation": true,
-        "options": {}
+        "options": { "fallbackOutput": "extra", "renameFallbackOutput": "خطأ" }
       },
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [-3640, 1344],
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [-3632, 1344],
       "id": "b2d5e1cf-3a66-4c88-8f21-5e9a7b4c2203",
-      "name": "فرع معروف؟"
+      "name": "أي فرع؟"
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://rxtjoqulmgkkcohmgzgi.supabase.co/functions/v1/eplus_proxy",
+        "method": "PATCH",
+        "url": "http://eplus.ebrahimhamdy.com/api/Item/SearchItem",
         "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "genericAuthType": "httpBasicAuth",
         "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.proxy) }}",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "itm_code_search", "value": "={{ $json.code }}" }
+          ]
+        },
         "options": { "timeout": 30000 }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-3424, 1248],
+      "position": [-3408, 1120],
       "id": "c3e6f2a0-4b77-4d99-a032-6f0b8c5d3304",
-      "name": "eplus عبر الوسيط",
+      "name": "مخزون المعمورة",
+      "retryOnFail": true,
+      "waitBetweenTries": 3000,
+      "credentials": {
+        "httpBasicAuth": { "id": "uJYS75ZTBXnlYIqg", "name": "eplus" }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "http://ضع-هنا-رابط-سان-ستيفانو/api/Item/SearchItem",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "itm_code_search", "value": "={{ $json.code }}" }
+          ]
+        },
+        "options": { "timeout": 30000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-3408, 1344],
+      "id": "c3e6f2a0-4b77-4d99-a032-6f0b8c5d3305",
+      "name": "مخزون سان ستيفانو",
       "retryOnFail": true,
       "waitBetweenTries": 3000
     },
     {
       "parameters": {
-        "jsCode": "// ═══ تجميع الرصيد ═══\nconst prep = $('تجهيز الطلب').first().json;\nconst res  = $input.first().json;   // رد eplus_proxy\n\nconst fail = (error, extra) => [{ json: Object.assign(\n  { found: false, in_branch: false, balance: 0, itm_name_ar: '', error },\n  extra || {}\n) }];\n\nif (res && res.ok === false) {\n  // الوسيط بيرجّع branch_not_configured لو الفرع مش في EPLUS_BRANCHES\n  return fail('تعذّر الوصول لسيرفر الفرع: ' + (res.error || res.status || 'سبب غير معروف'),\n              { configured: res.configured || null });\n}\n\nlet data = [];\ntry {\n  const parsed = typeof res.output === 'string' ? JSON.parse(res.output) : (res.output || {});\n  data = Array.isArray(parsed.Data) ? parsed.Data : [];\n} catch (e) {\n  return fail('رد غير مفهوم من eplus');\n}\n\n// المطابقة على الكود أو الباركود الداخلي\nconst same = data.filter(i =>\n  String(i.itm_code  ?? '').trim() === prep.code ||\n  String(i.itnl_code ?? '').trim() === prep.code\n);\nconst mine = same.find(i => String(i.sto_name ?? '').trim() === prep.store);\nconst any  = same[0];\n\nreturn [{ json: {\n  // نفس الحقول القديمة عشان الشاشة ماتقعش قبل ما نحدّثها\n  found:       !!any,                       // الكود موجود في eplus (مش شرط في فرعك)\n  itm_name_ar: (mine || any)?.itm_name_ar || '',\n  balance:     mine ? (Number(mine.sto_qty_big) || 0) : 0,\n  in_branch:   !!mine,                      // ← دي الإشارة الصح: الصنف في مخزون فرعك\n\n  // حقول تشخيص جديدة\n  branch:       prep.branch,\n  store:        prep.store,\n  stores_found: [...new Set(same.map(i => String(i.sto_name ?? '').trim()).filter(Boolean))],\n  source_url:   res.url || null,            // بيثبت إنك ضربت سيرفر الفرع الصح\n  took_ms:      res.time_ms ?? null\n} }];"
+        "method": "PATCH",
+        "url": "http://ضع-هنا-رابط-سيدى-بشر/api/Item/SearchItem",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "itm_code_search", "value": "={{ $json.code }}" }
+          ]
+        },
+        "options": { "timeout": 30000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-3408, 1568],
+      "id": "c3e6f2a0-4b77-4d99-a032-6f0b8c5d3306",
+      "name": "مخزون سيدى بشر",
+      "retryOnFail": true,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// ═══ تجميع الرصيد ═══\n// الرد دلوقتي جاي من سيرفر الفرع نفسه، مش من سيرفر المعمورة.\nconst prep = $('تجهيز الطلب').first().json;\nconst res  = $input.first().json;\n\nconst data = Array.isArray(res && res.Data) ? res.Data : [];\nif (!data.length && !(res && res.Data)) {\n  return [{ json: { found: false, in_branch: false, balance: 0, itm_name_ar: '',\n                    error: 'رد غير مفهوم من سيرفر ' + prep.branch } }];\n}\n\n// المطابقة على الكود أو الباركود الداخلي\nconst same = data.filter(i =>\n  String(i.itm_code  ?? '').trim() === prep.code ||\n  String(i.itnl_code ?? '').trim() === prep.code\n);\nconst mine = same.find(i => String(i.sto_name ?? '').trim() === prep.store);\nconst any  = same[0];\n\nreturn [{ json: {\n  // نفس الحقول القديمة — الشاشة ماتقعش قبل ما نحدّثها\n  found:       !!any,            // الكود موجود في eplus (مش شرط في فرعك)\n  itm_name_ar: (mine || any)?.itm_name_ar || '',\n  balance:     mine ? (Number(mine.sto_qty_big) || 0) : 0,\n  in_branch:   !!mine,           // ← الإشارة الصح: الصنف في مخزون فرعك\n\n  // تشخيص\n  branch:       prep.branch,\n  store:        prep.store,\n  stores_found: [...new Set(same.map(i => String(i.sto_name ?? '').trim()).filter(Boolean))]\n} }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [-3200, 1248],
+      "position": [-3184, 1344],
       "id": "d4f7a3b1-5c88-4e00-b143-70a1c9d6e405",
       "name": "تجميع الرصيد"
     },
@@ -83,7 +173,7 @@
       },
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.4,
-      "position": [-2976, 1344],
+      "position": [-2960, 1344],
       "id": "484eb791-bc52-4d1b-8072-0b7db8406669",
       "name": "Respond to Webhook7"
     }
@@ -93,15 +183,23 @@
       "main": [[{ "node": "تجهيز الطلب", "type": "main", "index": 0 }]]
     },
     "تجهيز الطلب": {
-      "main": [[{ "node": "فرع معروف؟", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "أي فرع؟", "type": "main", "index": 0 }]]
     },
-    "فرع معروف؟": {
+    "أي فرع؟": {
       "main": [
-        [{ "node": "eplus عبر الوسيط", "type": "main", "index": 0 }],
+        [{ "node": "مخزون المعمورة", "type": "main", "index": 0 }],
+        [{ "node": "مخزون سان ستيفانو", "type": "main", "index": 0 }],
+        [{ "node": "مخزون سيدى بشر", "type": "main", "index": 0 }],
         [{ "node": "Respond to Webhook7", "type": "main", "index": 0 }]
       ]
     },
-    "eplus عبر الوسيط": {
+    "مخزون المعمورة": {
+      "main": [[{ "node": "تجميع الرصيد", "type": "main", "index": 0 }]]
+    },
+    "مخزون سان ستيفانو": {
+      "main": [[{ "node": "تجميع الرصيد", "type": "main", "index": 0 }]]
+    },
+    "مخزون سيدى بشر": {
       "main": [[{ "node": "تجميع الرصيد", "type": "main", "index": 0 }]]
     },
     "تجميع الرصيد": {
