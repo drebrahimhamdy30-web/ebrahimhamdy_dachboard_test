@@ -571,6 +571,8 @@
       <div class="modal-item-info" id="mismatch-item-info"></div>
       <label class="modal-label">الرصيد الفعلي (اللي اتجرد فعلياً):</label>
       <input type="number" id="mismatch-balance-input" class="form-input" inputmode="decimal" placeholder="اكتب الرصيد الفعلي...">
+      <label class="modal-label" style="margin-top:12px;">تاريخ الصلاحية <span style="font-weight:400;color:var(--text-muted);font-size:0.78rem;">(شهر وسنة)</span></label>
+      <input type="month" id="mismatch-exp-input" class="form-input">
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeMismatchModal()">إلغاء</button>
         <button class="btn btn-primary" onclick="confirmMismatch()">
@@ -1215,7 +1217,7 @@
       }
     }
 
-    async function submitLiveMismatchResult(id, actualVal) {
+    async function submitLiveMismatchResult(id, actualVal, expYm) {
       const item = findLiveItemById(id);
       if (!item) return;
 
@@ -1228,6 +1230,7 @@
         matched:     false,
         system_qty:  item._systemQty,
         actual_qty:  Number(actualVal),
+        exp_ym:      expYm || null,
         audited_by:  employeeName
       });
 
@@ -1330,7 +1333,7 @@
       else { alert('⚠️ فشل الحفظ، يرجى المحاولة مجدداً'); }
     }
 
-    async function submitScanMismatchResult(actualVal) {
+    async function submitScanMismatchResult(actualVal, expYm) {
       if (!scanItem) return;
       const ok = await jardGuardedSubmit({
         branch:      scanItem.branch || userBranch,
@@ -1341,6 +1344,7 @@
         matched:     false,
         system_qty:  scanItem._systemQty,
         actual_qty:  Number(actualVal),
+        exp_ym:      expYm || null,
         audited_by:  employeeName
       });
       if (ok) { afterScanSaved(); loadMyDailyCount(); }
@@ -1435,6 +1439,8 @@
       const balInput = document.getElementById('mismatch-balance-input');
       balInput.value = '';
       balInput.style.borderColor = '';
+      const expInput = document.getElementById('mismatch-exp-input');
+      if (expInput) { expInput.value = ''; expInput.style.borderColor = ''; }
       openModalFullScreen(document.getElementById('mismatch-modal'));
       setTimeout(() => balInput.focus(), 100);
     }
@@ -1454,21 +1460,30 @@
         return;
       }
 
+      // الصلاحية: input[type=month] بيدّي 'YYYY-MM' جاهزة — نفس الصيغة اللي القاعدة مستنياها
+      const expEl = document.getElementById('mismatch-exp-input');
+      const exp   = expEl ? String(expEl.value || '').trim() : '';
+      if (exp && !/^[0-9]{4}-(0[1-9]|1[0-2])$/.test(exp)) {
+        expEl.style.borderColor = 'var(--danger,#dc2626)';
+        expEl.focus();
+        return;
+      }
+
       const id = mismatchTargetId;
       closeMismatchModal();
 
       if (mismatchSource === 'stale') {
-        await submitStaleMismatchResult(id, val);
+        await submitStaleMismatchResult(id, val, exp);
       } else if (mismatchSource === 'report') {
-        await submitFullReportMismatchResult(id, val);
+        await submitFullReportMismatchResult(id, val, exp);
       } else if (mismatchSource === 'scan') {
-        await submitScanMismatchResult(val);
+        await submitScanMismatchResult(val, exp);
       } else if (mismatchSource === 'live') {
-        await submitLiveMismatchResult(id, val);
+        await submitLiveMismatchResult(id, val, exp);
       } else {
         const item = rawData.find(x => String(x.id) === String(id));
         const sys  = item ? item.system_balance : undefined;
-        await handleAction(id, 'mismatch', { actual_balance: val, system_balance: sys });
+        await handleAction(id, 'mismatch', { actual_balance: val, system_balance: sys, exp_ym: exp });
       }
     }
 
@@ -1538,6 +1553,7 @@
           matched:     isDone,
           system_qty:  extra.system_balance ?? clicked?.system_balance ?? null,
           actual_qty:  isDone ? (extra.system_balance ?? clicked?.system_balance ?? null) : extra.actual_balance,
+          exp_ym:      extra.exp_ym || null,
           audited_by:  employeeName
         });
         loadMyDailyCount();
@@ -1826,13 +1842,14 @@
       else { alert('⚠️ فشل الحفظ، يرجى المحاولة مجدداً'); }
     }
 
-    async function submitFullReportMismatchResult(ri, actualVal) {
+    async function submitFullReportMismatchResult(ri, actualVal, expYm) {
       const row = currentFullReportData[ri];
       if (!row) return;
       const ok = await jardGuardedSubmit({
         branch: userBranch, category: row.category || 'erp', code: row.code,
         itm_name_ar: row.itm_name_ar, itm_name_en: row.itm_name_en,
-        matched: false, system_qty: row._systemQty, actual_qty: Number(actualVal), audited_by: employeeName
+        matched: false, system_qty: row._systemQty, actual_qty: Number(actualVal),
+        exp_ym: expYm || null, audited_by: employeeName
       });
       if (ok) { row._rejarded = 'mismatch'; renderFullReport(); loadMyDailyCount(); }
       else { alert('⚠️ فشل الحفظ، يرجى المحاولة مجدداً'); }
@@ -2056,7 +2073,7 @@
       }
     }
 
-    async function submitStaleMismatchResult(code, actualVal) {
+    async function submitStaleMismatchResult(code, actualVal, expYm) {
       const item = currentStaleData.find(x => x.code === code);
       if (!item) return;
 
@@ -2069,6 +2086,7 @@
         matched:     false,
         system_qty:  item._systemQty,
         actual_qty:  Number(actualVal),
+        exp_ym:      expYm || null,
         audited_by:  employeeName
       });
 
