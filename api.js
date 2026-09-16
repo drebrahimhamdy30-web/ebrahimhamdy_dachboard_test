@@ -968,17 +968,29 @@ async function fetchJardItems(branch, category) {
 }
 
 // ---- تسجيل نتيجة جرد صنف — لصفحة الجرد الجديدة ----
-const JARD_AUDIT_LOG_URL = "https://agent.ebrahimhamdy.com/webhook/jard_audit_log";
+// تسجيل الجرد مباشرة في القاعدة عبر submit_jard_audit (بدل ويبهوك n8n).
+// ⚠️ الويبهوك كان مفتوح من غير تسجيل دخول، ونود الإدخال فيه كانت بترمي أي
+//    حقل جديد (زي exp_ym) من غير خطأ. الحراسة دلوقتي على السيرفر: الدور،
+//    والاسم من التوكن، ومنع «دخول عام للفرع»، وموظف الجرد في فرعه بس.
+// بترجّع true/false زي الأول؛ ولو السيرفر رفض بسبب، السبب في lastJardAuditError.
+let lastJardAuditError = '';
 async function submitJardAudit(payload) {
+  lastJardAuditError = '';
   try {
-    const response = await fetch(JARD_AUDIT_LOG_URL, {
+    const response = await fetch(`${SB_URL_API}/rest/v1/rpc/submit_jard_audit`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      headers: await sbH({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ p: payload })
     });
-    return response.ok;
+    let out = null;
+    try { out = await response.json(); } catch (e) { out = null; }
+    if (response.ok && out && out.success) return true;
+    lastJardAuditError = (out && out.success === false && out.error) ||   // سبب الرفض من الدالة؛ غير كده رسالة الجلسة بالعربي
+      (typeof sbFailMsg === 'function' ? sbFailMsg('فشل الحفظ', response.status) : 'فشل الحفظ');
+    return false;
   } catch (e) {
     console.error('submitJardAudit error:', e);
+    lastJardAuditError = 'فشل الاتصال';
     return false;
   }
 }
