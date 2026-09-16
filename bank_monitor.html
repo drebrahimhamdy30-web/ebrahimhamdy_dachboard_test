@@ -97,6 +97,34 @@
 
     .pagination-row { display:flex; justify-content:center; gap:12px; margin-top:16px; align-items:center; }
     .page-info { font-size:0.8rem; color:var(--text-secondary); font-weight:700; }
+
+    /* تعديل المصدر من الجدول */
+    .src-select { border:1px solid transparent; border-radius:20px; padding:2px 6px; font-size:0.68rem; font-weight:700; font-family:var(--font); cursor:pointer; outline:none; }
+    .src-select:hover, .src-select:focus { border-color:var(--border); }
+    .src-manual { color:#a16207; font-weight:900; font-size:0.8rem; cursor:help; }
+
+    /* رفع كشف الحساب */
+    .imp-overlay { display:none; position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:99999; align-items:center; justify-content:center; padding:16px; }
+    .imp-box { background:var(--surface); border-radius:var(--radius-lg); width:100%; max-width:560px; max-height:92vh; overflow:auto; padding:18px; box-shadow:0 20px 60px rgba(0,0,0,.3); }
+    .imp-title { font-weight:900; font-size:1rem; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+    .imp-file { font-size:0.78rem; color:var(--text-secondary); margin-bottom:10px; word-break:break-all; }
+    .imp-file i { color:#16a34a; }
+    .imp-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:10px; }
+    .imp-grid-3 { grid-template-columns:repeat(3,1fr); }
+    @media(max-width:560px){ .imp-grid{grid-template-columns:1fr 1fr;} .imp-grid-3{grid-template-columns:1fr 1fr 1fr;} }
+    .imp-grid > div { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-sm); padding:8px; text-align:center; }
+    .imp-grid span { display:block; font-size:0.68rem; color:var(--text-muted); margin-bottom:3px; }
+    .imp-grid b { font-size:0.9rem; }
+    .imp-grid .imp-new { background:#ecfdf5; border-color:#16a34a; }
+    .imp-grid .imp-new b { color:#15803d; font-size:1.1rem; }
+    .imp-grid .imp-bad { background:#fef2f2; border-color:#dc2626; }
+    .imp-ok   { background:#ecfdf5; color:#15803d; border-radius:var(--radius-sm); padding:8px 10px; font-size:0.78rem; margin-bottom:10px; }
+    .imp-warn { background:#fffbeb; color:#92400e; border:1px solid #f59e0b; border-radius:var(--radius-sm); padding:8px 10px; font-size:0.78rem; margin-bottom:10px; }
+    .imp-sub  { font-size:0.78rem; font-weight:700; color:var(--text-secondary); margin:6px 0; }
+    .imp-table { width:100%; border-collapse:collapse; font-size:0.8rem; }
+    .imp-table th { text-align:right; padding:6px 8px; background:var(--surface-3); font-size:0.7rem; }
+    .imp-table td { padding:6px 8px; border-bottom:1px solid var(--surface-3); }
+    .imp-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:14px; }
   </style>
 </head>
 <body>
@@ -107,9 +135,11 @@
       <div class="page-header">
         <div class="page-title"><i class="fas fa-university"></i> متابعة الحساب البنكي</div>
         <div style="display:flex;gap:8px;">
-          <button class="btn" style="background:#e0f2fe;color:#0369a1;" onclick="importFromBank()" id="import-btn">
-            <i class="fas fa-file-import"></i> استيراد من البنك
+          <button class="btn" style="background:#dcfce7;color:#15803d;" onclick="pickStatement()" id="import-btn"
+                  title="كشف الحساب زي ما بيتنزل من البنك (.xls / .xlsx)">
+            <i class="fas fa-file-excel"></i> رفع كشف الحساب
           </button>
+          <input type="file" id="stmt-file" accept=".xls,.xlsx,.csv" style="display:none" onchange="onStatementFile(this)">
           <button class="btn btn-primary" onclick="loadAll()"><i class="fas fa-sync-alt"></i> تحديث</button>
         </div>
       </div>
@@ -260,16 +290,34 @@
     </div>
   </div>
 
+  <!-- معاينة كشف الحساب قبل الإضافة -->
+  <div class="imp-overlay" id="import-modal" onclick="if(event.target===this)closeImport()">
+    <div class="imp-box">
+      <div class="imp-title"><i class="fas fa-file-excel" style="color:#16a34a"></i> معاينة كشف الحساب</div>
+      <div id="imp-body"></div>
+      <div class="imp-actions">
+        <button class="btn" style="background:var(--surface-3);color:var(--text-secondary);" onclick="closeImport()">إلغاء</button>
+        <button class="btn btn-primary" id="imp-confirm" onclick="confirmImport()"><i class="fas fa-check"></i> إضافة</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="config.js?v=20260904c"></script>
   <script src="session.js?v=20260905"></script>
   <script src="branches.js?v=20260904d"></script>
   <script src="pages.js?v=20260904d"></script>
   <script src="brand.js?v=20260904c"></script>
-  <script src="api.js?v=20260904c"></script>
+  <script src="api.js?v=20260916jard"></script>
   <script>
-    const BM_GET      = 'https://agent.ebrahimhamdy.com/webhook/bmonline';
-    const BM_POST     = 'https://agent.ebrahimhamdy.com/webhook/bmonlinepost';
-    const IMPORT_URL  = 'https://agent.ebrahimhamdy.com/webhook/updatebmonlne';
+    // ═══ مصدر البيانات: جدول bank_transactions في القاعدة (بدل Data Table بتاع n8n) ═══
+    // ⚠️ المعاملات كانت في n8n (bmonline / bmonlinepost / updatebmonlne)، والاستيراد
+    //    التلقائي كان واقف من 14/9، والتصنيف كان بيحط «POS PURCHASE» باي موب ومش
+    //    بيعرف أبو قير. دلوقتي كشف الحساب بيترفع Excel من هنا، والتصنيف والحراسة
+    //    ومنع التكرار كلهم على السيرفر (migrate_20).
+    const SB_REST = SB_URL_API + '/rest/v1/';
+    const SRC_MAP = { instapay:'انستاباي', paymob:'باي موب', abuqir:'أبو قير', other:'أخرى' };
+    const SRC_CLS = { instapay:'src-instapay', paymob:'src-paymob', abuqir:'src-abuqir', other:'src-other' };
 
     let allTx       = [];
     let openingBal  = 0;
@@ -287,7 +335,7 @@
     checkAuth().then(async user => {
       if (!user) return;
       currentUser = user.username || user.name || user || '';
-      isAdmin     = (user.role === 'admin');
+      isAdmin     = (user.role === 'admin' || (typeof Session !== 'undefined' && Session.role && Session.role() === 'admin'));
       if (isAdmin) {
         document.getElementById('opening-input').removeAttribute('readonly');
         document.getElementById('opening-btn').style.display = 'inline-flex';
@@ -296,53 +344,67 @@
       await loadAll();
     });
 
-    // ===== استيراد من البنك =====
-    async function importFromBank() {
-      if (!confirm('هل تريد استيراد كشف الحساب من البنك؟')) return;
-      const btn = document.getElementById('import-btn');
-      btn.disabled = true;
-      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الاستيراد...';
+    // ===== نداءات القاعدة =====
+    async function rpc(name, body) {
+      let r, out = null;
       try {
-        const resp = await fetch(IMPORT_URL, { method: 'GET' });
-        if (resp.ok) {
-          await loadAll();
-          alert('✅ تم الاستيراد بنجاح');
-        } else { alert('❌ فشل الاستيراد'); }
-      } catch(e) { alert('❌ خطأ في الاتصال'); }
-      btn.disabled = false;
-      btn.innerHTML = '<i class="fas fa-file-import"></i> استيراد من البنك';
+        r = await fetch(SB_REST + 'rpc/' + name, {
+          method: 'POST', headers: await sbH({ 'Content-Type': 'application/json' }), body: JSON.stringify(body || {})
+        });
+        try { out = await r.json(); } catch (e) { out = null; }
+      } catch (e) { return { success: false, error: 'فشل الاتصال' }; }
+      if (r.ok && out && out.success !== false) return out;
+      return { success: false, error: (out && out.success === false && out.error) || sbFailMsg('فشل العملية', r.status) };
+    }
+
+    // وقت القاهرة كنص «YYYY-MM-DD HH:MM:SS» — لفلتر الشهر والترتيب
+    function cairoStamp(iso) {
+      try { return new Date(iso).toLocaleString('sv-SE', { timeZone: 'Africa/Cairo' }); } catch (e) { return ''; }
     }
 
     // ===== تحميل البيانات =====
     async function loadAll() {
       try {
-        const txResp = await fetch(BM_GET + '?type=get').then(r => r.json()).catch(() => []);
-        allTx = Array.isArray(txResp) ? txResp : (txResp.data || []);
+        const cols = 'id,tx_at,amount,description,source,source_auto,source_set_by,is_posted,posted_by,created_by,bank_no';
+        let rows = [], from = 0; const PAGE = 1000;
+        while (true) {
+          const r = await fetch(SB_REST + `bank_transactions?select=${cols}&order=tx_at.desc&limit=${PAGE}&offset=${from}`,
+                                { headers: await sbH() });
+          if (!r.ok) throw new Error(sbFailMsg('فشل التحميل', r.status));
+          const chunk = await r.json();
+          rows = rows.concat(chunk);
+          if (chunk.length < PAGE) break;
+          from += PAGE;
+        }
+        allTx = rows.map(t => ({ ...t, date: cairoStamp(t.tx_at) }));
         // تنظيف التحديدات اللي مبقاش ليها معاملات
         selectedIds.forEach(id => {
-          if (!allTx.find(t => String(t.id) === String(id))) selectedIds.delete(id);
+          if (!allTx.find(t => String(t.id) === String(id) && !t.is_posted)) selectedIds.delete(id);
         });
         try {
-          const settResp = await fetch(BM_GET + '?type=get_settings').then(r => r.json());
-          const settings = Array.isArray(settResp) ? settResp : (settResp.data || []);
-          const obRow    = settings.find(s => s.key === 'opening_balance');
-          openingBal     = obRow ? parseFloat(obRow.value) || 0 : 0;
+          const s = await fetch(SB_REST + 'bank_settings?select=value&key=eq.opening_balance', { headers: await sbH() })
+                          .then(r => r.json());
+          openingBal = (Array.isArray(s) && s[0]) ? (parseFloat(s[0].value) || 0) : 0;
           document.getElementById('opening-input').value = openingBal || '';
-        } catch(e) { openingBal = 0; }
+        } catch (e) { openingBal = 0; }
         updateKPIs();
         renderTable();
-      } catch(e) {
+      } catch (e) {
         document.getElementById('bm-tbody').innerHTML =
-          '<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل التحميل</td></tr>';
+          `<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ ${escHtml(e.message || 'فشل التحميل')}</td></tr>`;
       }
+    }
+
+    function escHtml(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
     }
 
     // ===== KPIs =====
     function updateKPIs() {
       const total  = allTx.reduce((s,t) => s+(parseFloat(t.amount)||0), 0);
-      const posted = allTx.filter(t => t.is_posted==='true'||t.is_posted===true).reduce((s,t) => s+(parseFloat(t.amount)||0), 0);
+      const posted = allTx.filter(t => t.is_posted).reduce((s,t) => s+(parseFloat(t.amount)||0), 0);
       const count  = allTx.length;
-      const pCount = allTx.filter(t => t.is_posted==='true'||t.is_posted===true).length;
+      const pCount = allTx.filter(t => t.is_posted).length;
       document.getElementById('kpi-total').textContent     = fmt(openingBal + total);
       document.getElementById('kpi-posted').textContent    = fmt(openingBal + posted);
       document.getElementById('kpi-pending').textContent   = fmt(total - posted);
@@ -371,11 +433,195 @@
     function updateSourceTotals() {
       ['instapay','paymob','abuqir','other'].forEach(src => {
         const total = allTx
-          .filter(t => t.source === src && !(t.is_posted==='true'||t.is_posted===true))
+          .filter(t => t.source === src && !t.is_posted)
           .reduce((s,t) => s+(parseFloat(t.amount)||0), 0);
         const el = document.getElementById('sum-' + src);
         if (el) el.textContent = total !== 0 ? fmt(Math.abs(total)) : '—';
       });
+    }
+
+    // ═══════════════ رفع كشف الحساب (Excel) ═══════════════
+    let pendingImport = null;   // { rows, file }
+
+    function pickStatement() {
+      if (typeof XLSX === 'undefined') { alert('⚠️ مكتبة Excel لسه بتتحمّل، جرّب تاني بعد ثانية'); return; }
+      const inp = document.getElementById('stmt-file');
+      inp.value = '';
+      inp.click();
+    }
+
+    const MON = { JAN:1,FEB:2,MAR:3,APR:4,MAY:5,JUN:6,JUL:7,AUG:8,SEP:9,OCT:10,NOV:11,DEC:12 };
+    const p2 = n => String(n).padStart(2, '0');
+
+    // «31-AUG-26 07.20.04.211516 PM» (شكل البنك) — وكمان أشكال شائعة لو البنك غيّر التصدير
+    function parseBankDT(v) {
+      if (v instanceof Date && !isNaN(v)) {
+        return `${v.getFullYear()}-${p2(v.getMonth()+1)}-${p2(v.getDate())} ${p2(v.getHours())}:${p2(v.getMinutes())}:${p2(v.getSeconds())}`;
+      }
+      const s = String(v || '').trim().toUpperCase();
+      let m = s.match(/^(\d{1,2})-([A-Z]{3})-(\d{2,4})\s+(\d{1,2})[.:](\d{2})[.:](\d{2})(?:[.,]\d+)?\s*(AM|PM)?$/);
+      if (m && MON[m[2]]) {
+        let h = +m[4];
+        if (m[7]) { h = h % 12; if (m[7] === 'PM') h += 12; }
+        const y = m[3].length === 2 ? '20' + m[3] : m[3];
+        return `${y}-${p2(MON[m[2]])}-${p2(m[1])} ${p2(h)}:${m[5]}:${m[6]}`;
+      }
+      m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+      if (m) return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6] || '00'}`;
+      m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/);
+      if (m) {
+        let h = +m[4];
+        if (m[7]) { h = h % 12; if (m[7] === 'PM') h += 12; }
+        return `${m[3]}-${p2(m[2])}-${p2(m[1])} ${p2(h)}:${m[5]}:${m[6] || '00'}`;
+      }
+      return '';
+    }
+    function parseBankDate(v) {
+      const s = String(v || '').trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      const d = parseBankDT(s + (/\d{1,2}[.:]\d{2}/.test(s) ? '' : ' 00.00.00 AM'));
+      return d ? d.slice(0, 10) : '';
+    }
+    const num = v => {
+      const n = parseFloat(String(v == null ? '' : v).replace(/,/g, '').trim());
+      return isNaN(n) ? 0 : n;
+    };
+
+    function parseStatement(wb) {
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const grid = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+      const hi = grid.findIndex(r => r.some(c => String(c).trim() === 'رقم الحركة') &&
+                                     r.some(c => ['دائن','مدين'].includes(String(c).trim())));
+      if (hi < 0) throw new Error('الملف ده مش كشف الحساب المعتاد — مالقيتش صف العناوين (رقم الحركة / دائن / مدين)');
+      const H = grid[hi].map(c => String(c).trim());
+      const col = name => H.indexOf(name);
+      const need = ['تاريخ و وقت المعاملة', 'البيان', 'رقم الحركة', 'دائن', 'مدين'];
+      const miss = need.filter(n => col(n) < 0);
+      if (miss.length) throw new Error('أعمدة ناقصة في الكشف: ' + miss.join('، '));
+
+      // بيانات الرأس: الرصيد الافتتاحي والحالي (للتحقق إن مفيش صفوف ضاعت)
+      const meta = {};
+      grid.slice(0, hi).forEach(r => r.forEach((c, i) => {
+        const k = String(c).trim();
+        if (['الرصيد الافتتاحي','الرصيد الحالي','تاريخ البداية','تاريخ النهاية','رقم الحساب'].includes(k)) meta[k] = r[i + 1];
+      }));
+
+      const at = (r, n) => col(n) >= 0 ? r[col(n)] : '';
+      const rows = grid.slice(hi + 1)
+        .filter(r => String(at(r, 'رقم الحركة')).trim() || String(at(r, 'البيان')).trim())
+        .map(r => ({
+          tx_at:         parseBankDT(at(r, 'تاريخ و وقت المعاملة')),
+          value_date:    parseBankDate(at(r, 'تاريخ الحق')),
+          amount:        +(num(at(r, 'دائن')) - num(at(r, 'مدين'))).toFixed(2),
+          description:   String(at(r, 'البيان')).trim(),
+          bank_no:       String(at(r, 'رقم الحركة')).trim(),
+          ref_no:        String(at(r, 'الرقم المرجعي')).trim(),
+          doc_no:        String(at(r, 'رقم المستند')).trim(),
+          tx_code:       String(at(r, 'كود الحركة')).trim(),
+          balance_after: String(at(r, 'الرصيد بعد المعاملة')).replace(/,/g, '').trim()
+        }));
+      return { rows, meta };
+    }
+
+    async function onStatementFile(input) {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const btn = document.getElementById('import-btn');
+      btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري القراءة...';
+      try {
+        const buf = await file.arrayBuffer();
+        const wb  = XLSX.read(buf, { type: 'array' });
+        const { rows, meta } = parseStatement(wb);
+        if (!rows.length) throw new Error('الكشف مفيهوش معاملات');
+
+        // معاينة من السيرفر (من غير كتابة): الجديد / الموجود / التصنيف
+        const pre = await importChunks(rows, file.name, true);
+        if (!pre.success) throw new Error(pre.error);
+        pendingImport = { rows, file: file.name };
+        showImportPreview(rows, meta, pre, file.name);
+      } catch (e) {
+        alert('❌ ' + (e.message || 'فشل قراءة الملف'));
+      }
+      btn.disabled = false; btn.innerHTML = '<i class="fas fa-file-excel"></i> رفع كشف الحساب';
+    }
+
+    async function importChunks(rows, fileName, dryRun) {
+      const agg = { success: true, rows: 0, invalid: 0, new: 0, inserted: 0, existing: 0, by_source: {} };
+      for (let i = 0; i < rows.length; i += 1000) {
+        const r = await rpc('bank_import_statement', { p_rows: rows.slice(i, i + 1000), p_file: fileName, p_dry_run: dryRun });
+        if (!r.success) return r;
+        ['rows','invalid','new','inserted','existing'].forEach(k => agg[k] += (r[k] || 0));
+        Object.entries(r.by_source || {}).forEach(([s, v]) => {
+          const a = agg.by_source[s] || (agg.by_source[s] = { count: 0, sum: 0 });
+          a.count += v.count; a.sum += +v.sum;
+        });
+      }
+      return agg;
+    }
+
+    function showImportPreview(rows, meta, pre, fileName) {
+      const dates = rows.map(r => r.tx_at).filter(Boolean).sort();
+      const credit = rows.reduce((s, r) => s + (r.amount > 0 ? r.amount : 0), 0);
+      const debit  = rows.reduce((s, r) => s + (r.amount < 0 ? -r.amount : 0), 0);
+
+      // تحقق الكشف: الافتتاحي + كل المعاملات = الحالي؟
+      let check = '';
+      const op = num(meta['الرصيد الافتتاحي']), cl = num(meta['الرصيد الحالي']);
+      if (meta['الرصيد الافتتاحي'] !== undefined && meta['الرصيد الحالي'] !== undefined) {
+        const calc = +(op + credit - debit).toFixed(2);
+        check = Math.abs(calc - cl) < 0.01
+          ? `<div class="imp-ok">✅ الكشف متقري كامل: الافتتاحي ${fmt(op)} + الحركات = الحالي ${fmt(cl)}</div>`
+          : `<div class="imp-warn">⚠️ الحركات مش مطابقة لرصيد الكشف: المحسوب ${fmt(calc)} والكشف بيقول ${fmt(cl)} — ممكن صفوف ماتقريتش</div>`;
+      }
+
+      const srcRows = ['instapay','paymob','abuqir','other'].map(s => {
+        const v = pre.by_source[s];
+        return v ? `<tr><td><span class="source-badge ${SRC_CLS[s]}">${SRC_MAP[s]}</span></td><td>${v.count}</td>
+                    <td class="${v.sum >= 0 ? 'amount-pos' : 'amount-neg'}">${v.sum >= 0 ? '+' : '-'}${fmt(Math.abs(v.sum))}</td></tr>` : '';
+      }).join('');
+
+      document.getElementById('imp-body').innerHTML = `
+        <div class="imp-file"><i class="fas fa-file-excel"></i> ${escHtml(fileName)}</div>
+        <div class="imp-grid">
+          <div><span>الفترة</span><b>${dates.length ? dates[0].slice(0,10) + ' ← ' + dates[dates.length-1].slice(0,10) : '—'}</b></div>
+          <div><span>صفوف الكشف</span><b>${rows.length}</b></div>
+          <div><span>وارد</span><b class="amount-pos">+${fmt(credit)}</b></div>
+          <div><span>صادر</span><b class="amount-neg">-${fmt(debit)}</b></div>
+        </div>
+        ${check}
+        <div class="imp-grid imp-grid-3">
+          <div class="imp-new"><span>جديد هيتضاف</span><b>${pre.new}</b></div>
+          <div><span>موجود قبل كده</span><b>${pre.existing}</b></div>
+          <div class="${pre.invalid ? 'imp-bad' : ''}"><span>غير صالح (هيتساب)</span><b>${pre.invalid}</b></div>
+        </div>
+        ${pre.new ? `<div class="imp-sub">تصنيف الجديد</div>
+          <table class="imp-table"><thead><tr><th>المصدر</th><th>العدد</th><th>الإجمالي</th></tr></thead><tbody>${srcRows}</tbody></table>`
+          : '<div class="imp-ok">كل معاملات الكشف موجودة بالفعل — مفيش حاجة جديدة.</div>'}`;
+      const ok = document.getElementById('imp-confirm');
+      ok.disabled = !pre.new;
+      ok.innerHTML = pre.new ? `<i class="fas fa-check"></i> إضافة ${pre.new} معاملة` : 'مفيش جديد';
+      document.getElementById('import-modal').style.display = 'flex';
+    }
+
+    function closeImport() {
+      document.getElementById('import-modal').style.display = 'none';
+      pendingImport = null;
+    }
+
+    async function confirmImport() {
+      if (!pendingImport) return;
+      const btn = document.getElementById('imp-confirm');
+      btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الإضافة...';
+      const res = await importChunks(pendingImport.rows, pendingImport.file, false);
+      if (!res.success) {
+        alert('❌ ' + res.error);
+        btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> حاول تاني';
+        return;
+      }
+      closeImport();
+      await loadAll();
+      alert(`✅ اتضاف ${res.inserted} معاملة` + (res.existing ? ` · ${res.existing} كانت موجودة` : '') +
+            (res.invalid ? ` · ${res.invalid} صف غير صالح اتساب` : ''));
     }
 
     // ===== تحقق من التكرار =====
@@ -387,12 +633,11 @@
       if (isNaN(amount)) { warning.classList.remove('show'); return; }
       const dup = allTx.find(t => parseFloat(t.amount) === amount && t.source === source);
       if (dup) {
-        const _d = dup.date ? new Date(dup.date) : null;
-        const dateStr = _d
-          ? _d.toLocaleDateString('ar-EG') + ' - ' + _d.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit', hour12:true})
+        const dateStr = dup.tx_at
+          ? new Date(dup.tx_at).toLocaleDateString('ar-EG', { timeZone:'Africa/Cairo' }) + ' - ' +
+            new Date(dup.tx_at).toLocaleTimeString('ar-EG', { timeZone:'Africa/Cairo', hour:'2-digit', minute:'2-digit', hour12:true })
           : '---';
-        const srcMap = { instapay:'انستاباي', paymob:'باي موب', abuqir:'أبو قير', other:'أخرى' };
-        msg.innerHTML = `⚠️ معاملة مكررة! نفس المبلغ <b>${fmt(amount)}</b> ونفس المصدر <b>${srcMap[source]||source}</b> موجودة بتاريخ: <b>${dateStr}</b>`;
+        msg.innerHTML = `⚠️ معاملة مكررة! نفس المبلغ <b>${fmt(amount)}</b> ونفس المصدر <b>${SRC_MAP[source]||source}</b> موجودة بتاريخ: <b>${dateStr}</b>`;
         warning.classList.add('show');
       } else {
         warning.classList.remove('show');
@@ -414,17 +659,9 @@
 
       const btn = document.getElementById('add-btn');
       btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-      try {
-        const resp = await fetch(BM_POST, {
-          method: 'POST', headers: { 'Content-Type':'application/json' },
-          body: JSON.stringify({
-            type: 'insert', date: new Date().toISOString(),
-            description: desc, amount, source, created_by: currentUser
-          })
-        });
-        if (resp.ok) { clearAddRow(); await loadAll(); }
-        else alert('❌ فشل الإضافة');
-      } catch(e) { alert('❌ خطأ في الاتصال'); }
+      const r = await rpc('bank_add_manual', { p_amount: amount, p_source: source, p_description: desc });
+      if (r.success) { clearAddRow(); await loadAll(); }
+      else alert('❌ ' + r.error);
       btn.disabled = false; btn.innerHTML = '<i class="fas fa-plus"></i> إضافة';
     }
 
@@ -436,26 +673,33 @@
       document.getElementById('dup-warning').classList.remove('show');
     }
 
+    // ===== تعديل المصدر (غير المرحّل بس) =====
+    async function changeSource(id, sel) {
+      const t = allTx.find(x => String(x.id) === String(id));
+      const prev = t ? t.source : '';
+      sel.disabled = true;
+      const r = await rpc('bank_set_source', { p_id: Number(id), p_source: sel.value });
+      if (r.success) {
+        if (t) { t.source = sel.value; t.source_set_by = currentUser; }
+        updateKPIs(); renderTable();
+      } else {
+        alert('❌ ' + r.error);
+        sel.value = prev; sel.disabled = false;
+      }
+    }
+
     // ===== ترحيل فردي =====
     async function postTx(id, btn) {
       if (!confirm('تأكيد ترحيل هذه المعاملة؟ لا يمكن التراجع.')) return;
       btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-      try {
-        const resp = await fetch(BM_POST, {
-          method: 'POST', headers: { 'Content-Type':'application/json' },
-          body: JSON.stringify({ type: 'post_transaction', id })
-        });
-        if (resp.ok) {
-          const t = allTx.find(x => String(x.id)===String(id));
-          if (t) t.is_posted = true;
-          selectedIds.delete(String(id));
-          updateKPIs(); renderTable();
-        } else {
-          alert('❌ فشل الترحيل');
-          btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> ترحيل';
-        }
-      } catch(e) {
-        alert('❌ خطأ في الاتصال');
+      const r = await rpc('bank_post', { p_ids: [Number(id)] });
+      if (r.success) {
+        const t = allTx.find(x => String(x.id)===String(id));
+        if (t) t.is_posted = true;
+        selectedIds.delete(String(id));
+        updateKPIs(); renderTable();
+      } else {
+        alert('❌ ' + r.error);
         btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> ترحيل';
       }
     }
@@ -505,28 +749,18 @@
       btn.disabled = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الترحيل...';
 
-      let ok = 0, fail = 0;
-      for (const id of ids) {
-        try {
-          const resp = await fetch(BM_POST, {
-            method: 'POST', headers: { 'Content-Type':'application/json' },
-            body: JSON.stringify({ type: 'post_transaction', id })
-          });
-          if (resp.ok) {
-            const t = allTx.find(x => String(x.id)===String(id));
-            if (t) t.is_posted = true;
-            ok++;
-          } else fail++;
-        } catch(e) { fail++; }
+      // نداء واحد للكل بدل نداء لكل معاملة
+      const r = await rpc('bank_post', { p_ids: ids.map(Number) });
+      if (r.success) {
+        allTx.forEach(t => { if (selectedIds.has(String(t.id))) t.is_posted = true; });
+        selectedIds.clear();
+        updateKPIs(); renderTable();
+        alert(`✅ تم ترحيل ${r.posted} معاملة`);
+      } else {
+        alert('❌ ' + r.error);
       }
-
-      selectedIds.clear();
-      updateKPIs();
-      renderTable();
-
       btn.disabled = false;
       btn.innerHTML = '<i class="fas fa-check"></i> ترحيل المحدد';
-      alert(`✅ تم ترحيل ${ok} معاملة` + (fail ? ` · ❌ فشل ${fail}` : ''));
     }
 
     // ===== رصيد البداية =====
@@ -535,18 +769,13 @@
       if (isNaN(val)) { alert('أدخل رقم صحيح'); return; }
       const btn = document.getElementById('opening-btn');
       btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-      try {
-        const resp = await fetch(BM_POST, {
-          method: 'POST', headers: { 'Content-Type':'application/json' },
-          body: JSON.stringify({ type: 'set_opening', value: val })
-        });
-        if (resp.ok) {
-          openingBal = val; updateKPIs();
-          const msg = document.getElementById('opening-msg');
-          msg.style.display = 'inline';
-          setTimeout(() => msg.style.display = 'none', 3000);
-        } else alert('❌ فشل الحفظ');
-      } catch(e) { alert('❌ خطأ في الاتصال'); }
+      const r = await rpc('bank_set_opening', { p_value: val });
+      if (r.success) {
+        openingBal = val; updateKPIs();
+        const msg = document.getElementById('opening-msg');
+        msg.style.display = 'inline';
+        setTimeout(() => msg.style.display = 'none', 3000);
+      } else alert('❌ ' + r.error);
       btn.disabled = false; btn.innerHTML = '<i class="fas fa-save"></i> حفظ';
     }
 
@@ -561,10 +790,9 @@
       const selectedSrc  = getSelectedSources();
 
       const list = allTx.filter(t => {
-        const isPosted = t.is_posted==='true'||t.is_posted===true;
-        if (statusF==='pending' && isPosted)  return false;
-        if (statusF==='posted'  && !isPosted) return false;
-        if (!selectedSrc.includes(t.source))  return false;
+        if (statusF==='pending' && t.is_posted)  return false;
+        if (statusF==='posted'  && !t.is_posted) return false;
+        if (!selectedSrc.includes(t.source))     return false;
         if (monthF && t.date && !t.date.startsWith(monthF)) return false;
         if (searchAmount !== '') {
           const searchNum = parseFloat(searchAmount);
@@ -573,7 +801,7 @@
         return true;
       });
 
-      list.sort((a,b) => new Date(b.date||0) - new Date(a.date||0));
+      list.sort((a,b) => (b.date||'').localeCompare(a.date||''));
 
       const totalPages = Math.ceil(list.length / pageSize) || 1;
       if (currentPage > totalPages) currentPage = totalPages;
@@ -586,9 +814,7 @@
       document.getElementById('prev-page').disabled = (currentPage === 1);
       document.getElementById('next-page').disabled = (currentPage === totalPages);
 
-      const tbody  = document.getElementById('bm-tbody');
-      const srcMap = { instapay:'انستاباي', paymob:'باي موب', abuqir:'أبو قير', other:'أخرى' };
-      const srcCls = { instapay:'src-instapay', paymob:'src-paymob', abuqir:'src-abuqir', other:'src-other' };
+      const tbody = document.getElementById('bm-tbody');
 
       if (!paged.length) {
         tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد معاملات</td></tr>';
@@ -599,15 +825,15 @@
       }
 
       tbody.innerHTML = paged.map(t => {
-        const isPosted   = t.is_posted==='true'||t.is_posted===true;
+        const isPosted   = !!t.is_posted;
         const amt        = parseFloat(t.amount)||0;
         const isSelected = !isPosted && selectedIds.has(String(t.id));
         const rowClass   = isSelected ? 'selected-row' : (isPosted ? 'posted-row' : 'pending-row');
-        const _d         = t.date ? new Date(t.date) : null;
+        const _d         = t.tx_at ? new Date(t.tx_at) : null;
         const dateStr    = _d
-          ? _d.toLocaleDateString('ar-EG') +
+          ? _d.toLocaleDateString('ar-EG', { timeZone:'Africa/Cairo' }) +
             '<br><span style="font-size:0.68rem;color:var(--text-muted);">' +
-            _d.toLocaleTimeString('ar-EG', {hour:'2-digit', minute:'2-digit', hour12:true}) +
+            _d.toLocaleTimeString('ar-EG', { timeZone:'Africa/Cairo', hour:'2-digit', minute:'2-digit', hour12:true }) +
             '</span>'
           : '---';
 
@@ -615,15 +841,24 @@
           ? '<td></td>'
           : `<td style="text-align:center;"><input type="checkbox" class="row-check" data-id="${t.id}" onchange="onRowCheck(this)" ${isSelected?'checked':''}></td>`;
 
+        // المصدر: غير المرحّل يتعدّل من القايمة؛ ✎ لو اتغيّر عن تصنيف السيستم
+        const manual = t.source_set_by && t.source_auto && t.source_auto !== t.source;
+        const srcCell = isPosted
+          ? `<span class="source-badge ${SRC_CLS[t.source]||'src-other'}">${SRC_MAP[t.source]||escHtml(t.source)||'---'}</span>`
+          : `<select class="src-select ${SRC_CLS[t.source]||'src-other'}" onchange="changeSource('${t.id}', this)"
+               title="${manual ? 'اتغيّر يدوي بواسطة ' + escHtml(t.source_set_by) + ' — تصنيف السيستم: ' + (SRC_MAP[t.source_auto]||'') : 'غيّر المصدر لو التصنيف غلط'}">
+               ${Object.keys(SRC_MAP).map(s => `<option value="${s}" ${s===t.source?'selected':''}>${SRC_MAP[s]}</option>`).join('')}
+             </select>${manual ? ' <span class="src-manual" title="اتغيّر يدوي">✎</span>' : ''}`;
+
         return `<tr class="${rowClass}">
           ${checkCell}
           <td style="white-space:nowrap;font-size:0.78rem;">${dateStr}</td>
-          <td style="font-weight:600;">${t.description||t.cust_name||'---'}</td>
+          <td style="font-weight:600;">${escHtml(t.description)||'---'}</td>
           <td><span class="${amt>=0?'amount-pos':'amount-neg'}">${amt>=0?'+':''}${fmt(Math.abs(amt))}</span></td>
-          <td><span class="source-badge ${srcCls[t.source]||'src-other'}">${srcMap[t.source]||t.source||'---'}</span></td>
-          <td style="font-size:0.75rem;color:var(--text-muted);">${t.created_by||'---'}</td>
+          <td style="white-space:nowrap;">${srcCell}</td>
+          <td style="font-size:0.75rem;color:var(--text-muted);">${escHtml(t.created_by)||'---'}</td>
           <td>${isPosted
-            ? '<span class="posted-badge">✅ مرحّل</span>'
+            ? `<span class="posted-badge" title="${t.posted_by ? 'رحّلها: ' + escHtml(t.posted_by) : ''}">✅ مرحّل</span>`
             : '<span class="pending-badge">⏳ لم يُرحَّل</span>'}</td>
           <td>${isPosted
             ? '<i class="fas fa-lock" style="color:var(--text-muted);font-size:0.8rem;" title="لا يمكن إلغاء الترحيل"></i>'
@@ -632,9 +867,7 @@
       }).join('');
 
       // ضبط حالة select-all حسب الصفحة الحالية (معاملات غير مرحّلة فقط)
-      const pagePendingIds = paged
-        .filter(t => !(t.is_posted==='true'||t.is_posted===true))
-        .map(t => String(t.id));
+      const pagePendingIds = paged.filter(t => !t.is_posted).map(t => String(t.id));
       const selAll = document.getElementById('select-all');
       if (selAll) {
         selAll.checked = pagePendingIds.length>0 && pagePendingIds.every(id => selectedIds.has(id));
