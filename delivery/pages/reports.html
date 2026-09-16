@@ -166,6 +166,7 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
   <button id="tabBtn-orders" onclick="switchTab('orders')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تقارير الطلبات</button>
   <button id="tabBtn-incentives" onclick="switchTab('incentives')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">حوافز الطيارين</button>
   <button id="tabBtn-jard" onclick="switchTab('jard')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تقارير الجرد</button>
+  <button id="tabBtn-prep" onclick="switchTab('prep')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تحضير الطلبات</button>
   <!-- تبويبات المبيعات — مخفية لحد ما نتأكد إن المستخدم مسموح له (أدمن، أو فرعه مفتوح في sales_analysis_access) -->
   <span id="saTabsBar" style="display:none;gap:.5rem;border-right:1px solid var(--border);padding-right:.5rem;margin-right:.25rem">
     <button id="tabBtn-sa_overview" onclick="switchTab('sa_overview')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">نظرة عامة المبيعات</button>
@@ -361,6 +362,34 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
 
 </div><!-- /tab-jard -->
 
+<!-- ========== TAB: تحضير الطلبات ========== -->
+<div id="tab-prep" style="display:none">
+  <div class="card" style="margin-bottom:1rem;background:#eff6ff;border-color:#bfdbfe">
+    <div class="card-body" style="font-size:.74rem;color:#1e3a8a;line-height:1.7">
+      🧪 <strong>أداء المحضّرين</strong> — من سجل «تم التحضير» في شاشة المحضّر خلال الفترة والفرع المختارين، باسم حساب كل محضّر.
+      <strong>المتوسط اليومي</strong> = فواتيره ÷ الأيام اللي حضّر فيها فعلًا.
+      <strong>وقت التحضير</strong> = من ما الطلب بقى نشط لحد «تم التحضير» (ناقص مدة الإيقاف) — <span style="color:#9a3412">بيشمل وقت الانتظار في الطابور</span>.
+      <strong>الوسيط</strong> أدق من المتوسط لو فيه فواتير اتأخرت جدًا. الوقت السالب أو فوق 3 ساعات بيتعدّ «غير طبيعي» ومش داخل في الوقت.
+    </div>
+  </div>
+  <div style="display:flex;justify-content:flex-end;margin-bottom:.75rem">
+    <button class="btn btn-outline btn-sm" onclick="exportPrepCSV()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      تصدير CSV
+    </button>
+  </div>
+  <div class="kpi-grid" id="prepKpiGrid"></div>
+  <div class="card" style="margin-bottom:1.25rem">
+    <div class="card-header"><span class="card-title">لكل محضّر</span><span style="font-size:.68rem;color:var(--text-muted)" id="prepEmpCount"></span></div>
+    <div class="card-body" id="prepEmpBody"><div class="empty-state"><p>اختر الفترة</p></div></div>
+  </div>
+  <div class="card" style="margin-bottom:1.25rem">
+    <div class="card-header"><span class="card-title">يوم بيوم</span><span style="font-size:.68rem;color:var(--text-muted)" id="prepDayCount"></span></div>
+    <div class="card-body" id="prepDayBody"></div>
+    <div id="prepDayPager" style="padding:0 1rem 1rem"></div>
+  </div>
+</div><!-- /tab-prep -->
+
 
 <!-- ========== تبويبات تحليل المبيعات ==========
      البيانات بتتحمّل كسول (أول ما تفتح التاب) عشان ما نضربش 6 نداءات
@@ -477,7 +506,7 @@ let currentTab = 'drivers';
 // كل التبويبات: تقارير التوصيل + تبويبات المبيعات المدموجة.
 // أزرار المبيعات ممكن تكون مخفية (مش مسموح للمستخدم) فبنتخطّى الناقص
 // بدل ما نكتب كل تاب صريح زي قبل كده.
-const ALL_TABS = ['drivers','orders','incentives','jard','sa_overview','sa_emp','sa_price','sa_disc'];
+const ALL_TABS = ['drivers','orders','incentives','jard','prep','sa_overview','sa_emp','sa_price','sa_disc'];
 function switchTab(tab) {
   currentTab = tab;
   for (const t of ALL_TABS) {
@@ -513,6 +542,7 @@ const MAIN_TAB_STEPS = {
   orders:     (f, t) => [() => loadOrdersTab(f, t), renderSlaAnalysis],
   incentives: (f, t) => [() => loadIncentivesTab(f, t)],
   jard:       (f, t) => [() => loadJardTab(f, t)],
+  prep:       (f, t) => [() => loadPrepTab(f, t)],
 };
 
 async function loadMainTab(tab) {
@@ -1401,6 +1431,101 @@ async function loadJardTab(from, to) {
     document.getElementById('jardKpiGrid').innerHTML = '';
     document.getElementById('jardBranchSummary').innerHTML = '';
   }
+}
+
+/* ═══ تقرير تحضير الطلبات ═══
+   الحساب كله على السيرفر (get_prep_report — migrate_21): الأدمن بفلتر الفرع
+   فوق، والمدير بيتقفل على فرعه من التوكن مهما بعت. */
+let prepData = null, prepDayPage = 1;
+const PREP_PAGE = 30;
+const _pm = v => v == null ? '—' : Number(v).toLocaleString('ar-EG', { maximumFractionDigits: 1 }) + ' د';
+const _pn = v => v == null ? '—' : Number(v).toLocaleString('ar-EG', { maximumFractionDigits: 1 });
+const _pe = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+
+async function loadPrepTab(from, to) {
+  const body = document.getElementById('prepEmpBody');
+  if (!from || !to) { prepData = null; body.innerHTML = '<div class="empty-state"><p>اختر الفترة</p></div>'; return; }
+  body.innerHTML = '<div class="empty-state"><p>⏳ جاري التحميل...</p></div>';
+  try {
+    const { data, error } = await db.rpc('get_prep_report', { p_from: from, p_to: to, p_branch: effectiveBranch() || null });
+    if (error) throw error;
+    if (!data || data.success === false) throw new Error((data && data.error) || 'تعذّر التحميل');
+    prepData = data; prepDayPage = 1;
+    renderPrep();
+  } catch (e) {
+    console.error('loadPrepTab', e);
+    prepData = null;
+    document.getElementById('prepKpiGrid').innerHTML = '';
+    document.getElementById('prepDayBody').innerHTML = '';
+    document.getElementById('prepDayPager').innerHTML = '';
+    body.innerHTML = '<div class="empty-state"><p>تعذّر تحميل تقرير التحضير — ' + _pe(e.message || '') + '</p></div>';
+  }
+}
+
+function renderPrep() {
+  const d = prepData; if (!d) return;
+  const T = d.totals || {};
+  document.getElementById('prepKpiGrid').innerHTML = `
+    <div class="stat-card"><div class="stat-label">فواتير اتحضّرت</div><div class="stat-value">${_pn(T.invoices)}</div></div>
+    <div class="stat-card"><div class="stat-label">محضّرين</div><div class="stat-value">${_pn(T.preparers)}</div></div>
+    <div class="stat-card"><div class="stat-label">متوسط يومي (الفرع)</div><div class="stat-value">${_pn(T.per_day)}</div></div>
+    <div class="stat-card"><div class="stat-label">متوسط وقت التحضير / فاتورة</div><div class="stat-value">${_pm(T.avg_mins)}</div></div>
+    <div class="stat-card"><div class="stat-label">الوسيط / فاتورة</div><div class="stat-value">${_pm(T.median_mins)}</div></div>`;
+
+  const U = d.per_user || [];
+  document.getElementById('prepEmpCount').textContent = '(' + U.length + ' محضّر)';
+  const th = 'style="padding:.5rem;white-space:nowrap"', td = 'style="padding:.5rem"';
+  document.getElementById('prepEmpBody').innerHTML = U.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.78rem">
+    <thead><tr style="text-align:right;color:var(--text-muted);border-bottom:2px solid var(--border)">
+      <th ${th}>المحضّر</th><th ${th}>الفرع</th><th ${th}>الفواتير</th><th ${th}>أيام الشغل</th>
+      <th ${th}>متوسط يومي</th><th ${th}>متوسط وقت/فاتورة</th><th ${th}>الوسيط</th><th ${th}>90% خلصوا في</th><th ${th}>غير طبيعي</th></tr></thead>
+    <tbody>${U.map(u => `<tr style="border-bottom:1px solid var(--border)">
+      <td ${td}><b style="color:var(--primary)">${_pe(u.who || '—')}</b></td>
+      <td ${td}>${_pe(u.branches || '—')}</td>
+      <td ${td}><b>${_pn(u.invoices)}</b></td>
+      <td ${td}>${_pn(u.days)}</td>
+      <td ${td}><b>${_pn(u.per_day)}</b></td>
+      <td ${td}><b>${_pm(u.avg_mins)}</b></td>
+      <td ${td}>${_pm(u.median_mins)}</td>
+      <td ${td}>${_pm(u.p90_mins)}</td>
+      <td style="padding:.5rem;color:${u.outliers ? '#b45309' : 'var(--text-muted)'}">${_pn(u.outliers)}</td></tr>`).join('')}</tbody></table></div>`
+    : '<div class="empty-state"><p>مفيش فواتير اتحضّرت في الفترة دي</p></div>';
+
+  const D = d.per_day || [];
+  const pages = Math.max(1, Math.ceil(D.length / PREP_PAGE));
+  if (prepDayPage > pages) prepDayPage = pages;
+  const slice = D.slice((prepDayPage - 1) * PREP_PAGE, prepDayPage * PREP_PAGE);
+  document.getElementById('prepDayCount').textContent = D.length ? '(' + D.length + ' صف)' : '';
+  document.getElementById('prepDayBody').innerHTML = D.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.78rem">
+    <thead><tr style="text-align:right;color:var(--text-muted);border-bottom:2px solid var(--border)">
+      <th ${th}>اليوم</th><th ${th}>المحضّر</th><th ${th}>الفواتير</th><th ${th}>متوسط وقت/فاتورة</th></tr></thead>
+    <tbody>${slice.map(r => `<tr style="border-bottom:1px solid var(--border)">
+      <td ${td}>${new Date(r.day + 'T12:00:00').toLocaleDateString('ar-EG', { weekday:'long', day:'numeric', month:'numeric' })}</td>
+      <td ${td}>${_pe(r.who || '—')}</td><td ${td}><b>${_pn(r.invoices)}</b></td><td ${td}>${_pm(r.avg_mins)}</td></tr>`).join('')}</tbody></table></div>`
+    : '<div class="empty-state"><p>لا بيانات</p></div>';
+
+  const pg = document.getElementById('prepDayPager');
+  if (pages <= 1) { pg.innerHTML = ''; return; }
+  const b = (label, to, dis, act) => `<button class="btn btn-outline btn-sm" ${dis ? 'disabled' : ''} onclick="prepGoto(${to})" style="min-width:32px;${act ? 'background:var(--primary);color:#fff' : ''}">${label}</button>`;
+  let nums = '';
+  for (let i = Math.max(1, prepDayPage - 2); i <= Math.min(pages, prepDayPage + 2); i++) nums += b(i, i, false, i === prepDayPage);
+  pg.innerHTML = `<div style="display:flex;gap:.35rem;align-items:center;justify-content:center;flex-wrap:wrap">
+    ${b('«', 1, prepDayPage <= 1)}${b('‹', prepDayPage - 1, prepDayPage <= 1)}${nums}${b('›', prepDayPage + 1, prepDayPage >= pages)}${b('»', pages, prepDayPage >= pages)}
+    <span style="font-size:.72rem;color:var(--text-muted);margin-inline-start:.5rem">صفحة ${prepDayPage} من ${pages}</span></div>`;
+}
+function prepGoto(n) { prepDayPage = n; renderPrep(); document.getElementById('prepDayBody').scrollIntoView({ behavior:'smooth', block:'start' }); }
+
+function exportPrepCSV() {
+  if (!prepData) return;
+  const rows = [['المحضّر','الفرع','الفواتير','أيام الشغل','متوسط يومي','متوسط وقت/فاتورة (دقيقة)','الوسيط (دقيقة)','90% (دقيقة)','غير طبيعي']]
+    .concat((prepData.per_user || []).map(u => [u.who, u.branches, u.invoices, u.days, u.per_day, u.avg_mins, u.median_mins, u.p90_mins, u.outliers]))
+    .concat([[], ['اليوم','المحضّر','الفواتير','متوسط وقت/فاتورة (دقيقة)']])
+    .concat((prepData.per_day || []).map(r => [r.day, r.who, r.invoices, r.avg_mins]));
+  const csv = '\ufeff' + rows.map(r => r.map(v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"').join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = 'تحضير_الطلبات_' + document.getElementById('dateFrom').value + '_' + document.getElementById('dateTo').value + '.csv';
+  a.click();
 }
 
 function _isGeneric(r) { return (r.audited_by || '').trim() === (r.branch || '').trim(); }
