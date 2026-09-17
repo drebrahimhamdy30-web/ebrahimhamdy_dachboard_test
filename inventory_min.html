@@ -65,7 +65,7 @@
 
         <!-- نتيجة البحث -->
         <div id="lookup-details" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;align-items:flex-end;">
+          <div style="display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr 1fr;gap:12px;align-items:flex-end;">
             <div>
               <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">اسم الصنف</label>
               <input type="text" id="lookup-name" class="form-input" readonly style="background:var(--surface-3);color:var(--text-muted);">
@@ -77,6 +77,10 @@
             <div>
               <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">نوع الصنف</label>
               <input type="text" id="lookup-type" class="form-input" readonly style="background:var(--surface-3);color:var(--text-muted);">
+            </div>
+            <div>
+              <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">الفرع</label>
+              <select id="lookup-branch" class="form-select" onchange="onLookupBranchChange()"></select>
             </div>
             <div>
               <label style="display:block;font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:5px;">الحد الأدنى</label>
@@ -159,6 +163,9 @@
       activeUser = user;
       if (user) {
         userBranch = (Session.branch()).trim();
+        isAdminUser = Session.isAdmin();
+        // الأدمن فرعه «كل الفروع» — فلازم يختار الفرع اللي الحد بيتسجّل عليه
+        Branches.ready().then(fillLookupBranches);
         try {
           const d = localStorage.getItem('minstock_cover_days');
           if (d !== null && document.getElementById('coverDays')) document.getElementById('coverDays').value = d;
@@ -435,6 +442,43 @@
       }
     }
 
+    // الفرع اللي الحد الأدنى بيتسجّل عليه: الأدمن بيختار (وممكن كل الفروع)،
+    // وغيره فرعه بس (نفس حراسة set_stock_limit على السيرفر).
+    let isAdminUser = false;
+    function fillLookupBranches() {
+      const sel = document.getElementById('lookup-branch');
+      if (!sel) return;
+      const names = Branches.names();
+      if (isAdminUser) {
+        sel.innerHTML = names.map(b => '<option value="' + escHtml(b) + '">' + escHtml(b) + '</option>').join('')
+          + '<option value="*">كل الفروع (نفس الحد)</option>';
+        sel.disabled = false;
+      } else {
+        sel.innerHTML = '<option value="' + escHtml(userBranch) + '">' + escHtml(userBranch) + '</option>';
+        sel.disabled = true;
+      }
+    }
+    function targetBranches() {
+      const v = (document.getElementById('lookup-branch') || {}).value || userBranch;
+      return v === '*' ? Branches.names() : [v];
+    }
+    function onLookupBranchChange() {
+      const m = lastPicked;
+      if (!m) return;
+      const brs = targetBranches();
+      const exists = brs.every(b => allData.some(x =>
+        String(x.item_code).trim() === String(m.code) && Branches.same(x.branch, b)));
+      if (exists) {
+        document.getElementById('lookup-result').innerHTML =
+          '<span style="color:var(--warning);font-size:0.85rem;">⚠️ «' + escHtml(m.name) + '» متسجّل بالفعل في ' + escHtml(brs.join(' و ')) + ' — عدّل حده من الجدول تحت</span>';
+      } else {
+        document.getElementById('lookup-result').innerHTML = '';
+      }
+      const suf = brs.length === 1 ? sufOf(brs[0]) : null;
+      document.getElementById('lookup-stock').value = suf ? nOf(m['qty_' + suf])
+        : (nOf(m.qty_m) + nOf(m.qty_s) + nOf(m.qty_b)) + ' (مجموع الفروع)';
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // البحث: بالكود أو بالاسم (بحث ذكي)
     // ═══════════════════════════════════════════════════════════════
@@ -502,27 +546,18 @@
     function escHtml(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
     // اختيار صنف من النتائج → يملا خانات الحفظ
+    let lastPicked = null;
     function pickMatch(i) {
       const m = lastMatches[i];
       if (!m) return;
-      const exists = allData.some(x =>
-        String(x.item_code).trim() === String(m.code) && Branches.same(x.branch, userBranch));
-      if (exists) {
-        document.getElementById('lookup-result').innerHTML =
-          '<span style="color:var(--warning);font-size:0.85rem;">⚠️ «' + escHtml(m.name) + '» متسجّل بالفعل لفرع ' + escHtml(userBranch) + ' — عدّل حده من الجدول تحت</span>';
-        document.getElementById('lookup-details').style.display = 'none';
-        return;
-      }
-      const suf = sufOf(userBranch);
-      const bal = suf ? nOf(m['qty_' + suf]) : (nOf(m.qty_m) + nOf(m.qty_s) + nOf(m.qty_b));
+      lastPicked = m;
       document.getElementById('lookup-code').value  = m.code;
       document.getElementById('lookup-name').value  = m.name;
-      document.getElementById('lookup-stock').value = bal + (suf ? '' : ' (مجموع الفروع)');
       document.getElementById('lookup-type').value  = m.med ? 'دواء' : 'غير دواء';
       document.getElementById('lookup-min').value   = '';
-      document.getElementById('lookup-result').innerHTML = '';
       document.getElementById('lookup-matches').innerHTML = '';
       document.getElementById('lookup-details').style.display = '';
+      onLookupBranchChange();   // الرصيد + تنبيه «متسجّل بالفعل» حسب الفرع المختار
       setTimeout(() => { const el = document.getElementById('lookup-min'); if (el) el.focus(); }, 30);
     }
 
@@ -538,18 +573,19 @@
       btn.disabled  = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
 
-      let success = false, err = '';
-      try {
-        const r = await fetch(SB_URL_API + '/rest/v1/rpc/set_stock_limit', {
-          method: 'POST', headers: await sbH({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ p_code: code, p_branch: userBranch, p_min: Number(minS), p_name: name, p_type: type }) });
-        const j = await r.json();
-        success = !!(j && j.success);
-        err = (j && j.error) || '';
-      } catch (e) { err = 'مفيش اتصال'; }
+      let saved = 0; const errs = [];
+      for (const br of targetBranches()) {
+        try {
+          const r = await fetch(SB_URL_API + '/rest/v1/rpc/set_stock_limit', {
+            method: 'POST', headers: await sbH({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ p_code: code, p_branch: br, p_min: Number(minS), p_name: name, p_type: type }) });
+          const j = await r.json();
+          if (j && j.success) saved++; else errs.push(br + ': ' + ((j && j.error) || 'فشل الحفظ'));
+        } catch (e) { errs.push(br + ': مفيش اتصال'); }
+      }
 
-      if (success) { resetLookup(); await loadAll(); }
-      else alert('❌ فشل الحفظ' + (err ? ' — ' + err : ''));
+      if (errs.length) alert('❌ ' + errs.join('\n'));
+      if (saved) { resetLookup(); await loadAll(); }
 
       btn.disabled  = false;
       btn.innerHTML = '<i class="fas fa-save"></i> حفظ الصنف';
@@ -559,6 +595,7 @@
       document.getElementById('lookup-code').value       = '';
       document.getElementById('lookup-name-q').value     = '';
       document.getElementById('lookup-matches').innerHTML = '';
+      lastPicked = null;
       document.getElementById('lookup-name').value       = '';
       document.getElementById('lookup-stock').value      = '';
       document.getElementById('lookup-type').value       = '';
