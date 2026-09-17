@@ -462,17 +462,29 @@
       const v = (document.getElementById('lookup-branch') || {}).value || userBranch;
       return v === '*' ? Branches.names() : [v];
     }
+    // الصفوف المسجّلة للصنف ده في الفروع المستهدفة (مفيش تكرار — القاعدة
+    // فيها unique على (الكود، الفرع)، فالحفظ بيحدّث الحد القديم مش بيضيف صف)
+    function existingRows(code, brs) {
+      return allData.filter(x => String(x.item_code).trim() === String(code)
+        && brs.some(b => Branches.same(x.branch, b)));
+    }
     function onLookupBranchChange() {
       const m = lastPicked;
       if (!m) return;
-      const brs = targetBranches();
-      const exists = brs.every(b => allData.some(x =>
-        String(x.item_code).trim() === String(m.code) && Branches.same(x.branch, b)));
-      if (exists) {
+      const brs  = targetBranches();
+      const have = existingRows(m.code, brs);
+      const btn  = document.getElementById('save-btn');
+      if (have.length) {
         document.getElementById('lookup-result').innerHTML =
-          '<span style="color:var(--warning);font-size:0.85rem;">⚠️ «' + escHtml(m.name) + '» متسجّل بالفعل في ' + escHtml(brs.join(' و ')) + ' — عدّل حده من الجدول تحت</span>';
+          '<span style="color:var(--warning);font-size:0.85rem;">⚠️ «' + escHtml(m.name) + '» متسجّل قبل كده في '
+          + have.map(x => escHtml(x.branch) + ' (حد ' + nOf(x.min_stock) + ')').join(' و ')
+          + ' — الحفظ هيحدّث الحد مش هيضيف صف جديد</span>';
+        if (btn) btn.innerHTML = '<i class="fas fa-save"></i> تحديث الحد';
+        const el = document.getElementById('lookup-min');
+        if (el && !el.value && have.length === 1) el.value = nOf(have[0].min_stock);
       } else {
         document.getElementById('lookup-result').innerHTML = '';
+        if (btn) btn.innerHTML = '<i class="fas fa-save"></i> حفظ الصنف';
       }
       const suf = brs.length === 1 ? sufOf(brs[0]) : null;
       document.getElementById('lookup-stock').value = suf ? nOf(m['qty_' + suf])
@@ -534,10 +546,10 @@
         + lastMatches.length + ' نتيجة — اختار الصنف:</div>'
         + '<div style="display:flex;flex-direction:column;gap:4px;max-height:260px;overflow:auto">'
         + lastMatches.map((m, i) => {
-            const have = allData.some(x => String(x.item_code).trim() === String(m.code) && Branches.same(x.branch, userBranch));
+            const have = existingRows(m.code, targetBranches()).length > 0;
             return '<button onclick="pickMatch(' + i + ')" style="text-align:right;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:7px 10px;cursor:pointer;font-family:var(--font)">'
               + '<div style="font-weight:700;font-size:0.84rem;color:var(--text-primary)">' + escHtml(m.name)
-              + (have ? ' <span style="font-size:0.7rem;color:var(--warning)">— مسجّل عندك</span>' : '') + '</div>'
+              + (have ? ' <span style="font-size:0.7rem;color:var(--warning)">— متسجّل قبل كده</span>' : '') + '</div>'
               + '<div style="font-size:0.72rem;color:var(--text-muted)">' + escHtml(m.code)
               + (m.company ? ' · ' + escHtml(m.company) : '')
               + ' · المعمورة ' + nOf(m.qty_m) + ' | سان ' + nOf(m.qty_s) + ' | بشر ' + nOf(m.qty_b) + '</div></button>';
