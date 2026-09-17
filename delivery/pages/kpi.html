@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>مؤشر الأداء</title>
+<link rel="stylesheet" href="../../tokens.css?v=20260906">
+<script>try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_dark")==="1"?"dark":"light");document.documentElement.setAttribute("data-theme",_t==="dark"?"dark":"light");}catch(e){}</script>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../delivery-style.css">
+<style>
+body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg); }
+@media (max-width: 600px) { body { padding: 1rem; } }
+
+.kp-head { display:flex; align-items:center; justify-content:space-between; gap:.75rem; flex-wrap:wrap; margin-bottom:1rem; }
+.kp-title { font-size:1.15rem; font-weight:700; color:var(--text); }
+.kp-sub { font-size:.75rem; color:var(--text-muted); }
+.kp-filters { display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; margin-bottom:.75rem; }
+.kp-chip { height:32px; padding:0 .8rem; border:1.5px solid var(--border); border-radius:999px; background:var(--surface); color:var(--text); font-family:'Cairo',sans-serif; font-size:.75rem; font-weight:600; cursor:pointer; }
+.kp-chip:hover { border-color:var(--primary); color:var(--primary); }
+.kp-chip.on { background:var(--primary); border-color:var(--primary); color:#fff; }
+.kp-branches { display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:1rem; }
+.kp-br { display:flex; align-items:center; gap:.4rem; padding:.3rem .7rem; border:1.5px solid var(--border); border-radius:999px; background:var(--surface); font-size:.78rem; font-weight:600; cursor:pointer; user-select:none; }
+.kp-br input { display:none; }
+.kp-br .dot { width:11px; height:11px; border-radius:50%; }
+.kp-br.off { opacity:.45; text-decoration:line-through; }
+
+.kp-msg { padding:2.5rem 1rem; text-align:center; color:var(--text-muted); font-size:.85rem; }
+.kp-msg.err { color:#dc2626; }
+
+.kp-sec { font-size:.9rem; font-weight:700; color:var(--text); margin:1.5rem 0 .6rem; display:flex; align-items:center; gap:.5rem; }
+.kp-sec::after { content:''; flex:1; height:1px; background:var(--border); }
+.kp-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(300px,100%), 1fr)); gap:.875rem; }
+
+.kp-card { background:var(--white); border:1px solid var(--border); border-radius:var(--radius-lg); box-shadow:var(--shadow); padding:.9rem 1rem; cursor:pointer; transition:border-color .12s, box-shadow .12s; }
+.kp-card:hover { border-color:var(--primary); }
+.kp-card.sel { border-color:var(--primary); box-shadow:0 0 0 2px var(--primary); }
+.kp-card-h { display:flex; justify-content:space-between; align-items:baseline; gap:.5rem; margin-bottom:.15rem; }
+.kp-card-t { font-size:.82rem; font-weight:700; color:var(--text); }
+.kp-card-total { font-size:.72rem; color:var(--text-muted); white-space:nowrap; }
+.kp-card-hint { font-size:.68rem; color:var(--text-muted); margin-bottom:.55rem; min-height:1em; }
+.kp-row { display:grid; grid-template-columns:78px 1fr auto; align-items:center; gap:.5rem; margin:.32rem 0; }
+.kp-row-name { font-size:.72rem; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.kp-bar { height:16px; background:var(--gray-light); border-radius:5px; overflow:hidden; }
+.kp-bar i { display:block; height:100%; border-radius:5px; min-width:2px; }
+.kp-row-v { font-size:.75rem; font-weight:700; color:var(--text); text-align:left; white-space:nowrap; direction:ltr; min-width:92px; }
+.kp-d { font-size:.64rem; font-weight:700; margin-left:.35rem; }
+.kp-d.up { color:#16a34a; } .kp-d.down { color:#dc2626; } .kp-d.flat { color:var(--text-muted); }
+.kp-best { font-size:.62rem; margin-left:.2rem; }
+.kp-nodata { font-size:.72rem; color:var(--text-muted); padding:.6rem 0; text-align:center; }
+
+.kp-trend { background:var(--white); border:1px solid var(--border); border-radius:var(--radius-lg); box-shadow:var(--shadow); padding:1rem; margin-bottom:1rem; }
+.kp-trend-h { display:flex; justify-content:space-between; align-items:center; gap:.5rem; flex-wrap:wrap; margin-bottom:.5rem; }
+.kp-trend-h select { height:34px; padding:0 .6rem; border:1.5px solid var(--border); border-radius:var(--radius); background:var(--surface); color:var(--text); font-family:'Cairo',sans-serif; font-size:.8rem; max-width:100%; }
+.kp-chart { position:relative; width:100%; height:270px; }
+.kp-chart svg { display:block; width:100%; height:100%; overflow:visible; }
+.kp-chart text { font-family:'Cairo',sans-serif; font-size:10px; fill:var(--text-muted); }
+.kp-tip { position:absolute; pointer-events:none; background:var(--text); color:var(--white); font-size:.72rem; padding:.4rem .6rem; border-radius:7px; white-space:nowrap; display:none; z-index:5; line-height:1.6; }
+
+.kp-score { display:grid; grid-template-columns:minmax(0,1fr); gap:1rem; }
+.kp-score-big { max-width:760px; }
+.kp-score-big { display:flex; flex-direction:column; gap:.6rem; }
+.kp-score-row { display:grid; grid-template-columns:26px 90px 1fr 48px; align-items:center; gap:.5rem; }
+.kp-score-rank { width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:.78rem; font-weight:700; color:#fff; }
+.kp-score-row .kp-bar { height:22px; }
+.kp-score-v { font-size:.95rem; font-weight:700; text-align:left; direction:ltr; }
+.kp-tbl-wrap { overflow-x:auto; }
+.kp-tbl { width:100%; border-collapse:collapse; font-size:.72rem; }
+.kp-tbl th, .kp-tbl td { padding:.35rem .5rem; border-bottom:1px solid var(--border); text-align:center; white-space:nowrap; }
+.kp-tbl th:first-child, .kp-tbl td:first-child { text-align:right; }
+.kp-tbl thead th { color:var(--text-muted); font-weight:700; }
+.kp-tbl tbody tr:nth-child(even) { background:var(--zebra, transparent); }
+</style>
+</head>
+<body>
+
+<div class="kp-head">
+  <div>
+    <div class="kp-title">📈 مؤشر الأداء</div>
+    <div class="kp-sub" id="kpPeriodLbl">مقارنة الفروع في المبيعات والتوصيل والجرد والتشغيل</div>
+  </div>
+  <button class="btn btn-outline btn-sm" onclick="exportCSV()">⬇ تصدير CSV</button>
+</div>
+
+<div class="kp-filters" id="kpPresets">
+  <button class="kp-chip" data-p="today">اليوم</button>
+  <button class="kp-chip" data-p="yesterday">امبارح</button>
+  <button class="kp-chip" data-p="7">آخر 7 أيام</button>
+  <button class="kp-chip" data-p="30">آخر 30 يوم</button>
+  <button class="kp-chip" data-p="month">الشهر ده</button>
+  <button class="kp-chip" data-p="prevmonth">الشهر اللي فات</button>
+  <button class="kp-chip" data-p="90">آخر 3 شهور</button>
+  <span style="display:flex;gap:.35rem;align-items:center">
+    <input type="date" class="filter-input" id="kpFrom">
+    <span style="font-size:.75rem;color:var(--text-muted)">إلى</span>
+    <input type="date" class="filter-input" id="kpTo">
+  </span>
+</div>
+<div class="kp-branches" id="kpBranches"></div>
+
+<div id="kpBody"><div class="kp-msg">جاري التحميل…</div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../config.js?v=20260903"></script>
+<script src="../../session.js?v=20260917tabs"></script>
+<script src="../supabase-config.js?v=20260901"></script>
+<script>
+/* ═══════════════════════════════════════════════════════════════════
+   مؤشر الأداء — كل الأرقام من get_kpi_dashboard (migrate_25): صف خام لكل
+   فرع × يوم. هنا بنجمع الفترة ونحسب النسب (مجموع البسط ÷ مجموع المقام)
+   ونقارن بالفترة اللي قبلها بنفس الطول.
+   ═══════════════════════════════════════════════════════════════════ */
+const COLORS = ['#0d9488', '#2563eb', '#d97706', '#7c3aed', '#db2777', '#65a30d', '#0891b2', '#dc2626'];
+const FIELDS = ['bills','sales_gross','delivery_bills','delivery_net','contract_net','returns_bills','returns_value',
+  'orders','orders_done','orders_cancelled','orders_value','sla_rated','sla_ok','dlv_n','dlv_mins','prep_n','prep_mins',
+  'jard_items','jard_matched','transfers','transfers_unavail','purchases','purchases_unavail','pos_n','pos_value',
+  'contract_invoices','contract_value','missing_items','tasks_done','price_changes','price_reviewed'];
+
+const ratio = (a, b, k) => b > 0 ? a / b * (k || 1) : null;
+// dir: 1 الأعلى أحسن، -1 الأقل أحسن، 0 محايد. score: داخل في الترتيب العام
+const KPIS = [
+  { g:'المبيعات', key:'sales_net', t:'صافي المبيعات', u:'money', dir:1, add:true, hint:'بعد خصم المرتجعات',
+    calc: s => (s.bills || s.returns_value) ? s.sales_gross - s.returns_value : null },
+  { g:'المبيعات', key:'bills', t:'عدد الفواتير', u:'count', dir:1, add:true, calc: s => s.bills || null },
+  { g:'المبيعات', key:'avg_bill', t:'متوسط الفاتورة', u:'money', dir:1, score:true, hint:'صافي المبيعات ÷ عدد الفواتير',
+    calc: s => ratio(s.sales_gross - s.returns_value, s.bills) },
+  { g:'المبيعات', key:'returns_pct', t:'نسبة المرتجعات', u:'pct', dir:-1, score:true, hint:'قيمة المرتجع ÷ المبيعات',
+    calc: s => ratio(s.returns_value, s.sales_gross, 100) },
+  { g:'المبيعات', key:'delivery_share', t:'نسبة مبيعات التوصيل', u:'pct', dir:0, hint:'من إجمالي المبيعات',
+    calc: s => ratio(s.delivery_net, s.sales_gross, 100) },
+  { g:'المبيعات', key:'contract_net', t:'مبيعات التعاقدات', u:'money', dir:0, add:true, calc: s => s.bills ? s.contract_net : null },
+
+  { g:'التوصيل', key:'orders_done', t:'طلبات اتسلّمت', u:'count', dir:1, add:true, calc: s => s.orders ? s.orders_done : null },
+  { g:'التوصيل', key:'orders_value', t:'قيمة الطلبات المُسلّمة', u:'money', dir:1, add:true, calc: s => s.orders ? s.orders_value : null },
+  { g:'التوصيل', key:'sla_pct', t:'الالتزام بوقت التوصيل', u:'pct', dir:1, score:true, hint:'ممتاز + جيد من الطلبات المقيّمة',
+    calc: s => ratio(s.sla_ok, s.sla_rated, 100) },
+  { g:'التوصيل', key:'dlv_avg', t:'متوسط وقت التوصيل', u:'min', dir:-1, score:true, hint:'بالدقيقة',
+    calc: s => ratio(s.dlv_mins, s.dlv_n) },
+  { g:'التوصيل', key:'cancel_pct', t:'نسبة الإلغاء', u:'pct', dir:-1, score:true, calc: s => ratio(s.orders_cancelled, s.orders, 100) },
+  { g:'التوصيل', key:'prep_avg', t:'متوسط وقت التحضير', u:'min', dir:-1, score:true, hint:'الفروع اللي شغّالة بالمحضّر بس',
+    calc: s => ratio(s.prep_mins, s.prep_n) },
+
+  { g:'الجرد والمخزون', key:'jard_items', t:'أصناف اتجردت', u:'count', dir:1, add:true, calc: s => s.jard_items || null },
+  { g:'الجرد والمخزون', key:'jard_match', t:'نسبة مطابقة الجرد', u:'pct', dir:1, score:true, calc: s => ratio(s.jard_matched, s.jard_items, 100) },
+  { g:'الجرد والمخزون', key:'missing_items', t:'أصناف لم تصل من الشركات', u:'count', dir:-1, add:true, calc: s => s.missing_items || null },
+  { g:'الجرد والمخزون', key:'price_review', t:'مراجعة تغييرات الأسعار', u:'pct', dir:1, hint:'اللي اتراجع من التغييرات',
+    calc: s => ratio(s.price_reviewed, s.price_changes, 100) },
+
+  { g:'التحويلات والشراء', key:'transfers', t:'طلبات التحويل', u:'count', dir:0, add:true, calc: s => s.transfers || null },
+  { g:'التحويلات والشراء', key:'transfers_unavail', t:'تحويلات مش متوفرة', u:'pct', dir:-1, score:true, hint:'من طلبات التحويل',
+    calc: s => ratio(s.transfers_unavail, s.transfers, 100) },
+  { g:'التحويلات والشراء', key:'purchases', t:'طلبات الشراء', u:'count', dir:0, add:true, calc: s => s.purchases || null },
+  { g:'التحويلات والشراء', key:'purchases_unavail', t:'شراء مش متوفر', u:'pct', dir:-1, hint:'من طلبات الشراء',
+    calc: s => ratio(s.purchases_unavail, s.purchases, 100) },
+
+  { g:'التشغيل والتحصيل', key:'tasks_done', t:'مهام اتنفذت', u:'count', dir:1, add:true, calc: s => s.tasks_done || null },
+  { g:'التشغيل والتحصيل', key:'pos_value', t:'مبيعات الماكينات', u:'money', dir:0, add:true, calc: s => s.pos_n ? s.pos_value : null },
+  { g:'التشغيل والتحصيل', key:'pos_n', t:'عمليات الماكينات', u:'count', dir:0, add:true, calc: s => s.pos_n || null },
+  { g:'التشغيل والتحصيل', key:'contract_value', t:'فواتير التعاقد', u:'money', dir:0, add:true, hint:'من شاشة فواتير التعاقد',
+    calc: s => s.contract_invoices ? s.contract_value : null },
+];
+
+const ST = { from:'', to:'', preset:'30', branches:[], hidden:new Set(), cur:null, prev:null, trendKey:'sales_net', seq:0 };
+
+const fmtN = (v, d) => Number(v).toLocaleString('en-US', { minimumFractionDigits:d||0, maximumFractionDigits:d||0 });
+function fmt(u, v) {
+  if (v == null || !isFinite(v)) return '—';
+  if (u === 'money') return fmtN(Math.round(v)) + ' ج';
+  if (u === 'pct') return fmtN(v, 1) + '%';
+  if (u === 'min') return fmtN(v, 1) + ' د';
+  return fmtN(Math.round(v));
+}
+const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const cairoToday = () => new Date().toLocaleDateString('en-CA', { timeZone:'Africa/Cairo' });
+function addDays(ymd, n) { const d = new Date(ymd + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+const daysBetween = (a, b) => Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000);
+const colorOf = br => COLORS[Math.max(0, ST.branches.indexOf(br)) % COLORS.length];
+const shown = () => ST.branches.filter(b => !ST.hidden.has(b));
+
+/* ── الفترة ───────────────────────────────────────────── */
+function presetRange(p) {
+  const t = cairoToday();
+  if (p === 'today') return [t, t];
+  if (p === 'yesterday') { const y = addDays(t, -1); return [y, y]; }
+  if (p === 'month') return [t.slice(0, 8) + '01', t];
+  if (p === 'prevmonth') { const f = t.slice(0, 8) + '01'; const last = addDays(f, -1); return [last.slice(0, 8) + '01', last]; }
+  const n = parseInt(p, 10) || 30; return [addDays(t, -(n - 1)), t];
+}
+function applyPreset(p) {
+  ST.preset = p;
+  [ST.from, ST.to] = presetRange(p);
+  document.getElementById('kpFrom').value = ST.from;
+  document.getElementById('kpTo').value = ST.to;
+  markPreset();
+  load();
+}
+function markPreset() {
+  document.querySelectorAll('#kpPresets .kp-chip').forEach(c => c.classList.toggle('on', c.dataset.p === ST.preset));
+}
+document.querySelectorAll('#kpPresets .kp-chip').forEach(c => c.onclick = () => applyPreset(c.dataset.p));
+['kpFrom', 'kpTo'].forEach(id => document.getElementById(id).addEventListener('change', () => {
+  const f = document.getElementById('kpFrom').value, t = document.getElementById('kpTo').value;
+  if (!f || !t) return;
+  if (t < f) { document.getElementById('kpBody').innerHTML = '<div class="kp-msg err">تاريخ النهاية قبل البداية</div>'; return; }
+  if (daysBetween(f, t) > 400) { document.getElementById('kpBody').innerHTML = '<div class="kp-msg err">أقصى فترة سنة</div>'; return; }
+  ST.from = f; ST.to = t; ST.preset = ''; markPreset(); load();
+}));
+
+/* ── التحميل ──────────────────────────────────────────── */
+async function fetchRange(f, t) {
+  const { data, error } = await db.rpc('get_kpi_dashboard', { p_from: f, p_to: t });
+  if (error) throw new Error(/JWT|401|PGRST30/i.test(error.message || '') ? 'الجلسة انتهت — اعمل تحديث للصفحة' : (error.message || 'فشل التحميل'));
+  if (!data || !data.success) throw new Error((data && data.error) || 'فشل التحميل');
+  return data;
+}
+async function load() {
+  const seq = ++ST.seq;
+  const len = daysBetween(ST.from, ST.to) + 1;
+  const pTo = addDays(ST.from, -1), pFrom = addDays(pTo, -(len - 1));
+  document.getElementById('kpPeriodLbl').textContent =
+    'من ' + ST.from + ' إلى ' + ST.to + ' (' + len + ' يوم) · المقارنة بـ ' + pFrom + ' → ' + pTo;
+  document.getElementById('kpBody').innerHTML = '<div class="kp-msg">جاري التحميل…</div>';
+  try {
+    const [cur, prev] = await Promise.all([fetchRange(ST.from, ST.to), fetchRange(pFrom, pTo)]);
+    if (seq !== ST.seq) return;
+    ST.cur = cur; ST.prev = prev;
+    ST.branches = cur.branches || [];
+    renderBranches();
+    render();
+  } catch (e) {
+    if (seq !== ST.seq) return;
+    document.getElementById('kpBody').innerHTML = '<div class="kp-msg err">⚠️ ' + esc(e.message) + '</div>';
+  }
+}
+
+/* ── التجميع ──────────────────────────────────────────── */
+function sumRows(rows, pred) {
+  const s = {}; FIELDS.forEach(f => s[f] = 0);
+  rows.forEach(r => { if (!pred || pred(r)) FIELDS.forEach(f => { if (r[f] != null) s[f] += Number(r[f]) || 0; }); });
+  return s;
+}
+function periodSums(res) {
+  const out = {};
+  ST.branches.forEach(b => out[b] = sumRows(res.rows, r => r.branch === b));
+  out.__all = sumRows(res.rows, r => !ST.hidden.has(r.branch));
+  return out;
+}
+
+/* ── الفروع (إظهار/إخفاء) ─────────────────────────────── */
+function renderBranches() {
+  document.getElementById('kpBranches').innerHTML = ST.branches.map(b =>
+    '<label class="kp-br' + (ST.hidden.has(b) ? ' off' : '') + '"><input type="checkbox" data-br="' + esc(b) + '"' + (ST.hidden.has(b) ? '' : ' checked') + '>'
+    + '<span class="dot" style="background:' + colorOf(b) + '"></span>' + esc(b) + '</label>').join('');
+  document.querySelectorAll('#kpBranches input').forEach(i => i.onchange = () => {
+    if (!i.checked && shown().length <= 1) { i.checked = true; return; }
+    i.checked ? ST.hidden.delete(i.dataset.br) : ST.hidden.add(i.dataset.br);
+    renderBranches(); render();
+  });
+}
+
+/* ── الرسم ───────────────────────────────────────────── */
+function deltaHtml(k, v, pv) {
+  if (v == null || pv == null) return '';
+  let d, txt;
+  if (k.u === 'pct') { d = v - pv; txt = (d >= 0 ? '+' : '') + fmtN(d, 1) + ' ن'; }
+  else if (pv === 0) return '';
+  else { d = (v - pv) / Math.abs(pv) * 100; txt = (d >= 0 ? '+' : '') + fmtN(d, 0) + '%'; }
+  const flat = Math.abs(d) < (k.u === 'pct' ? 0.1 : 0.5);
+  const cls = flat || !k.dir ? 'flat' : (d * k.dir > 0 ? 'up' : 'down');
+  return '<bdi class="kp-d ' + cls + '" title="مقارنة بالفترة اللي قبلها">' + (d >= 0 ? '▲' : '▼') + ' ' + txt + '</bdi>';
+}
+
+function render() {
+  const cur = periodSums(ST.cur), prev = periodSums(ST.prev);
+  const brs = shown();
+  const hasAny = ST.cur.rows.length > 0;
+  if (!hasAny) { document.getElementById('kpBody').innerHTML = '<div class="kp-msg">مفيش بيانات في الفترة دي</div>'; return; }
+
+  let html = '<div class="kp-trend"><div class="kp-trend-h"><div class="card-title">📉 الاتجاه اليومي — اضغط على أي مؤشر تحت</div>'
+    + '<select id="kpTrendSel">' + KPIS.map(k => '<option value="' + k.key + '"' + (k.key === ST.trendKey ? ' selected' : '') + '>' + esc(k.g + ' · ' + k.t) + '</option>').join('') + '</select></div>'
+    + '<div class="kp-chart" id="kpChart"></div></div>';
+
+  html += renderScore(cur, prev, brs);
+
+  let g = '';
+  KPIS.forEach(k => {
+    if (k.g !== g) { if (g) html += '</div>'; g = k.g; html += '<div class="kp-sec">' + esc(g) + '</div><div class="kp-grid">'; }
+    const vals = brs.map(b => ({ b, v: k.calc(cur[b]), pv: k.calc(prev[b]) }));
+    const withV = vals.filter(x => x.v != null);
+    const max = Math.max(0, ...withV.map(x => Math.abs(x.v)));
+    let best = null;
+    if (k.dir && withV.length > 1) best = withV.reduce((a, x) => (k.dir > 0 ? x.v > a.v : x.v < a.v) ? x : a).b;
+    const tv = k.calc(cur.__all);
+    html += '<div class="kp-card' + (k.key === ST.trendKey ? ' sel' : '') + '" data-k="' + k.key + '">'
+      + '<div class="kp-card-h"><span class="kp-card-t">' + esc(k.t) + '</span>'
+      + '<span class="kp-card-total">' + (k.add ? 'الإجمالي ' : 'كل الفروع ') + '<b dir="ltr">' + fmt(k.u, tv) + '</b></span></div>'
+      + '<div class="kp-card-hint">' + esc(k.hint || '') + '</div>';
+    if (!withV.length) html += '<div class="kp-nodata">مفيش بيانات للمؤشر ده في الفترة</div>';
+    else vals.forEach(x => {
+      const w = x.v == null || !max ? 0 : Math.max(1.5, Math.abs(x.v) / max * 100);
+      html += '<div class="kp-row"><span class="kp-row-name" title="' + esc(x.b) + '">' + esc(x.b) + '</span>'
+        + '<div class="kp-bar"><i style="width:' + w + '%;background:' + colorOf(x.b) + '"></i></div>'
+        + '<span class="kp-row-v">' + (x.b === best ? '<span class="kp-best" title="الأفضل">🏆</span>' : '') + '<bdi>' + fmt(k.u, x.v) + '</bdi>' + deltaHtml(k, x.v, x.pv) + '</span></div>';
+    });
+    html += '</div>';
+  });
+  html += '</div>';
+  html += '<div class="kp-sub" style="margin-top:1rem">▲▼ = التغيير عن الفترة اللي قبلها بنفس الطول (الأخضر تحسّن، الأحمر تراجع). في النسب «ن» = نقطة مئوية.</div>';
+
+  document.getElementById('kpBody').innerHTML = html;
+  document.querySelectorAll('.kp-card').forEach(c => c.onclick = () => {
+    ST.trendKey = c.dataset.k;
+    document.querySelectorAll('.kp-card').forEach(x => x.classList.toggle('sel', x === c));
+    document.getElementById('kpTrendSel').value = ST.trendKey;
+    drawTrend();
+    document.querySelector('.kp-trend').scrollIntoView({ behavior:'smooth', block:'start' });
+  });
+  document.getElementById('kpTrendSel').onchange = e => {
+    ST.trendKey = e.target.value;
+    document.querySelectorAll('.kp-card').forEach(x => x.classList.toggle('sel', x.dataset.k === ST.trendKey));
+    drawTrend();
+  };
+  const sb = document.getElementById('kpScoreToggle');
+  if (sb) sb.onclick = () => { const t = document.getElementById('kpScoreTbl'); t.style.display = t.style.display === 'none' ? '' : 'none'; };
+  drawTrend();
+}
+
+/* ── الترتيب العام ───────────────────────────────────────
+   كل مؤشر نسبي (score) بيتحوّل لدرجة من 100: الأعلى-أحسن = القيمة ÷ أحسن قيمة،
+   الأقل-أحسن = أحسن قيمة ÷ القيمة. الدرجة العامة = متوسط درجات الفرع.
+   مؤشرات الحجم (المبيعات/العدد) مش داخلة — الفرع الكبير مايكسبش بحجمه. */
+function scoresFor(sums, brs) {
+  const per = {}; brs.forEach(b => per[b] = {});
+  KPIS.filter(k => k.score).forEach(k => {
+    const vals = brs.map(b => ({ b, v: k.calc(sums[b]) })).filter(x => x.v != null);
+    if (vals.length < 2) return;
+    if (k.dir > 0) {
+      const best = Math.max(...vals.map(x => x.v));
+      vals.forEach(x => per[x.b][k.key] = best > 0 ? Math.max(0, x.v) / best * 100 : 100);
+    } else {
+      const best = Math.min(...vals.map(x => x.v));
+      vals.forEach(x => per[x.b][k.key] = x.v <= 0 ? 100 : Math.max(0, best) / x.v * 100);
+    }
+  });
+  const total = {};
+  brs.forEach(b => { const a = Object.values(per[b]); total[b] = a.length ? a.reduce((s, v) => s + v, 0) / a.length : null; });
+  return { per, total };
+}
+function renderScore(cur, prev, brs) {
+  if (brs.length < 2) return '';
+  const sc = scoresFor(cur, brs), ps = scoresFor(prev, brs);
+  const order = brs.filter(b => sc.total[b] != null).sort((a, b) => sc.total[b] - sc.total[a]);
+  if (!order.length) return '';
+  const used = KPIS.filter(k => k.score && brs.some(b => sc.per[b][k.key] != null));
+  let h = '<div class="kp-sec">🏅 الترتيب العام للفروع</div><div class="card"><div class="card-body"><div class="kp-score">'
+    + '<div class="kp-score-big">';
+  order.forEach((b, i) => {
+    const v = sc.total[b], pv = ps.total[b];
+    h += '<div class="kp-score-row"><span class="kp-score-rank" style="background:' + colorOf(b) + '">' + (i + 1) + '</span>'
+      + '<span class="kp-row-name">' + esc(b) + '</span>'
+      + '<div class="kp-bar"><i style="width:' + Math.max(2, v) + '%;background:' + colorOf(b) + '"></i></div>'
+      + '<span class="kp-score-v">' + fmtN(v, 0) + '</span></div>'
+      + (pv != null ? '<div style="font-size:.66rem;color:var(--text-muted);margin:-.35rem 124px 0 0">الفترة اللي قبلها: ' + fmtN(pv, 0) + '</div>' : '');
+  });
+  h += '<div class="kp-sub">الدرجة من 100 = متوسط درجات ' + used.length + ' مؤشرات جودة (الأحسن في كل مؤشر ياخد 100). المبيعات والأعداد مش داخلة عشان حجم الفرع مايأثرش.'
+    + ' <a href="#" id="kpScoreToggle" onclick="return false" style="color:var(--primary);font-weight:700">التفاصيل</a></div></div>';
+  h += '<div class="kp-tbl-wrap" id="kpScoreTbl" style="display:none"><table class="kp-tbl"><thead><tr><th>المؤشر</th>'
+    + order.map(b => '<th style="color:' + colorOf(b) + '">' + esc(b) + '</th>').join('') + '</tr></thead><tbody>';
+  used.forEach(k => {
+    h += '<tr><td>' + esc(k.t) + '</td>' + order.map(b => {
+      const s = sc.per[b][k.key];
+      return '<td>' + (s == null ? '—' : '<b>' + fmtN(s, 0) + '</b> <span style="color:var(--text-muted)">(' + fmt(k.u, k.calc(cur[b])) + ')</span>') + '</td>';
+    }).join('') + '</tr>';
+  });
+  h += '</tbody></table></div></div></div></div>';
+  return h;
+}
+
+/* ── الرسم البياني (SVG) ─────────────────────────────── */
+function buckets() {
+  const n = daysBetween(ST.from, ST.to) + 1;
+  const step = n > 120 ? 30 : n > 45 ? 7 : 1;
+  const out = [];
+  for (let i = 0; i < n; i += step) out.push({ from: addDays(ST.from, i), to: addDays(ST.from, Math.min(n - 1, i + step - 1)) });
+  return { list: out, step };
+}
+function niceMax(v) {
+  if (v <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v))), m = v / p;
+  return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * p;
+}
+function drawTrend() {
+  const el = document.getElementById('kpChart'); if (!el || !ST.cur) return;
+  const k = KPIS.find(x => x.key === ST.trendKey) || KPIS[0];
+  const brs = shown(), bk = buckets();
+  const series = brs.map(b => ({ b, pts: bk.list.map(x => k.calc(sumRows(ST.cur.rows, r => r.branch === b && r.day >= x.from && r.day <= x.to))) }));
+  const all = series.flatMap(s => s.pts).filter(v => v != null);
+  if (!all.length) { el.innerHTML = '<div class="kp-msg">مفيش بيانات للمؤشر ده في الفترة</div>'; return; }
+  const W = Math.max(280, el.clientWidth), H = el.clientHeight || 270;
+  const padL = 58, padR = 12, padT = 12, padB = 30;
+  const minV = Math.min(0, ...all), maxV = niceMax(Math.max(...all));
+  const X = i => bk.list.length === 1 ? padL + (W - padL - padR) / 2 : padL + i * (W - padL - padR) / (bk.list.length - 1);
+  const Y = v => padT + (1 - (v - minV) / (maxV - minV || 1)) * (H - padT - padB);
+  let s = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
+  for (let i = 0; i <= 4; i++) {
+    const v = minV + (maxV - minV) * i / 4, y = Y(v);
+    s += '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y + '" y2="' + y + '" stroke="var(--border)" stroke-width="1"/>'
+      + '<text x="' + (padL - 6) + '" y="' + (y + 3) + '" text-anchor="end">' + shortNum(k, v) + '</text>';
+  }
+  const every = Math.max(1, Math.ceil(bk.list.length / Math.max(2, Math.floor((W - padL) / 60))));
+  bk.list.forEach((x, i) => {
+    if (i % every && i !== bk.list.length - 1) return;
+    s += '<text x="' + X(i) + '" y="' + (H - 10) + '" text-anchor="middle">' + x.from.slice(8, 10) + '/' + x.from.slice(5, 7) + '</text>';
+  });
+  series.forEach(se => {
+    const c = colorOf(se.b); let d = '', pen = false;
+    se.pts.forEach((v, i) => { if (v == null) { pen = false; return; } d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1) + ' '; pen = true; });
+    s += '<path d="' + d + '" fill="none" stroke="' + c + '" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>';
+    if (bk.list.length <= 45) se.pts.forEach((v, i) => { if (v != null) s += '<circle cx="' + X(i) + '" cy="' + Y(v) + '" r="2.8" fill="' + c + '"/>'; });
+  });
+  const slot = (W - padL - padR) / Math.max(1, bk.list.length - 1);
+  bk.list.forEach((x, i) => {
+    s += '<rect class="kp-hit" data-i="' + i + '" x="' + (X(i) - slot / 2) + '" y="' + padT + '" width="' + Math.max(slot, 6) + '" height="' + (H - padT - padB) + '" fill="transparent"/>';
+  });
+  s += '<line id="kpCursor" y1="' + padT + '" y2="' + (H - padB) + '" stroke="var(--text-muted)" stroke-dasharray="3 3" style="display:none"/></svg><div class="kp-tip" id="kpTip"></div>';
+  el.innerHTML = s;
+  const tip = document.getElementById('kpTip'), cur = document.getElementById('kpCursor');
+  el.querySelectorAll('.kp-hit').forEach(r => {
+    r.onmouseenter = () => {
+      const i = +r.dataset.i, x = bk.list[i];
+      tip.innerHTML = '<b>' + (bk.step === 1 ? x.from : x.from + ' → ' + x.to) + '</b><br>'
+        + series.map(se => '<span style="color:' + colorOf(se.b) + '">●</span> ' + esc(se.b) + ': <b>' + fmt(k.u, se.pts[i]) + '</b>').join('<br>');
+      tip.style.display = 'block';
+      const left = X(i) / W * el.clientWidth;
+      tip.style.top = '4px';
+      tip.style.left = (left > el.clientWidth / 2 ? left - tip.offsetWidth - 12 : left + 12) + 'px';
+      cur.setAttribute('x1', X(i)); cur.setAttribute('x2', X(i)); cur.style.display = '';
+    };
+  });
+  el.onmouseleave = () => { tip.style.display = 'none'; cur.style.display = 'none'; };
+}
+function shortNum(k, v) {
+  if (k.u === 'pct') return fmtN(v, 0) + '%';
+  const a = Math.abs(v);
+  if (a >= 1e6) return fmtN(v / 1e6, 1) + 'M';
+  if (a >= 1e3) return fmtN(v / 1e3, a >= 1e4 ? 0 : 1) + 'K';
+  return fmtN(v, k.u === 'min' && a < 10 ? 1 : 0);
+}
+let _rs; window.addEventListener('resize', () => { clearTimeout(_rs); _rs = setTimeout(drawTrend, 150); });
+
+/* ── تصدير ────────────────────────────────────────────── */
+function exportCSV() {
+  if (!ST.cur) return;
+  const cur = periodSums(ST.cur), prev = periodSums(ST.prev), brs = shown();
+  const lines = [['القسم', 'المؤشر'].concat(brs.flatMap(b => [b, b + ' (الفترة السابقة)'])).concat(['كل الفروع'])];
+  KPIS.forEach(k => {
+    const num = v => v == null ? '' : (k.u === 'money' || k.u === 'count' ? Math.round(v) : Math.round(v * 10) / 10);
+    lines.push([k.g, k.t + (k.u === 'pct' ? ' %' : k.u === 'min' ? ' (دقيقة)' : '')]
+      .concat(brs.flatMap(b => [num(k.calc(cur[b])), num(k.calc(prev[b]))])).concat([num(k.calc(cur.__all))]));
+  });
+  const csv = '﻿' + lines.map(l => l.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type:'text/csv;charset=utf-8' }));
+  a.download = 'مؤشر_الأداء_' + ST.from + '_' + ST.to + '.csv';
+  a.click();
+}
+
+applyPreset('30');
+</script>
+</body>
+</html>
