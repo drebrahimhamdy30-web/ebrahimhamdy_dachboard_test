@@ -109,3 +109,25 @@ docker compose exec -T db dropdb -U supabase_admin testrestore
 ```
 
 لو العدد قريب من الحقيقي، النسخة موثوقة.
+
+---
+
+## درس من أول تشغيل (2026-09-17)
+
+`pg_restore` **مابيعرفش يقرا أرشيف `-Fc` من أنبوب** — بيقول:
+
+```
+pg_restore: error: did not find magic string in file header
+```
+
+فالفحص بينسخ الملف جوّه الحاوية بـ`docker cp` الأول. لو احتجت تفحص نسخة يدويًا:
+
+```bash
+CID=$(docker compose ps -q db)
+docker cp /root/backups/XXXX/db.dump $CID:/tmp/t.dump
+docker exec $CID pg_restore -l /tmp/t.dump | head -3   # المفروض يطلع فهرس
+docker exec $CID rm -f /tmp/t.dump
+```
+
+وكمان: السكربت بيستعمل `docker exec` مباشرة مش `docker compose exec`، عشان الأخير
+بيطبع `WARN` لكل متغيّر ناقص في `.env` مع كل نداء.

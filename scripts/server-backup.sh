@@ -77,13 +77,28 @@ verify_dir() {
   m=$(mb "$d/db.dump")
   [ "$m" -ge "$MIN_DB_MB" ] || { warn "$n: db.dump ${m}MB بس — مشكوك فيها"; return 1; }
   gzip -t "$d/config.tar.gz" 2>/dev/null || { warn "$n: config.tar.gz تالف"; return 1; }
-  # أهم فحص: pg_restore يقدر يقرا فهرس الملف؟ لو اتقطع هيفشل هنا
-  docker compose exec -T db pg_restore -l /dev/stdin < "$d/db.dump" >/dev/null 2>&1 \
-    || { warn "$n: pg_restore مش قادر يقراها — تالفة"; return 1; }
+  # توقيع بوستجرس في أول الملف — بيكشف فورًا لو حاجة اتكتبت فوق الـdump
+  [ "$(head -c 5 "$d/db.dump")" = "PGDMP" ] \
+    || { warn "$n: مش ملف نسخة أصلاً (مفيش PGDMP في أوله)"; return 1; }
+  # أهم فحص: pg_restore يقدر يقرا فهرس الملف؟ لو اتقطع هيفشل هنا.
+  # ⚠️ بننسخ الملف جوّه الحاوية بـdocker cp ومابنمرّرهوش في أنبوب —
+  #    pg_restore مابيعرفش يقرا أرشيف -Fc من stdin ("did not find magic string").
+  docker cp "$d/db.dump" "$CID:/tmp/verify.dump" >/dev/null 2>&1 \
+    && docker exec "$CID" pg_restore -l /tmp/verify.dump >/dev/null 2>&1
+  rc=$?
+  docker exec "$CID" rm -f /tmp/verify.dump >/dev/null 2>&1 || true
+  [ "$rc" = 0 ] || { warn "$n: pg_restore مش قادر يقراها — تالفة"; return 1; }
   ok "$n سليمة (${m}MB)"
 }
 
 cd "$COMPOSE_DIR" 2>/dev/null || die "مجلد سوبابيز مش موجود: $COMPOSE_DIR"
+
+# ── الحاوية ────────────────────────────────────────────────────────
+# بنمسك رقم الحاوية مرة واحدة ونستعمل docker exec مباشرة بعدها.
+# docker compose exec بيطبع WARN لكل متغيّر ناقص في .env مع كل نداء.
+CID="${PHALIX_DB_CID:-$(docker compose ps -q db 2>/dev/null | head -1)}"
+[ -n "$CID" ] || CID="$(docker inspect -f '{{.Id}}' supabase-db 2>/dev/null || true)"
+[ -n "$CID" ] || die "حاوية القاعدة مش لاقيها — إنت في المجلد الصح؟"
 
 if [ "$VERIFY_ONLY" = 1 ]; then
   last="$(dirs | tail -1)"
@@ -97,7 +112,8 @@ fi
 
 # ── ١) تأكيدات ─────────────────────────────────────────────────────
 step "فحص قبل البدء"
-docker compose ps db 2>/dev/null | grep -q db || die "خدمة db مش لاقيها — إنت في المجلد الصح؟"
+docker inspect -f '{{.State.Status}}' "$CID" 2>/dev/null | grep -qx running \
+  || die "حاوية القاعدة مش شغّالة"
 avail=$(df -Pm "$(dirname "$DIR")" | awk 'NR==2{print $4}')
 say "  المساحة الفاضية: $((avail/1024))GB"
 [ "$avail" -ge 2048 ] || warn "أقل من 2GB فاضي — النسخة ممكن تقع في النص"
@@ -118,13 +134,13 @@ mkdir -p "$OUT"; chmod 700 "$DIR" "$OUT"
 # ── ٢) القاعدة ─────────────────────────────────────────────────────
 # -Fc = صيغة مضغوطة بيقراها pg_restore (بتسمح ترجّع جدول واحد لوحده)
 step "تصدير القاعدة"
-docker compose exec -T db pg_dump -U "$DB_USER" -d postgres -Fc > "$OUT/db.dump" \
+docker exec "$CID" pg_dump -U "$DB_USER" -d postgres -Fc > "$OUT/db.dump" \
   || die "pg_dump فشل — النسخة دي مش كاملة"
 ok "db.dump — $(mb "$OUT/db.dump")MB"
 
 # الأدوار مش جوّه pg_dump — من غيرها الرجوع بيفشل بـ«role does not exist»
 step "تصدير الأدوار"
-docker compose exec -T db pg_dumpall -U "$DB_USER" --globals-only > "$OUT/globals.sql" \
+docker exec "$CID" pg_dumpall -U "$DB_USER" --globals-only > "$OUT/globals.sql" \
   || die "pg_dumpall فشل"
 ok "globals.sql — $(wc -l < "$OUT/globals.sql") سطر"
 
