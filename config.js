@@ -21,7 +21,7 @@ const PHALIX_CONFIG = {
   //   للرجوع للسحابة: بدّل السطرين دول بقيم البرودكشن.
   // خادم Supabase — السيرفر الخاص
   supabaseUrl:     'https://supabase.ebrahimhamdy.com',
-  supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg4MzI1MDA0LCJleHAiOjE5NDYwMDUwMDR9.Yx-kNhTDLh9fLku8AAdVnx1ir_xzT1uToO9XJdZ7d7I',
+  supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg5NjY1NjAzLCJleHAiOjE5NDczNDU2MDN9.ywTdAdPyNPxa6_Ks9udNfTzhtt0hUGlBQztB2pGyHCo',
 
   // خادم n8n — لسه بيشغّل الدخول وبعض التكاملات
   n8nBase: 'https://agent.ebrahimhamdy.com'
