@@ -207,3 +207,9 @@ GRANT EXECUTE ON FUNCTION public.get_kpi_dashboard(date, date) TO authenticated,
 --                AND lg.created_at >= t0 - interval '1 day' AND lg.created_at < t1 + interval '1 day')
 --      ... FROM orders o JOIN branches b ON b.id = o.branch_id LEFT JOIN pl ON pl.order_id = o.id
 --      ... CASE WHEN o.prep_done_at IS NULL OR pl.order_id IS NULL THEN NULL ELSE ...
+
+-- صلاحيات الصفحة: الأدمن بس افتراضيًا (get_role_pages بيقرأ page_permissions حتى للأدمن)
+INSERT INTO page_permissions (page, role, can_view, can_edit, page_key, sort_order)
+SELECT 'kpi.html', r, r = 'admin', r = 'admin', 'kpi', 1
+  FROM unnest(array['admin','manager','employee','pharmacist','cashier','accountant','reviewer','inventory','supervisor']) r
+ WHERE NOT EXISTS (SELECT 1 FROM page_permissions WHERE page_key = 'kpi' AND role = r);
