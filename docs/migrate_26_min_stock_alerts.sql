@@ -135,3 +135,9 @@ REVOKE ALL ON FUNCTION public.set_stock_limit(text, text, numeric, text, text) F
 GRANT EXECUTE ON FUNCTION public.set_stock_limit(text, text, numeric, text, text) TO authenticated, service_role;
 
 COMMIT;
+
+-- 2026-09-17 (بعدها بساعة): التبويب اللي كان في inventory_management.html اتشال —
+-- المالك عنده شاشة «حدود المخزون» بتعمل نفس الدور، فاتسمّت «الحد الأدنى للمخزون»
+-- (inventory_min.html) واتضاف فيها عمود «باقي الفروع» وزر طلب التحويل/الشراء.
+-- الدالتين هنا زي ما هما: الشاشة بتنادي get_min_stock_alerts لأرصدة الفروع التلاتة.
+UPDATE app_pages SET title = 'الحد الأدنى للمخزون' WHERE key = 'inventory_min';

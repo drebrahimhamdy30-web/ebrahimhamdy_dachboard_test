@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>المخزون - Phalix</title>
+  <title>الحد الأدنى للمخزون - Phalix</title>
   <link rel="stylesheet" href="tokens.css?v=20260906">
   <script>/* phalix-theme-stamp — يختم الثيم قبل الرسم عشان مفيش وميض.
      ⚠️ من غيره الصفحة مابتقولش هي فاتحة ولا داكنة، فقاعدة
@@ -32,7 +32,7 @@
   <div class="container">
     <div class="card">
       <div class="page-header">
-        <div class="page-title"><i class="fas fa-boxes"></i> حدود المخزون</div>
+        <div class="page-title"><i class="fas fa-boxes"></i> الحد الأدنى للمخزون</div>
         <button class="btn btn-primary" onclick="loadAll()"><i class="fas fa-sync-alt"></i> تحديث</button>
       </div>
 
@@ -117,12 +117,13 @@
               <th>الفرع</th>
               <th>الرصيد الحالي</th>
               <th>الحد الأدنى</th>
+              <th>باقي الفروع</th>
               <th>الحالة</th>
               <th>إجراء</th>
             </tr>
           </thead>
           <tbody id="table-body">
-            <tr class="loading-row"><td colspan="8">⏳ جاري التحميل...</td></tr>
+            <tr class="loading-row"><td colspan="9">⏳ جاري التحميل...</td></tr>
           </tbody>
         </table>
       </div>
@@ -150,14 +151,15 @@
 
     async function loadAll() {
       const tbody = document.getElementById('table-body');
-      tbody.innerHTML = '<tr class="loading-row"><td colspan="8">⏳ جاري جلب البيانات...</td></tr>';
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="9">⏳ جاري جلب البيانات...</td></tr>';
       try {
         // من Supabase: كل صف بالرصيد الحالي محسوب لحظياً من مخزون فرعه
-        const response = await sbStockLimits('عام');
+        // وبالتوازي أرصدة الفروع التلاتة لكل صنف (عشان نعرف نطلب تحويل من فرع فيه فائض)
+        const [response] = await Promise.all([sbStockLimits('عام'), loadCross()]);
         allData = Array.isArray(response) ? response : [];
         applyFilter();
       } catch(e) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
       }
     }
 
@@ -191,7 +193,7 @@
     function renderTable(items) {
       const tbody = document.getElementById('table-body');
       if (!items.length) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج</td></tr>';
         return;
       }
       items.sort((a, b) => {
@@ -220,8 +222,10 @@
                 <button class="save-min-btn" onclick="saveMinStock('${item.id}', document.getElementById('min-${item.id}').value)" title="حفظ">✓</button>
               </div>
             </td>
+            <td style="font-size:0.76rem;line-height:1.7;">${otherBranchesHtml(item)}</td>
             <td><span class="stock-badge ${isBelow ? 'badge-danger' : 'badge-ok'}" id="badge-${item.id}">${isBelow ? '⚠️ تحت الحد' : '✅ كافي'}</span></td>
             <td>
+              ${requestHtml(item)}
               <div style="display:flex;gap:4px;">
                 <button class="btn btn-sm" onclick="refreshItem('${item.id}', '${item.item_code}')" style="background:var(--accent);color:#fff;padding:5px 8px;" title="تحديث الرصيد"><i class="fas fa-sync-alt"></i></button>
                 <button class="btn btn-sm" onclick="deleteItem('${item.id}', '${item.item_name}')" style="background:var(--danger);color:#fff;padding:5px 8px;" title="حذف"><i class="fas fa-trash"></i></button>
@@ -229,6 +233,163 @@
             </td>
           </tr>`;
       }).join('');
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // طلب تحويل/شراء مباشر من الصف
+    // ═══════════════════════════════════════════════════════════════
+    // أرصدة الفروع التلاتة وحدودها بتيجي من get_min_stock_alerts (migrate_26)
+    // — نفس مصدر stock_flat اللي بيتحدّث كل 10 دقايق. الفائض في فرع =
+    // رصيده − حده الأدنى هو كمان، عشان ما نفضّيش فرع على حساب فرع.
+    const BR_SUF = [['المعمورة','m'], ['سان ستيفانو','s'], ['سيدى بشر','b']];
+    let crossMap = {};    // كود الصنف → أرصدة/حدود الفروع
+    let pendBuy  = {};    // "فرع|كود" → طلب شراء مفتوح
+    let branchReps = null;
+
+    function sufOf(branch) {
+      const hit = BR_SUF.find(([name]) => Branches.same(name, branch || ''));
+      return hit ? hit[1] : null;
+    }
+    const nOf = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+    const qtyIn = (c, suf) => nOf(c ? c['qty_' + suf] : 0);
+    const minIn = (c, suf) => { const v = c ? c['min_' + suf] : null; return (v === null || v === undefined || v === '') ? 0 : nOf(v); };
+    const pendIn = (c, suf) => !!(c && c['pend_' + suf]);
+    const surplusIn = (c, suf) => Math.floor(qtyIn(c, suf) - minIn(c, suf));
+
+    async function loadCross() {
+      try {
+        const r = await fetch(SB_URL_API + '/rest/v1/rpc/get_min_stock_alerts', {
+          method: 'POST', headers: await sbH({ 'Content-Type': 'application/json' }), body: '{}' });
+        const j = await r.json();
+        crossMap = {};
+        if (j && j.success) (j.rows || []).forEach(x => { crossMap[String(x.code)] = x; });
+        await loadPendingBuys();
+      } catch (e) { crossMap = {}; }
+    }
+    // طلبات شراء لسه مفتوحة (عشان مانطلبش الصنف مرتين)
+    async function loadPendingBuys() {
+      pendBuy = {};
+      try {
+        const since = new Date(Date.now() - 45 * 24 * 3600 * 1000).toISOString();
+        const r = await fetch(SB_URL_API + '/rest/v1/task?select=item_code,branch,state&type=eq.' + encodeURIComponent('شراء')
+          + '&state=in.(pending,ordered)&created_at=gte.' + since + '&limit=2000', { headers: await sbH() });
+        const rows = await r.json();
+        (Array.isArray(rows) ? rows : []).forEach(x => { pendBuy[String(x.branch || '') + '|' + String(x.item_code || '')] = x.state; });
+      } catch (e) {}
+    }
+
+    // أرصدة الفروع التانية في خلية واحدة (الأخضر = عنده فائض يقدر يحوّل منه)
+    function otherBranchesHtml(item) {
+      const c = crossMap[String(item.item_code)];
+      if (!c) return '<span style="color:var(--text-muted)">—</span>';
+      const mine = sufOf(item.branch);
+      return BR_SUF.filter(([, suf]) => suf !== mine).map(([name, suf]) => {
+        const s = surplusIn(c, suf);
+        const col = s > 0 ? 'var(--success,#16a34a)' : 'var(--text-muted)';
+        return '<div><span style="color:var(--text-muted)">' + name + ':</span> <b style="color:' + col + '">' + nOf(qtyIn(c, suf)) + '</b>'
+             + (s > 0 ? ' <span style="font-size:0.68rem;color:var(--success,#16a34a)">(فائض ' + s + ')</span>' : '') + '</div>';
+      }).join('');
+    }
+
+    // زر الطلب: تحويل من أكبر فائض، وإلا شراء
+    function requestHtml(item) {
+      const stock = nOf(item.current_stock), minS = nOf(item.min_stock);
+      const need  = Math.ceil(minS - stock);
+      if (!(need > 0)) return '';
+      const c = crossMap[String(item.item_code)];
+      const mine = sufOf(item.branch);
+      const branch = String(item.branch || '').trim();
+      if (mine && pendIn(c, mine)) return '<div style="font-size:0.72rem;font-weight:700;color:var(--warning,#f59e0b);margin-bottom:4px">⏳ تم طلب تحويله</div>';
+      const buy = pendBuy[branch + '|' + String(item.item_code)];
+      if (buy) return '<div style="font-size:0.72rem;font-weight:700;color:var(--warning,#f59e0b);margin-bottom:4px">⏳ ' + (buy === 'ordered' ? 'اتطلب شراؤه' : 'طلب شراء مفتوح') + '</div>';
+
+      let best = null, bestQty = 0;
+      if (c) BR_SUF.forEach(([name, suf]) => {
+        if (suf === mine) return;
+        const s = surplusIn(c, suf);
+        if (s > bestQty) { bestQty = s; best = name; }
+      });
+      const id = 'req-' + item.id;
+      if (best) {
+        const qty = Math.min(need, bestQty);
+        return '<button id="' + id + '" class="btn btn-sm" style="background:var(--accent,#0d9488);color:#fff;padding:5px 8px;font-size:0.72rem;font-weight:700;margin-bottom:4px;width:100%"'
+             + ' onclick="requestTransfer(\'' + item.id + '\',\'' + best.replace(/'/g, "\\'") + '\',' + qty + ')">↪ حوّل ' + qty + ' من ' + best + '</button>';
+      }
+      return '<button id="' + id + '" class="btn btn-sm" style="background:var(--surface-3);color:var(--text-primary);border:1.5px solid var(--border);padding:5px 8px;font-size:0.72rem;font-weight:700;margin-bottom:4px;width:100%"'
+           + ' onclick="requestBuy(\'' + item.id + '\',' + need + ')">🛒 اطلب شراء ' + need + '</button>';
+    }
+
+    // حساب الفرع الممثّل (عشان الطلب ينتسب لفرع الطالب) — نفس RPC شاشة التحويل
+    async function ensureBranchReps() {
+      if (branchReps) return;
+      try {
+        const r = await fetch(SB_URL_API + '/rest/v1/rpc/get_branch_rep_users', {
+          method: 'POST', headers: await sbH({ 'Content-Type': 'application/json' }), body: '{}' });
+        const j = await r.json();
+        branchReps = (j && typeof j === 'object') ? j : {};
+      } catch (e) { branchReps = {}; }
+    }
+
+    async function requestTransfer(id, sourceName, qty) {
+      const item = allData.find(x => String(x.id) === String(id));
+      if (!item || !(qty > 0)) return;
+      const targetName = String(item.branch || '').trim();
+      const btn = document.getElementById('req-' + id);
+      if (btn) { btn.disabled = true; btn.textContent = '... جاري الإرسال'; }
+      await ensureBranchReps();
+      const out = await sbTaskInsert({
+        type: 'تحويل',
+        user: (branchReps && branchReps[targetName]) || targetName,
+        target_branch: sourceName,
+        item_code: String(item.item_code),
+        item: item.item_name,
+        qty: qty,
+        note: 'تحت الحد الأدنى — رصيد ' + targetName + ' ' + nOf(item.current_stock) + ' والحد ' + nOf(item.min_stock)
+      });
+      if (out && out.ok) {
+        // علامة «قيد التحويل» — شاشة التحويل بتمسح الصف لما الطلب يتقفل
+        try {
+          await fetch(SB_URL_API + '/rest/v1/order_transfer_pending?on_conflict=branch,itm_code', {
+            method: 'POST',
+            headers: await sbH({ 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' }),
+            body: JSON.stringify({ branch: targetName, itm_code: String(item.item_code), qty: qty, requested_at: new Date().toISOString() })
+          });
+        } catch (e) {}
+        const c = crossMap[String(item.item_code)], suf = sufOf(targetName);
+        if (c && suf) c['pend_' + suf] = true;
+        applyFilter();
+      } else {
+        alert('❌ فشل إرسال طلب التحويل');
+        applyFilter();
+      }
+    }
+
+    async function requestBuy(id, qty) {
+      const item = allData.find(x => String(x.id) === String(id));
+      if (!item || !(qty > 0)) return;
+      const targetName = String(item.branch || '').trim();
+      if (!confirm('اطلب شراء ' + qty + ' من «' + item.item_name + '» لفرع ' + targetName + '؟')) return;
+      const btn = document.getElementById('req-' + id);
+      if (btn) { btn.disabled = true; btn.textContent = '... جاري الإرسال'; }
+      await ensureBranchReps();
+      const c = crossMap[String(item.item_code)];
+      const out = await sbTaskInsert({
+        type: 'شراء',
+        user: (branchReps && branchReps[targetName]) || targetName,
+        branch: targetName,
+        item_code: String(item.item_code),
+        item: item.item_name,
+        qty: qty,
+        order_type: (c && c.med) ? 'دواء' : (item.item_type === 'دواء' ? 'دواء' : 'كوزمو'),
+        note: 'تحت الحد الأدنى — مفيش فرع عنده فائض (رصيد ' + targetName + ' ' + nOf(item.current_stock) + ' والحد ' + nOf(item.min_stock) + ')'
+      });
+      if (out && out.ok) {
+        pendBuy[targetName + '|' + String(item.item_code)] = 'pending';
+        applyFilter();
+      } else {
+        alert('❌ فشل إرسال طلب الشراء');
+        applyFilter();
+      }
     }
 
     // ===== lookup بنفس مسار main.html =====
@@ -361,7 +522,7 @@
     }
 
     async function deleteItem(id, itemName) {
-      if (!confirm(`هل تريد حذف "${itemName}" من قائمة حدود المخزون؟`)) return;
+      if (!confirm(`هل تريد حذف "${itemName}" من قائمة الحد الأدنى للمخزون؟`)) return;
       const success = await sbStockLimitDelete(id);
       if (success) { allData = allData.filter(x => String(x.id) !== String(id)); renderStats(); applyFilter(); }
       else alert('❌ فشل الحذف');
