@@ -226,26 +226,42 @@
     // ⚠️ كانت كائن ثابت بمفتاح anon: الجداول بقت authenticated-only، وكمان
     //    أي توكن بيتقرا مرة واحدة وقت التحميل بيقدم بعد ساعة ويرجّع 401.
     const SRC_H = extra => sbH(Object.assign({ 'Content-Type': 'application/json' }, extra || {}));
+    // نداء واحد لدفعة أصناف + رسم نتايجها
+    async function _srcCall(slice){
+      const rows = slice.map(i => ({ k: String(i.id), code: i.item_code || '', name: i.item_name || '' }));
+      try {
+        const res = await fetch(SB_URL_API + '/rest/v1/rpc/suggest_purchase_sources', {
+          method:'POST', headers: await SRC_H(), body: JSON.stringify({ p_rows: rows })
+        });
+        const data = await res.json();
+        (Array.isArray(data) ? data : []).forEach(d => { SRC_MAP[d.k] = d; });
+      } catch(e){ /* تجاهل */ }
+      slice.forEach(i => { const el = document.getElementById('src-'+i.id); if (el) el.innerHTML = srcHtml(i.id); });
+    }
     async function loadSourceSuggestions(items){
       const pending = (items||[]).filter(i => SRC_MAP[i.id] === undefined && i.id != null);
       if (!pending.length) return;
       const _sel = document.getElementById('storeFilter');
       if (_sel){ _sel.disabled = true; _sel.innerHTML = '<option value="all">⏳ جاري تحميل المخازن…</option>'; }
-      const CHUNK = 40;
-      for (let x=0; x<pending.length; x+=CHUNK){
-        const slice = pending.slice(x, x+CHUNK);
-        const rows = slice.map(i => ({ k: String(i.id), code: i.item_code || '', name: i.item_name || '' }));
-        try {
-          const res = await fetch(SB_URL_API + '/rest/v1/rpc/suggest_purchase_sources', {
-            method:'POST', headers: await SRC_H(), body: JSON.stringify({ p_rows: rows })
-          });
-          const data = await res.json();
-          (Array.isArray(data) ? data : []).forEach(d => { SRC_MAP[d.k] = d; });
-        } catch(e){ /* تجاهل */ }
-        slice.forEach(i => { const el = document.getElementById('src-'+i.id); if (el) el.innerHTML = srcHtml(i.id); });
-      }
+      // الأصناف بكود لُقطتها سريعة (بحث مفهرس)؛ اللي بلا كود بتعمل مطابقة اسم بطيئة.
+      const hasCode = i => { const c = String(i.item_code || '').trim(); return c && !/^0+$/.test(c); };
+      const coded = pending.filter(hasCode);
+      const named = pending.filter(i => !hasCode(i));
+      // 1) الأصناف بكود: نداء واحد كبير الأول → الشاشة تتعمّر والفلتر يشتغل بسرعة
+      if (coded.length) await _srcCall(coded);
       if (_sel) _sel.disabled = false;
       populateStoreFilter();
+      // 2) الأصناف بالاسم: دفعات صغيرة على التوازي (حدّ 4 عشان مانحمّلش القاعدة) — بتتعمّر تدريجيًا
+      if (named.length){
+        const NCHUNK = 6, LIMIT = 4;
+        const chunks = [];
+        for (let x=0; x<named.length; x+=NCHUNK) chunks.push(named.slice(x, x+NCHUNK));
+        let idx = 0;
+        await Promise.all(Array.from({ length: Math.min(LIMIT, chunks.length) }, async () => {
+          while (idx < chunks.length) { await _srcCall(chunks[idx++]); }
+        }));
+        populateStoreFilter();
+      }
     }
     // المخزن المقترح لكل صنف: المختار يدويًا وإلا الأرخص
     function suggestedEntry(s){
