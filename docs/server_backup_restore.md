@@ -63,13 +63,16 @@ scp -r root@193.181.208.115:/root/backups/20260917-0300 D:\phalix-backups\
 ```bash
 cd /root/supabase-project
 BK=/root/backups/20260917-0300        # غيّرها للنسخة المطلوبة
+CID=$(docker compose ps -q db)
 
-# ١) الأدوار الأول (قبل أي حاجة)
-docker compose exec -T db psql -U supabase_admin -d postgres < $BK/globals.sql
+# ١) الأدوار الأول (قبل أي حاجة) — ملف نصي، الأنبوب معاه تمام
+docker exec -i $CID psql -U supabase_admin -d postgres < $BK/globals.sql
 
-# ٢) القاعدة — --clean بيمسح اللي موجود، -j4 أسرع
-docker compose exec -T db pg_restore -U supabase_admin -d postgres \
-  --clean --if-exists -j4 /dev/stdin < $BK/db.dump
+# ٢) القاعدة — لازم تتنسخ جوّه الحاوية الأول، مش أنبوب (شوف «درس من أول تشغيل»)
+docker cp $BK/db.dump $CID:/tmp/restore.dump
+docker exec $CID pg_restore -U supabase_admin -d postgres \
+  --clean --if-exists -j4 /tmp/restore.dump
+docker exec $CID rm -f /tmp/restore.dump
 
 # ٣) الإعدادات (لو محتاجها — دي بتكتب فوق .env الحالي!)
 tar -xzf $BK/config.tar.gz -C /root/supabase-project
@@ -81,8 +84,11 @@ docker compose up -d --force-recreate
 **رجوع جدول واحد بس** (من غير ما تلمس الباقي):
 
 ```bash
-docker compose exec -T db pg_restore -U supabase_admin -d postgres \
-  --data-only -t sales_items /dev/stdin < $BK/db.dump
+CID=$(docker compose ps -q db)
+docker cp $BK/db.dump $CID:/tmp/restore.dump
+docker exec $CID pg_restore -U supabase_admin -d postgres \
+  --data-only -t sales_items /tmp/restore.dump
+docker exec $CID rm -f /tmp/restore.dump
 ```
 
 ### أخطاء متوقّعة وقت الرجوع
@@ -101,11 +107,14 @@ docker compose exec -T db pg_restore -U supabase_admin -d postgres \
 نسخة ماتجرّبتش = نسخة مش مضمونة. مرة كل فترة، جرّب الرجوع على قاعدة فاضية:
 
 ```bash
-docker compose exec -T db createdb -U supabase_admin testrestore
-docker compose exec -T db pg_restore -U supabase_admin -d testrestore -j4 /dev/stdin < $BK/db.dump
-docker compose exec -T db psql -U supabase_admin -d testrestore -tAc \
+CID=$(docker compose ps -q db)
+docker cp $BK/db.dump $CID:/tmp/t.dump
+docker exec $CID createdb -U supabase_admin testrestore
+docker exec $CID pg_restore -U supabase_admin -d testrestore -j4 /tmp/t.dump
+docker exec $CID psql -U supabase_admin -d testrestore -tAc \
   "select count(*) from public.orders"
-docker compose exec -T db dropdb -U supabase_admin testrestore
+docker exec $CID dropdb -U supabase_admin testrestore
+docker exec $CID rm -f /tmp/t.dump
 ```
 
 لو العدد قريب من الحقيقي، النسخة موثوقة.
