@@ -114,7 +114,9 @@ const COLORS = ['#0d9488', '#2563eb', '#d97706', '#7c3aed', '#db2777', '#65a30d'
 const FIELDS = ['bills','sales_gross','delivery_bills','delivery_net','contract_net','returns_bills','returns_value',
   'orders','orders_done','orders_cancelled','orders_value','sla_rated','sla_ok','dlv_n','dlv_mins','prep_n','prep_mins',
   'jard_items','jard_matched','transfers','transfers_unavail','purchases','purchases_unavail','pos_n','pos_value',
-  'contract_invoices','contract_value','missing_items','tasks_done','price_changes','price_reviewed'];
+  'contract_invoices','contract_value','missing_items','tasks_done','price_changes','price_reviewed',
+  'transfers_done','purchases_ordered','purchases_pending','pur_med_ok','pur_med_dec','pur_cosmo_ok','pur_cosmo_dec',
+  'cust_req','cust_found','cust_decided','cust_answered','cust_informed','cust_received','cust_cancelled','cust_followup'];
 
 const ratio = (a, b, k) => b > 0 ? a / b * (k || 1) : null;
 // dir: 1 الأعلى أحسن، -1 الأقل أحسن، 0 محايد. score: داخل في الترتيب العام
@@ -146,12 +148,31 @@ const KPIS = [
   { g:'الجرد والمخزون', key:'price_review', t:'مراجعة تغييرات الأسعار', u:'pct', dir:1, hint:'اللي اتراجع من التغييرات',
     calc: s => ratio(s.price_reviewed, s.price_changes, 100) },
 
-  { g:'التحويلات والشراء', key:'transfers', t:'طلبات التحويل', u:'count', dir:0, add:true, calc: s => s.transfers || null },
-  { g:'التحويلات والشراء', key:'transfers_unavail', t:'تحويلات مش متوفرة', u:'pct', dir:-1, score:true, hint:'من طلبات التحويل',
-    calc: s => ratio(s.transfers_unavail, s.transfers, 100) },
-  { g:'التحويلات والشراء', key:'purchases', t:'طلبات الشراء', u:'count', dir:0, add:true, calc: s => s.purchases || null },
-  { g:'التحويلات والشراء', key:'purchases_unavail', t:'شراء مش متوفر', u:'pct', dir:-1, hint:'من طلبات الشراء',
-    calc: s => ratio(s.purchases_unavail, s.purchases, 100) },
+  // المشتريات مركزية: «كل الفروع» = أداء موظف المشتريات، والفرع = اللي اتوفّر من طلباته هو
+  { g:'المشتريات', key:'pur_pct', t:'نسبة توفير المشتريات', u:'pct', dir:1, hint:'اللي اتطلب ÷ (اتطلب + مش متوفر) — «كل الفروع» = أداء موظف المشتريات',
+    calc: s => ratio(s.purchases_ordered, s.purchases_ordered + s.purchases_unavail, 100) },
+  { g:'المشتريات', key:'pur_med_pct', t:'توفير الأدوية', u:'pct', dir:1, hint:'طلبات الشراء نوع دواء',
+    calc: s => ratio(s.pur_med_ok, s.pur_med_dec, 100) },
+  { g:'المشتريات', key:'pur_cosmo_pct', t:'توفير الكوزمو', u:'pct', dir:1, hint:'طلبات الشراء نوع كوزمو',
+    calc: s => ratio(s.pur_cosmo_ok, s.pur_cosmo_dec, 100) },
+  { g:'المشتريات', key:'purchases', t:'طلبات الشراء', u:'count', dir:0, add:true, calc: s => s.purchases || null },
+  { g:'المشتريات', key:'purchases_pending', t:'طلبات شراء لسه ماتردّش عليها', u:'count', dir:-1, add:true, hint:'اتضافت في الفترة ولسه معلّقة',
+    calc: s => s.purchases ? s.purchases_pending : null },
+
+  { g:'خدمة العملاء', key:'cust_found_pct', t:'نسبة اللي بنلاقيه للعملاء', u:'pct', dir:1, hint:'من طلبات العملاء (شراء + تحويل) اللي اتحدد مصيرها',
+    calc: s => ratio(s.cust_found, s.cust_decided, 100) },
+  { g:'خدمة العملاء', key:'cust_informed_pct', t:'نسبة إبلاغ العميل بالرد', u:'pct', dir:1, score:true, hint:'من الطلبات اللي اترد عليها',
+    calc: s => ratio(s.cust_informed, s.cust_answered, 100) },
+  { g:'خدمة العملاء', key:'cust_req', t:'طلبات العملاء', u:'count', dir:0, add:true, calc: s => s.cust_req || null },
+  { g:'خدمة العملاء', key:'cust_received_pct', t:'العملاء اللي استلموا', u:'pct', dir:1, hint:'«استلم» من اللي اتوفّر',
+    calc: s => ratio(s.cust_received, s.cust_found, 100) },
+  { g:'خدمة العملاء', key:'cust_cancel_pct', t:'العميل ألغى الطلب', u:'pct', dir:-1, hint:'من طلبات العملاء',
+    calc: s => ratio(s.cust_cancelled, s.cust_req, 100) },
+  { g:'خدمة العملاء', key:'cust_followup', t:'غير متوفر يحتاج متابعة', u:'count', dir:-1, add:true, calc: s => s.cust_req ? s.cust_followup : null },
+
+  { g:'التحويلات', key:'tr_pct', t:'نسبة توفير التحويلات', u:'pct', dir:1, hint:'اتحوّل ÷ (اتحوّل + مش متوفر)',
+    calc: s => ratio(s.transfers_done, s.transfers_done + s.transfers_unavail, 100) },
+  { g:'التحويلات', key:'transfers', t:'طلبات التحويل', u:'count', dir:0, add:true, calc: s => s.transfers || null },
 
   { g:'التشغيل والتحصيل', key:'tasks_done', t:'مهام اتنفذت', u:'count', dir:1, add:true, calc: s => s.tasks_done || null },
   { g:'التشغيل والتحصيل', key:'pos_value', t:'مبيعات الماكينات', u:'money', dir:0, add:true, calc: s => s.pos_n ? s.pos_value : null },

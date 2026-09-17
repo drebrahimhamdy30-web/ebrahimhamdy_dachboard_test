@@ -213,3 +213,21 @@ INSERT INTO page_permissions (page, role, can_view, can_edit, page_key, sort_ord
 SELECT 'kpi.html', r, r = 'admin', r = 'admin', 'kpi', 1
   FROM unnest(array['admin','manager','employee','pharmacist','cashier','accountant','reviewer','inventory','supervisor']) r
  WHERE NOT EXISTS (SELECT 1 FROM page_permissions WHERE page_key = 'kpi' AND role = r);
+
+-- ⚠️ تعديل تاني (kpi_dashboard_purchasing_cs): CTE tasks اتستبدل بنسخة فيها المشتريات وخدمة العملاء
+--    (باقي الدالة زي ما هي، والحقول الجديدة اتضافت في jsonb_build_object بعد purchases_unavail):
+--   tasks AS (
+--     SELECT bk.name AS branch, (t.created_at AT TIME ZONE 'Africa/Cairo')::date AS day,
+--       transfers / transfers_done (state transferred) / transfers_unavail,
+--       purchases / purchases_ordered (ordered) / purchases_unavail / purchases_pending (state pending أو null),
+--       pur_med_ok|pur_med_dec (order_type دواء: ordered | ordered+unavailable), pur_cosmo_ok|pur_cosmo_dec (كوزمو),
+--       cust_req      = طلبات فيها cust_name أو cust_code (نفس فلتر customer_service.html)
+--       cust_found    = cust_state «متوفر وتم ابلاغ العميل»/«استلم» → لقيناه؛ «غير متوفر…» → ملقيناهوش؛
+--                       وإلا من state (ordered/transferred = لقيناه، unavailable = لأ)
+--       cust_decided  = اللي اتحدد فيه لقيناه ولا لأ
+--       cust_answered = state في ordered/transferred/unavailable
+--       cust_informed = منهم اللي cust_state فيه إجراء غير «حاولنا التواصل مع العميل»
+--       cust_received (استلم) / cust_cancelled (العميل الغى الطلب) / cust_followup (غير متوفر يحتاج متابعة)
+--     FROM task t JOIN bk ON bk.k = replace(t.branch,'ي','ى') CROSS JOIN LATERAL (is_cust, found) c
+--     WHERE t.created_at في الفترة AND t.type IN ('تحويل','شراء') GROUP BY 1, 2)
+--   النص الكامل الحالي: SELECT pg_get_functiondef('public.get_kpi_dashboard(date,date)'::regprocedure);
