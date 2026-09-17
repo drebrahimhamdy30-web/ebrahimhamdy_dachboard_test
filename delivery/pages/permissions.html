@@ -15,7 +15,7 @@ try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_d
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../delivery-style.css">
 <script src="../../config.js?v=20260903"></script>
-<script src="../../session.js?v=20260903"></script>
+<script src="../../session.js?v=20260917tabs"></script>
 <script src="../../branches.js?v=20260904"></script>
 <script src="../../pages.js?v=20260905"></script>
 <script src="../../brand.js?v=20260904"></script>
@@ -42,6 +42,10 @@ table.matrix th:first-child{background:var(--gray-light);z-index:3}
 .toast{position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);background:#1e293b;color:white;padding:.6rem 1.25rem;border-radius:10px;font-size:.8rem;font-weight:600;z-index:400;display:none}
 .toast.show{display:block}
 .role-driver-note{font-size:.72rem;color:var(--text-muted);margin-top:.75rem}
+.tabs-toggle{background:none;border:1px solid var(--border);border-radius:20px;padding:0 .5rem;margin-inline-start:.4rem;font-family:'Cairo',sans-serif;font-size:.66rem;color:var(--primary);cursor:pointer}
+tr.tab-row td{background:var(--gray-light);font-size:.72rem}
+tr.tab-row td:first-child{padding-inline-start:1.6rem;font-weight:500;color:var(--text-secondary)}
+.tab-ok{color:#16a34a;font-weight:700}.tab-no{color:#dc2626;font-weight:700}.tab-na{color:var(--text-muted)}
 </style>
 </head>
 <body>
@@ -87,6 +91,8 @@ const ROLES = [
 // و4 شاشات مكانتش موجودة هنا خالص فماكانش ينفع تتعدّل صلاحياتها.
 
 let permData = {};   // permData[role][page] = {can_view, can_edit}
+// تبويبات الشاشات: TABS[page] = [{tab_key,title}]، tabDenied["role|page|tab"] = true لو ممنوع
+let TABS = {}, tabDenied = {}, openTabs = new Set();
 let editMode = false;
 let loadOk = false;  // اتحمّلت الصلاحيات صح؟ (حماية ضد الحفظ فوق بيانات فاضية ومسحها)
 
@@ -112,9 +118,25 @@ async function loadPermissions(){
     if(!permData[r.role]) permData[r.role]={};
     permData[r.role][r.page_key || Pages.keyOf(r.page)]={can_view:r.can_view, can_edit:r.can_edit};
   });
+  // التبويبات: الكتالوج + المنع (مفيش صف = مسموح)
+  try{
+    const [t, tp] = await Promise.all([
+      db.from('app_page_tabs').select('page_key,tab_key,title,sort_order').order('sort_order'),
+      db.from('tab_permissions').select('role,page_key,tab_key,allowed')
+    ]);
+    if(t.error || tp.error) throw (t.error || tp.error);
+    TABS = {}; (t.data||[]).forEach(r => (TABS[r.page_key] = TABS[r.page_key] || []).push(r));
+    tabDenied = {}; (tp.data||[]).forEach(r => { if(r.allowed === false) tabDenied[r.role+'|'+r.page_key+'|'+r.tab_key] = true; });
+  }catch(e){
+    console.error('tabs load failed', e);
+    document.getElementById('permActions').innerHTML='';
+    document.getElementById('permBody').innerHTML='<div class="no-access">⚠️ تعذّر تحميل صلاحيات التبويبات.<br>حدّث الصفحة وحاول تاني — الحفظ متوقّف مؤقتاً.</div>';
+    return;
+  }
   loadOk=true;
   render();
 }
+function toggleTabs(page){ if(openTabs.has(page)) openTabs.delete(page); else openTabs.add(page); render(); }
 
 function renderActions(){
   const el=document.getElementById('permActions');
@@ -140,7 +162,9 @@ function render(){
     html += `<tr class="group-row"><td colspan="${ROLES.length+1}">${group}</td></tr>`;
     pages.forEach(meta => {
       const page = meta.key;
-      html += `<tr><td>${meta.title}</td>`;
+      const tabs = TABS[page] || [];
+      const open = openTabs.has(page);
+      html += `<tr><td>${meta.title}${tabs.length ? `<button class="tabs-toggle" onclick="toggleTabs('${page}')">${open?'▾':'▸'} التبويبات (${tabs.length})</button>` : ''}</td>`;
       ROLES.forEach(role => {
         const pp = permData[role.key]?.[page] || {};
         const cur = pp.can_edit ? 'edit' : (pp.can_view ? 'view' : '');
@@ -155,16 +179,35 @@ function render(){
         }
       });
       html += `</tr>`;
+      if(tabs.length && open){
+        tabs.forEach(tb => {
+          html += `<tr class="tab-row"><td>↳ ${tb.title}</td>`;
+          ROLES.forEach(role => {
+            const pageOn = role.key === 'admin' || !!(permData[role.key]?.[page]?.can_view);
+            const denied = role.key !== 'admin' && !!tabDenied[role.key+'|'+page+'|'+tb.tab_key];
+            if(editMode){
+              html += role.key === 'admin'
+                ? '<td><span class="tab-ok" title="الأدمن بيشوف كل التبويبات">✓</span></td>'
+                : `<td><input type="checkbox" class="chk tab-chk" data-role="${role.key}" data-page="${page}" data-tab="${tb.tab_key}" ${denied?'':'checked'} title="${pageOn?'':'الشاشة نفسها مقفولة على الدور ده'}"></td>`;
+            } else {
+              html += !pageOn ? '<td><span class="tab-na">—</span></td>'
+                    : (denied ? '<td><span class="tab-no">✗</span></td>' : '<td><span class="tab-ok">✓</span></td>');
+            }
+          });
+          html += `</tr>`;
+        });
+      }
     });
   });
 
   html += `</tbody></table></div>
+    <div class="role-driver-note">التبويبات: ✓ مسموح · ✗ ممنوع · — الشاشة نفسها مقفولة على الدور. أي تبويب مالوش تعديل بيبقى مسموح، والأدمن بيشوف كله.</div>
     <div class="role-driver-note">ملاحظة: دور "طيار" (driver) مش موجود في الجدول ده — بيدخل مباشرة على صفحته الخاصة (driver.html) من غير أي شاشة تانية.</div>`;
 
   document.getElementById('permBody').innerHTML = html;
 }
 
-function enterEdit(){ editMode=true; render(); }
+function enterEdit(){ editMode=true; Object.keys(TABS).forEach(p => openTabs.add(p)); render(); }
 function cancelEdit(){ editMode=false; loadPermissions(); }
 
 async function savePermissions(){
@@ -179,6 +222,17 @@ async function savePermissions(){
   try{
     const { error } = await db.rpc('save_page_permissions_bulk', { p_updates: updates });
     if(error) throw error;
+    // التبويبات: نبعت اللي اتغيّر بس (الجدول بيفضل صغير — مفيش صف = مسموح)
+    const tabUpdates = [];
+    document.querySelectorAll('#permBody input.tab-chk').forEach(c => {
+      const k = c.dataset.role+'|'+c.dataset.page+'|'+c.dataset.tab;
+      const wasDenied = !!tabDenied[k], nowDenied = !c.checked;
+      if(wasDenied !== nowDenied) tabUpdates.push({ role:c.dataset.role, page_key:c.dataset.page, tab_key:c.dataset.tab, allowed:c.checked });
+    });
+    if(tabUpdates.length){
+      const { error: tErr } = await db.rpc('save_tab_permissions_bulk', { p_updates: tabUpdates });
+      if(tErr) throw tErr;
+    }
     showToast('✓ تم حفظ الصلاحيات');
     editMode=false;
     await loadPermissions();

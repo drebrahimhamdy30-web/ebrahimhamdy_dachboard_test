@@ -269,6 +269,7 @@ const Session = (function () {
     if (result.provider) set('authProvider', result.provider);
     if (result.refresh)  set('sbRefresh',    result.refresh);
     _permCache = null;          // مستخدم جديد = دور جديد = صلاحيات جديدة
+    _tabCache = null;
     return user();
   }
 
@@ -309,6 +310,7 @@ const Session = (function () {
       sessionStorage.removeItem('jwtRefreshDone');
     } catch (e) {}
     _permCache = null;
+    _tabCache = null;
   }
 
   /* الوجهة بتختلف: الشل والتوصيل بيرجّعوا لـauth.html، الـERP لـindex.html */
@@ -351,6 +353,64 @@ const Session = (function () {
     return { view: !!(p && p.can_view), edit: !!(p && p.can_edit) };
   }
 
+  /* ── صلاحيات التبويبات جوّه الشاشة ─────────────────────────────────
+     get_role_tabs بترجّع كل تبويبات الشاشات المسجّلة في app_page_tabs مع
+     allowed للدور (مفيش صف منع = مسموح، والأدمن دايمًا مسموح).
+     guardTabs('key') بتتنادى مرة في آخر الشاشة:
+       • بتحط CSS بيخفي أزرار التبويبات الممنوعة — حتى اللي بتترسم بعدين
+         (زي تبويبات أرصدة الموردين اللي بتتبني مع كل render).
+       • لو التبويب المفتوح أو الافتراضي ممنوع، بتضغط أول تبويب مسموح.
+     ⚠️ ده إخفاء في الواجهة زي صلاحيات الصفحات؛ حماية البيانات نفسها في
+        RPCs كل شاشة.                                                  */
+  let _tabCache = null;
+  async function tabRules() {
+    if (_tabCache) return _tabCache;
+    try {
+      const r = await fetch(`${PHALIX_CONFIG.supabaseUrl}/rest/v1/rpc/get_role_tabs`, {
+        method: 'POST', headers: await headers(), body: JSON.stringify({ p_role: role() })
+      });
+      _tabCache = r.ok ? (await r.json()) || [] : [];
+    } catch (e) { _tabCache = []; }
+    return _tabCache;
+  }
+  async function tabAllowed(pageKey, tabKey) {
+    if (isAdmin()) return true;
+    const t = (await tabRules()).find(x => x.page_key === pageKey && x.tab_key === tabKey);
+    return !t || t.allowed !== false;
+  }
+  async function guardTabs(pageKey) {
+    if (isAdmin()) return new Set();
+    const rows = (await tabRules()).filter(x => x.page_key === pageKey)
+                                   .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+    const denied = rows.filter(x => x.allowed === false);
+    if (!denied.length) return new Set();
+
+    const st = document.createElement('style');
+    st.setAttribute('data-tab-guard', pageKey);
+    st.textContent = denied.map(x => x.selector.split(',').map(sel => sel.trim() + '{display:none!important}').join('\n')).join('\n');
+    document.head.appendChild(st);
+
+    const allowed = rows.filter(x => x.allowed !== false);
+    const defaultDenied = rows.length && rows[0].allowed === false;
+    const visible = el => el && getComputedStyle(el).display !== 'none';
+    const tryPick = () => {
+      let deniedEls = [];
+      denied.forEach(x => { try { deniedEls = deniedEls.concat([...document.querySelectorAll(x.selector)]); } catch (e) {} });
+      if (!deniedEls.length) return false;                       // الأزرار لسه ماترسمتش
+      const activeDenied = deniedEls.some(el => el.classList.contains('active'));
+      if (!activeDenied && !defaultDenied) return true;
+      for (const x of allowed) {
+        let el = null;
+        try { el = [...document.querySelectorAll(x.selector)].find(visible); } catch (e) {}
+        if (el) { el.click(); return true; }
+      }
+      return false;
+    };
+    let n = 0;
+    (function tick() { if (tryPick() || ++n > 40) return; setTimeout(tick, 150); })();
+    return new Set(denied.map(x => x.tab_key));
+  }
+
   /* ── حارس الصفحة ─────────────────────────────────────────────────
      require()                      → لازم يكون داخل
      require({roles:['admin']})     → ولازم دوره من دول
@@ -374,5 +434,5 @@ const Session = (function () {
            username, fullName, is, isAdmin, decodeJwt, jwtValid, tokenValid,
            refresh, validToken, bearer, headers, client,
            save, resolveBranchId, clear, logout, loginPage, thisPage,
-           pages, can, require };
+           pages, can, require, tabRules, tabAllowed, guardTabs };
 })();
