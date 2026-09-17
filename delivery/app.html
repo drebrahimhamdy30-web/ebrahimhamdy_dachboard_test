@@ -244,6 +244,12 @@ html, body { max-width:100%; overflow-x:hidden; }
 body.dark{     --text-light:#6b7a94;  --gray-light:#16223a; --primary-light:#12403c; }
 .theme-btn{width:38px;height:38px;border-radius:10px;border:1.5px solid var(--border);background:var(--white);color:var(--text-muted);cursor:pointer;font-size:1rem;flex-shrink:0}
 .theme-btn:hover{border-color:var(--primary);color:var(--primary)}
+/* لجنة الجرد: اختيار فرع الجرد */
+.jard-br-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:.5rem;margin:.25rem 0 1rem}
+.jard-br-opt{height:48px;border:1.5px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-family:'Cairo',sans-serif;font-size:.85rem;font-weight:700;cursor:pointer}
+.jard-br-opt:hover:not(:disabled){border-color:var(--primary);color:var(--primary)}
+.jard-br-opt.cur{border-color:var(--primary);background:var(--primary-light);color:var(--primary)}
+.jard-br-opt:disabled{opacity:.55;cursor:wait}
 </style>
 </head>
 <body>
@@ -352,6 +358,9 @@ body.dark{     --text-light:#6b7a94;  --gray-light:#16223a; --primary-light:#124
         </div>
       </div>
 
+      <button class="header-btn" id="jardBranchBtn" style="display:none" onclick="jardOpenPicker(false)" title="الفرع اللي بتجرد فيه دلوقتي — اضغط لو انتقلت لفرع تاني">
+        🏬 <span id="jardBranchLbl"></span> · تغيير
+      </button>
       <button class="header-btn" onclick="reloadCurrentPage()">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
         تحديث
@@ -368,6 +377,16 @@ body.dark{     --text-light:#6b7a94;  --gray-light:#16223a; --primary-light:#124
     <iframe class="page-frame active" id="mainFrame" src="about:blank" allow="clipboard-write" onload="if(typeof frameLoaded==='function')frameLoaded()"></iframe>
   </div>
 </main>
+
+<div id="jardOverlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:600;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border-radius:14px;width:460px;max-width:92vw;max-height:90vh;overflow:auto;padding:1.5rem;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+    <div style="font-weight:700;font-size:1rem;margin-bottom:.35rem;text-align:center">🏬 بتجرد في أنهي فرع؟</div>
+    <div style="font-size:.78rem;color:var(--text-muted);text-align:center;margin-bottom:1rem">الرصيد والجرد هيتسجّلوا على الفرع اللي تختاره — لو انتقلت لفرع تاني غيّره من زر الفرع فوق</div>
+    <div class="jard-br-grid" id="jardBrGrid"></div>
+    <div id="jardBrMsg" style="font-size:.8rem;text-align:center;min-height:1.2em;margin-bottom:.5rem"></div>
+    <button id="jardBrCancel" onclick="jardClosePicker()" style="width:100%;height:42px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-family:'Cairo',sans-serif;font-size:.85rem;font-weight:700;cursor:pointer">إلغاء</button>
+  </div>
+</div>
 
 <div id="pwdOverlay" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:500;align-items:center;justify-content:center">
   <div style="background:var(--surface);border-radius:14px;width:360px;max-width:92vw;padding:1.5rem;box-shadow:0 20px 60px rgba(0,0,0,.3)">
@@ -559,6 +578,12 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (currentUser.role === 'driver') { window.location.href = 'driver.html'; return; }
   if (currentUser.role === 'preparer') { window.location.href = 'prep.html'; return; }
+
+  // لجنة الجرد: موظف الجرد بيختار الفرع اللي هيجرد فيه (مرة في اليوم، ويغيّره لو انتقل)
+  if (currentUser.role === 'inventory') {
+    await jardEnsureBranch();
+    currentUser = Session.user();
+  }
 
   document.getElementById('userName').textContent = currentUser.full_name;
   document.getElementById('userRoleLabel').textContent = ROLE_LABELS[currentUser.role] || currentUser.role;
@@ -1304,6 +1329,78 @@ function logout() {
   // ⚠️ كان بيمسح المفاتيح بالاسم وناسي authJwt و sbRefresh و authProvider،
   // فالجهاز يفضل شايل جلسة قابلة للتجديد بعد الخروج. Session.clear() بيمسح الكل.
   Session.logout('auth.html');
+}
+
+/* ── لجنة الجرد: فرع الجرد ─────────────────────────────────────────
+   فرع الحساب بقى «فرع أساسي» بس. الاختيار بيتسجّل على السيرفر
+   (jard_checkin → jard_checkins) وبيتحفظ محليًا لليوم ده، فأي دخول تاني
+   في نفس اليوم يرجع لنفس الفرع من غير سؤال. userBranch هو اللي شاشة
+   الجرد بتقرأ منه الرصيد وبتسجّل عليه.                                */
+const JARD_KEY = 'jardCheckin';
+const JARD = { mandatory: false, resolve: null };
+function jardSaved() {
+  try {
+    const j = JSON.parse(localStorage.getItem(JARD_KEY) || 'null');
+    return (j && j.branch && j.day === tqTodayCairo() && j.user === currentUser.username) ? j : null;
+  } catch (e) { return null; }
+}
+function jardShowBtn(br) {
+  document.getElementById('jardBranchLbl').textContent = br;
+  document.getElementById('jardBranchBtn').style.display = '';
+}
+async function jardEnsureBranch() {
+  const s = jardSaved();
+  if (s) {
+    // الدخول من جديد بيرجّع userBranch لفرع الحساب — نرجّعه للفرع المختار
+    if (Session.branch() !== s.branch) { localStorage.setItem('userBranch', s.branch); await Session.resolveBranchId(); }
+    jardShowBtn(s.branch);
+    return;
+  }
+  await Branches.ready();
+  await new Promise(res => jardOpenPicker(true, res));
+}
+function jardOpenPicker(mandatory, resolve) {
+  JARD.mandatory = !!mandatory; JARD.resolve = resolve || null;
+  const cur = (jardSaved() || {}).branch || '';
+  const esc = v => String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+  document.getElementById('jardBrGrid').innerHTML = Branches.names().map(n =>
+    '<button class="jard-br-opt' + (n === cur ? ' cur' : '') + '" data-br="' + esc(n) + '" onclick="jardPick(this.dataset.br)">' + esc(n) + '</button>'
+  ).join('') || '<div style="grid-column:1/-1;text-align:center;color:var(--text-muted)">مفيش فروع — اعمل تحديث</div>';
+  document.getElementById('jardBrMsg').textContent = '';
+  document.getElementById('jardBrCancel').style.display = JARD.mandatory ? 'none' : '';
+  document.getElementById('jardOverlay').style.display = 'flex';
+}
+function jardClosePicker() {
+  if (JARD.mandatory) return;
+  document.getElementById('jardOverlay').style.display = 'none';
+}
+async function jardPick(name) {
+  const btns = document.querySelectorAll('.jard-br-opt');
+  const msg = document.getElementById('jardBrMsg');
+  btns.forEach(b => b.disabled = true);
+  msg.style.color = 'var(--text-muted)'; msg.textContent = 'جاري تسجيل الدخول في ' + name + '…';
+  let err = '';
+  try {
+    const { data, error } = await db.rpc('jard_checkin', { p_branch: name });
+    if (error) err = (error.code === 'PGRST301' || /JWT|401/i.test(error.message || '')) ? 'الجلسة انتهت — سجّل الدخول من جديد' : (error.message || 'فشل التسجيل');
+    else if (!data || !data.success) err = (data && data.error) || 'فشل التسجيل';
+    else {
+      localStorage.setItem('userBranch', data.branch);
+      await Session.resolveBranchId();
+      localStorage.setItem(JARD_KEY, JSON.stringify({ day: tqTodayCairo(), user: currentUser.username, branch: data.branch }));
+      if (JARD.mandatory) {
+        document.getElementById('jardOverlay').style.display = 'none';
+        jardShowBtn(data.branch);
+        const r = JARD.resolve; JARD.mandatory = false; JARD.resolve = null;
+        if (r) r();
+      } else {
+        location.reload();   // كل الشاشات المفتوحة تقرأ الفرع الجديد
+      }
+      return;
+    }
+  } catch (e) { err = 'مفيش اتصال — حاول تاني'; }
+  msg.style.color = '#dc2626'; msg.textContent = '⚠️ ' + err;
+  btns.forEach(b => b.disabled = false);
 }
 
 function openChangePassword(){
