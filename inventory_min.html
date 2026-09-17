@@ -103,6 +103,12 @@
           <input type="checkbox" id="belowOnly" onchange="applyFilter()">
           تحت الحد الأدنى فقط ⚠️
         </label>
+        <label class="check-label" title="الفرع المصدر بنسيب له الأكبر: حده الأدنى أو استهلاك الأيام دي — والباقي هو الفائض">
+          يحتفظ الفرع المصدر باستهلاك
+          <input type="number" id="coverDays" min="0" max="120" step="1" value="30" oninput="onCoverDaysChange()"
+            style="width:58px;padding:3px 6px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface-3);color:var(--text-primary);font-family:var(--font);font-size:0.82rem;text-align:center;margin:0 4px;">
+          يوم
+        </label>
         <div id="stats-bar" style="display:flex;gap:8px;align-items:center;font-size:0.82rem;margin-right:auto;"></div>
       </div>
 
@@ -145,6 +151,10 @@
       activeUser = user;
       if (user) {
         userBranch = (Session.branch()).trim();
+        try {
+          const d = localStorage.getItem('minstock_cover_days');
+          if (d !== null && document.getElementById('coverDays')) document.getElementById('coverDays').value = d;
+        } catch (e) {}
         loadAll();
       }
     });
@@ -254,7 +264,21 @@
     const qtyIn = (c, suf) => nOf(c ? c['qty_' + suf] : 0);
     const minIn = (c, suf) => { const v = c ? c['min_' + suf] : null; return (v === null || v === undefined || v === '') ? 0 : nOf(v); };
     const pendIn = (c, suf) => !!(c && c['pend_' + suf]);
-    const surplusIn = (c, suf) => Math.floor(qtyIn(c, suf) - minIn(c, suf));
+    const avIn  = (c, suf) => nOf(c ? c['av_' + suf] : 0);   // معدل الاستهلاك الشهري للفرع
+
+    // عدد أيام الاستهلاك اللي الفرع المصدر بيحتفظ بيها (افتراضي شهر)
+    function coverDays() {
+      const v = parseFloat((document.getElementById('coverDays') || {}).value);
+      return (isNaN(v) || v < 0) ? 30 : v;
+    }
+    // اللي الفرع المصدر بيحتفظ بيه = الأكبر بين حده الأدنى واستهلاكه في فترة التغطية
+    function reserveIn(c, suf) { return Math.max(minIn(c, suf), avIn(c, suf) * coverDays() / 30); }
+    // الفائض المتاح للتحويل = رصيده − اللي بيحتفظ بيه
+    const surplusIn = (c, suf) => Math.floor(qtyIn(c, suf) - reserveIn(c, suf));
+    function onCoverDaysChange() {
+      try { localStorage.setItem('minstock_cover_days', String(coverDays())); } catch (e) {}
+      applyFilter();
+    }
 
     async function loadCross() {
       try {
@@ -284,10 +308,13 @@
       if (!c) return '<span style="color:var(--text-muted)">—</span>';
       const mine = sufOf(item.branch);
       return BR_SUF.filter(([, suf]) => suf !== mine).map(([name, suf]) => {
-        const s = surplusIn(c, suf);
+        const s = surplusIn(c, suf), res = reserveIn(c, suf), av = avIn(c, suf);
         const col = s > 0 ? 'var(--success,#16a34a)' : 'var(--text-muted)';
-        return '<div><span style="color:var(--text-muted)">' + name + ':</span> <b style="color:' + col + '">' + nOf(qtyIn(c, suf)) + '</b>'
-             + (s > 0 ? ' <span style="font-size:0.68rem;color:var(--success,#16a34a)">(فائض ' + s + ')</span>' : '') + '</div>';
+        const why = (av * coverDays() / 30 > minIn(c, suf)) ? 'استهلاك ' + coverDays() + ' يوم' : 'الحد الأدنى';
+        return '<div title="' + name + ': بيحتفظ بـ' + (Math.round(res * 10) / 10) + ' (' + why + ')' + (av ? ' · معدل ' + av + '/شهر' : '') + '">'
+             + '<span style="color:var(--text-muted)">' + name + ':</span> <b style="color:' + col + '">' + nOf(qtyIn(c, suf)) + '</b>'
+             + (s > 0 ? ' <span style="font-size:0.68rem;color:var(--success,#16a34a)">(فائض ' + s + ')</span>'
+                      : ' <span style="font-size:0.68rem;color:var(--text-muted)">(محجوز ' + (Math.round(res * 10) / 10) + ')</span>') + '</div>';
       }).join('');
     }
 
@@ -312,8 +339,12 @@
       const id = 'req-' + item.id;
       if (best) {
         const qty = Math.min(need, bestQty);
-        return '<button id="' + id + '" class="btn btn-sm" style="background:var(--accent,#0d9488);color:#fff;padding:5px 8px;font-size:0.72rem;font-weight:700;margin-bottom:4px;width:100%"'
-             + ' onclick="requestTransfer(\'' + item.id + '\',\'' + best.replace(/'/g, "\\'") + '\',' + qty + ')">↪ حوّل ' + qty + ' من ' + best + '</button>';
+        // الكمية قابلة للتعديل قبل الإرسال (المقترح = الأقل بين اللي ناقصك وفائض المصدر)
+        return '<div style="display:flex;gap:3px;align-items:center;margin-bottom:4px">'
+             + '<input type="number" id="qty-' + item.id + '" value="' + qty + '" min="1" step="1" title="كمية التحويل — تقدر تعدّلها"'
+             + ' style="width:48px;padding:4px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface-3);color:var(--text-primary);font-family:var(--font);font-size:0.75rem;text-align:center">'
+             + '<button id="' + id + '" class="btn btn-sm" style="background:var(--accent,#0d9488);color:#fff;padding:5px 6px;font-size:0.72rem;font-weight:700;flex:1"'
+             + ' onclick="requestTransfer(\'' + item.id + '\',\'' + best.replace(/'/g, "\\'") + '\',' + bestQty + ')">↪ حوّل من ' + best + '</button></div>';
       }
       return '<button id="' + id + '" class="btn btn-sm" style="background:var(--surface-3);color:var(--text-primary);border:1.5px solid var(--border);padding:5px 8px;font-size:0.72rem;font-weight:700;margin-bottom:4px;width:100%"'
            + ' onclick="requestBuy(\'' + item.id + '\',' + need + ')">🛒 اطلب شراء ' + need + '</button>';
@@ -330,9 +361,13 @@
       } catch (e) { branchReps = {}; }
     }
 
-    async function requestTransfer(id, sourceName, qty) {
+    async function requestTransfer(id, sourceName, maxQty) {
       const item = allData.find(x => String(x.id) === String(id));
-      if (!item || !(qty > 0)) return;
+      if (!item) return;
+      const box = document.getElementById('qty-' + id);
+      const qty = Math.floor(parseFloat(box ? box.value : maxQty));
+      if (!(qty > 0)) { alert('اكتب كمية أكبر من صفر'); return; }
+      if (qty > maxQty && !confirm('الكمية ' + qty + ' أكبر من فائض ' + sourceName + ' (' + maxQty + ') — تبعت برضه؟')) return;
       const targetName = String(item.branch || '').trim();
       const btn = document.getElementById('req-' + id);
       if (btn) { btn.disabled = true; btn.textContent = '... جاري الإرسال'; }
