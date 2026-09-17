@@ -824,7 +824,7 @@ async function tqLoad() {
   const dstr = tqTodayCairo();
   try {
     const [t, a, dn] = await Promise.all([
-      db.from('tasks').select('id,title,freq,weekday,month_day,month,sort_order,created_at').eq('is_active', true),
+      db.from('tasks').select('id,title,freq,weekday,month_day,month,sort_order,created_at,excluded_branches').eq('is_active', true),
       db.from('task_assignee').select('task_id,branch,assignee'),
       // سنة لورا عشان نعرف المهام المتأخرة اتعملت ولا لأ
       db.from('task_done').select('task_id,done_on').eq('branch', TQ.branch)
@@ -847,7 +847,9 @@ async function tqLoad() {
 function tqDueToday() {
   const d = tqCairoDate();
   // المتأخرة الأول — دي اللي ممكن تتنسي
-  return TQ.tasks.map(t => Object.assign({}, t, { _st: tkState(t, d, TQ.doneMap[t.id]) }))
+  // المهام المستثنى منها الفرع مابتظهرش خالص
+  return TQ.tasks.filter(t => !(Array.isArray(t.excluded_branches) && t.excluded_branches.includes(TQ.branch)))
+    .map(t => Object.assign({}, t, { _st: tkState(t, d, TQ.doneMap[t.id]) }))
     .filter(t => t._st.show)
     .sort((x, y) => (y._st.late - x._st.late) || (x.sort_order || 0) - (y.sort_order || 0) || String(x.title).localeCompare(String(y.title), 'ar'));
 }

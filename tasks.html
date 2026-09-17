@@ -78,6 +78,11 @@
     .tk-asg-box .lbl { font-size:0.78rem; font-weight:800; color:var(--text-secondary); margin-bottom:8px; display:flex; align-items:center; gap:6px; }
     .tk-asg-row { display:grid; grid-template-columns:110px 1fr; gap:8px; align-items:center; margin-bottom:7px; }
     .tk-asg-row span { font-size:0.8rem; font-weight:700; }
+    .tk-asg-row { grid-template-columns:110px 1fr auto; }
+    .tk-excl { display:flex; align-items:center; gap:4px; font-size:0.72rem; color:var(--text-muted); white-space:nowrap; cursor:pointer; }
+    .tk-excl input { width:auto; }
+    .tk-asg-row.excluded span, .tk-asg-row.excluded input.f-asg { opacity:.45; }
+    .tk-asg .tk-ex { color:#b45309; font-weight:700; }
     .tk-modal-act { display:flex; justify-content:flex-end; gap:8px; padding:0 18px 18px; }
     .tk-row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
     .hidden{ display:none !important; }
@@ -146,7 +151,7 @@
           <div class="tk-field hidden" id="wrap-monthday"><label>يوم من الشهر</label><select id="f-monthday"></select></div>
         </div>
         <div class="tk-asg-box">
-          <div class="lbl"><i class="fas fa-user-check"></i> المسؤول عن التنفيذ في كل فرع</div>
+          <div class="lbl"><i class="fas fa-user-check"></i> المسؤول عن التنفيذ في كل فرع <span style="font-weight:400;color:var(--text-muted);font-size:.72rem">· علّم «مستثنى» لو المهمة مالهاش علاقة بالفرع</span></div>
           <div id="tk-asg-fields"></div>
         </div>
         <div class="tk-field"><label>ملاحظات (اختياري)</label><textarea id="f-notes" rows="2"></textarea></div>
@@ -185,6 +190,8 @@
     function esc(s){ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
     function todayCairo(){ return new Date().toLocaleDateString('en-CA', { timeZone:'Africa/Cairo' }); }
     function lastDayOfMonth(y,m){ return new Date(y, m+1, 0).getDate(); }
+    // الفروع المستثناة من المهمة: مابتشوفهاش خالص ومش بتترحّل عليها
+    function isExcluded(t, br){ return Array.isArray(t.excluded_branches) && t.excluded_branches.includes(br); }
     function whoOf(id, br){ return (ASSIGN[id] && ASSIGN[id][br]) ? ASSIGN[id][br] : ''; }
 
     function isDue(t, d){
@@ -282,7 +289,7 @@
       const d = new Date(dstr + 'T12:00:00');
       document.getElementById('tk-dayname').textContent = WD[d.getDay()] + '، ' + d.getDate() + ' ' + MO[d.getMonth()] + ' ' + d.getFullYear();
       await loadDone();
-      const active = TASKS.filter(t=>t.is_active);
+      const active = TASKS.filter(t=>t.is_active && !isExcluded(t, selectedBranch));
       const ST = {}; active.forEach(t=>{ ST[t.id] = tkState(t, d, DONE_MAP[t.id]); });
       const lateN = active.filter(t=>ST[t.id].show && ST[t.id].late).length;
       document.getElementById('tk-daycount').textContent = 'مهام اليوم: ' + active.filter(t=>ST[t.id].show).length + (lateN ? ' (منها ' + lateN + ' متأخرة)' : '');
@@ -324,7 +331,9 @@
       const body = document.getElementById('tk-all-body');
       if (!TASKS.length){ body.innerHTML = '<tr><td colspan="6" class="tk-empty">لا توجد مهام — اضغط «مهمة جديدة»</td></tr>'; return; }
       body.innerHTML = TASKS.map(t=>{
-        const asg = BRANCHES.map(b=>{ const w=whoOf(t.id,b); return '<span>'+b+': <b>'+(w?esc(w):'—')+'</b></span>'; }).join('');
+        const asg = BRANCHES.map(b=>{
+          if (isExcluded(t,b)) return '<span>'+b+': <span class="tk-ex">مستثنى</span></span>';
+          const w=whoOf(t.id,b); return '<span>'+b+': <b>'+(w?esc(w):'—')+'</b></span>'; }).join('');
         return '<tr class="'+(t.is_active?'':'tk-inactive')+'">'
         + '<td style="text-align:right;font-weight:700">'+esc(t.title)+(t.notes?' <i class="fas fa-note-sticky" title="'+esc(t.notes)+'" style="color:var(--text-muted);font-size:.72rem"></i>':'')+'</td>'
         + '<td>'+badge(t)+'</td>'
@@ -351,8 +360,15 @@
     }
     function renderAsgFields(t){
       document.getElementById('tk-asg-fields').innerHTML = BRANCHES.map(b=>
-        '<div class="tk-asg-row"><span>'+esc(b)+'</span><input class="f-asg" data-branch="'+esc(b)+'" placeholder="اسم المسؤول" value="'+esc(t?whoOf(t.id,b):'')+'"></div>'
+        '<div class="tk-asg-row'+(t&&isExcluded(t,b)?' excluded':'')+'"><span>'+esc(b)+'</span>'
+        + '<input class="f-asg" data-branch="'+esc(b)+'" placeholder="اسم المسؤول" value="'+esc(t?whoOf(t.id,b):'')+'"'+(t&&isExcluded(t,b)?' disabled':'')+'>'
+        + '<label class="tk-excl"><input type="checkbox" class="f-excl" data-branch="'+esc(b)+'"'+(t&&isExcluded(t,b)?' checked':'')+' onchange="tkExclChange(this)"> مستثنى</label></div>'
       ).join('');
+    }
+    function tkExclChange(cb){
+      const row = cb.closest('.tk-asg-row');
+      row.classList.toggle('excluded', cb.checked);
+      row.querySelector('.f-asg').disabled = cb.checked;
     }
     function openTask(id){
       fillDaySelectors();
@@ -382,8 +398,10 @@
         month_day: (freq==='monthly'||freq==='yearly') ? Number(document.getElementById('f-monthday').value) : null,
         month:     freq==='yearly' ? Number(document.getElementById('f-month').value) : null,
         notes:     document.getElementById('f-notes').value.trim() || null,
-        is_active: document.getElementById('f-active').checked
+        is_active: document.getElementById('f-active').checked,
+        excluded_branches: Array.from(document.querySelectorAll('.f-excl:checked')).map(c=>c.getAttribute('data-branch'))
       };
+      if (rec.excluded_branches.length >= BRANCHES.length){ alert('مينفعش تستثني كل الفروع — لو المهمة مش مطلوبة خالص خلّيها «موقوفة»'); return; }
       const asg = Array.from(document.querySelectorAll('.f-asg')).map(i=>({ branch:i.getAttribute('data-branch'), assignee:i.value.trim() }));
       try {
         let tid = editId;
