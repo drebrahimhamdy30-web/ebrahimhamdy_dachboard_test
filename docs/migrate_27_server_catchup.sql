@@ -137,3 +137,28 @@ COMMIT;
 
 -- ملحوظة: prep_return_to_prep بتستعمل orders.prep_done_at، فلازم
 -- migrate_21_prep_report يكون اتشغّل قبلها.
+
+-- ═══════════════════════════════════════════════════════════════════
+--  (إضافة) أعمدة اتضافت على السحابة من غير ملف migration
+-- ═══════════════════════════════════════════════════════════════════
+--  ظهرت في الجولة التانية من المقارنة: الـmigrations اتطبّقت كلها
+--  ولسه 3 جداول أعمدتها مختلفة. التعريفات منقولة من البرودكشن.
+BEGIN;
+
+-- نظام التحضير — الدوال في migrate_21 بتقرا الأعمدة دي
+ALTER TABLE public.orders
+  ADD COLUMN IF NOT EXISTS prep_done_at         timestamptz,
+  ADD COLUMN IF NOT EXISTS prep_hold            boolean     DEFAULT false,
+  ADD COLUMN IF NOT EXISTS prep_hold_seconds    numeric     DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS prep_hold_started_at timestamptz;
+
+-- مفتاح تشغيل التحضير لكل فرع (مقفول افتراضيًا زي البرودكشن)
+ALTER TABLE public.dispatch_settings
+  ADD COLUMN IF NOT EXISTS prep_required boolean DEFAULT false;
+
+-- تسوية مبيعات الماكينات مع كشف البنك
+ALTER TABLE public.wallet
+  ADD COLUMN IF NOT EXISTS bank_settled    boolean DEFAULT false,
+  ADD COLUMN IF NOT EXISTS bank_settled_at timestamptz;
+
+COMMIT;
