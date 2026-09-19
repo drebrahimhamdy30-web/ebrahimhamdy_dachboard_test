@@ -55,6 +55,8 @@ norm(kind, obj, d) as (
   from cloudsrc.v_migration_ddl
   where obj not in (select obj from excl)
     and split_part(obj, ':', 1) not in (select obj from excl)   -- الجرانت شكله table:role
+    -- قيود وفهارس الجداول المستثناة اسمها بيبدأ باسم الجدول
+    and not exists (select 1 from excl e where obj like e.obj || '%')
 ),
 srv(kind, d) as (
   select kind,
