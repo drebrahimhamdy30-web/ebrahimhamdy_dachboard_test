@@ -88,6 +88,18 @@ if [ "$AUTH" = 1 ] && [ -f "$AUTH_SQL" ]; then
   $DOCKER exec -i "$CID" psql -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 -q < "$AUTH_SQL"     || { NOTABLE=1; echo "⚠️ مزامنة الحسابات فشلت"; }
 fi
 
+# حارس الانحراف: بيقارن سكيما السيرفر بالسحابة كل يوم. الانحراف
+# بيحصل لما حد يعدّل على السحابة مباشرة — واكتشفناه أول مرة بالصدفة.
+DRIFT_SQL="$REPO/docs/schema_drift_watch.sql"
+if [ -f "$DRIFT_SQL" ]; then
+  drift="$($DOCKER exec -i "$CID" psql -U "$DB_USER" -d postgres -q < "$DRIFT_SQL" 2>&1 || true)"
+  if printf %s "$drift" | grep -q "⚠️"; then
+    NOTABLE=1
+    echo "── انحراف عن السحابة ──"
+    printf %s\n "$drift"
+  fi
+fi
+
 # فشل جدول واحد مابيوقّفش السكربت (بيتسجّل في اللوج) — بس لازم نتكلم عنه
 fails="$(psql_q "select count(*) from public.cloud_sync_log
                  where ran_at > now() - interval '2 hours' and status <> 'ok'" | tr -d ' ')"
