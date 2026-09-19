@@ -21,13 +21,14 @@ REPO="${PHALIX_REPO_DIR:-/root/phalix-repo}"
 COMPOSE_DIR="${PHALIX_COMPOSE_DIR:-/root/supabase-project}"
 DB_USER="${PHALIX_DB_USER:-supabase_admin}"
 DOCKER="${PHALIX_DOCKER:-docker}"
-MODE=delta; DAYS=3; QUIET=0; CHECK=0; NOTABLE=0
+MODE=delta; DAYS=3; QUIET=0; CHECK=0; NOTABLE=0; AUTH=1
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --full)    MODE=full ;;
     --days)    DAYS="${2:-3}"; shift ;;
     --check)   CHECK=1 ;;
+    --no-auth) AUTH=0 ;;
     -q|--quiet) QUIET=1 ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "خيار مش معروف: $1" >&2; exit 2 ;;
@@ -78,6 +79,14 @@ SQL="$REPO/docs/refresh_data_from_cloud.sql"
 echo "── مزامنة ($MODE${MODE:+, }${DAYS} يوم) $(date '+%Y-%m-%d %H:%M') ──"
 $DOCKER exec -i "$CID" psql -U "$DB_USER" -d postgres \
   -v ON_ERROR_STOP=1 -v mode="$MODE" -v days="$DAYS" < "$SQL"
+
+# حسابات الدخول: قليلة العدد بس الدور فيها بيتغيّر، والصلاحيات كلها
+# معتمدة على الدور — فلازم تتزامن كل يوم مع البيانات
+AUTH_SQL="$REPO/docs/refresh_auth_users.sql"
+if [ "$AUTH" = 1 ] && [ -f "$AUTH_SQL" ]; then
+  echo "── حسابات الدخول ──"
+  $DOCKER exec -i "$CID" psql -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 -q < "$AUTH_SQL"     || { NOTABLE=1; echo "⚠️ مزامنة الحسابات فشلت"; }
+fi
 
 # فشل جدول واحد مابيوقّفش السكربت (بيتسجّل في اللوج) — بس لازم نتكلم عنه
 fails="$(psql_q "select count(*) from public.cloud_sync_log
