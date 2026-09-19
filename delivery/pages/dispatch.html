@@ -995,9 +995,14 @@ async function loadAll(){
     const tripOrderIds=[...new Set(rrData.map(r=>r.order_id).filter(Boolean))];
     let linkedRows=[];
     if(tripOrderIds.length){
-      let lq=db.from('orders').select('*').in('id',tripOrderIds);
-      if(branchId) lq=lq.eq('branch_id',branchId);
-      const lR=await lq; linkedRows=lR.data||[];
+      // دفعات 50: القايمة بتتحط في الرابط، والرد بيرجّعها في هيدر
+      // Content-Location — القوايم الطويلة بتكسر الوسيط بـ502.
+      // شوف docs/server_nginx.md
+      for(let i=0;i<tripOrderIds.length;i+=50){
+        let lq=db.from('orders').select('*').in('id',tripOrderIds.slice(i,i+50));
+        if(branchId) lq=lq.eq('branch_id',branchId);
+        const lR=await lq; linkedRows=linkedRows.concat(lR.data||[]);
+      }
     }
     { const _seen=new Set(); allOrders=[];
       (actR.data||[]).concat(linkedRows).forEach(o=>{ if(o && !_seen.has(o.id)){ _seen.add(o.id); allOrders.push(o); } }); }
@@ -1607,11 +1612,17 @@ async function openDriverPopup(driverId){
     tripsEl.innerHTML='<div style="color:#64748b;font-size:.75rem;text-align:center;padding:.5rem">لا توجد رحلات</div>';
   } else {
     const tripIds=trips.map(t=>t.id);
-    const {data:tos}=await db.from('trip_orders').select('trip_id,order_id').in('trip_id',tripIds);
-    const oids=[...new Set((tos||[]).map(r=>r.order_id))];
+    // دفعات 50 في الاتنين — القوايم الطويلة في الرابط بتكسر الوسيط
+    // بـ502 (الرد بيرجّع الاستعلام في هيدر). docs/server_nginx.md
+    const tos=[];
+    for(let i=0;i<tripIds.length;i+=50){
+      const {data:t}=await db.from('trip_orders').select('trip_id,order_id').in('trip_id',tripIds.slice(i,i+50));
+      if(t) tos.push(...t);
+    }
+    const oids=[...new Set(tos.map(r=>r.order_id))];
     const ordersById={};
-    if(oids.length){
-      const {data:ords}=await db.from('orders').select('id,bill_no,customer_name,total_bill_net,status,cust_region,payment_method,cust_code,collected_amount,collected_approved').in('id',oids);
+    for(let i=0;i<oids.length;i+=50){
+      const {data:ords}=await db.from('orders').select('id,bill_no,customer_name,total_bill_net,status,cust_region,payment_method,cust_code,collected_amount,collected_approved').in('id',oids.slice(i,i+50));
       (ords||[]).forEach(o=>ordersById[o.id]=o);
     }
     const byTrip={};

@@ -339,8 +339,10 @@ async function loadAll(){
     // ربط كل طلب برحلته (order → trip) على دفعات
     orderTrip={};
     const oids=allOrders.map(o=>o.id);
-    for(let i=0;i<oids.length;i+=150){
-      const {data:to}=await db.from('trip_orders').select('order_id,trip_id').in('order_id',oids.slice(i,i+150));
+    // 50 مش 150: الرد بيرجّع الاستعلام كله في هيدر Content-Location، و150
+    // معرّف (~6 كيلوبايت) كانوا بيكسروا الوسيط بـ502. docs/server_nginx.md
+    for(let i=0;i<oids.length;i+=50){
+      const {data:to}=await db.from('trip_orders').select('order_id,trip_id').in('order_id',oids.slice(i,i+50));
       (to||[]).forEach(r=>{orderTrip[r.order_id]=r.trip_id;});
     }
     updateCounts();
@@ -442,8 +444,9 @@ async function runSearch(){
       if(data.length<1000) break;
     }
     const oids=searchRows.map(o=>o.id);
-    for(let i=0;i<oids.length;i+=150){
-      const {data:to}=await db.from('trip_orders').select('order_id,trip_id').in('order_id',oids.slice(i,i+150));
+    // نفس السبب: دفعات 50 بدل 150 (docs/server_nginx.md)
+    for(let i=0;i<oids.length;i+=50){
+      const {data:to}=await db.from('trip_orders').select('order_id,trip_id').in('order_id',oids.slice(i,i+50));
       (to||[]).forEach(r=>{orderTrip[r.order_id]=r.trip_id;});
     }
     applyFilters();
