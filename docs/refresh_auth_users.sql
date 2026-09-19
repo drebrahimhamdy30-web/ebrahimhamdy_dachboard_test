@@ -122,11 +122,18 @@ select
                   where b.id = (u.raw_app_meta_data->>'branch_user_id')::int)) as "ربط_سليم";
 
 -- الأدوار: لازم تطابق السحابة عددًا
-select coalesce(raw_app_meta_data->>'user_role', '(بلا دور)') as "الدور",
-       count(*) as "على السيرفر",
-       (select count(*) from cloudauth.users c
-        where coalesce(c.raw_app_meta_data->>'user_role','(بلا دور)')
-              = coalesce(u.raw_app_meta_data->>'user_role','(بلا دور)')) as "على السحابة"
-from auth.users u
-group by 1
+-- (بنجمّع كل ناحية لوحدها وبعدين نقارن — المقارنة جوّه group by
+--  بتدي: subquery uses ungrouped column)
+with srv as (
+  select coalesce(raw_app_meta_data->>'user_role', '(بلا دور)') as role, count(*) as n
+  from auth.users group by 1
+), cld as (
+  select coalesce(raw_app_meta_data->>'user_role', '(بلا دور)') as role, count(*) as n
+  from cloudauth.users group by 1
+)
+select coalesce(s.role, c.role) as "الدور",
+       coalesce(s.n, 0) as "على السيرفر",
+       coalesce(c.n, 0) as "على السحابة",
+       case when coalesce(s.n,0) = coalesce(c.n,0) then '✓' else '⚠️ فرق' end as "الحالة"
+from srv s full join cld c on c.role = s.role
 order by 2 desc;
