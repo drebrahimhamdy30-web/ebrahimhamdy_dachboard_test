@@ -1,26 +1,36 @@
 -- ═══════════════════════════════════════════════════════════════════
 --  حارس الانحراف: أي تعديل على السحابة مش موجود على السيرفر
 -- ═══════════════════════════════════════════════════════════════════
---  ليه: اكتشفنا 17 دالة منحرفة **بالصدفة** — لأن المالك فتح شاشة
---  مؤشر الأداء ولقى جزء فاضي. لو ماكانش فتحها، كنا هنحوّل على سيرفر
+--  ليه: اكتشفنا 17 دالة منحرفة **بالصدفة** — المالك فتح شاشة مؤشر
+--  الأداء ولقى جزء خدمة العملاء فاضي. لولا كده كنا هنحوّل على سيرفر
 --  فيه دوال قديمة ومحدش واخد باله.
 --
---  ده بيقارن v_migration_ddl في الجهتين — بيغطّي الجداول والأعمدة
---  والفهارس والقيود والدوال والتريجرات والسياسات والصلاحيات كلها
---  بصيغة واحدة، وبيطلّع الفرق بس.
+--  بيقارن v_migration_ddl في الجهتين: جداول وأعمدة وفهارس وقيود ودوال
+--  وتريجرات وسياسات وصلاحيات — كلها بصيغة واحدة. بيطلّع الفرق بس.
 --
---  بيشتغل كل يوم مع المزامنة. ساكت لو مفيش انحراف.
+--  ═══ درسان من أول تشغيل (طلّع 553 إنذار كلها كذب) ═══
 --
---  ⚠️ المستثنى مقصود — اقرا السبب قبل ما تشيل أي سطر من القايمة.
+--  1. **الربط بالاسم مابينفعش.** اسم السياسة متكرر على جداول كتير
+--     (p_all على عشرين جدول)، فالربط بـ(النوع، الاسم) بيضرب كل واحدة
+--     في التانية ويطلّع 207 فرق والبرودكشن كله فيه 122 سياسة.
+--     الحل: نقارن **النصوص كمجموعات** — كل نص في السحابة له نظير
+--     مطابق على السيرفر ولا لأ، بغضّ النظر عن الاسم.
+--
+--  2. **نفس الشيء ممكن يتكتب بشكلين.** بوستجرس بيكتب
+--     REFERENCES public.stores أو REFERENCES stores حسب search_path
+--     بتاع الجلسة. ده خلّى 46 مفتاح أجنبي و48 تريجر يبانوا مختلفين
+--     وهم حرف بحرف نفس الحاجة. الحل: نوحّد الصياغة قبل المقارنة.
+--
+--  ⚠️ حارس بيكذب أسوأ من إنه مايكونش موجود — بعد أسبوع حد هيبطّل
+--     يبصّله. فأي إنذار هنا لازم يكون حقيقي.
 -- ═══════════════════════════════════════════════════════════════════
 
 \set ON_ERROR_STOP on
 
--- الـview بتاع السحابة (لو مش متقاسم لسه)
 do $$
 begin
-  if not exists (select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace
-                 where n.nspname='cloudsrc' and c.relname='v_migration_ddl') then
+  if not exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+                 where n.nspname = 'cloudsrc' and c.relname = 'v_migration_ddl') then
     execute 'import foreign schema public limit to (v_migration_ddl) from server cloud into cloudsrc';
   end if;
 end $$;
@@ -37,18 +47,26 @@ with excl as (
     -- أدوات الترحيل نفسها
     'v_migration_ddl','v_migration_post'
   ]) as obj
+),
+-- توحيد الصياغة: اسم السكيما، والمسافات المتكررة، وآخر فاصلة منقوطة
+norm(kind, obj, d) as (
+  select kind, obj,
+         regexp_replace(regexp_replace(replace(ddl, 'public.', ''), '\s+', ' ', 'g'), ';\s*$', '')
+  from cloudsrc.v_migration_ddl
+  where obj not in (select obj from excl)
+    and split_part(obj, ':', 1) not in (select obj from excl)   -- الجرانت شكله table:role
+),
+srv(kind, d) as (
+  select kind,
+         regexp_replace(regexp_replace(replace(ddl, 'public.', ''), '\s+', ' ', 'g'), ';\s*$', '')
+  from public.v_migration_ddl
 )
-select c.kind, c.obj,
-       case when s.obj is null then 'ناقص على السيرفر' else 'مختلف' end as حالة
-from cloudsrc.v_migration_ddl c
-left join public.v_migration_ddl s on s.kind = c.kind and s.obj = c.obj
-where c.obj not in (select obj from excl)
-  and split_part(c.obj, ':', 1) not in (select obj from excl)   -- الجرانت شكله table:role
-  and (s.obj is null or md5(s.ddl) <> md5(c.ddl));
+select c.kind, c.obj
+from norm c
+where not exists (select 1 from srv s where s.kind = c.kind and s.d = c.d);
 
-\echo '════ انحراف عن السحابة ════'
-select kind as "النوع", obj as "الاسم", حالة as "الحالة"
-from drift order by kind, obj;
+\echo '════ حاجات موجودة على السحابة ومالهاش نظير على السيرفر ════'
+select kind as "النوع", obj as "الاسم" from drift order by kind, obj;
 
 \echo ''
 select case when count(*) = 0 then '✓ مفيش انحراف — السيرفر مطابق للسحابة'
