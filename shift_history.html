@@ -143,6 +143,7 @@ tr:last-child td{border-bottom:none;}
   <div class="pane" id="pane-balance">
     <div style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 12px;">
       <i class="fas fa-circle-info"></i> كشف حساب لكل فرع: <b>توريد</b> = إجمالي الإغلاقات · <b>صرف</b> = التحويلات (محافظ + باي موب/انستاباي) · <b>الرصيد الحالي</b> = توريد − صرف. اختار فرع من فوق للتفصيل وإضافة تحويلات.
+      <br><i class="fas fa-lock" style="font-size:.7rem"></i> <b>إقفال الفترة:</b> لما الرصيد يطابق الفعلي، اقفل لحد تاريخه — الحركات اللي قبله بتتقفل وأي فرق بعد كده بيبقى محصور في الحركات الجديدة بس.
     </div>
     <div id="balance-area"><div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div></div>
   </div>
@@ -209,6 +210,7 @@ const isAdminView = role==='admin' || role==='accountant' || role==='reviewer';
 const isManager   = role==='manager';
 const canConfirm  = isAdminView || isManager;   // صلاحية الاعتماد والتوريد
 const isAdmin     = role==='admin';               // بعض إجراءات كشف الحساب للأدمن فقط
+const canClose    = role==='admin' || role==='accountant';   // إقفال الفترة (الفتح للأدمن بس)
 const MY_BRANCH   = (Session.branch()).trim();
 const settler=Session.username()||Session.fullName()||'محاسب';
 const REASON_LABEL={supplier:'تحويل لمورد', customer_refund:'مرتجع لعميل'};
@@ -855,15 +857,35 @@ async function loadBalance(){
       <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
           <div style="font-weight:900;font-size:0.9rem;color:var(--accent);display:flex;align-items:center;gap:7px;"><i class="fas fa-file-lines"></i> كشف حساب — ${esc(effBranch)} <span style="font-weight:500;color:var(--muted);font-size:.72rem">(${periodTxt})</span></div>
-          ${isAdmin?`<div style="display:flex;gap:6px;flex-wrap:wrap">
-            <button class="btn" style="padding:6px 12px;font-size:0.76rem;background:var(--surface);color:var(--text);border:1px solid var(--border)" onclick="openingModal('${esc(effBranch)}',${L.opening.opening_balance},'${L.opening.as_of}')"><i class="fas fa-flag"></i> رصيد البداية</button>
-            <button class="btn btn-primary" style="padding:6px 12px;font-size:0.76rem" onclick="addManualTransfer('${esc(effBranch)}')"><i class="fas fa-plus"></i> إضافة صرف</button>
-          </div>`:''}
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${canClose?`<button class="btn" style="padding:6px 12px;font-size:0.76rem;background:#0f766e;color:#fff;border:none" onclick="closePeriodModal('${esc(effBranch)}',${L.endBalance})"><i class="fas fa-lock"></i> إقفال الفترة</button>`:''}
+            ${isAdmin?`<button class="btn" style="padding:6px 12px;font-size:0.76rem;background:var(--surface);color:var(--text);border:1px solid var(--border)" onclick="openingModal('${esc(effBranch)}',${L.opening.opening_balance},'${L.opening.as_of}')"><i class="fas fa-flag"></i> رصيد البداية</button>
+            <button class="btn btn-primary" style="padding:6px 12px;font-size:0.76rem" onclick="addManualTransfer('${esc(effBranch)}')"><i class="fas fa-plus"></i> إضافة صرف</button>`:''}
+          </div>
         </div>
+        ${L.lastClose?`<div style="font-size:.74rem;color:var(--muted);margin-bottom:10px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:7px 10px">
+          <i class="fas fa-lock" style="color:#0f766e"></i> الفترة مقفولة لحد <b>${L.lastClose.upto}</b> برصيد <b>${fmt(L.lastClose.balance)} ج</b>${L.lastClose.closed_by?` — ${esc(L.lastClose.closed_by)}`:''}. الحركات اللي قبل التاريخ ده مقفولة ومش بتظهر في الكشف.
+        </div>`:''}
         ${balLedgerTable(L.period,{canDelete:isAdmin,branch:effBranch})}
+        ${closesTable(L.closes,effBranch)}
       </div>`;
   }catch(e){ area.innerHTML='<div class="empty" style="color:var(--danger)">فشل التحميل</div>'; }
 }
+
+// ═══ إقفال الفترة ═══════════════════════════════════════════════
+// آخر إقفال مفتوح لفرع = آخر نقطة رصيدها متأكَّد منه. الكشف بيبدأ منه
+// (رصيد البداية = رصيد الإقفال)، والحركات اللي قبله مقفولة على السيرفر.
+const closesCache={};
+async function getCloses(branch, force){
+  if(!force && closesCache[branch]) return closesCache[branch];
+  try{
+    const rows=await api(`pos_period_closes?branch=eq.${encodeURIComponent(branch)}&order=upto.desc&limit=100`);
+    closesCache[branch]=Array.isArray(rows)?rows:[];
+  }catch(e){ closesCache[branch]=[]; }
+  return closesCache[branch];
+}
+function lastClose(closes){ return (closes||[]).find(c=>!c.reopened_at)||null; }
+function nextDay(d){ const x=new Date(d+'T00:00:00Z'); x.setUTCDate(x.getUTCDate()+1); return x.toISOString().slice(0,10); }
 
 // رصيد بداية المدة لفرع
 async function getOpening(branch){
@@ -926,8 +948,14 @@ async function computeBranchLedger(branch, from, to){
     api(`pos_manual_transfers?select=*&branch=eq.${encodeURIComponent(branch)}&limit=5000`),
     getOpening(branch)
   ]);
-  const L=computeLedger(balRawEntries(closures,wtrans,mtrans), opening, from, to);
-  L.opening=opening;
+  // آخر إقفال أحدث من رصيد البداية اليدوي → هو نقطة البداية
+  const closes=await getCloses(branch);
+  const lc=lastClose(closes);
+  const eff=(lc && nextDay(lc.upto)>(opening.as_of||'2000-01-01'))
+    ? {opening_balance:+lc.balance||0, as_of:nextDay(lc.upto), from_close:lc}
+    : opening;
+  const L=computeLedger(balRawEntries(closures,wtrans,mtrans), eff, from, to);
+  L.opening=eff; L.closes=closes; L.lastClose=lc;
   return L;
 }
 
@@ -963,6 +991,104 @@ function openingModal(branch, cur, asOf){
     }catch(err){ toast('فشل الحفظ','err'); btn.disabled=false; btn.textContent='حفظ'; }
   };
 }
+// سجل الإقفالات تحت الكشف
+function closesTable(closes, branch){
+  closes=(closes||[]);
+  if(!closes.length) return '';
+  return `<div style="margin-top:16px">
+    <div style="font-weight:800;font-size:0.82rem;color:var(--muted);margin-bottom:6px"><i class="fas fa-lock"></i> سجل إقفالات الفترة</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>مقفول لحد</th><th class="num">الرصيد</th><th>قفلها</th><th>وقت الإقفال</th><th>ملاحظة</th><th>الحالة</th>${isAdmin?'<th></th>':''}</tr></thead>
+      <tbody>${closes.map(c=>`<tr>
+        <td style="font-weight:800">${c.upto}</td>
+        <td class="num" style="font-weight:800">${fmt(c.balance)}</td>
+        <td>${esc(c.closed_by||'—')}</td>
+        <td style="color:var(--muted);font-size:.75rem;white-space:nowrap">${dt(c.closed_at)}</td>
+        <td style="color:var(--muted);font-size:.75rem">${esc(c.note||'—')}</td>
+        <td>${c.reopened_at?`<span class="badge" style="background:#fee2e2;color:#b91c1c">اتفتح — ${esc(c.reopened_by||'')}</span>`:'<span class="badge" style="background:#dcfce7;color:#15803d">مقفول</span>'}</td>
+        ${isAdmin?`<td class="num">${c.reopened_at?'':`<button title="فتح الإقفال" onclick="reopenClose(${c.id},'${esc(branch)}')" style="background:none;border:none;cursor:pointer;color:#b45309;font-size:.8rem"><i class="fas fa-lock-open"></i></button>`}</td>`:''}
+      </tr>`).join('')}</tbody>
+    </table></div></div>`;
+}
+
+// مودال الإقفال: بيجيب رصيد النظام من السيرفر لحد التاريخ المختار،
+// والمحاسب يكتب الرصيد الفعلي — لو مختلف السيرفر بيرفض ويوضّح الفرق.
+async function sysBalanceUpto(branch, upto){
+  const r=await fetch(SB_URL+'/rest/v1/rpc/pos_balance_upto',{method:'POST',headers:await shHeaders(),
+    body:JSON.stringify({p_branch:branch, p_upto:upto})});
+  if(!r.ok) throw new Error(await r.text());
+  return +(await r.json())||0;
+}
+function closePeriodModal(branch, curBalance){
+  if(!canClose){toast('للمحاسب والأدمن بس','err');return;}
+  const old=document.getElementById('clsModal'); if(old) old.remove();
+  const ov=document.createElement('div'); ov.id='clsModal';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:9999';
+  ov.innerHTML=`<div style="background:var(--surface);border-radius:12px;padding:18px 20px;width:360px;max-width:92vw;box-shadow:0 10px 40px rgba(0,0,0,.25)">
+    <div style="font-weight:800;margin-bottom:2px"><i class="fas fa-lock" style="color:#0f766e"></i> إقفال الفترة — ${esc(branch)}</div>
+    <div style="font-size:.72rem;color:var(--muted);margin-bottom:12px">بعد الإقفال مايتعدّلش أي حركة بتاريخ أقدم أو يساوي التاريخ ده — الأدمن بس يقدر يفتحه.</div>
+    <label style="font-size:.75rem;font-weight:700;color:var(--muted)">مقفول لحد تاريخ</label>
+    <input type="date" id="clsDate" max="${today}" value="${today}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 10px">
+    <div id="clsSys" style="font-size:.8rem;background:var(--light);border-radius:8px;padding:8px 10px;margin-bottom:10px">رصيد النظام: <b>...</b></div>
+    <label style="font-size:.75rem;font-weight:700;color:var(--muted)">الرصيد الفعلي</label>
+    <input type="number" id="clsActual" step="0.01" placeholder="اكتب الرصيد اللي معاك" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 10px">
+    <label style="font-size:.75rem;font-weight:700;color:var(--muted)">ملاحظة (اختياري)</label>
+    <input type="text" id="clsNote" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 10px">
+    <div id="clsErr" style="font-size:.76rem;color:var(--danger);margin-bottom:8px;display:none"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="document.getElementById('clsModal').remove()" style="padding:7px 14px;border:1px solid var(--border);background:var(--surface);border-radius:8px;cursor:pointer">إلغاء</button>
+      <button id="clsSave" style="padding:7px 14px;border:none;background:#0f766e;color:#fff;border-radius:8px;cursor:pointer;font-weight:700">اقفل الفترة</button>
+    </div></div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
+
+  const sysBox=document.getElementById('clsSys');
+  let sysVal=null;
+  async function refreshSys(){
+    const d=document.getElementById('clsDate').value||today;
+    sysBox.innerHTML='رصيد النظام: <b>جاري الحساب...</b>';
+    try{ sysVal=await sysBalanceUpto(branch,d);
+      sysBox.innerHTML='رصيد النظام لحد '+d+': <b>'+fmt(sysVal)+' ج</b>';
+    }catch(e){ sysVal=null; sysBox.innerHTML='<span style="color:var(--danger)">فشل حساب رصيد النظام</span>'; }
+  }
+  document.getElementById('clsDate').addEventListener('change',refreshSys);
+  refreshSys();
+
+  document.getElementById('clsSave').onclick=async()=>{
+    const d=document.getElementById('clsDate').value||today;
+    const actualRaw=document.getElementById('clsActual').value;
+    const err=document.getElementById('clsErr');
+    err.style.display='none';
+    if(actualRaw===''){ err.textContent='اكتب الرصيد الفعلي'; err.style.display='block'; return; }
+    const btn=document.getElementById('clsSave'); btn.disabled=true; btn.textContent='جاري الإقفال...';
+    try{
+      const r=await fetch(SB_URL+'/rest/v1/rpc/pos_close_period',{method:'POST',headers:await shHeaders(),
+        body:JSON.stringify({p_branch:branch, p_upto:d, p_actual:parseFloat(actualRaw)||0, p_note:document.getElementById('clsNote').value||null})});
+      const j=await r.json();
+      if(!j||!j.success) throw new Error((j&&j.error)||'فشل الإقفال');
+      ov.remove(); toast('اتقفلت الفترة لحد '+d+' ✓');
+      delete closesCache[branch]; await loadBalance();
+    }catch(e){
+      err.textContent=String(e.message||e).replace(/^\s*\{.*"error":"?/,'').replace(/"?\}\s*$/,'');
+      err.style.display='block';
+      btn.disabled=false; btn.textContent='اقفل الفترة';
+    }
+  };
+}
+
+async function reopenClose(id, branch){
+  if(!isAdmin){toast('فتح الإقفال للأدمن بس','err');return;}
+  const note=prompt('سبب فتح الإقفال (اختياري):','');
+  if(note===null) return;
+  try{
+    const r=await fetch(SB_URL+'/rest/v1/rpc/pos_reopen_period',{method:'POST',headers:await shHeaders(),
+      body:JSON.stringify({p_id:id, p_note:note||null})});
+    const j=await r.json();
+    if(!j||!j.success) throw new Error((j&&j.error)||'فشل الفتح');
+    toast('اتفتح الإقفال ✓'); delete closesCache[branch]; await loadBalance();
+  }catch(e){ toast(String(e.message||e).slice(0,80),'err'); }
+}
+
 // كشف حساب موحّد: التاريخ | النوع | البيان | القيمة | الرصيد (الأحدث فوق)
 function balLedgerTable(entries, opts){
   opts=opts||{}; const del=opts.canDelete; const view=entries.slice().reverse();
