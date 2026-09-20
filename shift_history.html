@@ -863,10 +863,14 @@ async function loadBalance(){
             <button class="btn btn-primary" style="padding:6px 12px;font-size:0.76rem" onclick="addManualTransfer('${esc(effBranch)}')"><i class="fas fa-plus"></i> إضافة صرف</button>`:''}
           </div>
         </div>
-        ${L.lastClose?`<div style="font-size:.74rem;color:var(--muted);margin-bottom:10px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:7px 10px">
-          <i class="fas fa-lock" style="color:#0f766e"></i> الفترة مقفولة لحد <b>${L.lastClose.upto}</b> برصيد <b>${fmt(L.lastClose.balance)} ج</b>${L.lastClose.closed_by?` — ${esc(L.lastClose.closed_by)}`:''}. الحركات اللي قبل التاريخ ده مقفولة ومش بتظهر في الكشف.
+        ${L.lastClose?`<div style="font-size:.74rem;color:var(--muted);margin-bottom:10px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:7px 10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <span><i class="fas fa-lock" style="color:#0f766e"></i> الفترة مقفولة لحد <b>${L.lastClose.upto}</b> برصيد <b>${fmt(L.lastClose.balance)} ج</b>${L.lastClose.closed_by?` — ${esc(L.lastClose.closed_by)}`:''}.</span>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-weight:700;color:var(--accent)">
+            <input type="checkbox" ${showPreClose?'checked':''} onchange="togglePreClose(this)"> اعرض الحركات اللي قبل الإقفال
+          </label>
+          ${showPreClose?'<span style="color:#b45309">(عرض للمراجعة — الحركات دي مقفولة ومش بتتعدّل)</span>':''}
         </div>`:''}
-        ${balLedgerTable(L.period,{canDelete:isAdmin,branch:effBranch})}
+        ${balLedgerTable(L.period,{canDelete:isAdmin,branch:effBranch,lockedUpto:L.lastClose?L.lastClose.upto:null})}
         ${closesTable(L.closes,effBranch)}
       </div>`;
   }catch(e){ area.innerHTML='<div class="empty" style="color:var(--danger)">فشل التحميل</div>'; }
@@ -876,6 +880,8 @@ async function loadBalance(){
 // آخر إقفال مفتوح لفرع = آخر نقطة رصيدها متأكَّد منه. الكشف بيبدأ منه
 // (رصيد البداية = رصيد الإقفال)، والحركات اللي قبله مقفولة على السيرفر.
 const closesCache={};
+let showPreClose=false;          // عرض الحركات اللي قبل آخر إقفال (للمراجعة — مقفولة ومش بتتعدّل)
+function togglePreClose(el){ showPreClose=!!el.checked; loadBalance(); }
 async function getCloses(branch, force){
   if(!force && closesCache[branch]) return closesCache[branch];
   try{
@@ -951,7 +957,7 @@ async function computeBranchLedger(branch, from, to){
   // آخر إقفال أحدث من رصيد البداية اليدوي → هو نقطة البداية
   const closes=await getCloses(branch);
   const lc=lastClose(closes);
-  const eff=(lc && nextDay(lc.upto)>(opening.as_of||'2000-01-01'))
+  const eff=(!showPreClose && lc && nextDay(lc.upto)>(opening.as_of||'2000-01-01'))
     ? {opening_balance:+lc.balance||0, as_of:nextDay(lc.upto), from_close:lc}
     : opening;
   const L=computeLedger(balRawEntries(closures,wtrans,mtrans), eff, from, to);
@@ -1092,6 +1098,9 @@ async function reopenClose(id, branch){
 // كشف حساب موحّد: التاريخ | النوع | البيان | القيمة | الرصيد (الأحدث فوق)
 function balLedgerTable(entries, opts){
   opts=opts||{}; const del=opts.canDelete; const view=entries.slice().reverse();
+  // الحركة اللي داخل فترة مقفولة: مفيش أزرار تعديل/حذف (السيرفر هيرفضها أصلًا)
+  const lockedUpto=opts.lockedUpto||null;
+  const isLocked=e=>!!lockedUpto && (e.day||(''+e.date).slice(0,10))<=lockedUpto;
   const ic=k=>k==='closure'?'<i class="fas fa-cash-register" style="color:var(--success);font-size:.7rem;margin-inline-end:5px"></i>':k==='closure_neg'?'<i class="fas fa-cash-register" style="color:var(--danger);font-size:.7rem;margin-inline-end:5px"></i>':k==='wallet'?'<i class="fas fa-wallet" style="color:var(--wal-c);font-size:.7rem;margin-inline-end:5px"></i>':'<i class="fas fa-right-left" style="color:#1d4ed8;font-size:.7rem;margin-inline-end:5px"></i>';
   return `<div class="tbl-wrap"><table>
     <thead><tr><th>التاريخ</th><th>النوع</th><th>البيان</th><th class="num">القيمة</th><th class="num">الرصيد</th>${del?'<th></th>':''}</tr></thead>
@@ -1101,7 +1110,7 @@ function balLedgerTable(entries, opts){
       <td>${ic(e.kind)}${e.label}</td>
       <td class="num" style="font-weight:800;color:${e.dir==='in'?'var(--success)':'var(--wal-c)'}">${e.dir==='in'?'+':'−'}${fmt(e.amount)}</td>
       <td class="num" style="font-weight:800;color:${e.balance<0?'var(--danger)':'inherit'}">${fmt(e.balance)}</td>
-      ${del?`<td class="num" style="white-space:nowrap">${e.kind==='manual'?`<button title="تعديل الصرف" onclick="editManualTransfer(${e.mid},${e.amount})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.8rem"><i class="fas fa-pen-to-square"></i></button> <button title="حذف الصرف" onclick="deleteManualTransfer(${e.mid},'${esc(opts.branch)}')" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:.8rem"><i class="fas fa-trash"></i></button>`:e.kind==='wallet'?`<button title="تعديل التحويل" onclick="editWalletTransfer(${e.wid},${e.amount})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.8rem"><i class="fas fa-pen-to-square"></i></button> <button title="حذف التحويل" onclick="deleteWalletTransfer(${e.wid},'${esc(opts.branch)}')" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:.8rem"><i class="fas fa-trash"></i></button>`:(e.sid!=null?`<button title="تعديل قيمة الإغلاق" onclick="editShiftValue(${e.sid},${e.raw})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.8rem"><i class="fas fa-pen-to-square"></i></button>`:'')}</td>`:''}
+      ${del?`<td class="num" style="white-space:nowrap">${isLocked(e)?'<i class="fas fa-lock" title="حركة داخل فترة مقفولة" style="color:var(--muted);font-size:.72rem"></i>':e.kind==='manual'?`<button title="تعديل الصرف" onclick="editManualTransfer(${e.mid},${e.amount})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.8rem"><i class="fas fa-pen-to-square"></i></button> <button title="حذف الصرف" onclick="deleteManualTransfer(${e.mid},'${esc(opts.branch)}')" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:.8rem"><i class="fas fa-trash"></i></button>`:e.kind==='wallet'?`<button title="تعديل التحويل" onclick="editWalletTransfer(${e.wid},${e.amount})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.8rem"><i class="fas fa-pen-to-square"></i></button> <button title="حذف التحويل" onclick="deleteWalletTransfer(${e.wid},'${esc(opts.branch)}')" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:.8rem"><i class="fas fa-trash"></i></button>`:(e.sid!=null?`<button title="تعديل قيمة الإغلاق" onclick="editShiftValue(${e.sid},${e.raw})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.8rem"><i class="fas fa-pen-to-square"></i></button>`:'')}</td>`:''}
     </tr>`).join(''):`<tr><td colspan="${del?6:5}" class="empty" style="padding:24px">لا توجد حركات</td></tr>`}</tbody>
   </table></div>`;
 }
