@@ -1,0 +1,149 @@
+{
+  "name": "باي موب — سحب آخر 14 يوم (سدّ الفجوات)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 4,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1040,
+        -600
+      ],
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "كل يوم 4 الفجر"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1040,
+        -420
+      ],
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "تشغيل يدوي"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://accept.paymob.com/api/auth/tokens",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "api_key",
+              "value": "={{ $env.PAYMOB_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -760,
+        -520
+      ],
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "توكن باي موب"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== سحب معاملات باي موب لآخر N يوم (لفّة على الصفحات) =====\n// بيكمّل الوركفلو السريع (صفحة واحدة كل 6 دقايق): ده بيسدّ أي فجوة حصلت\n// من timeout أو توقف n8n. الحفظ ON CONFLICT (id) فالتكرار مستحيل.\nconst token = $('توكن باي موب').first().json.token;\n\nconst DAYS   = 14;                                   // غيّرها لو عايز مدة أطول\nconst cutoff = Date.now() - DAYS * 24 * 60 * 60 * 1000;\nconst MAX_PAGES = 60;                                // حارس: مايلفّش للأبد\n\nconst terminalMapping = {\n  \"1139384\": { branch: \"المعمورة\",    machine: \"paymob1\" },\n  \"1157596\": { branch: \"المعمورة\",    machine: \"paymob7\" },\n  \"1157119\": { branch: \"سان ستيفانو\", machine: \"paymob2\" },\n  \"1029607\": { branch: \"سان ستيفانو\", machine: \"paymob3\" },\n  \"1157121\": { branch: \"سان ستيفانو\", machine: \"paymob6\" },\n  \"1002249\": { branch: \"سيدي بشر\",    machine: \"paymob4\" },\n  \"1029609\": { branch: \"سيدي بشر\",    machine: \"paymob5\" }\n};\nconst allowed = Object.keys(terminalMapping);\n\n// باي موب بيتقل فجأة: 60 ثانية لكل صفحة + 3 محاولات بفاصل متزايد\nconst pull = (url) => this.helpers.httpRequest({\n  method: 'GET', url, headers: { Authorization: token }, json: true, timeout: 60000\n});\n\nconst BASE = 'https://accept.paymob.com/api/acceptance/transactions';\nconst out = [], seen = new Set();\nlet url = BASE, page = 0, stop = false, pagesDone = 0, seenOldest = null;\n\nwhile (url && !stop && page < MAX_PAGES) {\n  page++;\n  let resp = null, lastErr = null;\n  for (let a = 1; a <= 3; a++) {\n    try { resp = await pull(url); break; }\n    catch (e) { lastErr = e; if (a < 3) await new Promise(r => setTimeout(r, a * 3000)); }\n  }\n  if (!resp) { console.log('وقفنا عند صفحة ' + page + ': ' + (lastErr && lastErr.message)); break; }\n\n  const rows = resp.results || [];\n  if (!rows.length) break;\n  pagesDone++;\n\n  let oldest = Infinity;\n  for (const item of rows) {\n    const t = Date.parse(item.paid_at || item.created_at || '');\n    if (!isNaN(t)) oldest = Math.min(oldest, t);\n\n    if (item.success !== true) continue;              // غير الناجحة مالهاش لزمة\n    if (!isNaN(t) && t < cutoff) continue;            // أقدم من المدة\n    const tId = String(item.terminal_id || '').trim();\n    if (!allowed.includes(tId)) continue;             // ماكينة مش بتاعتنا\n    if (seen.has(item.id)) continue;                  // اتجابت في صفحة قبل كده\n    seen.add(item.id);\n\n    const isRefund  = item.is_refund === true || item.is_refunded === true;\n    let amount      = (item.amount_cents || 0) / 100;\n    const feesValue = Number(item.fees) || 0;\n    const vatValue  = (Number(item.vat_cents_bigint) || 0) / 100;\n    let netAmount   = amount - feesValue - vatValue;\n    if (isRefund) { amount = -Math.abs(amount); netAmount = -Math.abs(netAmount); }\n\n    const map = terminalMapping[tId];\n    out.push({ json: {\n      id:           item.id,\n      terminal_id:  tId,\n      machine_name: map.machine,\n      branch:       map.branch,\n      order_id:     item.order ? String(item.order.id) : null,\n      type:         isRefund ? 'REFUND' : 'SALE',\n      ammount:      amount.toFixed(2),\n      fees:         feesValue.toFixed(2),\n      vat:          vatValue.toFixed(2),\n      netammount:   netAmount.toFixed(2),\n      balance:      null,\n      from:         null,\n      to:           map.machine,\n      closed:       null,\n      done:         null,\n      is_excess:    null,\n      createdAt:    item.paid_at,\n      updatedAt:    null\n    }});\n  }\n\n  if (oldest !== Infinity) seenOldest = new Date(oldest).toISOString();\n  if (oldest < cutoff) { stop = true; break; }        // عدّينا المدة المطلوبة\n\n  // الصفحة اللي بعدها: الـAPI بيرجّع next، ولو مارجّعش بنبني ?page=N بنفسنا\n  url = resp.next || (BASE + '?page=' + (page + 1));\n  if (!resp.next && !rows.length) url = null;\n  await new Promise(r => setTimeout(r, 300));         // نفَس بسيط لباي موب\n}\n\nconsole.log('صفحات: ' + pagesDone + ' · معاملات للحفظ: ' + out.length + ' · أقدم معاملة شفناها: ' + seenOldest);\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -500,
+        -520
+      ],
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "سحب 14 يوم"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO public.wallet (\n  id, terminal_id, machine_name, branch, order_id, type,\n  ammount, fees, vat, netammount, balance,\n  \"from\", \"to\", closed, done, is_excess, \"createdAt\", \"updatedAt\"\n)\nVALUES (\n  NULLIF($1,'null')::bigint,\n  $2, $3, $4, $5, COALESCE(NULLIF($6,'null'),'SALE'),\n  COALESCE(NULLIF($7,'null')::numeric,0),\n  COALESCE(NULLIF($8,'null')::numeric,0),\n  COALESCE(NULLIF($9,'null')::numeric,0),\n  COALESCE(NULLIF($10,'null')::numeric,0),\n  NULLIF($11,'null')::numeric,\n  NULLIF($12,'null'),\n  NULLIF($13,'null'),\n  NULLIF($14,'null')::boolean,\n  COALESCE(NULLIF($15,'null')::boolean,false),\n  NULLIF($16,'null')::boolean,\n  NULLIF($17,'null')::timestamptz,\n  COALESCE(NULLIF($18,'null')::timestamptz, now())\n)\nON CONFLICT (id) DO UPDATE SET\n  ammount     = EXCLUDED.ammount,\n  fees        = EXCLUDED.fees,\n  vat         = EXCLUDED.vat,\n  netammount  = EXCLUDED.netammount,\n  type        = EXCLUDED.type,\n  closed      = EXCLUDED.closed,\n  is_excess   = EXCLUDED.is_excess,\n  \"updatedAt\" = EXCLUDED.\"updatedAt\";\n",
+        "options": {
+          "queryReplacement": "={{$json.id}}, {{$json.terminal_id}}, {{$json.machine_name}}, {{$json.branch}}, {{$json.order_id}}, {{$json.type}}, {{$json.ammount}}, {{$json.fees}}, {{$json.vat}}, {{$json.netammount}}, {{$json.balance}}, {{$json.from}}, {{$json.to}}, {{$json.closed}}, {{$json.done}}, {{$json.is_excess}}, {{$json.createdAt}}, {{$json.updatedAt}}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -220,
+        -520
+      ],
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "حفظ في wallet",
+      "credentials": {
+        "postgres": {
+          "id": "rijAXrGxz9zhfKOb",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "كل يوم 4 الفجر": {
+      "main": [
+        [
+          {
+            "node": "توكن باي موب",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تشغيل يدوي": {
+      "main": [
+        [
+          {
+            "node": "توكن باي موب",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "توكن باي موب": {
+      "main": [
+        [
+          {
+            "node": "سحب 14 يوم",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "سحب 14 يوم": {
+      "main": [
+        [
+          {
+            "node": "حفظ في wallet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
