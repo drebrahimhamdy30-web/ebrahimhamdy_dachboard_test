@@ -163,7 +163,7 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
 <!-- Tabs -->
 <div style="display:flex;gap:.5rem;margin-bottom:1rem;border-bottom:1px solid var(--border);flex-wrap:wrap">
   <button id="tabBtn-drivers" onclick="switchTab('drivers')" style="background:none;border:none;border-bottom:3px solid var(--primary);color:var(--primary);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تقارير الطيارين</button>
-  <button id="tabBtn-drivershift" onclick="switchTab('drivershift')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">شيفتات الطيارين اليومية</button>
+
   <button id="tabBtn-orders" onclick="switchTab('orders')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تقارير الطلبات</button>
   <button id="tabBtn-incentives" onclick="switchTab('incentives')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">حوافز الطيارين</button>
   <button id="tabBtn-jard" onclick="switchTab('jard')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تقارير الجرد</button>
@@ -222,13 +222,31 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
   <div class="card-body" id="regionsChart"></div>
 </div>
 
-<!-- Fair driver scoring -->
-<div class="card" style="margin-bottom:1.25rem">
-  <div class="card-header">
-    <span class="card-title">تقييم الطيارين العادل</span>
-    <span style="font-size:.68rem;color:var(--text-muted)">نصيبه المفترض مقابل اللي وصّله فعلاً</span>
+<!-- Fair driver scoring + اللي بتتشال منهم طلبات (جنب بعض) -->
+<div class="charts-2" style="margin-bottom:1.25rem">
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">تقييم الطيارين العادل</span>
+      <span style="font-size:.68rem;color:var(--text-muted)">نصيبه مقابل اللي وصّله</span>
+    </div>
+    <div class="card-body" id="fairScores"></div>
   </div>
-  <div class="card-body" id="fairScores"></div>
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">أكثر الطيارين اللي بتتشال منهم طلبات</span>
+      <span style="font-size:.68rem;color:var(--text-muted)">اضغط الطيار للتفاصيل</span>
+    </div>
+    <div class="card-body" id="takenOff"></div>
+  </div>
+</div>
+
+<!-- تنبيهات تحتاج قرار -->
+<div class="card" style="margin-bottom:1.25rem">
+  <div class="card-header"><span class="card-title">🚩 تنبيهات تحتاج قرار</span></div>
+  <div class="card-body">
+    <div id="alertIdle"></div>
+    <div id="alertLate" style="margin-top:1.2rem"></div>
+  </div>
 </div>
 
 <!-- أداء الطيارين — إحصائيات شاملة -->
@@ -241,10 +259,7 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
 </div><!-- /tab-drivers -->
 
 <!-- ========== TAB: تقارير الطلبات ========== -->
-<div id="tab-drivershift" style="display:none">
-  <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.6rem">كل شيفت (من الحضور للانصراف، حتى لو عدّى منتصف الليل) كسطر — للطيارين اللي حضروا خلال المدى المختار (من/إلى). بيوضّح مدة الشيفت، الرحلات، الطلبات، والطلبات اللي اتشالت من الطيار (بمناطقها ومين شالها).</div>
-  <div id="drivershift-body"></div>
-</div>
+
 <div id="tab-orders" style="display:none">
 
   <div class="kpi-grid" id="ordKpiGrid"></div>
@@ -511,7 +526,7 @@ let currentTab = 'drivers';
 // كل التبويبات: تقارير التوصيل + تبويبات المبيعات المدموجة.
 // أزرار المبيعات ممكن تكون مخفية (مش مسموح للمستخدم) فبنتخطّى الناقص
 // بدل ما نكتب كل تاب صريح زي قبل كده.
-const ALL_TABS = ['drivers','drivershift','orders','incentives','jard','prep','sa_overview','sa_emp','sa_price','sa_disc'];
+const ALL_TABS = ['drivers','orders','incentives','jard','prep','sa_overview','sa_emp','sa_price','sa_disc'];
 function switchTab(tab) {
   currentTab = tab;
   for (const t of ALL_TABS) {
@@ -543,12 +558,12 @@ async function step(fn) { try { await fn(); } catch (e) { console.error('report 
 const mainLoaded = new Set();
 const MAIN_TAB_STEPS = {
   drivers:    (f, t) => [renderKPIs, renderDailyChart, renderStatusPie, renderRegions,
-                         () => loadFairScores(f, t), () => loadDriverPerfTab(f, t)],
+                         () => loadFairScores(f, t), () => loadDriverPerfTab(f, t), () => loadDriverAlerts(f, t)],
   orders:     (f, t) => [() => loadOrdersTab(f, t), renderSlaAnalysis],
   incentives: (f, t) => [() => loadIncentivesTab(f, t)],
   jard:       (f, t) => [() => loadJardTab(f, t)],
   prep:       (f, t) => [() => loadPrepTab(f, t)],
-  drivershift:(f,t)  => [() => loadDriverShiftTab(f,t)],
+
 };
 
 async function loadMainTab(tab) {
@@ -657,6 +672,57 @@ function renderDriverShift(){
     html+='</tbody></table></div>';
   }
   host.innerHTML=html;
+}
+
+/* ═══ تنبيهات الطيارين: سحب طلبات + خمول ساعة+ + عودة متأخرة الضعف ═══ */
+function _alTime(t){ try{ return new Date(t).toLocaleString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }catch(_){ return ''; } }
+function _alHrs(m){ m=+m||0; const h=Math.floor(m/60),mm=m%60; return h>0?(h+'س'+(mm?(' '+mm+'د'):'')):(mm+'د'); }
+let _takenRows=[];
+function toggleTaken(i){ const el=document.getElementById('tk-'+i); if(el) el.style.display=el.style.display==='none'?'':'none'; }
+async function loadDriverAlerts(from,to){
+  const p={p_from:from||null,p_to:(to||from)||null,p_branch:effectiveBranch()||null};
+  try{ const {data,error}=await db.rpc('get_taken_off_report',p); if(error) throw error; _takenRows=data||[]; renderTakenOff(); }
+  catch(e){ const el=document.getElementById('takenOff'); if(el) el.innerHTML='<div style="color:#dc2626;font-size:.75rem">فشل التحميل</div>'; }
+  try{ const {data}=await db.rpc('get_idle_with_taken',p); renderIdle(data||[]); }catch(e){ const el=document.getElementById('alertIdle'); if(el) el.innerHTML=''; }
+  try{ const {data}=await db.rpc('get_late_returns',p); renderLate(data||[]); }catch(e){ const el=document.getElementById('alertLate'); if(el) el.innerHTML=''; }
+}
+function renderTakenOff(){
+  const el=document.getElementById('takenOff'); if(!el) return;
+  const rows=_takenRows;
+  if(!rows.length){ el.innerHTML='<div style="text-align:center;padding:1rem;color:var(--text-muted);font-size:.8rem">لا يوجد طلبات اتشالت في المدى ده</div>'; return; }
+  let h='';
+  rows.forEach((r,i)=>{
+    h+='<div style="border-bottom:1px solid var(--border)">'
+      +'<div onclick="toggleTaken('+i+')" style="display:flex;align-items:center;gap:.5rem;padding:.5rem 0;cursor:pointer">'
+      +'<span style="background:#fef2f2;color:#b91c1c;font-weight:800;border-radius:6px;padding:.1rem .5rem;font-size:.8rem;min-width:2rem;text-align:center">'+r.orders_taken+'</span>'
+      +'<span style="flex:1;font-weight:700;font-size:.82rem">'+(r.driver_name||'—')+'</span>'
+      +'<span style="font-size:.66rem;color:var(--text-muted)">'+r.events+' مرة'+(r.branch?(' · '+r.branch):'')+'</span>'
+      +'<span style="color:var(--text-muted);font-size:.7rem">▾</span></div>'
+      +'<div id="tk-'+i+'" style="display:none;padding:.1rem 0 .6rem">';
+    (r.details||[]).forEach(d=>{
+      h+='<div style="font-size:.72rem;padding:.12rem 0;color:var(--text-secondary)">• <b>'+(d.customer||'؟')+'</b> <span style="color:#7c3aed">('+(d.region||'—')+')</span> → راح لـ <b>'+(d.to||'؟')+'</b> · بواسطة '+(d.by||'؟')+' · <span style="color:var(--text-muted)">'+_alTime(d.at)+'</span></div>';
+    });
+    h+='</div></div>';
+  });
+  el.innerHTML=h;
+}
+function renderIdle(rows){
+  const el=document.getElementById('alertIdle'); if(!el) return;
+  let h='<div style="font-weight:800;font-size:.82rem;color:#b45309;margin-bottom:.4rem">⏳ طيارين قعدوا ساعة أو أكتر بدون طلبات رغم إن طلبات اتشالت منهم</div>';
+  if(!rows.length){ h+='<div style="color:var(--text-muted);font-size:.75rem">لا يوجد</div>'; el.innerHTML=h; return; }
+  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.78rem"><thead><tr style="color:var(--text-muted);font-size:.7rem"><th style="text-align:right;padding:.3rem">الطيار</th><th style="padding:.3rem">الفرع</th><th style="padding:.3rem">مرات</th><th style="padding:.3rem">أطول خمول</th></tr></thead><tbody>';
+  rows.forEach(r=>{ h+='<tr style="border-top:1px solid var(--border)"><td style="padding:.3rem;font-weight:700">'+(r.driver_name||'—')+'</td><td style="padding:.3rem;text-align:center;color:var(--text-muted)">'+(r.branch||'')+'</td><td style="padding:.3rem;text-align:center">'+r.incidents+'</td><td style="padding:.3rem;text-align:center;font-weight:800;color:#b45309">'+_alHrs(r.max_idle_min)+'</td></tr>'; });
+  h+='</tbody></table></div>';
+  el.innerHTML=h;
+}
+function renderLate(rows){
+  const el=document.getElementById('alertLate'); if(!el) return;
+  let h='<div style="font-weight:800;font-size:.82rem;color:#dc2626;margin-bottom:.4rem">🐢 عودة متأخرة الضعف (وقت العودة الفعلي ≥ 2× المتوقع)</div>';
+  if(!rows.length){ h+='<div style="color:var(--text-muted);font-size:.75rem">لا يوجد</div>'; el.innerHTML=h; return; }
+  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.78rem"><thead><tr style="color:var(--text-muted);font-size:.7rem"><th style="text-align:right;padding:.3rem">الطيار</th><th style="padding:.3rem">وقت الرحلة</th><th style="padding:.3rem">متوقع</th><th style="padding:.3rem">فعلي</th><th style="padding:.3rem">النسبة</th></tr></thead><tbody>';
+  rows.slice(0,150).forEach(r=>{ h+='<tr style="border-top:1px solid var(--border)"><td style="padding:.3rem;font-weight:700">'+(r.driver_name||'—')+'</td><td style="padding:.3rem;text-align:center;font-size:.68rem;color:var(--text-muted);white-space:nowrap">'+_alTime(r.trip_at)+'</td><td style="padding:.3rem;text-align:center">'+r.expected+'د</td><td style="padding:.3rem;text-align:center;font-weight:700">'+r.actual+'د</td><td style="padding:.3rem;text-align:center;font-weight:800;color:#dc2626">'+r.ratio+'×</td></tr>'; });
+  h+='</tbody></table></div>';
+  el.innerHTML=h;
 }
 
 async function loadReport() {
