@@ -563,6 +563,7 @@ async function loadMainTab(tab) {
 let _dsRows=[];
 function _dsWorked(r){ return (r.trips||0)>0 || (r.delivered||0)>0; }
 function _dsTime(t){ try{ return new Date(t).toLocaleTimeString('ar-EG',{timeZone:'Africa/Cairo',hour:'2-digit',minute:'2-digit'}); }catch(_){ return ''; } }
+function _dsHrs(m){ m=+m||0; if(m<=0) return '—'; const h=Math.floor(m/60), mm=m%60; return h>0?(h+'س'+(mm?(' '+mm+'د'):'')):(mm+'د'); }
 function toggleDsDetail(i){ const el=document.getElementById('dsdet-'+i); if(el) el.style.display=el.style.display==='none'?'':'none'; }
 async function loadDriverShiftTab(day){
   const host=document.getElementById('drivershift-body');
@@ -590,7 +591,7 @@ function renderDriverShift(){
     html+='<div style="font-weight:800;color:var(--primary);margin:.8rem 0 .4rem">🏥 '+br+'</div>'
       +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.78rem">'
       +'<thead><tr style="background:var(--surface);color:var(--text-muted);font-size:.7rem">'
-      +'<th style="padding:.4rem;text-align:right">الطيار</th><th style="padding:.4rem">الحالة</th><th style="padding:.4rem">رحلات</th><th style="padding:.4rem">تسليمات</th><th style="padding:.4rem">تعيين (تلقائي/يدوي)</th><th style="padding:.4rem">اتشال منه</th><th style="padding:.4rem">مين شال</th>'
+      +'<th style="padding:.4rem;text-align:right">الطيار</th><th style="padding:.4rem">الحالة</th><th style="padding:.4rem">ساعات العمل</th><th style="padding:.4rem">رحلات</th><th style="padding:.4rem">الطلبات</th><th style="padding:.4rem">تعيين (تلقائي/يدوي)</th><th style="padding:.4rem">اتشال منه</th><th style="padding:.4rem">مين شال</th>'
       +'</tr></thead><tbody>';
     for(const r of byBranch[br]){
       const w=_dsWorked(r);
@@ -603,17 +604,18 @@ function renderDriverShift(){
       html+='<tr style="border-top:1px solid var(--border);'+rowBg+(hasDet?';cursor:pointer':'')+'" '+(hasDet?('onclick="toggleDsDetail('+idx+')"'):'')+'>'
         +'<td style="padding:.4rem;font-weight:700">'+(r.driver_name||'—')+(hasDet?' <span style="color:var(--text-muted);font-size:.7rem">▾</span>':'')+'</td>'
         +'<td style="padding:.4rem;text-align:center"><span style="color:'+stCol+';font-weight:700">'+stLbl+'</span></td>'
-        +'<td style="padding:.4rem;text-align:center;font-weight:800">'+(r.trips||0)+'</td>'
+        +'<td style="padding:.4rem;text-align:center;white-space:nowrap">'+_dsHrs(r.online_minutes)+'</td>'
+        +'<td style="padding:.4rem;text-align:center;font-weight:800">'+(r.trips||0)+(((r.online_minutes||0)>0&&(r.trips||0)>0)?('<div style="font-size:.58rem;color:var(--text-muted);font-weight:400">'+(r.trips/(r.online_minutes/60)).toFixed(1)+' ر/س</div>'):'')+'</td>'
         +'<td style="padding:.4rem;text-align:center">'+(r.delivered||0)+'</td>'
         +'<td style="padding:.4rem;text-align:center;color:var(--text-muted)">'+(r.assigned_auto||0)+' / '+(r.assigned_manual||0)+'</td>'
         +'<td style="padding:.4rem;text-align:center;font-weight:700;color:'+(heavyOff?'#dc2626':'inherit')+'">'+(r.taken_off||0)+'</td>'
         +'<td style="padding:.4rem;font-size:.7rem;color:var(--text-muted)">'+(r.taken_off_by||'—')+'</td>'
         +'</tr>';
       if(hasDet){
-        let dd='<tr id="dsdet-'+idx+'" style="display:none;background:#f8fafc"><td colspan="7" style="padding:.5rem .8rem">'
+        let dd='<tr id="dsdet-'+idx+'" style="display:none;background:#f8fafc"><td colspan="8" style="padding:.5rem .8rem">'
           +'<div style="font-size:.68rem;color:var(--text-muted);margin-bottom:.3rem">الطلبات اللي اتشالت من '+(r.driver_name||'')+':</div>';
         for(const d of r.details){
-          dd+='<div style="font-size:.72rem;padding:.15rem 0">• الساعة '+_dsTime(d.at)+' — راحت لـ <b>'+(d.to||'؟')+'</b> — بواسطة <b>'+(d.by||'؟')+'</b>'+(d.reason?(' ('+d.reason+')'):'')+'</div>';
+          dd+='<div style="font-size:.72rem;padding:.15rem 0">• الساعة '+_dsTime(d.at)+' — راحت لـ <b>'+(d.to||'؟')+'</b> — بواسطة <b>'+(d.by||'؟')+'</b>'+(d.reason?(' ('+d.reason+')'):'')+(d.regions?(' — <span style="color:#7c3aed">مناطق: '+d.regions+'</span>'):'')+'</div>';
         }
         html+=dd+'</td></tr>';
       }
