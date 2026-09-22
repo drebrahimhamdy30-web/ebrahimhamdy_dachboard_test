@@ -163,6 +163,7 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
 <!-- Tabs -->
 <div style="display:flex;gap:.5rem;margin-bottom:1rem;border-bottom:1px solid var(--border);flex-wrap:wrap">
   <button id="tabBtn-drivers" onclick="switchTab('drivers')" style="background:none;border:none;border-bottom:3px solid var(--primary);color:var(--primary);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تقارير الطيارين</button>
+  <button id="tabBtn-drivershift" onclick="switchTab('drivershift')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">شيفتات الطيارين اليومية</button>
   <button id="tabBtn-orders" onclick="switchTab('orders')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تقارير الطلبات</button>
   <button id="tabBtn-incentives" onclick="switchTab('incentives')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">حوافز الطيارين</button>
   <button id="tabBtn-jard" onclick="switchTab('jard')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تقارير الجرد</button>
@@ -240,6 +241,10 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
 </div><!-- /tab-drivers -->
 
 <!-- ========== TAB: تقارير الطلبات ========== -->
+<div id="tab-drivershift" style="display:none">
+  <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.6rem">تقرير يومي (على تاريخ «من»): كل طيار عمل كام رحلة في شيفته، مين ماشتغلش، والطلبات اللي اتشالت منه ومين شالها — عشان تحدد سبب الخلل.</div>
+  <div id="drivershift-body"></div>
+</div>
 <div id="tab-orders" style="display:none">
 
   <div class="kpi-grid" id="ordKpiGrid"></div>
@@ -506,7 +511,7 @@ let currentTab = 'drivers';
 // كل التبويبات: تقارير التوصيل + تبويبات المبيعات المدموجة.
 // أزرار المبيعات ممكن تكون مخفية (مش مسموح للمستخدم) فبنتخطّى الناقص
 // بدل ما نكتب كل تاب صريح زي قبل كده.
-const ALL_TABS = ['drivers','orders','incentives','jard','prep','sa_overview','sa_emp','sa_price','sa_disc'];
+const ALL_TABS = ['drivers','drivershift','orders','incentives','jard','prep','sa_overview','sa_emp','sa_price','sa_disc'];
 function switchTab(tab) {
   currentTab = tab;
   for (const t of ALL_TABS) {
@@ -543,6 +548,7 @@ const MAIN_TAB_STEPS = {
   incentives: (f, t) => [() => loadIncentivesTab(f, t)],
   jard:       (f, t) => [() => loadJardTab(f, t)],
   prep:       (f, t) => [() => loadPrepTab(f, t)],
+  drivershift:(f)    => [() => loadDriverShiftTab(f)],
 };
 
 async function loadMainTab(tab) {
@@ -551,6 +557,71 @@ async function loadMainTab(tab) {
   const from = document.getElementById('dateFrom').value;
   const to   = document.getElementById('dateTo').value;
   for (const fn of MAIN_TAB_STEPS[tab](from, to)) await step(fn);
+}
+
+/* ═══ شيفتات الطيارين اليومية — كل طيار عمل كام رحلة + سبب الخلل ═══ */
+let _dsRows=[];
+function _dsWorked(r){ return (r.trips||0)>0 || (r.delivered||0)>0; }
+function _dsTime(t){ try{ return new Date(t).toLocaleTimeString('ar-EG',{timeZone:'Africa/Cairo',hour:'2-digit',minute:'2-digit'}); }catch(_){ return ''; } }
+function toggleDsDetail(i){ const el=document.getElementById('dsdet-'+i); if(el) el.style.display=el.style.display==='none'?'':'none'; }
+async function loadDriverShiftTab(day){
+  const host=document.getElementById('drivershift-body');
+  if(!host) return;
+  host.innerHTML='<div style="text-align:center;padding:2rem;color:var(--text-muted)">⏳ جاري التحميل...</div>';
+  try{
+    const {data,error}=await db.rpc('get_driver_daily_report',{p_day:day||null, p_branch: effectiveBranch()||null});
+    if(error) throw error;
+    _dsRows=data||[];
+    renderDriverShift();
+  }catch(e){ host.innerHTML='<div style="text-align:center;padding:2rem;color:#dc2626">فشل التحميل: '+(e&&e.message||e)+'</div>'; }
+}
+function renderDriverShift(){
+  const host=document.getElementById('drivershift-body');
+  const rows=_dsRows;
+  if(!rows.length){ host.innerHTML='<div style="text-align:center;padding:2rem;color:var(--text-muted)">لا توجد بيانات لليوم ده</div>'; return; }
+  const worked=rows.filter(_dsWorked).length, idle=rows.length-worked;
+  const totTrips=rows.reduce((s,r)=>s+(r.trips||0),0);
+  const kpi=(lbl,val,col)=>'<div style="flex:1;min-width:120px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.6rem .8rem"><div style="font-size:.65rem;color:var(--text-muted)">'+lbl+'</div><div style="font-size:1.3rem;font-weight:800;color:'+col+'">'+val+'</div></div>';
+  let html='<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem">'+kpi('اشتغلوا',worked,'#16a34a')+kpi('ماشتغلوش',idle,'#dc2626')+kpi('إجمالي الرحلات',totTrips,'var(--primary)')+'</div>';
+  const byBranch={};
+  rows.forEach(r=>{ const b=r.branch||'—'; (byBranch[b]=byBranch[b]||[]).push(r); });
+  let idx=0;
+  for(const br of Object.keys(byBranch).sort()){
+    html+='<div style="font-weight:800;color:var(--primary);margin:.8rem 0 .4rem">🏥 '+br+'</div>'
+      +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.78rem">'
+      +'<thead><tr style="background:var(--surface);color:var(--text-muted);font-size:.7rem">'
+      +'<th style="padding:.4rem;text-align:right">الطيار</th><th style="padding:.4rem">الحالة</th><th style="padding:.4rem">رحلات</th><th style="padding:.4rem">تسليمات</th><th style="padding:.4rem">تعيين (تلقائي/يدوي)</th><th style="padding:.4rem">اتشال منه</th><th style="padding:.4rem">مين شال</th>'
+      +'</tr></thead><tbody>';
+    for(const r of byBranch[br]){
+      const w=_dsWorked(r);
+      let stLbl,stCol,rowBg='';
+      if(w){ stLbl='اشتغل'; stCol='#16a34a'; }
+      else if(r.attended){ stLbl='حضر بدون عمل'; stCol='#a16207'; rowBg='background:#fffbeb'; }
+      else { stLbl='لم يحضر'; stCol='#dc2626'; rowBg='background:#fef2f2'; }
+      const heavyOff=(r.taken_off||0)>0 && (r.taken_off||0)>=(r.trips||0) && (r.trips||0)>0;
+      const hasDet=(r.details && r.details.length>0);
+      html+='<tr style="border-top:1px solid var(--border);'+rowBg+(hasDet?';cursor:pointer':'')+'" '+(hasDet?('onclick="toggleDsDetail('+idx+')"'):'')+'>'
+        +'<td style="padding:.4rem;font-weight:700">'+(r.driver_name||'—')+(hasDet?' <span style="color:var(--text-muted);font-size:.7rem">▾</span>':'')+'</td>'
+        +'<td style="padding:.4rem;text-align:center"><span style="color:'+stCol+';font-weight:700">'+stLbl+'</span></td>'
+        +'<td style="padding:.4rem;text-align:center;font-weight:800">'+(r.trips||0)+'</td>'
+        +'<td style="padding:.4rem;text-align:center">'+(r.delivered||0)+'</td>'
+        +'<td style="padding:.4rem;text-align:center;color:var(--text-muted)">'+(r.assigned_auto||0)+' / '+(r.assigned_manual||0)+'</td>'
+        +'<td style="padding:.4rem;text-align:center;font-weight:700;color:'+(heavyOff?'#dc2626':'inherit')+'">'+(r.taken_off||0)+'</td>'
+        +'<td style="padding:.4rem;font-size:.7rem;color:var(--text-muted)">'+(r.taken_off_by||'—')+'</td>'
+        +'</tr>';
+      if(hasDet){
+        let dd='<tr id="dsdet-'+idx+'" style="display:none;background:#f8fafc"><td colspan="7" style="padding:.5rem .8rem">'
+          +'<div style="font-size:.68rem;color:var(--text-muted);margin-bottom:.3rem">الطلبات اللي اتشالت من '+(r.driver_name||'')+':</div>';
+        for(const d of r.details){
+          dd+='<div style="font-size:.72rem;padding:.15rem 0">• الساعة '+_dsTime(d.at)+' — راحت لـ <b>'+(d.to||'؟')+'</b> — بواسطة <b>'+(d.by||'؟')+'</b>'+(d.reason?(' ('+d.reason+')'):'')+'</div>';
+        }
+        html+=dd+'</td></tr>';
+      }
+      idx++;
+    }
+    html+='</tbody></table></div>';
+  }
+  host.innerHTML=html;
 }
 
 async function loadReport() {
