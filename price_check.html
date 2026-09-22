@@ -194,10 +194,6 @@
   <script src="brand.js?v=20260904c"></script>
   <script src="api.js?v=20260904c"></script>
   <script>
-    const INV_URL = 'https://agent.ebrahimhamdy.com/webhook/inventory';
-    // مسار السؤال اللحظي عن صنف واحد (GET query: code & branch)
-    // لو الـ webhook مختلف، غيّر السطر ده فقط:
-    const SEARCH_URL = 'https://agent.ebrahimhamdy.com/webhook/inventory';
     const BRANCHES = Branches.codeMap();
     // الإملاء العربي للفرع كما يتوقعه الـ Switch/branchMap في n8n
     const BRANCH_AR_FOR_API = Branches.codeMap();
@@ -522,27 +518,37 @@
       }, 1600);
     }
 
-    // ===== السؤال اللحظي عن صنف واحد عبر الـ webhook (GET — يتفادى preflight) =====
-    // يرسل code & branch في الـ query string، ويتوقع رد فيه: found, sell_price, balance, itm_name_ar
-    async function searchItemLive(code, branchAr){
-      var url = SEARCH_URL +
-        (SEARCH_URL.indexOf('?')>-1 ? '&' : '?') +
-        'code='   + encodeURIComponent(String(code).trim()) +
-        '&branch='+ encodeURIComponent(branchAr);
-      var res = await fetch(url, { method:'GET' });
-      var raw = await res.json();
-      // الرد قد يأتي ككائن واحد أو مصفوفة أو داخل data
-      var obj = Array.isArray(raw) ? (raw[0]||{}) : (raw.data && !raw.found ? raw.data : raw);
-      if(Array.isArray(obj)) obj = obj[0]||{};
-      var found = (obj.found===true || obj.found==='true' || obj.found===1);
-      var price = obj.sell_price!=null ? parseFloat(obj.sell_price) : null;
-      // لو مفيش حقل found لكن فيه سعر، اعتبره موجوداً
-      if(!('found' in obj) && price!=null && !isNaN(price)) found=true;
+    // ===== الأسعار/الأرصدة مباشرة من Supabase (stock_flat) بدل نداء eplus الحي =====
+    // نجيب كل الأكواد دفعة واحدة عبر RPC price_check_lookup (أسرع بكتير وأثبت)، ونقرا منها لكل صنف.
+    var PRICE_MAP = {};
+    async function prefetchPrices(codes, branchAr){
+      PRICE_MAP = {};
+      var uniq = Array.from(new Set((codes||[]).map(function(c){ return String(c).trim(); }).filter(Boolean)));
+      var CH = 300;
+      for(var x=0; x<uniq.length; x+=CH){
+        var slice = uniq.slice(x, x+CH);
+        try {
+          var res = await fetch(SB_URL_API + '/rest/v1/rpc/price_check_lookup', {
+            method:'POST', headers: await sbH({ 'Content-Type':'application/json' }),
+            body: JSON.stringify({ p_codes: slice, p_branch: branchAr })
+          });
+          var rows = await res.json();
+          (Array.isArray(rows)?rows:[]).forEach(function(r){ PRICE_MAP[String(r.code).trim()] = r; });
+        } catch(e){ /* تجاهل — الأصناف تظهر «غير موجود» */ }
+      }
+    }
+    // قراءة صنف من الماب بعد prefetch — بنفس شكل الرد القديم عشان باقي الكود مايتغيرش
+    function searchItemLive(code){
+      var r = PRICE_MAP[String(code).trim()];
+      if(!r || r.found!==true){
+        return { found:false, price:null, name:'', balance:(r && r.balance!=null)?parseFloat(r.balance):null };
+      }
+      var price = r.sell_price!=null ? parseFloat(r.sell_price) : null;
       return {
-        found: found,
+        found: (price!=null && !isNaN(price)),
         price: (price!=null && !isNaN(price)) ? price : null,
-        name: obj.itm_name_ar || '',
-        balance: obj.balance!=null ? parseFloat(obj.balance) : null
+        name: r.itm_name_ar || '',
+        balance: r.balance!=null ? parseFloat(r.balance) : null
       };
     }
 
@@ -654,6 +660,8 @@
         '</div>';
       }
       container.innerHTML=progressHTML(0);
+      // نجيب كل الأسعار/الأرصدة دفعة واحدة من Supabase قبل الحلقة (بدل نداء لكل صنف)
+      await prefetchPrices(parsedRows.map(function(r){ return r.code; }), branchAr);
 
       for(var i=0;i<parsedRows.length;i++){
         if(calcAbort) break;
