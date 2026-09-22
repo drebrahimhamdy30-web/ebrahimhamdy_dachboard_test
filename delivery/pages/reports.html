@@ -575,14 +575,47 @@ async function loadDriverShiftTab(from, to){
     renderDriverShift();
   }catch(e){ host.innerHTML='<div style="text-align:center;padding:2rem;color:#dc2626">فشل التحميل: '+(e&&e.message||e)+'</div>'; }
 }
+function _dsDate(t){ try{ return new Date(t).toLocaleDateString('en-CA',{timeZone:'Africa/Cairo'}); }catch(_){ return ''; } }
+function _dsReason(r){
+  const hrs=(r.shift_minutes||0)/60, assigned=(r.assigned_auto||0)+(r.assigned_manual||0);
+  if((r.taken_off||0)>0 && (r.taken_off||0)>=Math.max(2,(r.trips||0))) return 'الكاشير بيشيل طلباته';
+  if(hrs>=1 && (r._avgAph||0)>0 && (assigned/hrs) < r._avgAph*0.6) return 'مجاش عليه طلبات كفاية';
+  return 'أداء/كفاءة الطيار';
+}
 function renderDriverShift(){
   const host=document.getElementById('drivershift-body');
   const rows=_dsRows;
   if(!rows.length){ host.innerHTML='<div style="text-align:center;padding:2rem;color:var(--text-muted)">لا توجد شيفتات في المدى المحدد</div>'; return; }
+  // مقاييس لكل شيفت
+  rows.forEach(r=>{ r._hrs=(r.shift_minutes||0)/60; r._oph=r._hrs>0?((r.delivered||0)/r._hrs):0; r._assigned=(r.assigned_auto||0)+(r.assigned_manual||0); r._aph=r._hrs>0?(r._assigned/r._hrs):0; r._sd=_dsDate(r.check_in); r._ratio=1; r._isTop=false; r._isBottom=false; });
+  // مجموعات الأقران: نفس الفرع + نفس يوم الشيفت — نحسب متوسط طلب/ساعة ونعلّم الأعلى والأقل
+  const grp={};
+  rows.forEach(r=>{ const k=(r.branch||'—')+'|'+r._sd; (grp[k]=grp[k]||[]).push(r); });
+  Object.values(grp).forEach(g=>{
+    const base=g.filter(r=>r._hrs>=1), bb=base.length?base:g;
+    const avgOph=bb.reduce((s,r)=>s+r._oph,0)/bb.length;
+    const avgAph=bb.reduce((s,r)=>s+r._aph,0)/bb.length;
+    let mx=bb[0], mn=bb[0];
+    bb.forEach(r=>{ if(r._oph>mx._oph)mx=r; if(r._oph<mn._oph)mn=r; });
+    g.forEach(r=>{ r._avgOph=avgOph; r._avgAph=avgAph; r._ratio=avgOph>0?(r._oph/avgOph):1; });
+    if(bb.length>=2){ mx._isTop=true; mn._isBottom=true; }
+  });
   const drivers=new Set(rows.map(r=>r.driver_id)).size;
   const totTrips=rows.reduce((s,r)=>s+(r.trips||0),0);
   const kpi=(lbl,val,col)=>'<div style="flex:1;min-width:110px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.6rem .8rem"><div style="font-size:.65rem;color:var(--text-muted)">'+lbl+'</div><div style="font-size:1.3rem;font-weight:800;color:'+col+'">'+val+'</div></div>';
   let html='<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem">'+kpi('شيفتات',rows.length,'var(--primary)')+kpi('طيارين',drivers,'#16a34a')+kpi('إجمالي الرحلات',totTrips,'#0891b2')+'</div>';
+  // تسليط الضوء على الأضعف والأعلى (مقارنة بالزمايل، للشيفتات ساعة فأكثر)
+  const ranked=rows.filter(r=>r._hrs>=1).slice().sort((a,b)=>a._ratio-b._ratio);
+  if(ranked.length>=2){
+    const low=ranked.slice(0,3), high=ranked.slice(-3).reverse();
+    const card=(r,isLow)=>'<div style="background:'+(isLow?'#fef2f2':'#f0fdf4')+';border:1px solid '+(isLow?'#fecaca':'#bbf7d0')+';border-radius:8px;padding:.5rem .7rem;font-size:.72rem;min-width:210px;flex:1">'
+      +'<div style="font-weight:800">'+(isLow?'🔻 ':'🔺 ')+(r.driver_name||'—')+' <span style="color:var(--text-muted);font-weight:400;font-size:.66rem">'+(r.branch||'')+' · '+r._sd+'</span></div>'
+      +'<div style="color:var(--text-muted);margin-top:.15rem">'+(r.delivered||0)+' طلب · '+(r.trips||0)+' رحلة · '+_dsHrs(r.shift_minutes)+' · <b>'+r._oph.toFixed(1)+' طلب/س</b> · '+Math.round(r._ratio*100)+'% من متوسط زمايله</div>'
+      +(isLow?('<div style="color:#b91c1c;margin-top:.2rem;font-weight:700">السبب المرجّح: '+_dsReason(r)+((r.taken_off||0)>0?(' — اتشال منه '+r.taken_off+' ('+(r.taken_off_by||'')+')'):'')+'</div>'):'')
+      +'</div>';
+    html+='<div style="margin:.2rem 0 .6rem"><div style="font-weight:800;color:#b91c1c;font-size:.82rem;margin-bottom:.35rem">🔻 الأضعف أداءً (يحتاج مراجعة)</div><div style="display:flex;gap:.5rem;flex-wrap:wrap">'+low.map(r=>card(r,true)).join('')+'</div></div>';
+    html+='<div style="margin:.2rem 0 .9rem"><div style="font-weight:800;color:#15803d;font-size:.82rem;margin-bottom:.35rem">🔺 الأعلى أداءً</div><div style="display:flex;gap:.5rem;flex-wrap:wrap">'+high.map(r=>card(r,false)).join('')+'</div></div>';
+  }
   const byBranch={};
   rows.forEach(r=>{ const b=r.branch||'—'; (byBranch[b]=byBranch[b]||[]).push(r); });
   let idx=0;
@@ -590,25 +623,29 @@ function renderDriverShift(){
     html+='<div style="font-weight:800;color:var(--primary);margin:.8rem 0 .4rem">🏥 '+br+'</div>'
       +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.78rem">'
       +'<thead><tr style="background:var(--surface);color:var(--text-muted);font-size:.7rem">'
-      +'<th style="padding:.4rem;text-align:right">الطيار</th><th style="padding:.4rem">الشيفت (حضور ← انصراف)</th><th style="padding:.4rem">المدة</th><th style="padding:.4rem">رحلات</th><th style="padding:.4rem">الطلبات</th><th style="padding:.4rem">تعيين (ت/ي)</th><th style="padding:.4rem">اتشال منه</th><th style="padding:.4rem">مين شال</th>'
+      +'<th style="padding:.4rem;text-align:right">الطيار</th><th style="padding:.4rem">الشيفت (حضور ← انصراف)</th><th style="padding:.4rem">المدة</th><th style="padding:.4rem">رحلات</th><th style="padding:.4rem">الطلبات</th><th style="padding:.4rem">الأداء مقابل الزمايل</th><th style="padding:.4rem">تعيين (ت/ي)</th><th style="padding:.4rem">اتشال منه</th><th style="padding:.4rem">مين شال</th>'
       +'</tr></thead><tbody>';
     for(const r of byBranch[br]){
       const heavyOff=(r.taken_off||0)>0 && (r.taken_off||0)>=(r.trips||0) && (r.trips||0)>0;
       const hasDet=(r.details && r.details.length>0);
       const rate=(((r.shift_minutes||0)>0)&&((r.trips||0)>0))?((r.trips/(r.shift_minutes/60)).toFixed(1)+' ر/س'):'';
       const cout=r.open_shift?'<span style="color:#16a34a">مفتوح</span>':_dsTime(r.check_out);
-      html+='<tr style="border-top:1px solid var(--border)'+(hasDet?';cursor:pointer':'')+'" '+(hasDet?('onclick="toggleDsDetail('+idx+')"'):'')+'>'
+      const rowBg=r._isTop?'background:#f0fdf4':(r._isBottom?'background:#fef2f2':'');
+      const perfCol=r._ratio>=1.15?'#15803d':(r._ratio<=0.7?'#dc2626':'var(--text-muted)');
+      const perfCell=r._hrs>=1?('<span style="font-weight:700;color:'+perfCol+'">'+Math.round(r._ratio*100)+'%</span>'+(r._isTop?' 🔺':(r._isBottom?' 🔻':''))):'<span style="color:var(--text-muted)">—</span>';
+      html+='<tr style="border-top:1px solid var(--border);'+rowBg+(hasDet?';cursor:pointer':'')+'" '+(hasDet?('onclick="toggleDsDetail('+idx+')"'):'')+'>'
         +'<td style="padding:.4rem;font-weight:700">'+(r.driver_name||'—')+(hasDet?' <span style="color:var(--text-muted);font-size:.7rem">▾</span>':'')+'</td>'
         +'<td style="padding:.4rem;text-align:center;white-space:nowrap;font-size:.7rem">'+_dsTime(r.check_in)+' ← '+cout+'</td>'
         +'<td style="padding:.4rem;text-align:center;white-space:nowrap">'+_dsHrs(r.shift_minutes)+'</td>'
         +'<td style="padding:.4rem;text-align:center;font-weight:800">'+(r.trips||0)+(rate?('<div style="font-size:.58rem;color:var(--text-muted);font-weight:400">'+rate+'</div>'):'')+'</td>'
         +'<td style="padding:.4rem;text-align:center">'+(r.delivered||0)+'</td>'
+        +'<td style="padding:.4rem;text-align:center;white-space:nowrap">'+perfCell+'</td>'
         +'<td style="padding:.4rem;text-align:center;color:var(--text-muted)">'+(r.assigned_auto||0)+' / '+(r.assigned_manual||0)+'</td>'
         +'<td style="padding:.4rem;text-align:center;font-weight:700;color:'+(heavyOff?'#dc2626':'inherit')+'">'+(r.taken_off||0)+'</td>'
         +'<td style="padding:.4rem;font-size:.7rem;color:var(--text-muted)">'+(r.taken_off_by||'—')+'</td>'
         +'</tr>';
       if(hasDet){
-        let dd='<tr id="dsdet-'+idx+'" style="display:none;background:#f8fafc"><td colspan="8" style="padding:.5rem .8rem">'
+        let dd='<tr id="dsdet-'+idx+'" style="display:none;background:#f8fafc"><td colspan="9" style="padding:.5rem .8rem">'
           +'<div style="font-size:.68rem;color:var(--text-muted);margin-bottom:.3rem">الطلبات اللي اتشالت من '+(r.driver_name||'')+':</div>';
         for(const d of r.details){
           dd+='<div style="font-size:.72rem;padding:.15rem 0">• '+_dsTime(d.at)+' — راحت لـ <b>'+(d.to||'؟')+'</b> — بواسطة <b>'+(d.by||'؟')+'</b>'+(d.reason?(' ('+d.reason+')'):'')+(d.regions?(' — <span style="color:#7c3aed">مناطق: '+d.regions+'</span>'):'')+'</div>';
