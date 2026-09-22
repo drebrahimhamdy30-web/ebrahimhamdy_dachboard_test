@@ -242,7 +242,7 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
 
 <!-- ========== TAB: تقارير الطلبات ========== -->
 <div id="tab-drivershift" style="display:none">
-  <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.6rem">تقرير يومي (على تاريخ «من»): كل طيار عمل كام رحلة في شيفته، مين ماشتغلش، والطلبات اللي اتشالت منه ومين شالها — عشان تحدد سبب الخلل.</div>
+  <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.6rem">كل شيفت (من الحضور للانصراف، حتى لو عدّى منتصف الليل) كسطر — للطيارين اللي حضروا خلال المدى المختار (من/إلى). بيوضّح مدة الشيفت، الرحلات، الطلبات، والطلبات اللي اتشالت من الطيار (بمناطقها ومين شالها).</div>
   <div id="drivershift-body"></div>
 </div>
 <div id="tab-orders" style="display:none">
@@ -548,7 +548,7 @@ const MAIN_TAB_STEPS = {
   incentives: (f, t) => [() => loadIncentivesTab(f, t)],
   jard:       (f, t) => [() => loadJardTab(f, t)],
   prep:       (f, t) => [() => loadPrepTab(f, t)],
-  drivershift:(f)    => [() => loadDriverShiftTab(f)],
+  drivershift:(f,t)  => [() => loadDriverShiftTab(f,t)],
 };
 
 async function loadMainTab(tab) {
@@ -559,18 +559,17 @@ async function loadMainTab(tab) {
   for (const fn of MAIN_TAB_STEPS[tab](from, to)) await step(fn);
 }
 
-/* ═══ شيفتات الطيارين اليومية — كل طيار عمل كام رحلة + سبب الخلل ═══ */
+/* ═══ شيفتات الطيارين — كل شيفت (حضور←انصراف) كسطر ضمن المدى المختار ═══ */
 let _dsRows=[];
-function _dsWorked(r){ return (r.trips||0)>0 || (r.delivered||0)>0; }
-function _dsTime(t){ try{ return new Date(t).toLocaleTimeString('ar-EG',{timeZone:'Africa/Cairo',hour:'2-digit',minute:'2-digit'}); }catch(_){ return ''; } }
+function _dsTime(t){ try{ return new Date(t).toLocaleString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }catch(_){ return '—'; } }
 function _dsHrs(m){ m=+m||0; if(m<=0) return '—'; const h=Math.floor(m/60), mm=m%60; return h>0?(h+'س'+(mm?(' '+mm+'د'):'')):(mm+'د'); }
 function toggleDsDetail(i){ const el=document.getElementById('dsdet-'+i); if(el) el.style.display=el.style.display==='none'?'':'none'; }
-async function loadDriverShiftTab(day){
+async function loadDriverShiftTab(from, to){
   const host=document.getElementById('drivershift-body');
   if(!host) return;
   host.innerHTML='<div style="text-align:center;padding:2rem;color:var(--text-muted)">⏳ جاري التحميل...</div>';
   try{
-    const {data,error}=await db.rpc('get_driver_daily_report',{p_day:day||null, p_branch: effectiveBranch()||null});
+    const {data,error}=await db.rpc('get_driver_shift_report',{p_from:from||null, p_to:(to||from)||null, p_branch: effectiveBranch()||null});
     if(error) throw error;
     _dsRows=data||[];
     renderDriverShift();
@@ -578,13 +577,12 @@ async function loadDriverShiftTab(day){
 }
 function renderDriverShift(){
   const host=document.getElementById('drivershift-body');
-  const _hiddenNoShow=_dsRows.filter(r=>!r.attended && !_dsWorked(r)).length;
-  const rows=_dsRows.filter(r=>r.attended || _dsWorked(r));
-  if(!rows.length){ host.innerHTML='<div style="text-align:center;padding:2rem;color:var(--text-muted)">لا يوجد طيارون حضروا في اليوم ده'+(_hiddenNoShow>0?(' ('+_hiddenNoShow+' لم يحضروا)'):'')+'</div>'; return; }
-  const worked=rows.filter(_dsWorked).length, idle=rows.length-worked;
+  const rows=_dsRows;
+  if(!rows.length){ host.innerHTML='<div style="text-align:center;padding:2rem;color:var(--text-muted)">لا توجد شيفتات في المدى المحدد</div>'; return; }
+  const drivers=new Set(rows.map(r=>r.driver_id)).size;
   const totTrips=rows.reduce((s,r)=>s+(r.trips||0),0);
-  const kpi=(lbl,val,col)=>'<div style="flex:1;min-width:120px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.6rem .8rem"><div style="font-size:.65rem;color:var(--text-muted)">'+lbl+'</div><div style="font-size:1.3rem;font-weight:800;color:'+col+'">'+val+'</div></div>';
-  let html='<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem">'+kpi('اشتغلوا',worked,'#16a34a')+kpi('حضر بدون عمل',idle,'#a16207')+kpi('إجمالي الرحلات',totTrips,'var(--primary)')+'</div>'+(_hiddenNoShow>0?('<div style="font-size:.68rem;color:var(--text-muted);margin-bottom:.6rem">🚫 '+_hiddenNoShow+' طيار لم يحضروا (مخفيين)</div>'):'');
+  const kpi=(lbl,val,col)=>'<div style="flex:1;min-width:110px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.6rem .8rem"><div style="font-size:.65rem;color:var(--text-muted)">'+lbl+'</div><div style="font-size:1.3rem;font-weight:800;color:'+col+'">'+val+'</div></div>';
+  let html='<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem">'+kpi('شيفتات',rows.length,'var(--primary)')+kpi('طيارين',drivers,'#16a34a')+kpi('إجمالي الرحلات',totTrips,'#0891b2')+'</div>';
   const byBranch={};
   rows.forEach(r=>{ const b=r.branch||'—'; (byBranch[b]=byBranch[b]||[]).push(r); });
   let idx=0;
@@ -592,21 +590,18 @@ function renderDriverShift(){
     html+='<div style="font-weight:800;color:var(--primary);margin:.8rem 0 .4rem">🏥 '+br+'</div>'
       +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.78rem">'
       +'<thead><tr style="background:var(--surface);color:var(--text-muted);font-size:.7rem">'
-      +'<th style="padding:.4rem;text-align:right">الطيار</th><th style="padding:.4rem">الحالة</th><th style="padding:.4rem">ساعات العمل</th><th style="padding:.4rem">رحلات</th><th style="padding:.4rem">الطلبات</th><th style="padding:.4rem">تعيين (تلقائي/يدوي)</th><th style="padding:.4rem">اتشال منه</th><th style="padding:.4rem">مين شال</th>'
+      +'<th style="padding:.4rem;text-align:right">الطيار</th><th style="padding:.4rem">الشيفت (حضور ← انصراف)</th><th style="padding:.4rem">المدة</th><th style="padding:.4rem">رحلات</th><th style="padding:.4rem">الطلبات</th><th style="padding:.4rem">تعيين (ت/ي)</th><th style="padding:.4rem">اتشال منه</th><th style="padding:.4rem">مين شال</th>'
       +'</tr></thead><tbody>';
     for(const r of byBranch[br]){
-      const w=_dsWorked(r);
-      let stLbl,stCol,rowBg='';
-      if(w){ stLbl='اشتغل'; stCol='#16a34a'; }
-      else if(r.attended){ stLbl='حضر بدون عمل'; stCol='#a16207'; rowBg='background:#fffbeb'; }
-      else { stLbl='لم يحضر'; stCol='#dc2626'; rowBg='background:#fef2f2'; }
       const heavyOff=(r.taken_off||0)>0 && (r.taken_off||0)>=(r.trips||0) && (r.trips||0)>0;
       const hasDet=(r.details && r.details.length>0);
-      html+='<tr style="border-top:1px solid var(--border);'+rowBg+(hasDet?';cursor:pointer':'')+'" '+(hasDet?('onclick="toggleDsDetail('+idx+')"'):'')+'>'
+      const rate=(((r.shift_minutes||0)>0)&&((r.trips||0)>0))?((r.trips/(r.shift_minutes/60)).toFixed(1)+' ر/س'):'';
+      const cout=r.open_shift?'<span style="color:#16a34a">مفتوح</span>':_dsTime(r.check_out);
+      html+='<tr style="border-top:1px solid var(--border)'+(hasDet?';cursor:pointer':'')+'" '+(hasDet?('onclick="toggleDsDetail('+idx+')"'):'')+'>'
         +'<td style="padding:.4rem;font-weight:700">'+(r.driver_name||'—')+(hasDet?' <span style="color:var(--text-muted);font-size:.7rem">▾</span>':'')+'</td>'
-        +'<td style="padding:.4rem;text-align:center"><span style="color:'+stCol+';font-weight:700">'+stLbl+'</span></td>'
-        +'<td style="padding:.4rem;text-align:center;white-space:nowrap">'+_dsHrs(r.online_minutes)+'</td>'
-        +'<td style="padding:.4rem;text-align:center;font-weight:800">'+(r.trips||0)+(((r.online_minutes||0)>0&&(r.trips||0)>0)?('<div style="font-size:.58rem;color:var(--text-muted);font-weight:400">'+(r.trips/(r.online_minutes/60)).toFixed(1)+' ر/س</div>'):'')+'</td>'
+        +'<td style="padding:.4rem;text-align:center;white-space:nowrap;font-size:.7rem">'+_dsTime(r.check_in)+' ← '+cout+'</td>'
+        +'<td style="padding:.4rem;text-align:center;white-space:nowrap">'+_dsHrs(r.shift_minutes)+'</td>'
+        +'<td style="padding:.4rem;text-align:center;font-weight:800">'+(r.trips||0)+(rate?('<div style="font-size:.58rem;color:var(--text-muted);font-weight:400">'+rate+'</div>'):'')+'</td>'
         +'<td style="padding:.4rem;text-align:center">'+(r.delivered||0)+'</td>'
         +'<td style="padding:.4rem;text-align:center;color:var(--text-muted)">'+(r.assigned_auto||0)+' / '+(r.assigned_manual||0)+'</td>'
         +'<td style="padding:.4rem;text-align:center;font-weight:700;color:'+(heavyOff?'#dc2626':'inherit')+'">'+(r.taken_off||0)+'</td>'
@@ -616,7 +611,7 @@ function renderDriverShift(){
         let dd='<tr id="dsdet-'+idx+'" style="display:none;background:#f8fafc"><td colspan="8" style="padding:.5rem .8rem">'
           +'<div style="font-size:.68rem;color:var(--text-muted);margin-bottom:.3rem">الطلبات اللي اتشالت من '+(r.driver_name||'')+':</div>';
         for(const d of r.details){
-          dd+='<div style="font-size:.72rem;padding:.15rem 0">• الساعة '+_dsTime(d.at)+' — راحت لـ <b>'+(d.to||'؟')+'</b> — بواسطة <b>'+(d.by||'؟')+'</b>'+(d.reason?(' ('+d.reason+')'):'')+(d.regions?(' — <span style="color:#7c3aed">مناطق: '+d.regions+'</span>'):'')+'</div>';
+          dd+='<div style="font-size:.72rem;padding:.15rem 0">• '+_dsTime(d.at)+' — راحت لـ <b>'+(d.to||'؟')+'</b> — بواسطة <b>'+(d.by||'؟')+'</b>'+(d.reason?(' ('+d.reason+')'):'')+(d.regions?(' — <span style="color:#7c3aed">مناطق: '+d.regions+'</span>'):'')+'</div>';
         }
         html+=dd+'</td></tr>';
       }
