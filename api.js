@@ -3,7 +3,7 @@ const FETCH_URL     = "https://agent.ebrahimhamdy.com/webhook/get_order";
 const POST_URL      = "https://agent.ebrahimhamdy.com/webhook/taskmanagement";
 const LOGIN_URL     = "https://agent.ebrahimhamdy.com/webhook/login";
 const VERIFY_URL    = "https://agent.ebrahimhamdy.com/webhook/verify_token";
-const DASHBOARD_URL = "https://agent.ebrahimhamdy.com/webhook/dashboard";
+// webhook/dashboard اتشال — العملاء بقوا على سوبابيز (جدول customers + get_customers RPC)
 const PAYMOB_URL    = "https://agent.ebrahimhamdy.com/webhook/paymobtransaction";
 
 // بحث الصنف من مخزون Supabase مباشرة (بدل نداء ERP) — يرجّع {found,itm_name_ar,itm_name_en,balance,item_type}
@@ -517,42 +517,40 @@ async function fetchFromN8N(category) {
   }
 }
 
-async function fetchFromDashboard(type) {
+// جلب بيانات العملاء من سوبابيز (بديل webhook/dashboard) — نداء واحد عبر RPC يتخطى سقف 1000
+async function fetchCustomers() {
   try {
-    const response = await fetch(`${DASHBOARD_URL}?type=${type}`);
-    if (!response.ok) throw new Error('Network error');
-    const text = await response.text();
-    if (!text || text.trim() === '') return [];
-    const data = JSON.parse(text);
-    if (Array.isArray(data) && data[0]?.data) return data[0].data;
-    if (data.data && Array.isArray(data.data)) return data.data;
+    const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_customers`, {
+      method:  'POST',
+      headers: await sbH(),
+      body:    '{}'
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
     return Array.isArray(data) ? data : [];
-  } catch (error) {
-    console.error(`Dashboard fetch error (${type}):`, error);
+  } catch (e) {
+    console.error('fetchCustomers (supabase) error:', e);
     return [];
   }
 }
 
-// جلب بيانات العملاء من dashboard webhook
-async function fetchCustomers() {
-  return await fetchFromDashboard('customers');
-}
-
-// تعديل بيانات عميل (type / note / category) عبر dashboard webhook
-// الحفظ بـ GET query params عشان الـ Switch يقراه من $json.query.type
+// تعديل بيانات عميل (type / note / category) في سوبابيز — PATCH على cust_code
+// مش بيلمس أعمدة الأرصدة (balance*) — دي بتتزامن من eplus عبر وركفلو منفصل كل ساعة
 async function updateCustomer({ cust_code, cust_type, note, category }) {
   try {
-    const params = new URLSearchParams({
-      type:      'customer_update',
-      cust_code: cust_code  || '',
-      cust_type: cust_type  || '',
-      note:      note       || '',
-      category:  category   || ''
+    const url = `${SB_URL_API}/rest/v1/customers?cust_code=eq.${encodeURIComponent(cust_code)}`;
+    const r = await fetch(url, {
+      method:  'PATCH',
+      headers: await sbH({ 'Prefer': 'return=minimal' }),
+      body:    JSON.stringify({
+        type:     cust_type || null,
+        note:     note      || null,
+        category: category  || null
+      })
     });
-    const response = await fetch(`${DASHBOARD_URL}?${params.toString()}`);
-    return response.ok;
+    return r.ok;
   } catch (e) {
-    console.error('updateCustomer error:', e);
+    console.error('updateCustomer (supabase) error:', e);
     return false;
   }
 }
