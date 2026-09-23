@@ -342,17 +342,47 @@ async function sbSalesAccessDisable(store) {
 }
 
 // طلبات خدمة العملاء لفرع — pendingOnly=true يرجّع بس اللي لسه محتاج إجراء (أسرع بكتير)
-async function sbCsOrders(branch, pendingOnly) {
+/* ⚠️ الفخ اللي كان هنا: PostgREST بيقص أي رد عند 1000 صف (db-max-rows)،
+   والقص بيحصل **قبل** ما المتصفح يفلتر. الدالة get_cs_orders مابتسألش
+   «الطلب ده عليه عميل؟» — فكانت بتبعت 1000 صف، 931 منهم بلا عميل والشاشة
+   بترميهم، والباقي الحقيقي بيتقص. النتيجة: 77 طلب عميل مفتوح مكانوش
+   بيوصلوا للمتصفح أصلًا (أقدمهم من مايو)، ومحدش شايفهم لا أدمن ولا فرع.
+
+   الإصلاح: نسأل السيرفر السؤال الصح — الفلتر بيتطبق على **ناتج الدالة**
+   لأنها بترجّع setof، فمفيش لزوم نعدّل الدالة نفسها (مشتركة مع البرودكشن).
+   وبنجيب على دفعات بـoffset عشان السقف مايقطعش مهما كبرت البيانات:
+   «إخفاء المُنفَّذ» مفعّل = 161 صف، ولو اتشال = بين 5.5 و9 آلاف.        */
+const CS_HAS_CUSTOMER = 'or=(cust_name.not.is.null,cust_code.not.is.null)';
+const CS_PAGE      = 1000;   // سقف PostgREST لكل طلب — مينفعش نتخطاه في نداء واحد
+const CS_MAX_PAGES = 12;     // حارس: فوق 12 ألف صف يبقى فيه حاجة غلط، مانفضلش نلف
+
+async function sbCsOrders(branch, pendingOnly, opts) {
+  const o = opts || {};
+  const rows = [];
+  const body = JSON.stringify({ p_branch: branch || '', p_pending: pendingOnly !== false });
+  // o.since = لحظة ISO مطلقة (محسوبة بـDate.now)، فمالهاش علاقة بتوقيت الجهاز ولا DST
+  const since = o.since ? '&createdAt=gte.' + encodeURIComponent(o.since) : '';
   try {
-    const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_cs_orders`, {
-      method: 'POST',
-      headers: await sbH(),
-      body: JSON.stringify({ p_branch: branch || '', p_pending: pendingOnly !== false })
-    });
-    if (!r.ok) return [];
-    const rows = await r.json();
-    return Array.isArray(rows) ? rows : [];
-  } catch (e) { console.error('sbCsOrders error:', e); return []; }
+    for (let page = 0; page < CS_MAX_PAGES; page++) {
+      const qs = '?' + CS_HAS_CUSTOMER + '&order=id.desc' + since +
+                 '&limit=' + CS_PAGE + '&offset=' + (page * CS_PAGE);
+      const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_cs_orders${qs}`, {
+        method: 'POST', headers: await sbH(), body
+      });
+      if (!r.ok) { rows.incomplete = true; break; }   // فشل نص الطريق = بيانات ناقصة، نقولها
+      const batch = await r.json();
+      if (!Array.isArray(batch) || !batch.length) break;
+      rows.push.apply(rows, batch);
+      if (typeof o.onProgress === 'function') o.onProgress(rows.length);
+      if (batch.length < CS_PAGE) return rows;        // آخر دفعة — خلصنا
+      if (page === CS_MAX_PAGES - 1) rows.incomplete = true;
+    }
+    return rows;
+  } catch (e) {
+    console.error('sbCsOrders error:', e);
+    rows.incomplete = true;
+    return rows;
+  }
 }
 
 // ===================== أسعار الزيوت والخامات (material_prices) =====================

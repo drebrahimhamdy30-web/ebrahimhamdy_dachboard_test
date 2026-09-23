@@ -14,6 +14,10 @@
   try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_dark")==="1"?"dark":"light");document.documentElement.setAttribute("data-theme",_t==="dark"?"dark":"light");}catch(e){}</script>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    .pagination-row { display:flex; justify-content:center; gap:12px; margin-top:16px; align-items:center; }
+    .page-info { font-size:0.8rem; color:var(--text-secondary); font-weight:700; }
+  </style>
 </head>
 <body>
   <div class="nav-bar"></div>
@@ -25,20 +29,42 @@
           <span class="highlight" id="display-branch">...</span>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <!-- الأدمن (أو أي حساب بلا فرع) بيختار الفرع؛ موظف الفرع مابيشوفش القائمة أصلاً -->
+          <select id="branchFilter" data-branches class="form-select" hidden
+                  onchange="onBranchChange()" style="min-width:150px;">
+            <option value="">كل الفروع</option>
+          </select>
           <div class="field-icon-wrap" style="min-width:220px;">
             <i class="fas fa-search field-icon"></i>
             <input type="text" id="searchInput" class="form-input"
               placeholder="بحث..."
-              oninput="renderItems()"
+              oninput="onFilterChange()"
               style="padding-right:34px;">
           </div>
           <label class="check-label">
-            <input type="checkbox" id="hideDone" checked onchange="loadCSData()"> إخفاء المنفذ
+            <input type="checkbox" id="hideDone" checked onchange="onHideDoneChange()"> إخفاء المنفذ
           </label>
+          <!-- عرض «المنفّذ» بيفتح آلاف الصفوف، فبيتقيّد بمدة. العرض المفتوح لأ. -->
+          <select id="periodFilter" class="form-select" hidden
+                  onchange="onFilterReload()" style="min-width:130px;">
+            <option value="30">آخر شهر</option>
+            <option value="90">آخر 3 شهور</option>
+            <option value="180">آخر 6 شهور</option>
+            <option value="0">كل التاريخ</option>
+          </select>
           <button class="btn btn-primary" onclick="loadCSData()">
             <i class="fas fa-sync-alt"></i> تحديث
           </button>
+          <span class="page-info" id="result-count"></span>
         </div>
+      </div>
+
+      <div id="truncated-warn" hidden
+           style="margin-bottom:12px;padding:10px 14px;border-radius:8px;
+                  background:var(--danger-bg,#fee2e2);color:var(--danger,#b91c1c);
+                  font-size:0.82rem;font-weight:700;">
+        <i class="fas fa-triangle-exclamation"></i>
+        البيانات وصلت ناقصة — فيه طلبات مش ظاهرة. حدّث الصفحة، ولو فضلت الرسالة بلّغ المسؤول.
       </div>
 
       <div class="table-wrap">
@@ -61,6 +87,12 @@
           </tbody>
         </table>
       </div>
+
+      <div class="pagination-row" id="pager" hidden>
+        <button class="btn btn-sm" id="prev-page" onclick="changePage(-1)"><i class="fas fa-chevron-right"></i></button>
+        <span class="page-info" id="page-info">صفحة 1 من 1</span>
+        <button class="btn btn-sm" id="next-page" onclick="changePage(1)"><i class="fas fa-chevron-left"></i></button>
+      </div>
     </div>
   </div>
 
@@ -69,11 +101,23 @@
 <script src="branches.js?v=20260904d"></script>
 <script src="pages.js?v=20260904d"></script>
 <script src="brand.js?v=20260904c"></script>
-<script src="api.js?v=20260904c"></script>
+<script src="api.js?v=20260923cs"></script>
   <script>
     let activeUser = null;
     let userBranch = '';
     let allItems   = [];
+
+    // الأدمن مالوش فرع مخزّن، فـSession.branch() بترجع فاضي — وقبل كده كان
+    // شرط isMyBranch بيقارن بالفاضي فالشاشة تطلع فاضية تمامًا بدل ما تعرض الكل.
+    let SEE_ALL = false;
+    const seeAllBranches = b => !b || b === 'عام' || b === 'Admin' || b === 'كل الفروع';
+    // الفرع المعروض دلوقتي: للأدمن = اللي مختاره، ولغيره = فرعه هو
+    const activeBranch = () => SEE_ALL
+      ? (document.getElementById('branchFilter').value || '')
+      : userBranch;
+
+    const PAGE_SIZE = 50;
+    let currentPage = 1;
 
     // خريطة (اسم مستخدم/موبايل → فرع) عشان نطابق فرع الطالب حتى لو داخل بحساب فردي
     let userBranchMap = {};
@@ -101,20 +145,71 @@
     checkAuth().then(user => {
       activeUser = user;
       if (user) {
-        userBranch = (Session.branch()).trim();
-        document.getElementById('display-branch').textContent = userBranch;
+        userBranch = (Session.branch() || '').trim();
+        SEE_ALL    = Session.isAdmin() || seeAllBranches(userBranch);
+        if (SEE_ALL) document.getElementById('branchFilter').hidden = false;
+        updateBranchLabel();
         loadCSData();
       }
     });
 
+    function updateBranchLabel() {
+      const b = activeBranch();
+      document.getElementById('display-branch').textContent = b || 'كل الفروع';
+    }
+
+    /* المدة بتتطبّق على عرض «المُنفَّذ» بس.
+       ⚠️ ماتخليهاش تشمل الطلبات المفتوحة: فيه طلبات عميل مفتوحة من مايو،
+          وأي تقييد بالتاريخ هيخفيها تاني زي ما كان بيحصل مع سقف الـ1000. */
+    function periodSince() {
+      if (document.getElementById('hideDone').checked) return null;
+      const days = parseInt(document.getElementById('periodFilter').value, 10) || 0;
+      if (!days) return null;
+      return new Date(Date.now() - days * 86400000).toISOString();
+    }
+
+    function onHideDoneChange() {
+      const hide = document.getElementById('hideDone').checked;
+      document.getElementById('periodFilter').hidden = hide;
+      loadCSData();
+    }
+    function onFilterReload() { loadCSData(); }
+
+    // أي تغيير في الفلتر بيرجّع لأول صفحة — من غير زر «تطبيق»
+    function onFilterChange() { currentPage = 1; renderItems(); }
+    function onBranchChange() { currentPage = 1; updateBranchLabel(); loadCSData(); }
+
+    function changePage(step) {
+      currentPage += step;
+      renderItems();
+      const w = document.querySelector('.table-wrap');
+      if (w) w.scrollIntoView({ behavior:'smooth', block:'start' });
+    }
+
     async function loadCSData() {
       try {
+        currentPage = 1;
         await loadUserBranchMap();
         const hideDone = document.getElementById('hideDone').checked;
-        const response = await sbCsOrders(userBranch, hideDone);   // hideDone=true → بس اللي محتاج إجراء
+        // الـRPC بيفلتر على الفرع الطالب وبيحوّل حسابات الموبايل لفروعها على السيرفر،
+        // فبنبعتله الفرع المختار بدل ما نسحب الكل ونرمي الباقي في المتصفح.
+        // شيل «إخفاء المُنفَّذ» = آلاف الصفوف على دفعات، فبنطمّن المستخدم إنها ماشية.
+        // رجّع صف التحميل الأول — لولا كده تغيير الفرع يفضل عارض بيانات الفرع القديم
+        document.getElementById('data-list').innerHTML =
+          '<tr class="loading-row"><td colspan="9">جاري التحميل...</td></tr>';
+        const loadingCell = document.querySelector('#data-list .loading-row td');
+        const response = await sbCsOrders(activeBranch(), hideDone, {
+          since: periodSince(),
+          onProgress: count => {
+            if (loadingCell) loadingCell.textContent = `جاري التحميل... (${count} صف)`;
+          }
+        });
         allItems = (response[0]?.data) ? response[0].data : (response.data || response);
+        // لو الجلب وقف نص الطريق نقولها صراحة — العطل القديم كان صامت تمامًا
+        document.getElementById('truncated-warn').hidden = !response.incomplete;
         renderItems();
       } catch(e) {
+        document.getElementById('truncated-warn').hidden = true;
         document.getElementById('data-list').innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل الاتصال</td></tr>';
       }
     }
@@ -124,8 +219,12 @@
       const hideDone  = document.getElementById('hideDone').checked;
       const searchVal = document.getElementById('searchInput').value.trim().toLowerCase();
 
+      const viewBranch = activeBranch();
       const filtered = allItems.filter(item => {
-        const isMyBranch  = (String(branchOf(item.user)).trim() === String(userBranch).trim());
+        // على «كل الفروع» مفيش قصر على فرع؛ غير كده بنقارن بالفرع المعروض
+        const isMyBranch  = !viewBranch ||
+          Branches.same(branchOf(item.user), viewBranch) ||
+          String(branchOf(item.user)).trim() === String(viewBranch).trim();
         const validStates = ['ordered', 'unavailable', 'transferred'];
         const isResponded = validStates.includes(String(item.state || "").trim().toLowerCase());
         const hasAction   = (item.cust_state && item.cust_state !== "" && item.cust_state !== "null" && item.cust_state !== "حاولنا التواصل مع العميل");
@@ -150,12 +249,26 @@
         return searchMatch;
       });
 
+      // العدّاد والصفحات بتتحسب على كل النتائج المفلترة، مش على الصفحة المعروضة
+      const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
+      if (currentPage > totalPages) currentPage = totalPages;
+      if (currentPage < 1) currentPage = 1;
+
+      const pager = document.getElementById('pager');
+      pager.hidden = (filtered.length <= PAGE_SIZE);
+      document.getElementById('page-info').textContent = `صفحة ${currentPage} من ${totalPages}`;
+      document.getElementById('prev-page').disabled = (currentPage === 1);
+      document.getElementById('next-page').disabled = (currentPage === totalPages);
+      document.getElementById('result-count').textContent =
+        filtered.length ? `${filtered.length} طلب` : '';
+
       if (filtered.length === 0) {
         tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted);">لا توجد نتائج</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = filtered.map(item => {
+      const start = (currentPage - 1) * PAGE_SIZE;
+      tbody.innerHTML = filtered.slice(start, start + PAGE_SIZE).map(item => {
         const currentAction = (item.cust_state && item.cust_state !== "null") ? item.cust_state : "";
         const isDone        = (currentAction !== "" && currentAction !== "حاولنا التواصل مع العميل");
         const attempts      = parseInt(item.contact_attempts) || 0;
