@@ -669,27 +669,8 @@ async function updateData(data) {
   }
 }
 
-// زي updateData بالظبط، لكن بترجع الرد الفعلي اللي راجع من الوركفلو (مش true/false بس)
-// عشان الصفحة تقدر تعرض البيانات "زي ما اتخزنت فعلاً" بدل رسالة عامة، وتكشف أي حقل ناقص.
-// ملحوظة: دي دالة جديدة منفصلة عمداً — updateData() الأصلية فيها استخدامات كتير في صفحات
-// تانية بتتعامل معاها كـ true/false بس، فمش هينفع نغيّر شكل الرجوع بتاعها من غير ما نكسرهم.
-async function updateDataWithResponse(data) {
-  try {
-    const response = await fetch(POST_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
-    let row = null;
-    try {
-      const raw = await response.json();
-      row = Array.isArray(raw) ? (raw[0] || null) : raw;
-    } catch (e) { /* الرد ممكن يكون فاضي أو مش JSON */ }
-    return { ok: response.ok, data: row };
-  } catch (e) {
-    return { ok: false, data: null };
-  }
-}
+// updateDataWithResponse اتشالت 2026-09-23 — اتكتبت عشان ترجّع الرد الفعلي
+// بدل true/false، ومحدش استخدمها. updateData() فوق هي الحيّة (27 نداء).
 
 // تجديد جلسة Supabase — التنفيذ في session.js (مقفول). الغلاف باقي
 // عشان verifyToken() القديمة تفضل شغّالة.
@@ -780,34 +761,9 @@ async function checkAuth() {
 async function fetchBranchSales() { return await fetchFromN8N('branch_visa_sales'); }
 
 // ---- إغلاق الشيفت ----
-// حفظ إغلاق شيفت — بيتبعت لـ taskmanagement (POST_URL) بنوع shift_close
-// محتاج تضيف فرع type=shift_close في n8n يخزّن في جدول shift_closes
-// وكمان ياخد closed_wallet_ids ويعلّم المعاملات دي كـ "مرحّلة" عشان متظهرش في الشيفت الجديد
-async function postShiftClose(data) {
-  try {
-    const response = await fetch('https://agent.ebrahimhamdy.com/webhook/posupdate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        table: 'shift_closes',
-        action: 'insert',
-        data: {
-          ...data,
-          cash_breakdown: typeof data.cash_breakdown === 'object'
-            ? JSON.stringify(data.cash_breakdown)
-            : data.cash_breakdown
-        }
-      })
-    });
-    const text = await response.text();
-    const json = text ? JSON.parse(text) : {};
-    const d = Array.isArray(json) ? json[0] : json;
-    return !!(d && d.ok);
-  } catch (e) {
-    console.error('postShiftClose error:', e);
-    return false;
-  }
-}
+// postShiftClose (webhook/posupdate) اتشالت 2026-09-23 — كانت ناقصة أصلاً
+// (فرع type=shift_close عمره ما اتعمل في n8n)، وshift_close.html بقت
+// بتكتب في سوبابيز مباشرة.
 
 // ===================== نظام الجرد الجديد (Supabase) =====================
 const JARD_URL = "https://agent.ebrahimhamdy.com/webhook/inventory_audit_erp";
@@ -969,25 +925,9 @@ async function fetchDailyJardStats(dateFrom, dateTo, branch) {
   }
 }
 
-// ---- التقرير الشامل لكل عمليات الجرد (كل الفئات مع بعض) ----
-const JARD_FULL_REPORT_URL = "https://agent.ebrahimhamdy.com/webhook/jard_full_report";
-async function fetchFullJardReport({ branch, category, dateFrom, dateTo }) {
-  try {
-    const params = new URLSearchParams({ branch });
-    if (category) params.set('category', category);
-    if (dateFrom) params.set('date_from', dateFrom);
-    if (dateTo)   params.set('date_to', dateTo);
-    const response = await fetch(`${JARD_FULL_REPORT_URL}?${params.toString()}`);
-    if (!response.ok) return [];
-    const text = await response.text();
-    if (!text || text.trim() === '') return [];
-    const data = JSON.parse(text);
-    return Array.isArray(data) ? data : [];
-  } catch (e) {
-    console.error('fetchFullJardReport error:', e);
-    return [];
-  }
-}
+// fetchFullJardReport (webhook/jard_full_report) اتشالت 2026-09-23 — محدش ناداها.
+// ⚠️ متخلطش بينها وبين JARD_URL (webhook/inventory_audit_erp) فوق — ده حيّ
+// ومستخدم في main.html و inventory.html.
 
 function logout() {
   // localStorage.clear() كان بيشيل كمان تفضيلات مش جلسة (الخط، الثيم،

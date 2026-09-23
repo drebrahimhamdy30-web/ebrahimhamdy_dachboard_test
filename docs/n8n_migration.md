@@ -30,10 +30,16 @@
 |---|---|
 | ~~`fetchSms` · `insertSms` (api.js)~~ | `bmonline` — ✅ **اتشالت 2026-09-23** |
 | ~~`fetchPaymob` · `postPaymob` (api.js)~~ | `paymobtransaction` — ✅ **اتشالت 2026-09-23** |
-| `fetchFullJardReport` (api.js) | `jard_full_report` |
-| `updateDataWithResponse` (api.js) | `taskmanagement` |
-| `postShiftClose` (api.js) | `posupdate` |
-| `INV_URL` في `cosmo_order.html` | `inventory` — ثابت معرَّف ومش مستعمل |
+| ~~`fetchFullJardReport` (api.js)~~ | `jard_full_report` — ✅ **اتشالت 2026-09-23** |
+| ~~`updateDataWithResponse` (api.js)~~ | `taskmanagement` — ✅ **اتشالت 2026-09-23** |
+| ~~`postShiftClose` (api.js)~~ | `posupdate` — ✅ **اتشالت 2026-09-23** |
+| ~~`INV_URL` في `cosmo_order.html`~~ | `inventory` — ✅ **مابقاش موجود** (اتشال قبل كده) |
+
+⚠️ **الويبهوك مش دايمًا يموت بموت الدالة.** `taskmanagement` **حيّ** —
+`updateData()` (من غير `WithResponse`) بتستخدمه في 27 نداء من
+`sales_contracts.html` و`main.html` و`claims.html`. اللي مات هو التوأم بس.
+وبالمثل `inventory_audit_erp` حيّ رغم إن `jard_full_report` مات — الاسمين
+متشابهين وسهل تقفل الغلط.
 
 ⚠️ `bank_monitor.html` بيستعمل نداءاته الخاصة (`BM_GET`/`BM_POST`/`IMPORT_URL`) — مش دوال `api.js` دي. فحذف `fetchSms`/`insertSms` **مابيأثرش** على شاشة البنك.
 
