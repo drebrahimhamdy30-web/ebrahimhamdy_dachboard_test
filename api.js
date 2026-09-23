@@ -1,5 +1,4 @@
 // الرابط والمفتاح بييجوا من config.js — لازم يتحمّل قبل الملف ده
-const FETCH_URL     = "https://agent.ebrahimhamdy.com/webhook/get_order";
 const POST_URL      = "https://agent.ebrahimhamdy.com/webhook/taskmanagement";
 const LOGIN_URL     = "https://agent.ebrahimhamdy.com/webhook/login";
 const VERIFY_URL    = "https://agent.ebrahimhamdy.com/webhook/verify_token";
@@ -526,26 +525,8 @@ async function sbStockLimitDelete(id) {
   } catch (e) { console.error('sbStockLimitDelete error:', e); return false; }
 }
 
-async function fetchFromN8N(category) {
-  try {
-    const response = await fetch(`${FETCH_URL}?type=${category}`);
-    if (!response.ok) throw new Error('Network error');
-    const text = await response.text();
-    if (!text || text.trim() === '') return [];
-    const data = JSON.parse(text);
-    if (Array.isArray(data) && data[0]?.data)         return data[0].data;
-    if (Array.isArray(data) && data[0]?.branch)       return data;
-    if (Array.isArray(data) && data[0]?.invoice_no)   return data;
-    if (Array.isArray(data) && data[0]?.cust_code)    return data;
-    if (Array.isArray(data) && data[0]?.bill_no)      return data;
-    if (Array.isArray(data) && data[0]?.machine_name) return data;
-    if (data.data && Array.isArray(data.data))         return data.data;
-    return Array.isArray(data) ? data : [];
-  } catch (error) {
-    console.error(`Error fetching ${category}:`, error);
-    return [];
-  }
-}
+// fetchFromN8N + FETCH_URL (webhook/get_order) اتشالوا 2026-09-23 مع
+// أغلفتهم الستة — الويبهوك اتقفل بعد ما كل اللي كان بيستعمله اتنقل لسوبابيز.
 
 // جلب بيانات العملاء من سوبابيز (بديل webhook/dashboard) — نداء واحد عبر RPC يتخطى سقف 1000
 async function fetchCustomers() {
@@ -585,12 +566,8 @@ async function updateCustomer({ cust_code, cust_type, note, category }) {
   }
 }
 
-async function fetchOrders()           { return await fetchFromN8N('orders'); }
-async function fetchData()             { return await fetchFromN8N('orders'); }
 async function fetchContracts()        { return await sbContractList(); }   // Supabase (بدل n8n)
 async function fetchMissing()          { return await sbMissingList(); }    // Supabase (بدل n8n)
-async function fetchInventory()        { return await fetchFromN8N('inventory'); }
-async function fetchOffers()           { return await fetchFromN8N('offers'); }
 
 // ===================== المصادقة =====================
 // فك payload بتاع JWT بترميز UTF-8 صحيح.
@@ -755,10 +732,9 @@ async function checkAuth() {
 // ===================== إغلاق نقطة البيع + التسوية =====================
 // ألصق الدوال دي في آخر api.js عندك (قبل دالة logout أو بعدها، مش فارقة)
 
-// ---- فواتير السيستم (B Connect) ----
-// بتمشي على نفس fetchFromN8N بنوع branch_visa_sales
-// محتاج تضيف فرع type=branch_visa_sales في n8n يرجّع جدول الفواتير
-async function fetchBranchSales() { return await fetchFromN8N('branch_visa_sales'); }
+// fetchBranchSales (فواتير B Connect) اتشالت 2026-09-23 — زي postShiftClose
+// و insertSms، كانت ناقصة من الأصل: فرع type=branch_visa_sales عمره ما اتعمل
+// في n8n. اتكتبت في الداشبورد والطرف التاني مااتعملش.
 
 // ---- إغلاق الشيفت ----
 // postShiftClose (webhook/posupdate) اتشالت 2026-09-23 — كانت ناقصة أصلاً
@@ -878,9 +854,6 @@ async function submitJardAudit(payload) {
     return false;
   }
 }
-
-// جلب سجل الإغلاقات السابقة — بنفس fetchFromN8N بنوع shift_closes
-async function fetchShiftCloses() { return await fetchFromN8N('shift_closes'); }
 
 // ---- تقرير الأصناف اللي لم تُجرد خلال مدة معينة ----
 // اتحوّلت من ويبهوك jard_stale_report للقاعدة مباشرة (migrate_37).
