@@ -310,7 +310,9 @@ begin
          system_balance = coalesce(
            case when (p ->> 'system_balance') ~ '^-?[0-9]+(\.[0-9]+)?$'
                 then (p ->> 'system_balance')::numeric end, system_balance),
-         action_time    = coalesce(nullif(p ->> 'action_time', ''), to_char(now(), 'YYYY-MM-DD"T"HH24:MI:SSOF')),
+         -- action_time عمود timestamptz مش نص — التحويل صريح عشان ماينفعش
+         -- يقع وقت التشغيل (plpgsql مابيفحصش ده وقت الإنشاء)
+         action_time    = coalesce(nullif(p ->> 'action_time', '')::timestamptz, now()),
          updated_at     = now()
    where id = v_id
   returning * into r;
