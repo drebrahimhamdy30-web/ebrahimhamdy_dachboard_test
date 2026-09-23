@@ -28,8 +28,8 @@
 
 | الدالة / المكان | الويبهوك |
 |---|---|
-| `fetchSms` · `insertSms` (api.js) | `bmonline` |
-| `fetchPaymob` · `postPaymob` (api.js) | `paymobtransaction` |
+| ~~`fetchSms` · `insertSms` (api.js)~~ | `bmonline` — ✅ **اتشالت 2026-09-23** |
+| ~~`fetchPaymob` · `postPaymob` (api.js)~~ | `paymobtransaction` — ✅ **اتشالت 2026-09-23** |
 | `fetchFullJardReport` (api.js) | `jard_full_report` |
 | `updateDataWithResponse` (api.js) | `taskmanagement` |
 | `postShiftClose` (api.js) | `posupdate` |

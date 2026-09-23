@@ -4,7 +4,7 @@ const POST_URL      = "https://agent.ebrahimhamdy.com/webhook/taskmanagement";
 const LOGIN_URL     = "https://agent.ebrahimhamdy.com/webhook/login";
 const VERIFY_URL    = "https://agent.ebrahimhamdy.com/webhook/verify_token";
 // webhook/dashboard اتشال — العملاء بقوا على سوبابيز (جدول customers + get_customers RPC)
-const PAYMOB_URL    = "https://agent.ebrahimhamdy.com/webhook/paymobtransaction";
+// webhook/paymobtransaction اتشال 2026-09-23 — تسوية الماكينات بقت على wallet + bank_transactions
 
 // بحث الصنف من مخزون Supabase مباشرة (بدل نداء ERP) — يرجّع {found,itm_name_ar,itm_name_en,balance,item_type}
 
@@ -592,66 +592,6 @@ async function fetchMissing()          { return await sbMissingList(); }    // S
 async function fetchInventory()        { return await fetchFromN8N('inventory'); }
 async function fetchOffers()           { return await fetchFromN8N('offers'); }
 
-// جلب معاملات باي موب عبر webhook paymobtransaction (نوع paymob_get)
-async function fetchPaymob() {
-  try {
-    const response = await fetch(PAYMOB_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'paymob_get' })
-    });
-    if (!response.ok) return [];
-    const text = await response.text();
-    if (!text || text.trim() === '') return [];
-    const data = JSON.parse(text);
-    if (Array.isArray(data) && data[0]?.data) return data[0].data;
-    if (data.data && Array.isArray(data.data)) return data.data;
-    return Array.isArray(data) ? data : [];
-  } catch (e) {
-    console.error('fetchPaymob error:', e);
-    return [];
-  }
-}
-
-// إرسال أمر كتابة لـ webhook باي موب (paymobtransaction) — مش taskmanagement
-async function postPaymob(data) {
-  try {
-    const response = await fetch(PAYMOB_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
-    });
-    return response.ok;
-  } catch (e) {
-    console.error('postPaymob error:', e);
-    return false;
-  }
-}
-
-// كتابة رقم الفاتورة على معاملة باي موب (ربط) — نوع paymob_update
-async function paymobUpdate({ id, bill_no }) {
-  return await postPaymob({ type: 'paymob_update', id, bill_no });
-}
-
-// إضافة معاملة باي موب يدوي — نوع paymob_insert
-async function paymobInsert({ amount, terminal_id, bill_no, transaction_time }) {
-  return await postPaymob({
-    type: 'paymob_insert',
-    amount, terminal_id, bill_no, transaction_time
-  });
-}
-
-// تعليم كل معاملات يوم معين كـ "تم التحويل" (paid) — نوع paymob_mark_paid
-// dayStr بصيغة YYYY-MM-DD
-async function paymobMarkPaidForDay(dayStr) {
-  return await postPaymob({
-    type:      'paymob_mark_paid',
-    day_start: dayStr + 'T00:00:00',
-    day_end:   dayStr + 'T23:59:59',
-    paid:      true
-  });
-}
-
 // ===================== المصادقة =====================
 // فك payload بتاع JWT بترميز UTF-8 صحيح.
 // ⚠️ atob لوحده بيخرّب العربي (اسم الفرع بيرجع رموز) — لازم الخطوة الزيادة دي.
@@ -829,40 +769,8 @@ async function checkAuth() {
   localStorage.setItem('lastVerify', now);
   return user;
 }
-// ===================== المحافظ (SMS) =====================
-// جلب معاملات المحافظ من webhook bmonline (نوع sms)
-async function fetchSms() {
-  try {
-    const response = await fetch(`https://agent.ebrahimhamdy.com/webhook/bmonline?type=sms`);
-    if (!response.ok) throw new Error('Network error');
-    const text = await response.text();
-    if (!text || text.trim() === '') return [];
-    const data = JSON.parse(text);
-    if (Array.isArray(data) && data[0]?.data) return data[0].data;
-    if (Array.isArray(data) && data[0]?.to_no) return data;
-    if (data.data && Array.isArray(data.data)) return data.data;
-    return Array.isArray(data) ? data : [];
-  } catch (error) {
-    console.error('fetchSms error:', error);
-    return [];
-  }
-}
-
-// إضافة معاملة محفظة جديدة — نوع sms_insert
-// ملاحظة: محتاج تضيف فرع sms_insert في n8n يقرأ من الـ body
-async function insertSms(data) {
-  try {
-    const response = await fetch(`https://agent.ebrahimhamdy.com/webhook/bmonline`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'sms_insert', ...data })
-    });
-    return response.ok;
-  } catch (e) {
-    console.error('insertSms error:', e);
-    return false;
-  }
-}
+// المحافظ (SMS): fetchSms/insertSms اتشالوا 2026-09-23 — الشاشة بقت على
+// جدول wallet_sms في سوبابيز (sms.html)، وجداول n8n اتساب عليها الويبهوك بس.
 // ===================== إغلاق نقطة البيع + التسوية =====================
 // ألصق الدوال دي في آخر api.js عندك (قبل دالة logout أو بعدها، مش فارقة)
 
