@@ -766,80 +766,81 @@ async function fetchBranchSales() { return await fetchFromN8N('branch_visa_sales
 // بتكتب في سوبابيز مباشرة.
 
 // ===================== نظام الجرد الجديد (Supabase) =====================
-const JARD_URL = "https://agent.ebrahimhamdy.com/webhook/inventory_audit_erp";
+/* ═══ الجرد: إعدادات + صفوف jard_erp ═══════════════════════════════
+   اتحوّلوا من ويبهوكي inventory_audit_erp و jard_settings_manage للقاعدة
+   مباشرة (docs/migrate_36_jard_settings_and_erp.sql).
 
-async function fetchInventoryAudit() {
-  try {
-    const response = await fetch(JARD_URL);
-    if (!response.ok) throw new Error('Network error');
-    const text = await response.text();
-    if (!text || text.trim() === '') return [];
-    const data = JSON.parse(text);
-    return Array.isArray(data) ? data : [];
-  } catch (e) {
-    console.error('fetchInventoryAudit error:', e);
-    return [];
-  }
-}
+   ليه: الويبهوكات دي مكانتش بتخزّن في n8n — n8n كان بيتصل بنفس قاعدة
+   سوبابيز بكريدنشيال Postgres مباشر. يعني كان طريق زيادة بيتخطّى الحراسة
+   كلها: allowedOrigins:"*" من غير مصادقة، وفيه حقن SQL. دلوقتي الحراسة
+   على السيرفر جوّه الدوال (الدور من التوكن).                          */
 
-async function updateInventoryAudit(payload) {
+// آخر سبب رفض من السيرفر — للتشخيص لما الشاشة تعرض رسالة عامة
+let lastJardError = '';
+
+async function sbJardRpc(fn, body) {
   try {
-    const response = await fetch(JARD_URL, {
+    const r = await fetch(`${SB_URL_API}/rest/v1/rpc/${fn}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      headers: await sbH({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(body || {})
     });
-    return response.ok;
+    if (!r.ok) {
+      lastJardError = (typeof sbFailMsg === 'function' ? sbFailMsg('فشل الاتصال', r.status) : 'فشل الاتصال');
+      console.warn(fn + ' → HTTP ' + r.status);
+      return null;
+    }
+    return await r.json();
   } catch (e) {
-    console.error('updateInventoryAudit error:', e);
-    return false;
-  }
-}
-
-// ---- إعدادات فئات الجرد (تلاجه/غوالى) وأكواد fastmove ----
-const JARD_SETTINGS_URL = "https://agent.ebrahimhamdy.com/webhook/jard_settings_manage";
-
-async function jardSettingsAction(payload) {
-  try {
-    const response = await fetch(JARD_SETTINGS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (!response.ok) return null;
-    const text = await response.text();
-    if (!text || text.trim() === '') return [];
-    const data = JSON.parse(text);
-    return Array.isArray(data) ? data : [data];
-  } catch (e) {
-    console.error('jardSettingsAction error:', e);
+    lastJardError = 'فشل الاتصال';
+    console.error(fn + ' error:', e);
     return null;
   }
 }
 
+// الدوال اللي بترجّع نتيجة: { success, error? } — بنطلّع السبب في الكونسول
+// عشان «فشل الحفظ» في الشاشة مايفضلش من غير تفسير
+function jardOk(out, fn) {
+  if (out && out.success) { lastJardError = ''; return true; }
+  if (out && out.error) { lastJardError = out.error; console.warn(fn + ' رفض: ' + out.error); }
+  return false;
+}
+
+// ---- صفوف الجرد ----
+async function fetchInventoryAudit() {
+  const d = await sbJardRpc('get_jard_erp');
+  return Array.isArray(d) ? d : [];
+}
+
+// الشاشة بتبعت action: update_status (نتيجة جرد) أو insert_order (طلب صنف)
+async function updateInventoryAudit(payload) {
+  const fn = (payload && payload.action === 'update_status') ? 'update_jard_erp' : 'insert_jard_erp';
+  return jardOk(await sbJardRpc(fn, { p: payload }), fn);
+}
+
+// ---- إعدادات فئات الجرد (تلاجه/غوالى) وأكواد fastmove ----
 async function getJardSettings() {
-  const res = await jardSettingsAction({ action: 'get_settings' });
-  return res || [];
+  const d = await sbJardRpc('get_jard_settings');
+  return Array.isArray(d) ? d : [];
 }
 
 async function updateJardSettings(data) {
-  const res = await jardSettingsAction({ action: 'update_settings', ...data });
-  return res !== null;
+  return jardOk(await sbJardRpc('update_jard_settings', { p: data }), 'update_jard_settings');
 }
 
 async function getFastmoveCodes() {
-  const res = await jardSettingsAction({ action: 'get_fastmove' });
-  return res || [];
+  const d = await sbJardRpc('get_jard_fastmove');
+  return Array.isArray(d) ? d : [];
 }
 
 async function addFastmoveCode(code) {
-  const res = await jardSettingsAction({ action: 'add_fastmove', code });
-  return res !== null;
+  return jardOk(await sbJardRpc('add_jard_fastmove', { p_code: code }), 'add_jard_fastmove');
 }
 
+// ⚠️ عقدة الحذف في n8n كانت operation غير صالحة فالزرار مكانش شغال خالص.
+// الدالة دي بتحذف بالـid بعينه.
 async function deleteFastmoveCode(id) {
-  const res = await jardSettingsAction({ action: 'delete_fastmove', id });
-  return res !== null;
+  return jardOk(await sbJardRpc('delete_jard_fastmove', { p_id: Number(id) }), 'delete_jard_fastmove');
 }
 
 // ---- أصناف الجرد الحية (فرع + فئة) — لصفحة الجرد الجديدة ----
@@ -926,8 +927,8 @@ async function fetchDailyJardStats(dateFrom, dateTo, branch) {
 }
 
 // fetchFullJardReport (webhook/jard_full_report) اتشالت 2026-09-23 — محدش ناداها.
-// ⚠️ متخلطش بينها وبين JARD_URL (webhook/inventory_audit_erp) فوق — ده حيّ
-// ومستخدم في main.html و inventory.html.
+// و inventory_audit_erp اتنقل للقاعدة في نفس اليوم (migrate_36)، فالويبهوكين
+// دول بقوا جاهزين للتعطيل في n8n.
 
 function logout() {
   // localStorage.clear() كان بيشيل كمان تفضيلات مش جلسة (الخط، الثيم،

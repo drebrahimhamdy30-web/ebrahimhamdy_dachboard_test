@@ -107,7 +107,9 @@ begin
   update jard_settings
      set keywords_ar = coalesce(v_ar, '{}'::text[]),
          keywords_en = coalesce(v_en, '{}'::text[]),
-         min_price   = v_min,
+         -- الشاشة بتبعت min_price لفئة «غوالى» بس — فلو المفتاح مش مبعوت
+         -- نسيب القيمة زي ما هي بدل ما نمسحها
+         min_price   = case when p ? 'min_price' then v_min else min_price end,
          cycle_days  = v_cycle,
          updated_at  = now()
    where category = v_cat
