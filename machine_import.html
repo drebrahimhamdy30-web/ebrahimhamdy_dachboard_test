@@ -239,8 +239,7 @@ if(IS_ACCOUNTANT_MI&&!USER_BRANCH)USER_BRANCH=BRANCHES_MI[0];
   }
 })();
 
-const POSMGMT_URL='https://agent.ebrahimhamdy.com/webhook/posmanagement';
-const POSUPDATE_URL='https://agent.ebrahimhamdy.com/webhook/posupdate';
+// posmanagement/posupdate اتشالوا — links/cash_to_wallet/إغلاق المعاملات بقوا على سوبابيز
 
 /* ===== Supabase: مصدر المعاملات (باي موب + محافظ) من جدولين ===== */
 // wallet جدول مالي بيتقفل على anon — التوكن بيتقرا لكل نداء مش مرة واحدة
@@ -257,9 +256,39 @@ async function sbFetchAll(table){
   }
   return all;
 }
+// كتابة links / cash_to_wallet مباشرة في سوبابيز (بديل webhook/posupdate)
 async function posUpdate(payload){
-  const r=await fetch(POSUPDATE_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  const t=await r.text();let d=t&&t.trim()?JSON.parse(t):{};if(Array.isArray(d))d=d[0]||{};return d;
+  const p=payload||{}; const data=p.data||{}; const id=p.id;
+  const route=p._route || ((p.table||'')+'_'+(p.action||''));
+  let q;
+  if(route==='links_insert')               q=sdb.from('links').insert(data);
+  else if(route==='links_update')          q=sdb.from('links').update(data).eq('id',id);
+  else if(route==='links_delete')          q=sdb.from('links').delete().eq('id',id);
+  else if(route==='cash_to_wallet_insert') q=sdb.from('cash_to_wallet').insert(data);
+  else if(route==='cash_to_wallet_update') q=sdb.from('cash_to_wallet').update(data).eq('id',id);
+  else if(route==='cash_to_wallet_delete') q=sdb.from('cash_to_wallet').delete().eq('id',id);
+  else throw new Error('posUpdate: unsupported route '+route);
+  const {error}=await q;
+  if(error) throw error;
+  return {ok:true};
+}
+
+// قراءة links (على دفعات، فوق 1000) و cash_to_wallet من سوبابيز
+async function sbFetchLinks(){
+  let all=[],from=0;const page=1000;
+  while(true){
+    const {data,error}=await sdb.from('links').select('*').order('id',{ascending:true}).range(from,from+page-1);
+    if(error)throw error;
+    all=all.concat(data||[]);
+    if(!data||data.length<page)break;
+    from+=page;
+  }
+  return all;
+}
+async function sbFetchC2W(){
+  const {data,error}=await sdb.from('cash_to_wallet').select('*').order('id',{ascending:true});
+  if(error)throw error;
+  return data||[];
 }
 
 const EXPECTED_COLS=['تحصيل','تاريخ','فاتورة بيع','ن.رسوم تحصيل','القيمة','الإسم','البنك','ت.صلاحية','الرقم','العميل'];
@@ -485,10 +514,9 @@ async function loadWallet(){
 
     // links و cash_to_wallet لسه من posmanagement (جداول n8n منفصلة)
     try {
-      const res = await fetch(POSMGMT_URL);
-      const data = await res.json();
-      const o = Array.isArray(data)?data[0]:data;
-      LINKS = Array.isArray(o.links)?o.links:[];
+      const [linkRows, c2wRows] = await Promise.all([ sbFetchLinks(), sbFetchC2W() ]);
+      const o = { cash_to_wallet: c2wRows };
+      LINKS = linkRows;
       CASH2WALLET = (Array.isArray(o.cash_to_wallet)?o.cash_to_wallet:[]).map(r=>({
         id:r.id,bill_no:r.bill_no,branch:r.branch,
         invoice_amount:num(r.invoice_amount),transaction_value:num(r.transaction_value),
@@ -743,16 +771,12 @@ async function toggleExtraReceived(walId,val){
     if(role!=='admin'&&role!=='manager'){ toast('التراجع يحتاج مدير الفرع','err'); return; }
   }
   const w=WALLET.find(x=>x.id===walId); if(!w) return;
-  const rawId=(w.raw&&w.raw.id!=null)?w.raw.id:walId;
-  const isInstapay=w.src==='instapay'||String(rawId).startsWith('bm');
+  const tbl=(w.raw&&w.raw._table)||'wallet';
+  const wid=(w.raw&&w.raw._origId!=null)?w.raw._origId:null;
   try{
-    // is_excess مستقل عن closed — كل واحد له دوره
-    const payload={is_excess:val};
-    if(isInstapay){
-      await posUpdate({_route:'instapay_excess',id:rawId,data:payload});
-    }else{
-      await posUpdate({_route:'wallet_excess',id:rawId,data:payload});
-    }
+    if(wid==null) throw new Error('no id');
+    const {error}=await sdb.from(tbl).update({is_excess:val}).eq('id',wid);
+    if(error) throw error;
     w.extra_received=val;
     toast(val?'تم تسجيل وصلت زيادة — لسه قيد المراجعة':'تم التراجع','ok');
     renderLeft();
@@ -867,15 +891,13 @@ async function confirmLinking(){
         }});
       }
     }
-    // شمال: كل معاملة لوحدها — تبديل closed على الجدول الصح حسب نوع المعاملة
+    // شمال: كل معاملة لوحدها — تبديل closed مباشرة في جدولها بسوبابيز (wallet أو wallet_sms)
     for(const w of leftWals){
-      const rawWalId=(w.raw&&w.raw.id!=null)?w.raw.id:w.id;
-      const isInstapay=w.src==='instapay'||String(rawWalId).startsWith('bm');
-      if(isInstapay){
-        await posUpdate({_route:'instapay',id:rawWalId,data:{closed:!w.closed}});
-      }else{
-        await posUpdate({table:'wallet',action:'update',id:rawWalId,data:{closed:!w.closed}});
-      }
+      const tbl=(w.raw&&w.raw._table)||'wallet';
+      const wid=(w.raw&&w.raw._origId!=null)?w.raw._origId:null;
+      if(wid==null) continue;
+      const {error}=await sdb.from(tbl).update({closed:!w.closed}).eq('id',wid);
+      if(error) throw error;
     }
     toast('تم التحديث','ok');
   }catch(e){
