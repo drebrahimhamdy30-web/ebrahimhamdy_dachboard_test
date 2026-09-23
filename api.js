@@ -783,8 +783,14 @@ function jardOk(out, fn) {
 }
 
 // ---- صفوف الجرد ----
-async function fetchInventoryAudit() {
-  const d = await sbJardRpc('get_jard_erp');
+// الفلترة بقت في القاعدة (migrate_38) بدل ما ننزّل 5963 صف ونرمي أغلبهم:
+// موظف سيدى بشر على تبويب erp محتاج 177 صف بس.
+// الباراميترين اختياريين — سيبهم فاضيين تجيب الكل (الأدمن على «كل الفروع»).
+async function fetchInventoryAudit(branch, type) {
+  const d = await sbJardRpc('get_jard_erp', {
+    p_branch: branch || null,
+    p_type:   type   || null
+  });
   return Array.isArray(d) ? d : [];
 }
 
