@@ -53,13 +53,28 @@ const BRANCH_MAP = Branches.storeMap();
       if (user) loadAll();
     });
 
+    // قراءة على دفعات من Supabase (سقف 1000/طلب)
+    async function sbGetAll(path){
+      let all=[],from=0;const PAGE=1000;
+      while(true){
+        const sep = path.includes('?') ? '&' : '?';
+        const r = await fetch(`${SB_URL_API}/rest/v1/${path}${sep}limit=${PAGE}&offset=${from}`, { headers: await sbH() });
+        if(!r.ok) break;
+        const rows = await r.json();
+        all = all.concat(rows);
+        if(rows.length < PAGE) break;
+        from += PAGE;
+      }
+      return all;
+    }
+
     async function loadAll() {
       document.getElementById('stats-container').innerHTML =
         '<p style="text-align:center;padding:40px;color:var(--text-muted);">⏳ جاري جلب البيانات...</p>';
       try {
         const [cResp, clResp] = await Promise.all([
-          fetchFromN8N('sales_contract'),
-          fetchFromN8N('claims').catch(() => [])
+          sbGetAll('contract_invoices?select=*'),
+          sbGetAll('claims?select=*&order=claim_date.desc').catch(() => [])
         ]);
         allContracts = Array.isArray(cResp)  ? cResp  : (cResp.data  || []);
         allClaims    = Array.isArray(clResp) ? clResp : (clResp.data || []);
@@ -79,9 +94,8 @@ const BRANCH_MAP = Branches.storeMap();
     }
 
     function getBranchData(branch) {
-const mappedBranch = BRANCH_MAP[branch] || branch;
 const branchContracts = allContracts.filter(i =>
-  String(i.branch || '').trim() === mappedBranch
+  String(i.branch || '').trim() === branch
 );
 
       // ١. فواتير داخل المطالبات (مطالبات لم تُحصَّل)

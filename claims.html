@@ -205,6 +205,7 @@
     const SB_URL_CI = PHALIX_CONFIG.supabaseUrl;
     const SB_KEY_CI = PHALIX_CONFIG.supabaseAnonKey;
     const CI_URL = SB_URL_CI + '/rest/v1/contract_invoices';
+    const CLAIMS_URL = SB_URL_CI + '/rest/v1/claims';
     // الترويسة بتتبني لكل نداء بتوكن المستخدم (sbH بيجدّد لو لزم).
     // ⚠️ كانت كائن ثابت بمفتاح anon: الجداول بقت authenticated-only، وكمان
     //    أي توكن بيتقرا مرة واحدة وقت التحميل بيقدم بعد ساعة ويرجّع 401.
@@ -251,7 +252,7 @@
       try {
         const [cResp, clResp] = await Promise.all([
           ciLoadInvoices(),
-          fetchFromN8N('claims').catch(() => [])
+          fetch(CLAIMS_URL + '?select=*&order=claim_date.desc', { headers: await CI_H() }).then(r => r.ok ? r.json() : []).catch(() => [])
         ]);
         allContracts = Array.isArray(cResp)  ? cResp  : (cResp.data  || []);
         allClaims    = Array.isArray(clResp) ? clResp : (clResp.data || []);
@@ -686,14 +687,14 @@
       let claimSaved = false;
 
       try {
-        const claimResp = await fetch("https://agent.ebrahimhamdy.com/webhook/taskmanagement", {
+        // إنشاء مطالبة في جدول claims بسوبابيز (بديل webhook/taskmanagement?type=claim_new) — يرجّع id
+        const claimResp = await fetch(CLAIMS_URL, {
           method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: await CI_H({ Prefer: 'return=representation' }),
           body:    JSON.stringify({
-            type:       "claim_new",
             claim_date: new Date().toISOString(),
             status:     "pending",
-            created_by: activeUser
+            created_by: ciReviewer()
           })
         });
 
@@ -937,11 +938,10 @@
       btn.disabled  = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
-      const success = await updateData({
-        type:   "claim_collected",
-        id,
-        status: "collected"
+      const r = await fetch(CLAIMS_URL + '?id=eq.' + encodeURIComponent(id), {
+        method: 'PATCH', headers: await CI_HW(), body: JSON.stringify({ status: 'collected' })
       });
+      const success = r.ok;
 
       if (success) {
         await loadAll();
