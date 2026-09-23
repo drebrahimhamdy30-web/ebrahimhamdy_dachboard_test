@@ -844,20 +844,11 @@ async function deleteFastmoveCode(id) {
 }
 
 // ---- أصناف الجرد الحية (فرع + فئة) — لصفحة الجرد الجديدة ----
-const JARD_ITEMS_URL = "https://agent.ebrahimhamdy.com/webhook/jard_items";
+// اتحوّلت من ويبهوك jard_items للقاعدة مباشرة (migrate_37).
+// الأرقام اتقارنت بـn8n قبل التحويل وطابقت في 9/9 (فرع × فئة).
 async function fetchJardItems(branch, category) {
-  try {
-    const params = new URLSearchParams({ branch, category });
-    const response = await fetch(`${JARD_ITEMS_URL}?${params.toString()}`);
-    if (!response.ok) return [];
-    const text = await response.text();
-    if (!text || text.trim() === '') return [];
-    const data = JSON.parse(text);
-    return Array.isArray(data) ? data : [];
-  } catch (e) {
-    console.error('fetchJardItems error:', e);
-    return [];
-  }
+  const data = await sbJardRpc('get_jard_items', { p_branch: branch, p_category: category });
+  return Array.isArray(data) ? data : [];
 }
 
 // ---- تسجيل نتيجة جرد صنف — لصفحة الجرد الجديدة ----
@@ -892,20 +883,11 @@ async function submitJardAudit(payload) {
 async function fetchShiftCloses() { return await fetchFromN8N('shift_closes'); }
 
 // ---- تقرير الأصناف اللي لم تُجرد خلال مدة معينة ----
-const JARD_STALE_REPORT_URL = "https://agent.ebrahimhamdy.com/webhook/jard_stale_report";
+// اتحوّلت من ويبهوك jard_stale_report للقاعدة مباشرة (migrate_37).
+// الأرقام اتقارنت بـn8n وطابقت للفروع التلاتة (4026 · 4348 · 5135).
 async function fetchStaleItems(branch, months) {
-  try {
-    const params = new URLSearchParams({ branch, months: months || 3 });
-    const response = await fetch(`${JARD_STALE_REPORT_URL}?${params.toString()}`);
-    if (!response.ok) return [];
-    const text = await response.text();
-    if (!text || text.trim() === '') return [];
-    const data = JSON.parse(text);
-    return Array.isArray(data) ? data : [];
-  } catch (e) {
-    console.error('fetchStaleItems error:', e);
-    return [];
-  }
+  const data = await sbJardRpc('get_jard_stale', { p_branch: branch, p_months: Number(months) || 3 });
+  return Array.isArray(data) ? data : [];
 }
 
 // ---- معدل الجرد اليومي لكل موظف (يدعم نطاق تاريخ من - إلى) ----
