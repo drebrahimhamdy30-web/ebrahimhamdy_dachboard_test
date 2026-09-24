@@ -422,11 +422,17 @@
 
     /* ===================== رصيد العميل داخل عمود الجدول (n8n / eplus) ===================== */
     const CUSTOMER_WEBHOOK_BASE = 'https://agent.ebrahimhamdy.com/webhook/';
-    const BRANCH_WEBHOOKS = {
-      'المعمورة':     'customer_mamora_search',
-      'سان ستيفانو':  'customer_san_search',
-      'سيدى بشر':     'customer_bishr_search'
-    };
+
+    /* مسار البحث عن العميل لكل فرع: customer_<code>_search
+       بيتبني من جدول الفروع بدل خريطة مكتوبة بالإيد، فالفرع الجديد بيشتغل
+       من غير تعديل هنا — شرطه الوحيد إن ويبهوك n8n يتسمّى بنفس القاعدة.
+       (كانت مكتوبة بالأسماء العربية، فالفرع الجديد كان هيفضل من غير زرار
+        رصيد وهو «فرع غير معروف» — من غير أي رسالة تقول ليه.)           */
+    function branchWebhook(branchName) {
+      if (typeof Branches === 'undefined' || !Branches.byName) return null;
+      const b = Branches.byName(Branches.toName(branchName));
+      return (b && b.code) ? 'customer_' + b.code + '_search' : null;
+    }
     // بيانات كل عميل (بالكود+الاسم مع بعض + الفرع) بتتحمل مرة واحدة وتتخزن هنا،
     // فلو نفس العميل ظاهر في أكتر من صف مصروف مش هيتبعت طلب لـ n8n كل مرة تاني.
     const customerBalanceCache = {}; // key -> {status, balance}
@@ -458,7 +464,7 @@
       const lookup = customerLookupFor(exp);
       if (!lookup) return `<span class="bal-note">—</span>`;
 
-      const path = BRANCH_WEBHOOKS[exp.branch];
+      const path = branchWebhook(exp.branch);
       if (!path) return `<span class="bal-note">فرع غير معروف</span>`;
 
       const key   = String(exp.branch || '').trim() + '||' + lookup.code + '||' + lookup.name.toLowerCase();
@@ -490,7 +496,7 @@
       customerBalanceCache[key] = { status: 'loading' };
       renderExpenses();
 
-      const path = BRANCH_WEBHOOKS[branch];
+      const path = branchWebhook(branch);
       // بيبعت الكود والاسم مع بعض في نفس الطلب زي ما اتطلب
       const body = { code: code, name: name };
 
