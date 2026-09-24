@@ -213,9 +213,7 @@
               <tr>
                 <th>كود الموظف</th>
                 <th>اسم الموظف</th>
-                <th>المعمورة</th>
-                <th>سان ستيفانو</th>
-                <th>سيدى بشر</th>
+                <th data-bal-heads></th>
                 <th>الإجمالي</th>
               </tr>
             </thead>
@@ -235,9 +233,7 @@
               <tr>
                 <th>كود العميل</th>
                 <th>اسم العميل</th>
-                <th>المعمورة</th>
-                <th>سان ستيفانو</th>
-                <th>سيدى بشر</th>
+                <th data-bal-heads></th>
                 <th>الإجمالي</th>
               </tr>
             </thead>
@@ -256,7 +252,7 @@
   <script src="branches.js?v=20260904d"></script>
   <script src="pages.js?v=20260904d"></script>
   <script src="brand.js?v=20260904c"></script>
-  <script src="api.js?v=20260923cust"></script>
+  <script src="api.js?v=20260924seyouf"></script>
   <script>
     // ===== بيانات المستخدم =====
     let allCustomers = [];
@@ -264,12 +260,45 @@
     let userBranch   = '';
     let userRole     = '';
 
-    // ===== خريطة الفروع =====
-    const BRANCH_MAP = {
-      'المعمورة':      { col: 'balance',       label: 'المعمورة' },
-      'سان ستيفانو':  { col: 'balance_san',    label: 'سان ستيفانو' },
-      'سيدى بشر':     { col: 'balance_bishr',  label: 'سيدى بشر' }
-    };
+    /* ===== أعمدة أرصدة الفروع =====
+       بتتبني من جدول الفروع، فأي فرع جديد بيظهر لوحده في الجدولين وفي
+       الإجمالي وفي تحديد «الفرع الرئيسي» — من غير تعديل هنا.
+
+       ⚠️ التسمية غير منتظمة تاريخيًا: المعمورة عمودها «balance» من غير
+          لاحقة، والباقي «balance_<code>». القاعدة دي محفوظة زي ما هي
+          عشان مانغيّرش أسماء أعمدة شغّالة.
+
+       (BRANCH_MAP القديمة كانت معرّفة ومش مستعملة في أي مكان — المنطق
+        كله كان مكتوب بالإيد تحت.)                                     */
+    function balColOf(code) {
+      return code === 'mamora' ? 'balance' : 'balance_' + code;
+    }
+
+    let BAL_BRANCHES = [];   // [{ name, code, col }]
+
+    function buildBalBranches() {
+      const list = (typeof Branches !== 'undefined' && Branches.all) ? Branches.all() : [];
+      BAL_BRANCHES = list.filter(b => b && b.code)
+                         .map(b => ({ name: b.name, code: b.code, col: balColOf(b.code) }));
+      if (!BAL_BRANCHES.length) {
+        // احتياطي لو الفروع ما وصلتش لسه
+        BAL_BRANCHES = [
+          { name: 'المعمورة',     code: 'mamora', col: 'balance' },
+          { name: 'سان ستيفانو', code: 'san',    col: 'balance_san' },
+          { name: 'سيدى بشر',    code: 'bishr',  col: 'balance_bishr' }
+        ];
+      }
+      // رأس الجدول: خلية واحدة في الـHTML بتتفكّ لعدد الفروع
+      document.querySelectorAll('th[data-bal-heads]').forEach(th => {
+        const tr = th.parentElement;
+        BAL_BRANCHES.forEach(b => {
+          const cell = document.createElement('th');
+          cell.textContent = b.name;
+          tr.insertBefore(cell, th);
+        });
+        th.remove();
+      });
+    }
 
     // ===== أدوات =====
     function normType(t) {
@@ -288,19 +317,17 @@
       return parseBal(b).toFixed(1);
     }
 
-    // إجمالي الرصيد من الثلاثة أعمدة
+    // إجمالي الرصيد من كل أعمدة الفروع
     function totalBalance(c) {
-      return parseBal(c.balance) + parseBal(c.balance_san) + parseBal(c.balance_bishr);
+      return BAL_BRANCHES.reduce((sum, b) => sum + parseBal(c[b.col]), 0);
     }
 
     // تحديد فرع الشخص: العمود الأكبر قيمة مطلقة
     function personBranch(c) {
-      const vals = [
-        { branch: 'المعمورة',     val: Math.abs(parseBal(c.balance)) },
-        { branch: 'سان ستيفانو', val: Math.abs(parseBal(c.balance_san)) },
-        { branch: 'سيدى بشر',    val: Math.abs(parseBal(c.balance_bishr)) }
-      ];
-      return vals.reduce((max, x) => x.val > max.val ? x : max, vals[0]).branch;
+      if (!BAL_BRANCHES.length) return '';
+      return BAL_BRANCHES
+        .map(b => ({ branch: b.name, val: Math.abs(parseBal(c[b.col])) }))
+        .reduce((max, x) => x.val > max.val ? x : max).branch;
     }
 
     // هل الإجمالي خارج النطاق ±5
@@ -341,10 +368,13 @@
     }
 
     // ===== تهيئة =====
-    checkAuth().then(user => {
+    checkAuth().then(async user => {
       if (user) {
         userBranch = Session.branch().trim();
         userRole   = Session.role();   // مطبَّع في session.js (manger → manager)
+        // الفروع الأول — الأعمدة والرؤوس والإجمالي كلهم بيعتمدوا عليها
+        if (typeof Branches !== 'undefined' && Branches.ready) await Branches.ready();
+        buildBalBranches();
         initUI();
         loadCustomers();
         // فتح تبويب معيّن من الرابط (مثال: من قائمة «الموظفين» ?tab=employees)
@@ -484,9 +514,7 @@
             <label><i class="fas fa-scale-balanced"></i> الرصيد الإجمالي</label>
             <div class="ro-value ${balClass}">${fmtBal(total)} ج</div>
             <div class="bal-breakdown">
-              ${balChip(c.balance,       'المعمورة')}
-              ${balChip(c.balance_san,   'سان')}
-              ${balChip(c.balance_bishr, 'بشر')}
+              ${BAL_BRANCHES.map(b => balChip(c[b.col], b.name)).join('')}
             </div>
           </div>
           <div class="detail-field">
@@ -594,16 +622,15 @@
     function balRow(c) {
       const total = totalBalance(c);
       const col   = balColor(total);
-      const b     = parseBal(c.balance);
-      const bs    = parseBal(c.balance_san);
-      const bb    = parseBal(c.balance_bishr);
+      const cells = BAL_BRANCHES.map(br => {
+        const v = parseBal(c[br.col]);
+        return `<td><b style="color:${balColor(v)};">${v !== 0 ? fmtBal(v)+' ج' : '—'}</b></td>`;
+      }).join('');
       return `
         <tr>
           <td><code style="font-size:0.82rem;color:var(--text-secondary);">${clean(c.cust_code)||'---'}</code></td>
           <td style="text-align:right;font-weight:700;">${clean(c.cust_name)||'---'}</td>
-          <td><b style="color:${balColor(b)};">${b !== 0 ? fmtBal(b)+' ج' : '—'}</b></td>
-          <td><b style="color:${balColor(bs)};">${bs !== 0 ? fmtBal(bs)+' ج' : '—'}</b></td>
-          <td><b style="color:${balColor(bb)};">${bb !== 0 ? fmtBal(bb)+' ج' : '—'}</b></td>
+          ${cells}
           <td><b style="color:${col};font-size:0.95rem;">${fmtBal(total)} ج</b></td>
         </tr>`;
     }
