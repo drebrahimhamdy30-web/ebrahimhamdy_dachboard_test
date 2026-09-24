@@ -1,7 +1,7 @@
 -- ═══════════════════════════════════════════════════════════════════
 -- آخر ويبهوكين للجرد: jard_items و jard_stale_report → دوال القاعدة
 -- ═══════════════════════════════════════════════════════════════════
--- (لسه ما اتطبّقش — لازم يتطبّق على **القاعدتين**: السحابة والسيرفر الذاتي)
+-- (لازم يتطبّق على **القاعدتين**: السحابة والسيرفر الذاتي)
 --
 -- ليه:
 --   • دول آخر نقطتين من الجرد على n8n، والاتنين قراءة بس — بياخدوا
@@ -13,30 +13,24 @@
 --
 -- نفس الاستعلامات بالحرف — مفيش تغيير في المنطق ولا في النتيجة.
 --
--- ⚠️ الخياطة المستقبلية:
---   خرايط الفرع→الجدول كانت متكررة في كل استعلام في n8n. هنا اتجمّعت في
---   **عرض واحد** (v_branch_stock). لما الجدول الموحّد mig.branch_stock
---   ينزل لـpublic، تعيد تعريف العرض ده وبس — والدوال التحت ماتتلمسش.
+-- ⚠️⚠️ ماتعملش view على جداول المخزون ⚠️⚠️
+--   النسخة الأولى من الملف ده عملت عرض v_branch_stock بيوحّد الجداول
+--   التلاتة، عشان يبقى سطر واحد يتعدّل لما الجدول الموحّد ينزل.
+--   ده **وقّف مزامنة المخزون في كل الفروع** يوم 2026-09-24.
+--
+--   السبب: ورك فلو المزامنة بيحدّث المخزون بالتبديل مش بالمسح:
+--       rename stock_mamora → stock_mamora_old
+--       create stock_mamora (الجديد من staging)
+--       drop   stock_mamora_old
+--   والـview في Postgres بيتسجّل كاعتماد على **الجدول نفسه مش اسمه**،
+--   فبيتبعه في إعادة التسمية وبيمنع الـdrop:
+--       cannot drop table stock_mamora_old because other objects depend on it
+--
+--   الحل: الاستعلام اتنقل جوّه الدالتين. **أجسام الدوال مش بتتسجّل
+--   كاعتماد** في Postgres، فالتبديل بيعدّي عادي.
+--   والملف ده بيعمل drop للview في آخره عشان إعادة تشغيله تنضّف بدل
+--   ما ترجّع العطل.
 -- ═══════════════════════════════════════════════════════════════════
-
--- ── عرض المخزون الموحّد ──────────────────────────────────────────
--- جدول لكل فرع دلوقتي؛ العرض بيوحّدهم بعمود branch.
--- كل الأعمدة نصوص في الجداول الأصلية (حتى الكميات) — التحويل عند الاستعمال.
-create or replace view public.v_branch_stock as
-  select 'المعمورة'::text as branch,
-         itm_code, itm_name_ar, itm_name_en, sto_qty_big, itm_sell_price_big
-    from public.stock_mamora
-  union all
-  select 'سان ستيفانو'::text,
-         itm_code, itm_name_ar, itm_name_en, sto_qty_big, itm_sell_price_big
-    from public.stock_san
-  union all
-  select 'سيدى بشر'::text,
-         itm_code, itm_name_ar, itm_name_en, sto_qty_big, itm_sell_price_big
-    from public.stock_bishr;
-
-revoke all on public.v_branch_stock from public, anon;
-
 
 -- ═══ ١) أصناف الجرد لفرع + فئة ══════════════════════════════════
 -- بديل webhook/jard_items
@@ -75,12 +69,22 @@ begin
     from jard_settings s where s.category = v_cat;
   v_cycle := coalesce(v_cycle, 7);
 
+  -- توحيد جداول الفروع جوّه الدالة (مش view — اقرا التحذير فوق).
+  -- لما mig.branch_stock الموحّد ينزل، الـCTE دي بتتبدّل بسطر واحد هنا
+  -- وسطر في get_jard_stale.
+  with bs as (
+    select 'المعمورة'::text as branch, itm_code, itm_name_ar, itm_name_en, sto_qty_big from stock_mamora
+    union all
+    select 'سان ستيفانو'::text, itm_code, itm_name_ar, itm_name_en, sto_qty_big from stock_san
+    union all
+    select 'سيدى بشر'::text,    itm_code, itm_name_ar, itm_name_en, sto_qty_big from stock_bishr
+  )
   select coalesce(jsonb_agg(to_jsonb(t) order by t.code), '[]'::jsonb)
     into out_j
     from (
       select distinct on (s.itm_code)
              s.itm_code as code, s.itm_name_ar, s.itm_name_en
-        from v_branch_stock s
+        from bs s
        where s.branch = v_br
          and coalesce(nullif(s.sto_qty_big, ''), '0')::numeric > 0
          and (
@@ -135,11 +139,18 @@ begin
     return '[]'::jsonb;
   end if;
 
-  -- ⚠️ النسخة الأولى كانت بتعمل استعلام فرعي **مترابط** (بحث في سجل الجرد
+  -- ⚠️ أول نسخة كانت بتعمل استعلام فرعي **مترابط** (بحث في سجل الجرد
   --    لكل صنف على حدة = عشرات الآلاف من اللمّات) وعملت statement timeout.
   --    الصح: تجميعة واحدة لآخر جرد لكل كود، وبعدين left join — نفس أسلوب
   --    استعلام n8n الأصلي.
-  with audit_last as (
+  with bs as (
+    select 'المعمورة'::text as branch, itm_code, itm_name_ar, itm_name_en, sto_qty_big from stock_mamora
+    union all
+    select 'سان ستيفانو'::text, itm_code, itm_name_ar, itm_name_en, sto_qty_big from stock_san
+    union all
+    select 'سيدى بشر'::text,    itm_code, itm_name_ar, itm_name_en, sto_qty_big from stock_bishr
+  ),
+  audit_last as (
     select l.code, max(l.audited_at) as last_audited
       from jard_audit_log l
      where l.branch = v_br
@@ -150,7 +161,7 @@ begin
     from (
       select s.itm_code as code, s.itm_name_ar, s.itm_name_en, s.sto_qty_big,
              al.last_audited
-        from v_branch_stock s
+        from bs s
         left join audit_last al on al.code = s.itm_code
        where s.branch = v_br
          and coalesce(nullif(s.sto_qty_big, ''), '0')::numeric > 0
@@ -165,6 +176,11 @@ revoke all on function public.get_jard_stale(text, integer) from public, anon;
 grant execute on function public.get_jard_stale(text, integer) to authenticated, service_role;
 
 
+-- التنضيف: لو النسخة الأولى من الملف ده اتطبّقت، العرض ده لسه موجود
+-- وبيوقف مزامنة المخزون. شيله.
+drop view if exists public.v_branch_stock;
+
+
 -- ═══════════════════════════════════════════════════════════════════
 -- التحقق (اتعمل على السحابة 2026-09-23) — الأرقام طابقت n8n في 12/12:
 --   jard_items   المعمورة: 26/100/567 · سان ستيفانو: 26/110/685 · سيدى بشر: 25/88/535
@@ -174,4 +190,13 @@ grant execute on function public.get_jard_stale(text, integer) to authenticated,
 -- بعد التطبيق على القاعدتين وتجربة شاشة الجرد:
 --   عطّل في n8n: Webhook2 (jard_items) و Webhook5 (jard_stale_report)
 --   ⚠️ سيب Webhook (get_balance) شغّال — هو آخر حاجة حيّة في الكانفس ده
+--
+-- وبعد التطبيق تأكد إن مفيش اعتماد فاضل على جداول المخزون:
+--   select count(*) from pg_depend d
+--     join pg_class t on t.oid=d.refobjid
+--     join pg_class v on v.oid=d.objid and v.relkind in ('v','m')
+--     join pg_namespace n on n.oid=t.relnamespace
+--    where n.nspname='public'
+--      and t.relname in ('stock_mamora','stock_san','stock_bishr');
+--   لازم ترجّع 0 — أي رقم غير كده معناه فيه view هيوقف المزامنة.
 -- ═══════════════════════════════════════════════════════════════════
