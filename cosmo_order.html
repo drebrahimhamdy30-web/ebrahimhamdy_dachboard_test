@@ -141,9 +141,8 @@
           <span class="filter-label">الفرع المطلوب له <small style="font-weight:400;opacity:0.65;">(تقدر تختار فرع أو أكتر)</small></span>
           <div class="type-toggle branch-toggle" style="display:flex;width:100%;">
             <button id="branch-all" class="active" onclick="setBranch('all')" style="flex:1;">🏬 كل الفروع</button>
-            <button id="branch-mamora" onclick="setBranch('mamora')" style="flex:1;">المعمورة</button>
-            <button id="branch-san" onclick="setBranch('san')" style="flex:1;">سان ستيفانو</button>
-            <button id="branch-bishr" onclick="setBranch('bishr')" style="flex:1;">سيدى بشر</button>
+            <span id="branch-buttons" style="display:contents;"></span>
+            <!-- بتتولد من جدول الفروع في initBranches() -->
           </div>
         </div>
 
@@ -235,8 +234,47 @@
     var dataLoaded=false, allResults=[], filteredResults=[];
     var itemStates = {};
     var currentType = 'cosmo';          // 'cosmo' = itm_ismedicine 0 | 'medicine' = 1
-    var ALL_BR = ['mamora','san','bishr'];
-    var selectedBranches = ['mamora','san','bishr'];  // المختارة (الثلاثة = إجمالي/كل الفروع)
+    /* الفروع كلها من جدول الفروع — مفيش اسم فرع مكتوب في الملف ده.
+       بتتملى في initBranches() بعد Branches.ready()، مش وقت تحميل
+       السكربت: أول زيارة بكاش فاضي كانت هتدّي قايمة فاضية. */
+    var BRANCHES = {};            // كود → اسم
+    var BR_KEYS  = [];            // أكواد الفروع بالترتيب
+    var ALL_BR   = [];
+    var selectedBranches = [];    // المختارة (كلها = إجمالي)
+    /* حرف الفرع في رد get_stock_summary. بيتحدّث من meta.branches،
+       والمكتوب تحت احتياطي لو الترحيل ماوصلش للقاعدة دي. */
+    var BR_LETTER = { mamora:'m', san:'s', bishr:'b', seyouf:'f' };
+    var stockMeta = {};
+    function applyBranchLetters(meta){
+      var list = meta && meta.branches;
+      if (!Array.isArray(list) || !list.length) {
+        console.warn('meta.branches مش في رد get_stock_summary — الرجوع للخريطة المكتوبة. طبّق migrate_49.');
+        return;
+      }
+      var m = {};
+      list.forEach(function(b){ if (b && b.code && b.letter) m[b.code] = b.letter; });
+      if (Object.keys(m).length) BR_LETTER = m;
+    }
+    function initBranches(){
+      BRANCHES = (typeof Branches !== 'undefined' && Branches.codeMap) ? Branches.codeMap() : {};
+      BR_KEYS  = Object.keys(BRANCHES);
+      if (!BR_KEYS.length) {   // مايحصلش عادةً — بس نقولها بدل شاشة فاضية
+        console.error('جدول الفروع ما وصلش — الشاشة مش هتعرض فروع');
+      }
+      ALL_BR = BR_KEYS.slice();
+      selectedBranches = BR_KEYS.slice();
+      var host = document.getElementById('branch-buttons');
+      if (host) {
+        host.innerHTML = BR_KEYS.map(function(k){
+          return '<button id="branch-'+k+'" onclick="setBranch(\''+k+'\')" style="flex:1;">'+BRANCHES[k]+'</button>';
+        }).join('');
+      }
+    }
+    function brHeadCells(sub){
+      return BR_KEYS.map(function(k){
+        return '<th>'+BRANCHES[k]+(sub ? '<br><small style="font-weight:400;opacity:0.8;">'+sub+'</small>' : '')+'</th>';
+      }).join('');
+    }
     var allCompanies = [];              // كل الشركات المتاحة للنوع الحالي
     var selectedCompanies = [];         // المختارة ([] = الكل)
     var companyActiveIdx = -1;          // للتنقل بالكيبورد في الاقتراحات
@@ -311,8 +349,8 @@
 
     function setBranch(b){
       if(b === 'all'){
-        selectedBranches = ALL_BR.slice();          // «كل الفروع» = الثلاثة
-      } else if(selectedBranches.length === 3){
+        selectedBranches = ALL_BR.slice();          // «كل الفروع» = كلها
+      } else if(selectedBranches.length === ALL_BR.length){
         // كنا في وضع «الكل» (الفردية مطفية) → أول ضغطة تبدأ اختيار الفرع ده وحده
         selectedBranches = [b];
       } else {
@@ -321,11 +359,12 @@
         else       selectedBranches.push(b);         // أو ضيفه (تجميع فرعين مع بعض)
         if(!selectedBranches.length) selectedBranches = ALL_BR.slice(); // مفيش اختيار = رجوع للكل
       }
-      var isAll = selectedBranches.length === 3;
+      var isAll = selectedBranches.length === ALL_BR.length;
       document.getElementById('branch-all').classList.toggle('active', isAll);
-      ['mamora','san','bishr'].forEach(function(x){
+      BR_KEYS.forEach(function(x){
         // في وضع «الكل» نضيء زر الكل بس؛ في وضع مخصّص نضيء الفروع المختارة
-        document.getElementById('branch-'+x).classList.toggle('active', !isAll && selectedBranches.includes(x));
+        var el = document.getElementById('branch-'+x);
+        if (el) el.classList.toggle('active', !isAll && selectedBranches.includes(x));
       });
       // إعادة الحساب لأن الكمية/الهدف/المعدل تتغير حسب الفروع المختارة
       if(dataLoaded) calculate();
@@ -398,7 +437,13 @@ saveQty();
       } catch(e){ alert('فشل المسح'); }
     }
 
-    checkAuth().then(function(user){ if(user) loadAllData(); });
+    checkAuth().then(async function(user){
+      if(!user) return;
+      // الفروع قبل أي رسم أو حساب — كله متعلّق بيها
+      if (typeof Branches !== 'undefined' && Branches.ready) await Branches.ready();
+      initBranches();
+      loadAllData();
+    });
 
     // ملخّص المبيعات من Supabase مباشرة (RPC) بدل n8n — أسرع بكتير وحمولة أقل
     async function getSalesSummary(){
@@ -413,7 +458,7 @@ saveQty();
       } catch(e){ console.error('فشل تحميل ملخّص المبيعات', e); return []; }
     }
 
-    // ملخّص المخزون من Supabase (RPC واحد يجمّع الفروع التلاتة) بدل 3 نداءات كاملة عبر n8n
+    // ملخّص المخزون من Supabase (RPC واحد يجمّع كل الفروع) بدل نداءات n8n
     async function getStockSummary(){
       try {
         var res = await fetch(SB_URL_API+'/rest/v1/rpc/get_stock_summary', {
@@ -422,6 +467,8 @@ saveQty();
           body:'{}'
         });
         var d = await res.json();
+        stockMeta = (d && d.meta) || {};
+        applyBranchLetters(stockMeta);   // حروف الفروع جاية مع الرد
         return (d && Array.isArray(d.items)) ? d.items : [];
       } catch(e){ console.error('فشل تحميل ملخّص المخزون', e); return []; }
     }
@@ -622,14 +669,19 @@ saveQty();
         if(isMed !== wantMed) return;
         var code=String(item.c||'').trim();
         if(!code) return;
-        var m=item.m||{},s=item.s||{},b=item.b||{};
-        // السعر التمثيلي: أول فرع مسجّل فيه الصنف (المعمورة ← سان ← بشر)
-        var price = m.h ? m.p : (s.h ? s.p : (b.h ? b.p : 0));
+        // السعر التمثيلي: أول فرع مسجّل فيه الصنف، بترتيب جدول الفروع
+        var price = 0;
+        for (var pi=0; pi<BR_KEYS.length; pi++){
+          var bo = item[BR_LETTER[BR_KEYS[pi]]] || {};
+          if (bo.h) { price = bo.p; break; }
+        }
         stockMap[code]={
           name:item.n||'',company:item.co||'',
-          unit:item.u||'',price:parseFloat(price)||0,
-          mamora:parseFloat(m.q)||0,san:parseFloat(s.q)||0,bishr:parseFloat(b.q)||0
+          unit:item.u||'',price:parseFloat(price)||0
         };
+        BR_KEYS.forEach(function(k){
+          stockMap[code][k] = parseFloat((item[BR_LETTER[k]]||{}).q)||0;
+        });
       });
 
       // salesData بقت ملخّص جاهز من الـRPC: {itm_code, mamora_total, mamora_active, ...}
@@ -637,37 +689,36 @@ saveQty();
       salesData.forEach(function(row){
         var code=String(row.itm_code||'').trim();
         if(!code) return;
-        salesMap[code]={
-          mamora:{ total:parseFloat(row.mamora_total)||0, active:parseInt(row.mamora_active)||0 },
-          san:   { total:parseFloat(row.san_total)||0,    active:parseInt(row.san_active)||0 },
-          bishr: { total:parseFloat(row.bishr_total)||0,  active:parseInt(row.bishr_active)||0 }
-        };
+        salesMap[code]={};
+        // get_sales_summary بيرجّع <الكود>_total/_active. الفرع اللي لسه
+        // مالوش أعمدة في monthly_sales بيطلع صفر — يعني معدل استهلاكه صفر
+        // لحد ما الأعمدة تتضاف، مش خطأ.
+        BR_KEYS.forEach(function(k){
+          salesMap[code][k] = { total:parseFloat(row[k+'_total'])||0,
+                                active:parseInt(row[k+'_active'])||0 };
+        });
       });
 
       var list=[];
       Object.keys(stockMap).forEach(function(code){
         var s=stockMap[code];
-        var sale=salesMap[code]||{mamora:{},san:{},bishr:{}};
+        var sale=salesMap[code]||{};
         function bc(bs){
           var active=(bs&&bs.active)||0, total=(bs&&bs.total)||0;
           var avg=active>0?total/active:0;
           return{avg:avg,activeMonths:active};
         }
-        var m=bc(sale.mamora),n=bc(sale.san),b=bc(sale.bishr);
-        var mulM=getMultiply(m.avg,m.activeMonths,rules);
-        var mulN=getMultiply(n.avg,n.activeMonths,rules);
-        var mulB=getMultiply(b.avg,b.activeMonths,rules);
-        var tM=m.avg*mulM,tN=n.avg*mulN,tB=b.avg*mulB;
-        var nM=Math.ceil(Math.max(0,tM-s.mamora));
-        var nN=Math.ceil(Math.max(0,tN-s.san));
-        var nB=Math.ceil(Math.max(0,tB-s.bishr));
-
-        // الإجماليات تُجمَع على الفروع المختارة (فرع · فرعين · كل الفروع)
-        var brMap = {
-          mamora:{ t:tM, stock:s.mamora, avg:m.avg },
-          san:   { t:tN, stock:s.san,    avg:n.avg },
-          bishr: { t:tB, stock:s.bishr,  avg:b.avg }
-        };
+        // نفس الحساب بالظبط لكل فرع — كان مكتوب ثلاث مرات بمتغيّرات
+        // منفصلة (tM/tN/tB)، فالفرع الرابع كان لازم يتكتب بالإيد.
+        var brMap = {};
+        BR_KEYS.forEach(function(k){
+          var c    = bc(sale[k]);
+          var mul  = getMultiply(c.avg, c.activeMonths, rules);
+          var t    = c.avg * mul;
+          var st   = s[k] || 0;
+          brMap[k] = { t:t, stock:st, avg:c.avg, mul:mul,
+                       active:c.activeMonths, need:Math.ceil(Math.max(0, t - st)) };
+        });
         var totalTarget=0, totalStock=0, totalAvg=0;
         selectedBranches.forEach(function(x){
           totalTarget += brMap[x].t; totalStock += brMap[x].stock; totalAvg += brMap[x].avg;
@@ -678,14 +729,16 @@ saveQty();
 
         origQty[code] = orderQty; // حفظ الكمية الأصلية المحسوبة
 
-        list.push({
+        var row = {
           code,name:s.name,company:s.company,unit:s.unit,price:s.price,
-          mamora:{stock:s.mamora,avg:r1(m.avg),active:m.activeMonths,mul:mulM,need:nM},
-          san:   {stock:s.san,   avg:r1(n.avg),active:n.activeMonths,mul:mulN,need:nN},
-          bishr: {stock:s.bishr, avg:r1(b.avg),active:b.activeMonths,mul:mulB,need:nB},
           totalStock,totalTarget,orderQty,
           totalAvg:r1(totalAvg)
+        };
+        BR_KEYS.forEach(function(k){
+          var x = brMap[k];
+          row[k] = { stock:x.stock, avg:r1(x.avg), active:x.active, mul:x.mul, need:x.need };
         });
+        list.push(row);
       });
 
       list.sort(function(a,b){return b.orderQty-a.orderQty;});
@@ -746,9 +799,8 @@ saveQty();
 
       if(!list.length){container.innerHTML='<div class="loading-overlay">لا توجد نتائج</div>';return;}
 
-      var BR_NAMES = {mamora:'المعمورة', san:'سان', bishr:'بشر'};
-      var brLbl = selectedBranches.length===3 ? 'إجمالي'
-                : selectedBranches.map(function(x){return BR_NAMES[x];}).join('+') + ' —';
+      var brLbl = selectedBranches.length===ALL_BR.length ? 'إجمالي'
+                : selectedBranches.map(function(x){return BRANCHES[x];}).join('+') + ' —';
       var html=`
         <div class="summary-bar">
           <div class="summary-item">أصناف: <b>${list.filter(i=>!(itemStates[i.code]||{}).ignored).length}</b></div>
@@ -767,9 +819,7 @@ saveQty();
                 <th>${brLbl} المعدل الشهري</th>
                 <th>${brLbl} الهدف</th>
                 <th>${brLbl} الرصيد</th>
-                <th>المعمورة<br><small style="font-weight:400;opacity:0.8;">احتياج·رصيد·معدل·×</small></th>
-                <th>سان ستيفانو<br><small style="font-weight:400;opacity:0.8;">احتياج·رصيد·معدل·×</small></th>
-                <th>سيدى بشر<br><small style="font-weight:400;opacity:0.8;">احتياج·رصيد·معدل·×</small></th>
+                ${brHeadCells('احتياج·رصيد·معدل·×')}
               </tr>
             </thead>
             <tbody>
@@ -818,7 +868,7 @@ saveQty();
           '<td style="font-weight:700;color:var(--primary);">'+item.totalAvg+'</td>'+
           '<td style="color:var(--accent-dark);font-weight:700;">'+Math.round(item.totalTarget)+'</td>'+
           '<td style="font-weight:600;">'+Math.round(item.totalStock)+'</td>'+
-          bc(item.mamora)+bc(item.san)+bc(item.bishr)+
+          BR_KEYS.map(function(k){ return bc(item[k]); }).join('')+
         '</tr>';
       });
 
@@ -926,7 +976,7 @@ saveQty();
       ws['!freeze'] = {xSplit:0, ySplit:1};
 
       XLSX.utils.book_append_sheet(wb, ws, 'الطلبية');
-      var brTag = selectedBranches.length===3 ? '' : '_'+selectedBranches.join('_');
+      var brTag = selectedBranches.length===ALL_BR.length ? '' : '_'+selectedBranches.join('_');
       var fname = (currentType==='medicine'?'medicine':'cosmo') + brTag + '_order_';
       XLSX.writeFile(wb, fname + new Date().toISOString().slice(0,10) + '.xlsx');
     }
