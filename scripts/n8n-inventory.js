@@ -66,7 +66,8 @@ function whereIsIt(str) {
 /* ── الفحص ───────────────────────────────────────────────────────── */
 
 const rows = [];          // كل عقدة محتاجة شغل
-const untouched = [];     // ورك فلوز مالهاش علاقة بالقاعدة
+const untouched = [];     // ورك فلوز مالهاش أي أثر للقاعدة خالص
+const suspects  = [];     // مالقيناش فيها عقدة — بس فيها أثر. محتاجة عين بشرية
 let nActive = 0;
 
 for (const wf of wfs) {
@@ -83,29 +84,37 @@ for (const wf of wfs) {
 
     const kinds = [];   // إيه اللي لازم يتغيّر في العقدة دي
     let target = null;  // على السحابة ولا السيرفر
+    let credName = "";  // اسم الكريدنشيال — بيتجمّع عليه الشغل
     let detail = '';
 
     // 1) كريدنشيال Supabase
     const supaCred = credTypes.find(k => /supabase/i.test(k));
     if (supaCred) {
       kinds.push('كريدنشيال Supabase');
-      detail = (creds[supaCred] && creds[supaCred].name) || supaCred;
+      credName = (creds[supaCred] && creds[supaCred].name) || supaCred;
+      detail = credName;
     }
 
     // 2) كريدنشيال Postgres / عقدة postgres
     const pgCred = credTypes.find(k => /postgres/i.test(k));
     if (pgCred || /postgres/i.test(type)) {
       kinds.push('كريدنشيال Postgres');
-      if (!detail) detail = (pgCred && creds[pgCred] && creds[pgCred].name) || 'عقدة Postgres';
+      credName = credName || (pgCred && creds[pgCred] && creds[pgCred].name) || 'عقدة Postgres';
+      if (!detail) detail = credName;
       target = target || 'db-direct';
     }
 
     // 3) رابط مكتوب جوّه العقدة
-    const urls = strs.filter(s => /^https?:\/\//.test(s.trim()));
-    const dbUrls = urls.filter(u => whereIsIt(u));
+    //    ⚠️ مش كفاية ندوّر على https:// — فيه عقد بتبني الرابط بتعبير
+    //    {{ }} أو بتاخده من متغيّر بيئة، فالمضيف مش مكتوب أصلًا.
+    //    دول أخطر نوع (مزامنة فاضلة على السحابة بتكتب بصمت) فلازم
+    //    نمسكهم من المسار نفسه: /rest/v1/ أو /auth/v1/.
+    const urls = strs.filter(s => /^https?:\/\//.test(s.trim()) || /\/(rest|auth)\/v1\b/.test(s));
+    const dbUrls = urls.filter(u => whereIsIt(u) || /\/(rest|auth)\/v1\b/.test(u));
     if (dbUrls.length) {
       kinds.push('رابط مكتوب في العقدة');
-      target = whereIsIt(dbUrls[0]);
+      // لو فيه مضيف صريح في أي واحد منهم خده، وإلا يبقى رابط بتعبير
+      target = whereIsIt(dbUrls.join(' ')) || target || 'expr';
       detail = shortUrl(dbUrls[0]);
     }
 
@@ -137,11 +146,28 @@ for (const wf of wfs) {
       type: type.replace(/^n8n-nodes-base\./, ''),
       kinds,
       target,
+      cred: credName,
       detail: redactJwt(detail).slice(0, 110),
     });
   }
 
-  if (!hit) untouched.push({ name: wf.name || '(بلا اسم)', active: !!wf.active });
+  if (!hit) {
+    // ── شبكة أمان ──────────────────────────────────────────────────
+    // لو مفيش أي عقدة اتمسكت، بندوّر في نص الورك فلو كله على أي أثر
+    // للقاعدة. الورك فلو اللي بيطلع هنا **مش** مطمَّن عليه — يعني
+    // «مالقيتش» مش «مفيش». الفرق ده مهم: أول نسخة من الأداة قالت إن
+    // «sync customers balances -> supabase» مالهاش علاقة بالقاعدة.
+    const raw = JSON.stringify(wf);
+    const marks = [];
+    if (/supabase/i.test(raw)) marks.push('supabase');
+    if (new RegExp(CLOUD_REF, 'i').test(raw)) marks.push('السحابة');
+    if (new RegExp(SERVER_HOST.replace(/\./g, '\\.'), 'i').test(raw)) marks.push('السيرفر');
+    if (/\/(rest|auth)\/v1\b/.test(raw)) marks.push('rest/v1');
+    if (/postgres|\bpg\b|sql/i.test(raw)) marks.push('sql');
+    if (/executeWorkflow/i.test(raw)) marks.push('بينده ورك فلو تاني');
+    if (marks.length) suspects.push({ name: wf.name || '(بلا اسم)', active: !!wf.active, marks });
+    else untouched.push({ name: wf.name || '(بلا اسم)', active: !!wf.active });
+  }
 }
 
 /* ── العرض ───────────────────────────────────────────────────────── */
@@ -165,6 +191,32 @@ console.log('         على السيرفر : ' + serverRows.length + (serverRow
 console.log('         اتصال مباشر : ' + dbRows.length + '   ← كريدنشيال Postgres');
 console.log('         ختم في الكود: ' + secretRows.length + '   ← ' + (secretRows.length ? bold('أخطر بند — بيفشل بـ401 مضلّل') : 'ولا واحد'));
 
+/* ── أهم جدول: الكريدنشيالات ──────────────────────────────────────
+   دي الصورة اللي بتحدّد حجم الشغل الحقيقي. عشرات العقد بتشترك في
+   كريدنشيال واحد، فتغييره بيحرّكهم كلهم مرة واحدة — بس بنفس المنطق
+   أي غلطة فيه بتوقّفهم كلهم مرة واحدة. فبعد التغيير: شغّل عقدة
+   واحدة يدوي واتأكد قبل ما تكمّل. */
+const byCred = {};
+for (const r of activeRows) {
+  const c = r.kinds.find(k => k.startsWith('كريدنشيال'));
+  if (!c) continue;
+  const key = c + ' — ' + (r.cred || '؟');
+  byCred[key] = byCred[key] || { nodes: 0, wfs: new Set() };
+  byCred[key].nodes++;
+  byCred[key].wfs.add(r.wf);
+}
+const credKeys = Object.keys(byCred).sort((a, b) => byCred[b].nodes - byCred[a].nodes);
+if (credKeys.length) {
+  console.log('');
+  console.log(bold('══ الكريدنشيالات — تعديل واحد بيحرّك كام عقدة ══'));
+  for (const k of credKeys) {
+    console.log('  ' + bold(String(byCred[k].nodes).padStart(3)) + ' عقدة  في ' +
+                String(byCred[k].wfs.size).padStart(2) + ' ورك فلو   ← ' + k);
+  }
+  console.log(dim('  ⚠️ غلطة في كريدنشيال واحد = كل العقد دي تقف مرة واحدة.'));
+  console.log(dim('     غيّره، شغّل عقدة واحدة يدوي، اتأكد، وبعدين كمّل.'));
+}
+
 // جدول مجمّع بالورك فلو
 console.log('');
 console.log(bold('══ التفصيل (الورك فلوز النشطة) ══'));
@@ -178,18 +230,31 @@ for (const nm of names) {
   console.log('');
   console.log('  ' + flags + ' ' + bold(nm));
   for (const r of list) {
-    const where = r.target === 'cloud' ? 'السحابة' : r.target === 'server' ? 'السيرفر' : r.target === 'db-direct' ? 'مباشر' : '—';
+    const where = r.target === 'cloud' ? 'السحابة' : r.target === 'server' ? 'السيرفر' : r.target === 'db-direct' ? 'مباشر' : r.target === 'expr' ? 'رابط بتعبير — افحصه بإيدك' : '—';
     console.log('      • ' + r.node + dim('  [' + r.type + ']'));
     console.log('        ' + r.kinds.join(' + ') + '   ← ' + where);
     if (r.detail) console.log(dim('        ' + r.detail));
   }
 }
 
-// ورك فلوز نشطة مالهاش علاقة بالقاعدة — عشان نتأكد إننا مابنفوّتش حاجة
+// ── مشتبه فيها: فيها أثر للقاعدة بس مالقيناش العقدة ────────────────
+const suspectActive = suspects.filter(u => u.active);
+if (suspectActive.length) {
+  console.log('');
+  console.log(bold('══ 🟡 محتاجة عين بشرية (' + suspectActive.length + ') ══'));
+  console.log('  فيها أثر للقاعدة بس مالقيتش فيها عقدة أقدر أصنّفها — غالبًا');
+  console.log('  الرابط متبني بتعبير {{ }} أو جاي من متغيّر بيئة.');
+  console.log('  ' + bold('افتحها بإيدك.') + ' «مالقيتش» ≠ «مفيش».');
+  for (const u of suspectActive) {
+    console.log('      • ' + u.name + dim('   [' + u.marks.join(' · ') + ']'));
+  }
+}
+
+// ورك فلوز نشطة مافيهاش أي أثر للقاعدة خالص
 const untouchedActive = untouched.filter(u => u.active);
 if (untouchedActive.length) {
   console.log('');
-  console.log(dim('══ ورك فلوز نشطة مالهاش علاقة بالقاعدة (' + untouchedActive.length + ') ══'));
+  console.log(dim('══ ورك فلوز نشطة مافيهاش أي أثر للقاعدة (' + untouchedActive.length + ') ══'));
   console.log(dim('  ' + untouchedActive.map(u => u.name).join(' · ')));
 }
 
@@ -212,6 +277,28 @@ for (const nm of names) {
   for (const r of list) {
     out.push('- [ ] **' + r.node + '** — ' + r.kinds.join(' + ') +
              (r.detail ? '  \n      `' + r.detail + '`' : ''));
+  }
+  out.push('');
+}
+if (credKeys.length) {
+  out.push('## الكريدنشيالات (ابدأ بيها — أكبر أثر بأقل تعديل)');
+  out.push('');
+  for (const k of credKeys) {
+    out.push('- [ ] **' + k + '** — ' + byCred[k].nodes + ' عقدة في ' + byCred[k].wfs.size + ' ورك فلو');
+  }
+  out.push('');
+  out.push('> غيّر الكريدنشيال، شغّل **عقدة واحدة** يدوي، اتأكد، وبعدين كمّل.');
+  out.push('> غلطة في كريدنشيال واحد بتوقّف كل العقد دي مرة واحدة.');
+  out.push('');
+}
+if (suspectActive.length) {
+  out.push('## 🟡 افتحها بإيدك — مالقيتش فيها عقدة أصنّفها');
+  out.push('');
+  out.push('الأداة بتدوّر على مضيف مكتوب صريح. العقدة اللي بتبني الرابط بتعبير');
+  out.push('`{{ }}` أو بتاخده من متغيّر بيئة مابتتمسكش. **«مالقيتش» ≠ «مفيش».**');
+  out.push('');
+  for (const u of suspectActive) {
+    out.push('- [ ] **' + u.name + '** — أثر: ' + u.marks.join(' · '));
   }
   out.push('');
 }
