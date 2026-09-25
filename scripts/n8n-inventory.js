@@ -52,9 +52,27 @@ function redactJwt(s) {
 function shortUrl(u) {
   try {
     const m = u.match(/^(https?:\/\/[^/\s]+)(\/[^\s?'"]*)?/);
-    if (!m) return redactJwt(u).slice(0, 80);
-    return m[1] + (m[2] || '');
+    if (m) return m[1] + (m[2] || '');
+    // مش رابط كامل — يبقى إما تعبير {{ }} أو جوّه كود.
+    // نطلّع المسار بس، مانرجّعش النص زي ما هو.
+    const p = u.match(/\/(?:rest|auth)\/v1\/[A-Za-z0-9_./-]*/);
+    return p ? '…' + p[0] : '(مسار جوّه العقدة)';
   } catch (e) { return '؟'; }
+}
+
+// 🔒 آخر حاجز قبل الطباعة.
+// الأداة وعدت إن كود العقد مابيتطبعش — والوعد ده لازم يتنفّذ في نقطة
+// واحدة، مش في كل مكان بيطبع. أي نص شكله كود بيتحوّل لمؤشّر بدل ما
+// يتطبع. اتكسر الوعد ده مرة: عقدة Code الرابط مكتوب جوّاها، فالدالة
+// اللي فوق رجّعت أول ٨٠ حرف من الكود — والمرة الجاية ممكن يكون سطر
+// فيه المفتاح.
+function safeDetail(s) {
+  s = redactJwt(String(s == null ? '' : s)).replace(/\s+/g, ' ').trim();
+  if (/\b(const|let|var|function|return|require)\b|=>|;\s*\/\//.test(s)) {
+    const m = s.match(/\/(?:rest|auth)\/v1\/[A-Za-z0-9_./-]*/);
+    return m ? '(الرابط جوّه كود العقدة) …' + m[0] : '(جوّه كود العقدة)';
+  }
+  return s.slice(0, 110);
 }
 
 function whereIsIt(str) {
@@ -129,12 +147,15 @@ for (const wf of wfs) {
       if (!detail) detail = 'كود العقدة';
     }
 
-    // مفتاح service_role ظاهر كنص في العقدة
+    // مفتاح service_role مكتوب في العقدة — سواء في خانة لوحدها
+    // (هيدر مثلًا) أو جوّه كود. الجوّه-كود ده كان بيفوت: الفحص كان
+    // بيطلب إن النص كله يبقى المفتاح، والمفتاح جوّه سطر كود مابيطابقش.
     const jwtLiteral = strs.find(s => /^eyJ[A-Za-z0-9._-]{40,}$/.test(s.trim()));
-    if (jwtLiteral) {
-      kinds.push('مفتاح مكتوب في العقدة');
+    const jwtInCode = !jwtLiteral && /eyJ[A-Za-z0-9._-]{40,}/.test(code);
+    if (jwtLiteral || jwtInCode) {
+      kinds.push(jwtInCode ? '🔑 مفتاح مكتوب في الكود' : 'مفتاح مكتوب في العقدة');
       if (!target) target = 'cloud';
-      detail = detail || redactJwt(jwtLiteral);
+      if (!detail) detail = jwtLiteral ? redactJwt(jwtLiteral) : 'كود العقدة';
     }
 
     if (!kinds.length) continue;
@@ -147,7 +168,7 @@ for (const wf of wfs) {
       kinds,
       target,
       cred: credName,
-      detail: redactJwt(detail).slice(0, 110),
+      detail: safeDetail(detail),
     });
   }
 
