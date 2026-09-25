@@ -58,6 +58,34 @@ begin
   end if;
 end $$;
 
+-- ── أعمدة الجهتين — للمقارنة بالكتالوج مش بنص الـDDL ─────────────
+-- ⚠️ ليه: نص `create table` بيرتّب الأعمدة بأرقامها، وبوستجرس بيسيب
+--    فجوة في الترقيم لما عمود يتشال. السحابة اتشال منها أعمدة على
+--    مدى سنة، فـorders هيفضل «منحرف» للأبد وهو مطابق حرف بحرف.
+--    وحارس معاه ضوضاء دايمة = حارس محدش بيبصّله بعد أسبوعين.
+drop table if exists _cc_drift;
+create temp table _cc_drift as
+select * from dblink('cloud', $q$
+  select c.relname, a.attname, format_type(a.atttypid, a.atttypmod),
+         a.attnotnull, pg_get_expr(ad.adbin, ad.adrelid)
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+  left join pg_attrdef ad on ad.adrelid = c.oid and ad.adnum = a.attnum
+  where n.nspname = 'public' and c.relkind in ('r','p')
+$q$) as t(tbl text, col text, typ text, nn boolean, dflt text);
+
+drop table if exists _lc_drift;
+create temp table _lc_drift as
+select c.relname as tbl, a.attname as col,
+       format_type(a.atttypid, a.atttypmod) as typ,
+       a.attnotnull as nn, pg_get_expr(ad.adbin, ad.adrelid) as dflt
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+left join pg_attrdef ad on ad.adrelid = c.oid and ad.adnum = a.attnum
+where n.nspname = 'public' and c.relkind in ('r','p');
+
 create temp view drift as
 with excl as (
   select unnest(array[
@@ -87,9 +115,10 @@ norm(kind, obj, d) as (
     and split_part(c.obj, ':', 1) not in (select e.obj from excl e)   -- الجرانت شكله table:role
     -- قيود وفهارس الجداول المستثناة اسمها بيبدأ باسم الجدول
     and not exists (select 1 from excl e where c.obj like e.obj || '%')
+    and c.kind <> 'table'   -- الجداول بتتقارن بالكتالوج، مش بنص الـDDL
     -- جداول staging بتتعمل وتتمسح مع كل دورة مزامنة مخزون، فبتظهر
     -- وتختفي من القايمة حسب توقيت التشغيل. وجودها مش انحراف.
-    and split_part(c.obj, ':', 1) not like '%\_staging'
+    and c.obj not like '%\_staging%'
 ),
 srv(kind, d) as (
   select kind,
@@ -98,7 +127,27 @@ srv(kind, d) as (
 )
 select c.kind, c.obj
 from norm c
-where not exists (select 1 from srv s where s.kind = c.kind and s.d = c.d);
+where not exists (select 1 from srv s where s.kind = c.kind and s.d = c.d)
+union all
+-- جدول مش موجود خالص على السيرفر
+select 'جدول'::text, c.tbl
+from (select distinct tbl from _cc_drift) c
+where not exists (select 1 from _lc_drift l where l.tbl = c.tbl)
+  and c.tbl not in (select e.obj from excl e)
+  and c.tbl not like '%\_staging%'
+union all
+-- عمود مختلف في جدول موجود في الجهتين (ناقص · نوع · not null · افتراضي)
+select 'عمود'::text, coalesce(c.tbl, l.tbl) || '.' || coalesce(c.col, l.col)
+from _cc_drift c
+full join _lc_drift l on l.tbl = c.tbl and l.col = c.col
+where exists (select 1 from _lc_drift x where x.tbl = coalesce(c.tbl, l.tbl))
+  and exists (select 1 from _cc_drift y where y.tbl = coalesce(c.tbl, l.tbl))
+  and coalesce(c.tbl, l.tbl) not in (select e.obj from excl e)
+  and coalesce(c.tbl, l.tbl) not like '%\_staging%'
+  and (c.col is null or l.col is null
+       or c.typ  is distinct from l.typ
+       or c.nn   is distinct from l.nn
+       or c.dflt is distinct from l.dflt);
 
 -- نسخة من norm قبل المقارنة — الأرضية بتعدّ منها
 create temp view drift_src as
@@ -120,7 +169,8 @@ where c.obj not in (select e.obj from excl e)
   and not exists (select 1 from excl e where c.obj like e.obj || '%')
     -- جداول staging بتتعمل وتتمسح مع كل دورة مزامنة مخزون، فبتظهر
     -- وتختفي من القايمة حسب توقيت التشغيل. وجودها مش انحراف.
-    and split_part(c.obj, ':', 1) not like '%\_staging';
+    and c.obj not like '%\_staging%'
+  and c.kind <> 'table';
 
 -- ══ أرضية تعقّل — تتنفّذ قبل أي حكم ═════════════════════════════════
 -- الحارس عدّ من 1730 صف لصفر وقال «تمام». ماكانش فيه حاجة تسأل
@@ -129,7 +179,7 @@ where c.obj not in (select e.obj from excl e)
 do $sane$
 declare src int; kept int; loc int;
 begin
-  select count(*) into src  from cloudsrc.v_migration_ddl;
+  select count(*) into src  from cloudsrc.v_migration_ddl where kind <> 'table';
   select count(*) into loc  from public.v_migration_ddl;
   select count(*) into kept from drift_src;
 

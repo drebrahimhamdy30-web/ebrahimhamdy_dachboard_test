@@ -42,7 +42,7 @@
 create temp table _ctabs as
 select * from dblink('cloud',
   'select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace
-   where n.nspname=''public'' and c.relkind=''r''') as t(tbl text);
+   where n.nspname=''public'' and c.relkind in (''r'',''p'')') as t(tbl text);
 
 do $$
 declare n int;
@@ -128,7 +128,7 @@ where c.privs is distinct from l.privs
   -- السحابة مالهاش رأي في صلاحياته، فمنلمسوش.
   and coalesce(c.tbl, l.tbl) in (select tbl from _ctabs)
   and exists (select 1 from pg_class k join pg_namespace n on n.oid = k.relnamespace
-              where n.nspname = 'public' and k.relname = coalesce(c.tbl, l.tbl) and k.relkind = 'r');
+              where n.nspname = 'public' and k.relname = coalesce(c.tbl, l.tbl) and k.relkind in ('r','p'));
 
 \echo ''
 \echo '════ فروق الصلاحيات ════'
@@ -193,7 +193,7 @@ from _log group by 1, 2 order by 1, 2;
 \echo ''
 \echo '════ التفصيل ════'
 select نوع as "النوع", هدف as "الهدف",
-       case when ok then '✓' else '✗' end as "", تفصيل as "التفصيل"
+       case when ok then '✓' else '✗' end as "ok", تفصيل as "التفصيل"
 from _log order by ok, نوع, هدف;
 
 \echo ''
