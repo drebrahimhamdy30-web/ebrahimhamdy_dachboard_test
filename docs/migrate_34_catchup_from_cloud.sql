@@ -99,6 +99,22 @@ select n.ord, n.kind, n.obj, n.ddl
 from norm n
 where not exists (select 1 from srv s where s.kind = n.kind and s.d = n.d);
 
+-- ── 🔴 حاجز مستقل عن الأسماء: أي DDL فيه رابط ─────────────────────
+-- الاستثناءات فوق بتشتغل **بالاسم**. أي دالة جديدة على السحابة فيها
+-- رابط ومش في القايمة هتعدّي وتتنفّذ بالحرف — وساعتها تريجر على
+-- السيرفر يبقى بينده **السحابة**، ومايبانش: بيشتغل، مابيرميش خطأ،
+-- وبيبعت للمكان الغلط.
+-- الحاجز ده بيشيلها من التنفيذ ويوديها لقايمة «محتاجة تدخّل يدوي».
+create temp table _blocked as
+select * from _todo
+where ddl like '%__TARGET_URL__%'
+   or ddl ~* 'supabase[.]co'
+   or ddl ~* 'rxtjoqulmgkkcohmgzgi';
+
+delete from _todo t
+using _blocked b
+where t.kind = b.kind and t.obj = b.obj;
+
 -- ── أعمدة ناقصة على جداول **موجودة** ─────────────────────────────
 -- الجداول دي بتظهر في قايمة الانحراف لأن تعريفها مختلف، بس
 -- `create table if not exists` مش هيلمسها. فبنحسب فرق الأعمدة.
@@ -127,6 +143,13 @@ where not exists (
 \echo ''
 \echo '════ الناقص حسب النوع ════'
 select kind as "النوع", count(*) as "العدد" from _todo group by 1 order by 1;
+\echo ''
+\echo '════ 🔴 اتمنعت — فيها رابط، محتاجة تدخّل يدوي ════'
+select kind as "النوع", obj as "الاسم",
+       case when ddl like '%__TARGET_URL__%' then 'عنصر نائب __TARGET_URL__'
+            else 'رابط السحابة مكتوب صريح' end as "السبب"
+from _blocked order by 1, 2;
+
 
 \echo ''
 \echo '════ جداول مش موجودة خالص ════'
