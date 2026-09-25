@@ -214,9 +214,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
               <tr>
                 <th style="text-align:right;">الصنف</th>
                 <th>الكود</th>
-                <th>المعمورة</th>
-                <th>سان ستيفانو</th>
-                <th>سيدى بشر</th>
+                <!-- أعمدة الفروع بتتولد في renderBranchUi() -->
+                <th data-br-heads></th>
                 <th>شهور نشطة (م/س/ب)</th>
               </tr>
             </thead>
@@ -232,9 +231,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       <div id="tab-orders" style="display:none">
         <div class="ord-bar">
           <div class="ord-branches" id="ordBranches">
-            <button class="ord-br active" data-b="المعمورة" onclick="ordSetBranch('المعمورة')">المعمورة</button>
-            <button class="ord-br" data-b="سان ستيفانو" onclick="ordSetBranch('سان ستيفانو')">سان ستيفانو</button>
-            <button class="ord-br" data-b="سيدى بشر" onclick="ordSetBranch('سيدى بشر')">سيدى بشر</button>
+            <!-- بتتولد في renderBranchUi() -->
           </div>
           <span id="ordBranchLabel" style="display:none;font-weight:800;color:var(--primary);font-size:0.9rem"></span>
           <input type="text" id="ord-search" class="form-input" placeholder="🔍 بحث بالصنف أو الكود..." oninput="ordDebounce()" style="max-width:180px">
@@ -415,9 +412,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           <div class="up-map">
             <div class="cr-field"><label>الكود</label><select id="m-code" class="form-select" onchange="renderMuPreview()"></select></div>
             <div class="cr-field"><label>الاسم</label><select id="m-name" class="form-select" onchange="renderMuPreview()"></select></div>
-            <div class="cr-field"><label>المعمورة</label><select id="m-mam" class="form-select" onchange="renderMuPreview()"></select></div>
-            <div class="cr-field"><label>سان</label><select id="m-san" class="form-select" onchange="renderMuPreview()"></select></div>
-            <div class="cr-field"><label>بشر</label><select id="m-bishr" class="form-select" onchange="renderMuPreview()"></select></div>
+            <!-- خانة لكل فرع، بتتولد في renderBranchUi() -->
+            <span id="mu-branch-fields" style="display:contents"></span>
           </div>
           <div class="cr-wrap" style="max-height:240px"><div id="mu-preview"></div></div>
           <div style="font-weight:700;font-size:0.8rem;margin:8px 0" id="mu-sum"></div>
@@ -456,7 +452,30 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     const H = { 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + MO_AUTH };
     const REST = SB_URL_API + '/rest/v1/';
     const numv = v => (v === null || v === undefined || v === '') ? '0' : (Math.round(Number(v) * 10) / 10);
-    const BR = Branches.codeMap();
+    let BR = Branches.codeMap();          // كود → اسم
+    let BR_KEYS = Object.keys(BR);        // أكواد الفروع بالترتيب
+    /* حرف الفرع في stock_flat (m_q/s_q/f_q). اعتباطي ومصدره
+       branches.letter، فبنجيبه من الدالة. المكتوب تحت احتياطي لو
+       الترحيل ماوصلش للقاعدة دي — من غيره الأعمدة تطلع أصفار ساكتة. */
+    let BR_LETTER = { mamora:'m', san:'s', bishr:'b', seyouf:'f' };
+    async function loadBranchLetters() {
+      try {
+        const r = await fetch(REST + 'rpc/branch_letters', {
+          method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' });
+        const j = await r.json();
+        if (!Array.isArray(j) || !j.length) throw new Error('رد فاضي');
+        const m = {};
+        j.forEach(b => { if (b && b.code && b.letter) m[b.code] = b.letter; });
+        if (Object.keys(m).length) BR_LETTER = m;
+      } catch (e) {
+        console.warn('branch_letters مش متاحة — الرجوع للخريطة المكتوبة. طبّق migrate_46.', e);
+      }
+    }
+    /* بيانات الفرع الكاملة (للأسماء البديلة في تخمين أعمدة الملف) */
+    const brInfo = code => (Branches.byCode ? Branches.byCode(code) : null) || { code, name: BR[code], aliases: [] };
+    function brHeadCells() {
+      return BR_KEYS.map(k => '<th>' + esc(BR[k]) + '</th>').join('');
+    }
     const esc = s => String(s==null?'':s).replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
     const TABS = ['rate','orders','replace','exceptional','tiers','archive','newitems','settings'];
@@ -493,6 +512,39 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       loadWhPriority();
       loadBranchStores();
     }
+    /* كل عنصر واجهة فيه فروع بيتولد من هنا — مرة واحدة عند التحميل */
+    function renderBranchUi() {
+      BR = Branches.codeMap();
+      BR_KEYS = Object.keys(BR);
+      if (!BR_KEYS.length) { console.error('جدول الفروع ما وصلش — الشاشة مش هتعرض فروع'); return; }
+
+      // رؤوس جدول الاستهلاك: خلية واحدة بتتفكّ لعدد الفروع
+      document.querySelectorAll('th[data-br-heads]').forEach(th => {
+        const tr = th.parentElement;
+        BR_KEYS.forEach(k => {
+          const c = document.createElement('th'); c.textContent = BR[k]; tr.insertBefore(c, th);
+        });
+        th.remove();
+      });
+
+      // أزرار فروع الطلبيات
+      const bx = document.getElementById('ordBranches');
+      if (bx) {
+        bx.innerHTML = BR_KEYS.map((k, i) =>
+          '<button class="ord-br' + (i === 0 ? ' active' : '') + '" data-b="' + esc(BR[k]) + '"' +
+          ' onclick="ordSetBranch(\'' + String(BR[k]).replace(/'/g, "\\'") + '\')">' + esc(BR[k]) + '</button>').join('');
+      }
+      if (!ordBranch || !BR_KEYS.some(k => BR[k] === ordBranch)) ordBranch = BR[BR_KEYS[0]];
+
+      // خانات ربط أعمدة ملف المبيعات
+      const mf = document.getElementById('mu-branch-fields');
+      if (mf) {
+        mf.innerHTML = BR_KEYS.map(k =>
+          '<div class="cr-field"><label>' + esc(BR[k]) + '</label>' +
+          '<select id="m-br-' + k + '" class="form-select" onchange="renderMuPreview()"></select></div>').join('');
+      }
+    }
+
     const ORD_BR3 = Branches.names();
     async function loadBranchStores() {
       const wrap = document.getElementById('ps-branch-stores'); if (!wrap) return;
@@ -573,7 +625,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
 
     // ===== تبويب الطلبيات =====
     const ORD_SIZE = 50;
-    let ordBranch = 'المعمورة', ordPage = 1, ordTotal = 0, ordTimer = null, ordLoaded = false, ordById = {};
+    // ordBranch بيتحدّد في renderBranchUi() من أول فرع في الجدول
+    let ordBranch = '', ordPage = 1, ordTotal = 0, ordTimer = null, ordLoaded = false, ordById = {};
     let branchReps = {};
     let ordSelCodes = new Set();  // أكواد «تحت الطلب» للفرع الحالي (محفوظة في قاعدة البيانات)
     let ordSelStock = {};         // رصيد الصنف وقت تعليمه «تحت الطلب» (لكشف الوصول الجزئي)
@@ -581,7 +634,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     let ordHideHours = 24;               // مهلة إخفاء الصنف بعد طلب التحويل (من إعدادات المشتريات)
     let ordSelBranch = null;      // آخر فرع اتحمّلت تحديداته
     const ordWhChoice = {};     // المخزن المختار لكل صف (id → {store,price,disc,net,av})
-    const BR_LIST = [['المعمورة','surplus_mamora'],['سان ستيفانو','surplus_san'],['سيدى بشر','surplus_bishr']];
+    /* [اسم الفرع, عمود فائضه في purchase_orders_flat] — من جدول الفروع */
+    const brList = () => BR_KEYS.map(k => [BR[k], 'surplus_' + k]);
 
     function ordSetBranch(b) {
       ordBranch = b; ordPage = 1;
@@ -595,7 +649,9 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const w = document.getElementById('ord-wh').value;
       const co = document.getElementById('ord-company').value;
       const surpOnly = document.getElementById('ord-surp-only').checked;
-      let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,net_required,surplus_mamora,surplus_san,surplus_bishr,surplus_other,best_store,best_price,best_disc,active_months,ex_archived'
+      // أعمدة الفائض بتتبني من الفروع — كانت تلاتة مكتوبة بالإيد
+      const surpCols = BR_KEYS.map(k => 'surplus_' + k).join(',');
+      let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,net_required,' + surpCols + ',surplus_other,best_store,best_price,best_disc,active_months,ex_archived'
         + '&branch=eq.' + encodeURIComponent(ordBranch)
         + '&order=' + ((ordSortCol && ORD_SORT_MAP[ordSortCol]) ? (ORD_SORT_MAP[ordSortCol] + '.' + ordSortDir + '.nullslast') : 'required.desc,itm_name.asc')
         + '&limit=' + ORD_SIZE + '&offset=' + offset;
@@ -800,7 +856,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         ordById = {};
         body.innerHTML = rows.map(r => {
           ordById[r.id] = r; r._wh = null;
-          const others = BR_LIST.filter(([bn, k]) => bn !== ordBranch && (r[k] || 0) > 0);
+          const others = brList().filter(([bn, k]) => bn !== ordBranch && (r[k] || 0) > 0);
           const totalSur = others.reduce((s, [, k]) => s + (r[k] || 0), 0);
           const surCell = totalSur > 0
             ? '<span style="color:#15803d;font-weight:800;cursor:pointer;text-decoration:underline" title="اضغط لتفاصيل الفائض والتحويل" onclick="openTransfer(' + r.id + ')">' + totalSur + '</span>'
@@ -947,7 +1003,11 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     }
 
     // ===== التحويل =====
-    const STOCK_KEY = { 'المعمورة': 'm_q', 'سان ستيفانو': 's_q', 'سيدى بشر': 'b_q' };
+    /* اسم الفرع → عمود رصيده في stock_flat (بالحرف) أو معدله في
+       consumption_flat (بالكود). الاتنين بيتبنوا من جدول الفروع. */
+    const codeOfName = nm => BR_KEYS.find(k => BR[k] === nm) || null;
+    const stockKeyOf = nm => { const k = codeOfName(nm); return k && BR_LETTER[k] ? BR_LETTER[k] + '_q' : null; };
+    const consKeyOf  = nm => { const k = codeOfName(nm); return k ? 'av_' + k : null; };
     async function openTransfer(id) {
       const r = ordById[id]; if (!r) return;
       document.getElementById('tr-item').textContent = (r.itm_name || '') + ' — كود ' + r.itm_code;
@@ -961,21 +1021,22 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       if (!r._live) {
         try {
           const [sj, cj, pj] = await Promise.all([
-            fetch(REST + 'stock_flat?select=m_q,s_q,b_q&itm_code=eq.' + encodeURIComponent(r.itm_code), { headers: H }).then(x => x.json()),
-            fetch(REST + 'consumption_flat?select=av_mamora,av_san,av_bishr&code=eq.' + encodeURIComponent(r.itm_code), { headers: H }).then(x => x.json()),
+            fetch(REST + 'stock_flat?select=' + BR_KEYS.map(k => (BR_LETTER[k] || '?') + '_q').join(',')
+                  + '&itm_code=eq.' + encodeURIComponent(r.itm_code), { headers: H }).then(x => x.json()),
+            fetch(REST + 'consumption_flat?select=' + BR_KEYS.map(k => 'av_' + k).join(',')
+                  + '&code=eq.' + encodeURIComponent(r.itm_code), { headers: H }).then(x => x.json()),
             fetch(REST + 'purchase_settings?id=eq.1&select=min_stock_surplus', { headers: H }).then(x => x.json())
           ]);
           r._live = { stock: (sj && sj[0]) || {}, cons: (cj && cj[0]) || {}, mss: (pj && pj[0] && pj[0].min_stock_surplus) || 2 };
         } catch (e) { r._live = { stock: {}, cons: {}, mss: 2 }; }
       }
-      const CONS_KEY = { 'المعمورة': 'av_mamora', 'سان ستيفانو': 'av_san', 'سيدى بشر': 'av_bishr' };
       const liveSurp = (bn) => {
-        const st = Number(r._live.stock[STOCK_KEY[bn]] || 0);
-        const rate = Number(r._live.cons[CONS_KEY[bn]] || 0);
+        const st = Number(r._live.stock[stockKeyOf(bn)] || 0);
+        const rate = Number(r._live.cons[consKeyOf(bn)] || 0);
         const sur = (st >= r._live.mss && Math.floor(st - rate) > 0) ? Math.floor(st - rate) : 0;
         return { st, sur };
       };
-      const others = BR_LIST.filter(([bn]) => bn !== ordBranch && liveSurp(bn).sur > 0);
+      const others = brList().filter(([bn]) => bn !== ordBranch && liveSurp(bn).sur > 0);
       if (!others.length) { src.innerHTML = '<option value="">لا يوجد فائض حالي في الفروع الأخرى</option>'; document.getElementById('tr-hint') && (document.getElementById('tr-hint').innerHTML = ''); return; }
       src.innerHTML = others.map(([bn]) => {
         const { st, sur } = liveSurp(bn);
@@ -1079,7 +1140,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     function buildQuery(offset) {
       const q = document.getElementById('cr-search').value.trim();
       const br = document.getElementById('cr-branch').value;
-      let url = REST + 'consumption_flat?select=code,itm_name,av_mamora,av_san,av_bishr,act_mamora,act_san,act_bishr'
+      const consCols = BR_KEYS.map(k => 'av_' + k).concat(BR_KEYS.map(k => 'act_' + k)).join(',');
+      let url = REST + 'consumption_flat?select=code,itm_name,' + consCols
         + '&order=itm_name.asc&limit=' + CR_SIZE + '&offset=' + offset;
       if (q) { const e = encodeURIComponent(q); url += '&or=(itm_name.ilike.*' + e + '*,code.ilike.*' + e + '*)'; }
       if (br) url += '&av_' + br + '=gt.0';
@@ -1100,10 +1162,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           '<tr onclick="openDetail(\'' + String(r.code).replace(/'/g, "\\'") + '\')" title="اضغط لتفاصيل الاشتقاق">'
           + '<td style="text-align:right;font-weight:600;">' + esc(r.itm_name) + '</td>'
           + '<td class="cr-code">' + esc(r.code) + '</td>'
-          + '<td class="cr-v">' + numv(r.av_mamora) + '</td>'
-          + '<td class="cr-v">' + numv(r.av_san) + '</td>'
-          + '<td class="cr-v">' + numv(r.av_bishr) + '</td>'
-          + '<td class="cr-act">' + (r.act_mamora||0) + ' / ' + (r.act_san||0) + ' / ' + (r.act_bishr||0) + '</td>'
+          + BR_KEYS.map(k => '<td class="cr-v">' + numv(r['av_' + k]) + '</td>').join('')
+          + '<td class="cr-act">' + BR_KEYS.map(k => (r['act_' + k] || 0)).join(' / ') + '</td>'
           + '</tr>').join('');
         renderPager();
       } catch (e) {
@@ -1174,23 +1234,37 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       }
       html += '<div class="cr-sec">الناتج لكل فرع = المعدل الأساسي × الاستثنائى × معامل التغطية</div>';
       html += '<table class="cr-mini"><thead><tr><th>الفرع</th><th>المعدل الأساسي</th><th>الاستثنائى</th><th>معامل التغطية</th><th>شهور نشطة</th><th>النهائي</th></tr></thead><tbody>';
-      ['mamora','san','bishr'].forEach(k => { const b = d.branches[k];
-        html += '<tr><td style="text-align:right;font-weight:700">' + BR[k] + '</td><td>' + b.pre + '</td><td>×' + b.exc + '</td><td>×' + b.factor + '</td><td>' + b.active + '</td><td class="cr-final">' + b.final + '</td></tr>';
+      /* الفروع من رد الدالة (فيه name و sort)، مرتّبة بـsort — مش من
+         قايمة مكتوبة ولا من خريطة محلية. */
+      Object.keys(d.branches || {})
+        .sort((x, y) => ((d.branches[x].sort ?? 99) - (d.branches[y].sort ?? 99)))
+        .forEach(k => { const b = d.branches[k];
+        html += '<tr><td style="text-align:right;font-weight:700">' + esc(b.name || BR[k] || k) + '</td><td>' + b.pre + '</td><td>×' + b.exc + '</td><td>×' + b.factor + '</td><td>' + b.active + '</td><td class="cr-final">' + b.final + '</td></tr>';
       });
       html += '</tbody></table>';
       if (d.sources && d.sources.length) {
         html += '<div class="cr-sec">المصادر المكوّنة للمعدل (أساسي كل مصدر ÷ شهوره النشطة)</div>';
-        html += '<table class="cr-mini"><thead><tr><th>الكود</th><th>نوعه</th><th>وزن</th><th>استثنائى</th><th>معمورة (شهور)</th><th>سان (شهور)</th><th>بشر (شهور)</th></tr></thead><tbody>';
+        html += '<table class="cr-mini"><thead><tr><th>الكود</th><th>نوعه</th><th>وزن</th><th>استثنائى</th>'
+              + BR_KEYS.map(k => '<th>' + esc(BR[k]) + ' (شهور)</th>').join('') + '</tr></thead><tbody>';
         html += d.sources.map(s =>
           '<tr><td class="cr-code">' + esc(s.code) + '</td><td>' + (s.is_self ? 'ذاتي' : 'بديل') + '</td><td>×' + s.qty + '</td><td>×' + s.exc + '</td>'
-          + '<td>' + s.base_m + ' (' + s.act_m + ')</td><td>' + s.base_s + ' (' + s.act_s + ')</td><td>' + s.base_b + ' (' + s.act_b + ')</td></tr>').join('');
+          // s.br مفاتيحه أكواد الفروع (migrate_56)؛ الرجوع للمفاتيح
+          // القديمة بالحرف لو الترحيل ماوصلش للقاعدة دي
+          + BR_KEYS.map(k => {
+              const x = (s.br && s.br[k]) || null;
+              const base = x ? x.base : s['base_' + (BR_LETTER[k] || '?')];
+              const act  = x ? x.act  : s['act_'  + (BR_LETTER[k] || '?')];
+              return '<td>' + (base ?? 0) + ' (' + (act ?? 0) + ')</td>';
+            }).join('') + '</tr>').join('');
         html += '</tbody></table>';
       }
       if (d.months && d.months.length) {
         html += '<div class="cr-sec">مبيعات الشهور (الخام) — لتقف على أي شهر غير طبيعي</div>';
-        html += '<div style="max-height:240px;overflow:auto"><table class="cr-mini"><thead><tr><th>المصدر</th><th>الشهر</th><th>المعمورة</th><th>سان</th><th>بشر</th></tr></thead><tbody>';
+        html += '<div style="max-height:240px;overflow:auto"><table class="cr-mini"><thead><tr><th>المصدر</th><th>الشهر</th>'
+              + brHeadCells() + '</tr></thead><tbody>';
         html += d.months.map(m =>
-          '<tr><td class="cr-code">' + esc(m.src) + '</td><td>' + esc(m.month) + '</td><td>' + numv(m.mamora) + '</td><td>' + numv(m.san) + '</td><td>' + numv(m.bishr) + '</td></tr>').join('');
+          '<tr><td class="cr-code">' + esc(m.src) + '</td><td>' + esc(m.month) + '</td>'
+          + BR_KEYS.map(k => '<td>' + numv(m[k]) + '</td>').join('') + '</tr>').join('');
         html += '</tbody></table></div>';
       }
       return html;
@@ -1221,14 +1295,43 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       s=s.replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[^\d.\-]/g,'');
       if(s===''||s==='-'||s==='.') return null; const n=parseFloat(s); return isFinite(n)?n:null; };
     const guess = (hs, keys) => { for (let i=0;i<hs.length;i++){ const h=String(hs[i]||'').toLowerCase(); if(keys.some(k=>h.includes(k))) return i; } return -1; };
+    /* كلمات تخمين عمود الفرع في ملف الإكسل: من كوده واسمه وأسماءه
+       البديلة في جدول الفروع (كانت مكتوبة بالإيد لتلات فروع).
+       ⚠️ الأرقام المجرّدة مستثناة من القايمة الأساسية — «2» لوحدها
+       بتطابق أي عنوان فيه رقم 2. بترجع كملاذ أخير بس، زي الأصل. */
+    function brGuessKeys(code) {
+      const b = brInfo(code);
+      const out = new Set(); const nums = new Set();
+      const add = t => { t = String(t||'').trim().toLowerCase(); if (t.length >= 2) out.add(t); };
+      add(code);
+      [b.name].concat(b.aliases || []).forEach(t => {
+        const v = String(t || '').trim();
+        if (!v) return;
+        add(v);
+        add(v.replace(/^ال/, ''));                 // «المعمورة» → «معمورة»
+        const w = v.split(/\s+/);
+        const last = w[w.length - 1];
+        if (/^\d+$/.test(last)) nums.add(last);    // «ابراهيم حمدي 2» → «2»
+        else if (last.length >= 3) add(last);       // «سيدى بشر» → «بشر»
+      });
+      return { keys: [...out], nums: [...nums] };
+    }
     function monthAutoMap(hs) {
-      let c=guess(hs,['كود','code']), n=guess(hs,['صنف','اسم','name']),
-          m=guess(hs,['صيدلية','معمورة','mamora']), s=guess(hs,['حمدي 2','حمدى 2','san','ستيفانو']), b=guess(hs,['حمدي 3','حمدى 3','bishr','بشر']);
-      // fallback بالرقم لو مفيش تطابق
-      if (s<0) s=guess(hs,[' 2','2']); if (b<0) b=guess(hs,[' 3','3']);
+      let c=guess(hs,['كود','code']), n=guess(hs,['صنف','اسم','name']);
+      const br = {};
+      BR_KEYS.forEach(k => {
+        const g = brGuessKeys(k);
+        let i = guess(hs, g.keys);
+        // ملاذ أخير: رقم الفرع لو موجود في اسمه البديل
+        if (i < 0 && g.nums.length) i = guess(hs, g.nums.map(x => ' ' + x).concat(g.nums));
+        br[k] = i;
+      });
       const used=new Set(); const ff=()=>{ for(let i=0;i<hs.length;i++) if(!used.has(i)) return i; return 0; };
       const claim=i=>{ const v=(i>=0&&i<hs.length&&!used.has(i))?i:ff(); used.add(v); return v; };
-      return { c:claim(c), n:claim(n), m:claim(m), s:claim(s), b:claim(b) };
+      const outBr = {};
+      const cc = claim(c), nn = claim(n);
+      BR_KEYS.forEach(k => { outBr[k] = claim(br[k]); });
+      return { c: cc, n: nn, br: outBr };
     }
     function openMonthUp() {
       document.getElementById('mu-msg').innerHTML=''; document.getElementById('mu-map').style.display='none';
@@ -1257,22 +1360,29 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         muRows=aoa.slice(hdrIdx+1).filter(r=>r.some(c=>String(c).trim()!==''));
         if(!muRows.length){ msg.innerHTML='<span class="msg-err">لا توجد صفوف</span>'; return; }
         const opts=muHeaders.map((h,i)=>'<option value="'+i+'">'+(esc(h)||('عمود '+(i+1)))+'</option>').join('');
-        ['m-code','m-name','m-mam','m-san','m-bishr'].forEach(id=>document.getElementById(id).innerHTML=opts);
+        ['m-code','m-name'].concat(BR_KEYS.map(k=>'m-br-'+k))
+          .forEach(id=>{ const el=document.getElementById(id); if(el) el.innerHTML=opts; });
         const mp=monthAutoMap(muHeaders);
         document.getElementById('m-code').value=mp.c; document.getElementById('m-name').value=mp.n;
-        document.getElementById('m-mam').value=mp.m; document.getElementById('m-san').value=mp.s; document.getElementById('m-bishr').value=mp.b;
+        BR_KEYS.forEach(k=>{ const el=document.getElementById('m-br-'+k); if(el) el.value=mp.br[k]; });
         document.getElementById('mu-map').style.display='block'; renderMuPreview();
       }catch(err){ msg.innerHTML='<span class="msg-err">تعذّر قراءة الملف: '+err.message+'</span>'; } };
       rd.readAsArrayBuffer(file);
     }
-    function muMapping(){ return { c:+document.getElementById('m-code').value, n:+document.getElementById('m-name').value,
-      m:+document.getElementById('m-mam').value, s:+document.getElementById('m-san').value, b:+document.getElementById('m-bishr').value }; }
+    function muMapping(){
+      const br={};
+      BR_KEYS.forEach(k=>{ const el=document.getElementById('m-br-'+k); br[k]= el ? +el.value : -1; });
+      return { c:+document.getElementById('m-code').value, n:+document.getElementById('m-name').value, br:br };
+    }
     function buildMuRecords(){ const mp=muMapping(); return muRows.map(r=>({
       code:String(r[mp.c]==null?'':r[mp.c]).trim(), name:String(r[mp.n]==null?'':r[mp.n]).trim(),
-      mamora:toNum(r[mp.m]), san:toNum(r[mp.s]), bishr:toNum(r[mp.b]) })).filter(x=>x.code!==''); }
+      // مفتاح لكل فرع بكوده — upload_month_sales بتقراهم بالأكواد
+      ...BR_KEYS.reduce((o,k)=>{ o[k]=toNum(r[mp.br[k]]); return o; }, {})
+    })).filter(x=>x.code!==''); }
     function renderMuPreview(){ const recs=buildMuRecords();
-      const head='<table class="cr-mini"><thead><tr><th>الكود</th><th>الاسم</th><th>معمورة</th><th>سان</th><th>بشر</th></tr></thead><tbody>';
-      const rows=recs.slice(0,8).map(x=>'<tr><td class="cr-code">'+esc(x.code)+'</td><td style="text-align:right">'+esc(x.name)+'</td><td>'+(x.mamora??0)+'</td><td>'+(x.san??0)+'</td><td>'+(x.bishr??0)+'</td></tr>').join('');
+      const head='<table class="cr-mini"><thead><tr><th>الكود</th><th>الاسم</th>'+brHeadCells()+'</tr></thead><tbody>';
+      const rows=recs.slice(0,8).map(x=>'<tr><td class="cr-code">'+esc(x.code)+'</td><td style="text-align:right">'+esc(x.name)+'</td>'
+        +BR_KEYS.map(k=>'<td>'+(x[k]??0)+'</td>').join('')+'</tr>').join('');
       document.getElementById('mu-preview').innerHTML=head+rows+'</tbody></table>';
       document.getElementById('mu-sum').textContent='عدد الأصناف الصالحة: '+recs.length.toLocaleString('ar-EG')+' (معاينة أول 8)'; }
     async function confirmMonth(){
@@ -1433,10 +1543,11 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       for (let i = 0; i < codes.length; i += CH) {
         const list = codes.slice(i, i + CH).map(c => '"' + String(c).replace(/"/g, '') + '"').join(',');
         try {
-          const r = await fetch(REST + 'stock_flat?select=itm_code,m_p,s_p,b_p&itm_code=in.(' + encodeURIComponent(list) + ')', { headers: await sbH() });
+          const pCols = BR_KEYS.map(k => (BR_LETTER[k] || '?') + '_p').join(',');
+          const r = await fetch(REST + 'stock_flat?select=itm_code,' + pCols + '&itm_code=in.(' + encodeURIComponent(list) + ')', { headers: await sbH() });
           if (!r.ok) continue;
           (await r.json() || []).forEach(row => {
-            const parts = [['المعمورة', Number(row.m_p) || 0], ['سان ستيفانو', Number(row.s_p) || 0], ['سيدى بشر', Number(row.b_p) || 0]]
+            const parts = BR_KEYS.map(k => [BR[k], Number(row[(BR_LETTER[k] || '?') + '_p']) || 0])
               .filter(x => x[1] > 0);
             if (!parts.length) return;
             niPrice[row.itm_code] = { val: Math.max(...parts.map(x => x[1])), parts: parts };
@@ -1495,7 +1606,11 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const c = document.getElementById('ni-count');
       if (c) c.textContent = (rows.length === niData.length) ? niData.length : (rows.length + ' من ' + niData.length);
       if (!rows.length) { wrap.innerHTML = '<div class="et-note" style="text-align:center">' + (niData.length ? 'لا نتائج مطابقة للفلتر.' : '🎉 مفيش أصناف جديدة محتاجة تكويد حاليًا.') + '</div>'; return; }
-      const th = ['الكود','الاسم','الشركة','النوع','سعر البيع','المعمورة','سان ستيفانو','سيدى بشر','سعر مخزن؟','تكويد المخازن','إجراء'];
+      // خمسة أعمدة ثابتة + عمود لكل فرع + تلاتة في الآخر.
+      // (نفس العدد اللي الـcolspan تحت بيتحسب بيه: 8 + عدد الفروع)
+      const th = ['الكود','الاسم','الشركة','النوع','سعر البيع']
+        .concat(BR_KEYS.map(k => BR[k]))
+        .concat(['سعر مخزن؟','تكويد المخازن','إجراء']);
       let h = '<table class="cr-table"><thead><tr>' + th.map(t => '<th>' + t + '</th>').join('') + '</tr></thead><tbody>';
       rows.forEach(r => {
         const code = esc(r.itm_code||'');
@@ -1512,14 +1627,13 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
               ? '<span class="ni-type-tag med" title="itm_ismedicine = 1 في المخزون">دواء</span>'
               : '<span class="ni-type-tag non" title="itm_ismedicine = 0 في المخزون">غير دواء</span>') + '</td>'
           + '<td style="text-align:center">' + niPriceCell(r.itm_code) + '</td>'
-          + '<td style="text-align:center">' + niQ(r.m_q) + '</td>'
-          + '<td style="text-align:center">' + niQ(r.s_q) + '</td>'
-          + '<td style="text-align:center">' + niQ(r.b_q) + '</td>'
+          + BR_KEYS.map(k => '<td style="text-align:center">' + niQ(r[(BR_LETTER[k] || '?') + '_q']) + '</td>').join('')
           + '<td style="text-align:center">' + store + '</td>'
           + '<td style="text-align:center"><button class="btn btn-sm" style="background:var(--surface-3);color:var(--text-primary);border:1px solid var(--surface-3);padding:4px 12px;border-radius:8px;cursor:pointer;font-weight:700" onclick="event.stopPropagation();toggleLinkPanel(\'' + jsCode + '\',\'' + jsName + '\',this)">🔗 ربط بالمخازن</button></td>'
           + '<td style="text-align:center"><button class="btn btn-sm" style="background:#0d9488;color:#fff;border:none;padding:4px 14px;border-radius:8px;cursor:pointer;font-weight:700" title="بيكوّد صفوف المخازن المحددة في بانل الربط (لو فيه تحديد) وبعدين يسجّل الصنف كمكوّد ويخفيه" onclick="event.stopPropagation();markCoded(\'' + jsCode + '\', this)">تم ✓</button></td>'
           + '</tr>'
-          + '<tr class="nl-row" id="nl-row-' + code + '" style="display:none"><td colspan="11" style="padding:0 6px 10px"><div id="nl-panel-' + code + '"></div></td></tr>';
+          // colspan كان ١١ ثابت (٨ + تلات فروع) — بقى يتحسب
+          + '<tr class="nl-row" id="nl-row-' + code + '" style="display:none"><td colspan="' + (8 + BR_KEYS.length) + '" style="padding:0 6px 10px"><div id="nl-panel-' + code + '"></div></td></tr>';
       });
       h += '</tbody></table>';
       wrap.innerHTML = h;
@@ -1812,22 +1926,34 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeDetail(); closeMonthUp(); closeTransfer(); closeBest(); } });
 
     // كل فرع يشوف طلبياته بس (المستخدم المرتبط بفرع) — الأدمن/المشتريات يشوفوا كل الفروع
-    (function () {
-      const BR3 = Branches.names();
+    function applyUserBranch() {
       const ub = (Session.branch()).trim();
-      if (BR3.includes(ub)) {
-        ordBranch = ub;
-        const bx = document.getElementById('ordBranches'); if (bx) bx.style.display = 'none';
-        const lb = document.getElementById('ordBranchLabel'); if (lb) { lb.textContent = 'فرع: ' + ub; lb.style.display = 'inline'; }
-      }
-    })();
+      if (!Branches.names().includes(ub)) return;
+      ordBranch = ub;
+      const bx = document.getElementById('ordBranches'); if (bx) bx.style.display = 'none';
+      const lb = document.getElementById('ordBranchLabel'); if (lb) { lb.textContent = 'فرع: ' + ub; lb.style.display = 'inline'; }
+    }
 
-    // loadMeta/loadMonths/loadPage اتشالوا من هنا — دول بتوع تبويب «معدل
-    // الاستهلاك» وبيتحمّلوا أول ما يتفتح (showTab). اللي فاضل مشترك أو
-    // بتاع «الطلبيات» وهو التبويب الافتراضي.
-    loadBranchReps(); loadOrdStores(); loadOrdCompanies();
-    ordSyncFitBtn();
-    showTab('orders');   // الطلبيات هو التبويب الافتراضي عند فتح الشاشة
+    /* الترتيب مهم: جدول الفروع → توليد عناصر الواجهة → قصر الفرع على
+       المستخدم → التحميل. الأزرار كانت مكتوبة في الـHTML فالإخفاء كان
+       بيشتغل في أي وقت؛ دلوقتي بتتولد، فلو خفّيناها قبل التوليد
+       بتتولد ظاهرة تاني. وحروف الفروع لازم تكون موجودة قبل أي نداء
+       بيقرا أعمدة stock_flat، وإلا بترجع أصفار ساكتة. */
+    (async function init() {
+      try {
+        if (Branches.ready) await Branches.ready();
+      } catch (e) { console.warn('جدول الفروع ما وصلش من الشبكة — الكاش هو اللي شغّال', e); }
+      renderBranchUi();
+      applyUserBranch();
+      await loadBranchLetters();
+
+      // loadMeta/loadMonths/loadPage اتشالوا من هنا — دول بتوع تبويب «معدل
+      // الاستهلاك» وبيتحمّلوا أول ما يتفتح (showTab). اللي فاضل مشترك أو
+      // بتاع «الطلبيات» وهو التبويب الافتراضي.
+      loadBranchReps(); loadOrdStores(); loadOrdCompanies();
+      ordSyncFitBtn();
+      showTab('orders');   // الطلبيات هو التبويب الافتراضي عند فتح الشاشة
+    })();
   </script>
 <!-- صلاحيات التبويبات: بيخفي التبويبات الممنوعة على دور المستخدم (من شاشة الصلاحيات) -->
 <script>try { Session.guardTabs('medicine_orders'); } catch (e) { console.error('guardTabs', e); }</script>
