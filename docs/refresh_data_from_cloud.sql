@@ -89,6 +89,7 @@ declare
   v_ts     text;
   v_ident  boolean;
   v_over   text;
+  v_lost   text;      -- أعمدة محلية مش في تعريف الجدول الأجنبي
   v_before bigint;
   v_after  bigint;
   v_t0     timestamptz;
@@ -167,6 +168,30 @@ begin
       insert into public.cloud_sync_log(mode,tbl,status,detail)
         values (v_mode, r.t, 'skip', 'مفيش أعمدة مشتركة');
       v_skip := v_skip + 1; continue;
+    end if;
+
+    -- ═══ أعمدة محلية مش في تعريف الجدول الأجنبي ═══
+    -- النقل تحت بيعمل delete ثم insert **بالأعمدة المشتركة بس**، فأي
+    -- عمود محلي مش معروف للجدول الأجنبي بيرجع لقيمته الافتراضية.
+    -- حصل فعلًا: ترحيل 46 ضاف branches.letter، والمزامنة رجّعته null،
+    -- فـbranch_letters() (بتفلتر letter is not null) رمت السيوف بالساكت
+    -- ومفتاح f اختفى من كل الدوال (2026-09-25).
+    --
+    -- ⚠️ الجدول الأجنبي **لقطة**: أي ترحيل بيضيف عمود لجدول بيتزامن
+    --    لازم يعيد استيراده — راجع migrate_48.
+    select string_agg(a.attname, ', ' order by a.attnum) into v_lost
+      from pg_attribute a
+     where a.attrelid = ('public.' || quote_ident(r.t))::regclass
+       and a.attnum > 0 and not a.attisdropped and a.attgenerated = ''
+       and not exists (select 1 from pg_attribute a2
+                        where a2.attrelid = ('cloudsrc.' || quote_ident(r.t))::regclass
+                          and a2.attname = a.attname and a2.attnum > 0 and not a2.attisdropped);
+    if v_lost is not null then
+      insert into public.cloud_sync_log(mode,tbl,status,detail)
+        values (v_mode, r.t, 'cols_lost',
+                'أعمدة محلية بترجع فاضية كل مزامنة: ' || v_lost
+                || ' — أعد استيراد cloudsrc.' || r.t);
+      raise warning '⚠️ %: الأعمدة دي بترجع فاضية كل مزامنة → %  (أعد استيراد الجدول الأجنبي)', r.t, v_lost;
     end if;
 
     -- أعمدة identity محتاجة overriding عشان نكتب القيمة الجاية من السحابة
