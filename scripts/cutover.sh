@@ -54,6 +54,7 @@ cmd_status() {
   done
   printf '  تريجرات الإشعارات  : %s شغّالة · %s معطّلة · %s مش موجودة\n' "$on" "$off" "$miss"
   printf '  آخر مزامنة        : من %s ساعة\n' "$(q 'select coalesce(round(extract(epoch from now()-max(ran_at))/3600)::int,999) from public.cloud_sync_log')"
+  printf '  مزامنة المرآة     : %s\n' "$(crontab -l 2>/dev/null | grep -q '^[^#].*sync-from-cloud' && echo 'شغّالة (قبل التحويل)' || echo 'موقوفة (بعد التحويل)')"
   printf '  أسرار vault       : %s من 6\n' "$(q 'select count(*) from vault.decrypted_secrets')"
   printf '  التطبيقات بتشاور على: %s\n' "$(curl -s --max-time 10 https://phalix.ebrahimhamdy.com/app-config.json 2>/dev/null | grep -o '"pointsTo"[^,]*' | cut -d'"' -f4 || echo '؟')"
   echo
@@ -114,10 +115,26 @@ EOF
   printf "\nنكمّل؟ اكتب %sتحويل%s: " "$B" "$N"
   read -r a; [ "$a" = "تحويل" ] || { echo "اتلغى."; exit 0; }
 
-  echo "\n${B}[1/4] مزامنة أخيرة${N}"
+  printf '\n'; echo "${B}[1/4] مزامنة أخيرة${N}"
   "$REPO/scripts/sync-from-cloud.sh" --days 2 || { echo "${R}✗ المزامنة فشلت — وقفنا هنا${N}"; exit 1; }
 
-  echo "\n${B}[2/4] فك عزل الإشعارات وتقييم الأداء${N}"
+  printf '\n'; echo "${B}[1.5/4] إيقاف مزامنة المرآة${N}"
+  # 🔴 لازم تتوقف هنا بالظبط — البند ده كان ناقص في الدليل:
+  #    بعد التحويل السحابة بتبقى متجمّدة، والمزامنة بتاخد صفوفها
+  #    وتحطها مكان المحلي. يعني بترجّع البيانات الحية لورا:
+  #    طلب اتسلّم يرجع «قيد التوصيل»، رحلة اتقفلت تفتح تاني.
+  #    وأخطر حاجة إنها مابتبانش بسرعة — مفيش حاجة بتختفي، بس
+  #    الحالة بترجع قديمة، فتفتكرها غلطة موظف مش مزامنة.
+  if crontab -l 2>/dev/null | grep -q '^[^#].*sync-from-cloud'; then
+    crontab -l 2>/dev/null | sed '/sync-from-cloud/ s|^|# [اتوقفت يوم التحويل] |' > /tmp/.cron.$$ \
+      && crontab /tmp/.cron.$$ && rm -f /tmp/.cron.$$
+    echo "  ✓ مزامنة المرآة اتوقفت"
+  else
+    echo "  (موقوفة خلاص أو مش في الكرون)"
+  fi
+  echo "  ℹ️ النسخ الاحتياطي وفحص الصحة بيفضلوا شغّالين زي ما هما"
+
+  printf '\n'; echo "${B}[2/4] فك عزل الإشعارات وتقييم الأداء${N}"
   for t in $TRIGGERS; do
     local tbl="${t%%:*}" nm="${t##*:}"
     if q "select 1 from pg_trigger t join pg_class c on c.oid=t.tgrelid where c.relname='$tbl' and t.tgname='$nm'" | grep -q 1; then
@@ -125,7 +142,7 @@ EOF
     else echo "  ⚠️ $nm مش موجود — اتخطّى"; fi
   done
 
-  echo "\n${B}[3/4] تشغيل الكرونات${N}"
+  printf '\n'; echo "${B}[3/4] تشغيل الكرونات${N}"
   local before; before="$(q 'select count(*) from cron.job')"
   if [ "${before:-0}" != "0" ]; then
     echo "  ⚠️ فيه $before مهمة شغّالة خلاص — مش هنضيف تاني (شغّل rollback الأول لو عايز تعيد)"
@@ -148,7 +165,7 @@ SQL
     echo "  المهام دلوقتي: $(q 'select count(*) from cron.job')"
   fi
 
-  echo "\n${B}[4/4] التحقق${N}"
+  printf '\n'; echo "${B}[4/4] التحقق${N}"
   cmd_status
 
   cat <<EOF
@@ -177,7 +194,7 @@ cmd_rollback() {
   printf "\nنكمّل؟ (y/N) "; read -r a
   case "$a" in [Yy]) ;; *) echo "اتلغى."; exit 0 ;; esac
 
-  echo "\n[1/2] إيقاف الكرونات"
+  printf '\n'; echo "[1/2] إيقاف الكرونات"
   run <<'SQL' >/dev/null
 do $$
 declare r record; n int := 0;
@@ -190,7 +207,17 @@ end $$;
 SQL
   echo "  المهام دلوقتي: $(q 'select count(*) from cron.job')"
 
-  echo "\n[2/2] إعادة عزل الإشعارات"
+  printf '\n'; echo "[1.5/2] إرجاع مزامنة المرآة"
+  # الرجوع = السحابة رجعت مصدر الحقيقة تاني، فالمرآة لازم تشتغل
+  if crontab -l 2>/dev/null | grep -q 'اتوقفت يوم التحويل'; then
+    crontab -l 2>/dev/null | sed 's|^# \[اتوقفت يوم التحويل\] ||' > /tmp/.cron.$$ \
+      && crontab /tmp/.cron.$$ && rm -f /tmp/.cron.$$
+    echo "  ✓ مزامنة المرآة رجعت"
+  else
+    echo "  (مش لاقيها موقوفة)"
+  fi
+
+  printf '\n'; echo "[2/2] إعادة عزل الإشعارات"
   for t in $TRIGGERS; do
     local tbl="${t%%:*}" nm="${t##*:}"
     run -c "alter table public.$tbl disable trigger $nm" >/dev/null 2>&1 && echo "  ✓ $nm اتعطّل"
