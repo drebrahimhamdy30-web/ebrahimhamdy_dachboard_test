@@ -124,9 +124,21 @@ begin
                         where n.nspname = 'public' and c.relname = c2.relname)
      order by c2.relname
   loop
-    insert into public.cloud_sync_log(mode, tbl, status, detail)
-      values (v_mode, r.t, 'missing', 'موجود على السحابة ومش موجود محليًا — محتاج ترحيل يعمل الجدول');
-    raise warning '⚠️ جدول ناقص محليًا: %  — المزامنة بتتخطّاه. محتاج ترحيل.', r.t;
+    -- الـviews مستثناة من التحذير الصريح: مالهاش بيانات خاصة بيها،
+    -- والمزامنة مش شغلها تعملها. أول تشغيل طلّع v_migration_post
+    -- (view بروفة الترحيل) — ولو تحذير زي ده فضل يطلع كل يوم على حاجة
+    -- مش محتاجة، بنتعلّم نتجاهل التحذير وساعتها بيضيع الهدف منه.
+    -- بيتسجّل في اللوج برضه، بس بدرجة أهدى.
+    -- ⚠️ الاعتماد على البادئة v_ هشّ، بس مفيش طريقة نعرف من cloudsrc
+    --    إن الأصل view: الاستيراد بيحوّل الجدول والـview لنفس النوع (f).
+    if r.t ~ '^v_' then
+      insert into public.cloud_sync_log(mode, tbl, status, detail)
+        values (v_mode, r.t, 'skip', 'يشبه view (بادئة v_) — المزامنة مابتعملش views، وده عادي');
+    else
+      insert into public.cloud_sync_log(mode, tbl, status, detail)
+        values (v_mode, r.t, 'missing', 'موجود على السحابة ومش موجود محليًا — محتاج ترحيل يعمل الجدول');
+      raise warning '⚠️ جدول ناقص محليًا: %  — المزامنة بتتخطّاه. محتاج ترحيل.', r.t;
+    end if;
   end loop;
 
   for r in
