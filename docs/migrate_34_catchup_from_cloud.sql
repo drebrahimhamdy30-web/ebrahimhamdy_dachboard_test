@@ -111,10 +111,10 @@ select * from dblink('cloud', $q$
   join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
   left join pg_attrdef ad on ad.adrelid = c.oid and ad.adnum = a.attnum
   where n.nspname = 'public' and c.relkind = 'r'
-$q$) as t(tbl text, col text, typ text, notnull boolean, dflt text, pos int);
+$q$) as t(tbl text, col text, typ text, nn boolean, dflt text, pos int);
 
 create temp table _missing_cols as
-select c.tbl, c.col, c.typ, c.notnull, c.dflt
+select c.tbl, c.col, c.typ, c.nn, c.dflt
 from _cloud_cols c
 join pg_class k on k.relname = c.tbl
 join pg_namespace ns on ns.oid = k.relnamespace and ns.nspname = 'public' and k.relkind = 'r'
@@ -140,7 +140,7 @@ order by 1;
 \echo ''
 \echo '════ أعمدة ناقصة على جداول موجودة ════'
 select tbl as "الجدول", col as "العمود", typ as "النوع",
-       case when notnull then 'هتتضاف nullable — راجعها بعدين' else '' end as "ملحوظة"
+       case when nn then 'هتتضاف nullable — راجعها بعدين' else '' end as "ملحوظة"
 from _missing_cols order by 1, 2;
 
 -- ── التنفيذ ──────────────────────────────────────────────────────
@@ -200,7 +200,7 @@ begin
       if r.dflt is not null then stmt := stmt || ' default ' || r.dflt; end if;
       execute stmt;
       insert into _log values (35, 'column', r.tbl || '.' || r.col, true,
-        case when r.notnull then 'اتضاف nullable — على السحابة not null' else null end);
+        case when r.nn then 'اتضاف nullable — على السحابة not null' else null end);
     exception when others then
       insert into _log values (35, 'column', r.tbl || '.' || r.col, false, left(sqlerrm, 160));
     end;
