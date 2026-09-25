@@ -108,6 +108,27 @@ begin
   raise notice '═══ النمط: %  ·  من تاريخ: %  ═══',
     v_mode, case when v_mode = 'full' then 'الكل' else v_since::date::text end;
 
+  -- ═══ جداول موجودة على السحابة ومش موجودة محليًا ═══
+  -- الحلقة تحت بتلفّ على جداول public المحلية، فجدول جديد على السحابة
+  -- **عمره ما يدخلها** — ولا بيتسجّل كـskip. كان بيتوه بالساكت تمامًا:
+  -- stock_seyouf فضل ناقص على السيرفر وإحنا فاكرين إن المزامنة شغّالة
+  -- (اتكشف 2026-09-25). المزامنة مش بتخلق جداول — وده مقصود، بنية
+  -- الجدول شغل ترحيل مش شغل نقل بيانات — بس لازم **تعلن** الناقص.
+  for r in
+    select c2.relname::text as t
+      from pg_class c2 join pg_namespace n2 on n2.oid = c2.relnamespace
+     where n2.nspname = 'cloudsrc' and c2.relkind in ('f','r','v')
+       and not (c2.relname = any (EXCLUDED))
+       and c2.relname !~ '_backup_|_backfill_|_staging$'
+       and not exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+                        where n.nspname = 'public' and c.relname = c2.relname)
+     order by c2.relname
+  loop
+    insert into public.cloud_sync_log(mode, tbl, status, detail)
+      values (v_mode, r.t, 'missing', 'موجود على السحابة ومش موجود محليًا — محتاج ترحيل يعمل الجدول');
+    raise warning '⚠️ جدول ناقص محليًا: %  — المزامنة بتتخطّاه. محتاج ترحيل.', r.t;
+  end loop;
+
   for r in
     select c.relname::text as t
     from pg_class c join pg_namespace n on n.oid = c.relnamespace
