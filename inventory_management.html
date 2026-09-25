@@ -344,8 +344,31 @@
     const REFRESH_WEBHOOK = 'https://agent.ebrahimhamdy.com/webhook/refresh_stock';
     const BRANCHES = Branches.codeMap();
     const BR_KEYS  = Object.keys(BRANCHES);                 // أي فرع جديد بيدخل لوحده
-    // get_stock_summary بيرجّع الفرع بحرف: المعمورة m · سان s · بشر b · السيوف f
-    const BR_LETTER = { mamora:'m', san:'s', bishr:'b', seyouf:'f' };
+    /* get_stock_summary بترجّع الفرع بحرف (m/s/b/f). الحروف اعتباطية
+       ومصدرها branches.letter في القاعدة، والدالة بقت ترجّعها في
+       meta.branches — فالخريطة دي بتتبني من الرد، مش مكتوبة هنا.
+       القايمة المكتوبة تحت احتياطي بس لو الترحيل ماوصلش للقاعدة اللي
+       الصفحة دي بتقرا منها؛ من غيرها الفرع كان هيظهر بأصفار ساكتة. */
+    var BR_LETTER = { mamora:'m', san:'s', bishr:'b', seyouf:'f' };
+    function applyBranchLetters(meta) {
+      var list = meta && meta.branches;
+      if (!Array.isArray(list) || !list.length) {
+        console.warn('meta.branches مش موجودة في رد get_stock_summary — الرجوع للخريطة المكتوبة. طبّق migrate_49.');
+        return;
+      }
+      var m = {};
+      list.forEach(function(b){ if (b && b.code && b.letter) m[b.code] = b.letter; });
+      if (Object.keys(m).length) BR_LETTER = m;
+      var missing = BR_KEYS.filter(function(k){ return !BR_LETTER[k]; });
+      if (missing.length) console.warn('فروع من غير حرف في القاعدة: ' + missing.join(', '));
+    }
+    /* مساعدين بيشيلوا تكرار «كل الفروع» من الرسم */
+    function brHeadCells() {
+      return BR_KEYS.map(function(k){ return '<th>' + BRANCHES[k] + '</th>'; }).join('');
+    }
+    function brSum(it, prop) {
+      return BR_KEYS.reduce(function(t, k){ return t + ((it[k] && it[k][prop]) || 0); }, 0);
+    }
     const REFRESH_URLS = (function(){ var o={}; BR_KEYS.forEach(function(k){ o[k]=REFRESH_WEBHOOK; }); return o; })();
     // اسم المخزن → الكود المختصر
     const BRANCH_NAME_MAP = (function(){ var m={}; Branches.all().forEach(function(b){ (b.aliases||[]).forEach(function(a){ m[a]=b.code; }); }); return m; })();
@@ -498,6 +521,7 @@
       salesData    = r[1].status==='fulfilled' ? r[1].value : [];
       var meta = stockSummary.meta || {};
 
+      applyBranchLetters(meta);   // قبل buildItemsMap — هي اللي بتقرا الحروف
       BR_KEYS.forEach(function(k){ branchEmpty[k] = !(meta[k] && meta[k].count>0); });
 
       dataLoaded=true;
@@ -662,7 +686,7 @@
     }
     function transferPlan(item, target){
       var needQty = neededQty(item[target]);
-      var others = ['mamora','san','bishr'].filter(function(b){return b!==target;});
+      var others = BR_KEYS.filter(function(b){return b!==target;});
       var sources = others
         .map(function(b){ return { branch:b, surplus:branchSurplus(item[b]) }; })
         .filter(function(s){ return s.surplus > 0; })
@@ -683,7 +707,7 @@
     var missingOrder = {};
     function missingOthers(){
       var t=document.getElementById('target-branch').value;
-      return ['mamora','san','bishr'].filter(function(b){return b!==t;});
+      return BR_KEYS.filter(function(b){return b!==t;});
     }
     // الافتراضي: الفرع صاحب أكبر فائض + الكمية = فائضه
     function missingDefaultPlan(it){
@@ -816,17 +840,17 @@
       if(currentTab==='prices'){
         base.forEach(function(it){
           var prices=[];
-          ['mamora','san','bishr'].forEach(function(br){
+          BR_KEYS.forEach(function(br){
             if(it[br].has && it[br].price>0) prices.push(it[br].price);
           });
-          var anyStock = it.mamora.stock>0 || it.san.stock>0 || it.bishr.stock>0;
+          var anyStock = BR_KEYS.some(function(k){ return (it[k].stock||0) > 0; });
           if(!anyStock) return;
           var uniq=[...new Set(prices)];
           if(uniq.length>1) rows.push(it);
         });
       } else if(currentTab==='transfer'){
         var target=document.getElementById('target-branch').value;
-        var others=['mamora','san','bishr'].filter(function(b){return b!==target;});
+        var others=BR_KEYS.filter(function(b){return b!==target;});
         base.forEach(function(it){
           if(!branchNeeds(it[target])) return;
           var hasSurplus=others.some(function(b){ return branchSurplus(it[b]) > 0; });
@@ -838,7 +862,7 @@
         if(topN>0) rows=rows.slice(0, topN);
       } else if(currentTab==='missing'){
         var target2=document.getElementById('target-branch').value;
-        var others2=['mamora','san','bishr'].filter(function(b){return b!==target2;});
+        var others2=BR_KEYS.filter(function(b){return b!==target2;});
         var minOtherStock = parseFloat(document.getElementById('missing-min-stock').value)||0;
         var minOtherAvg   = parseFloat(document.getElementById('missing-min-avg').value)||0;
         base.forEach(function(it){
@@ -896,22 +920,20 @@
 
       if(currentTab==='prices'){
         html+='<tr><th class="name-cell" style="text-align:right;">الصنف</th>'+
-          '<th>المعمورة</th><th>سان ستيفانو</th><th>سيدى بشر</th><th>الفرق</th></tr></thead><tbody>';
+          brHeadCells()+'<th>الفرق</th></tr></thead><tbody>';
         pageItems.forEach(function(it){
           var ps=[];
-          ['mamora','san','bishr'].forEach(function(br){ if(it[br].has&&it[br].price>0) ps.push(it[br].price); });
+          BR_KEYS.forEach(function(br){ if(it[br].has&&it[br].price>0) ps.push(it[br].price); });
           var maxP=Math.max.apply(null,ps), minP=Math.min.apply(null,ps);
           html+='<tr><td class="name-cell"><div style="font-weight:600;">'+it.name+' '+medBadge(it)+'</div>'+
             '<div style="font-size:0.65rem;color:var(--text-muted);">'+it.code+' · '+it.company+'</div></td>'+
-            priceCell(it.mamora, it.mamora.price===maxP, it.mamora.price===minP)+
-            priceCell(it.san,    it.san.price===maxP,    it.san.price===minP)+
-            priceCell(it.bishr,  it.bishr.price===maxP,  it.bishr.price===minP)+
+            BR_KEYS.map(function(k){ return priceCell(it[k], it[k].price===maxP, it[k].price===minP); }).join('')+
             '<td style="font-weight:700;color:var(--accent-dark);">'+r1(maxP-minP)+'</td></tr>';
         });
       } else if(currentTab==='transfer'){
         var target=document.getElementById('target-branch').value;
         html+='<tr><th class="name-cell" style="text-align:right;">الصنف</th>'+
-          '<th>'+BRANCHES.mamora+'</th><th>'+BRANCHES.san+'</th><th>'+BRANCHES.bishr+'</th>'+
+          brHeadCells()+
           '<th>المستهدف</th><th>تحويل من</th><th>الكمية المطلوبة</th></tr></thead><tbody>';
         pageItems.forEach(function(it){
           var mp=missingPlan(it), mo=missingOthers();
@@ -921,14 +943,14 @@
           var mBtn=transferActionHtml(it, mp);
           html+='<tr><td class="name-cell"><div style="font-weight:600;">'+it.name+' '+medBadge(it)+'</div>'+
             '<div style="font-size:0.65rem;color:var(--text-muted);">'+it.code+' · '+it.company+'</div></td>'+
-            branchInfoCell(it.mamora)+branchInfoCell(it.san)+branchInfoCell(it.bishr)+
+            BR_KEYS.map(function(k){ return branchInfoCell(it[k]); }).join('')+
             '<td style="font-weight:700;">'+BRANCHES[target]+'</td>'+
             '<td>'+mSel+'</td><td>'+mQty+'<br>'+mBtn+'</td></tr>';
         });
       } else if(currentTab==='missing'){
         var target2=document.getElementById('target-branch').value;
         html+='<tr><th class="name-cell" style="text-align:right;">الصنف</th>'+
-          '<th>'+BRANCHES.mamora+'</th><th>'+BRANCHES.san+'</th><th>'+BRANCHES.bishr+'</th>'+
+          brHeadCells()+
           '<th>ناقص من</th><th>تحويل من</th><th>الكمية المطلوبة</th></tr></thead><tbody>';
         pageItems.forEach(function(it){
           var mp=missingPlan(it), mo=missingOthers();
@@ -938,7 +960,7 @@
           var mBtn=transferActionHtml(it, mp);
           html+='<tr><td class="name-cell"><div style="font-weight:600;">'+it.name+' '+medBadge(it)+'</div>'+
             '<div style="font-size:0.65rem;color:var(--text-muted);">'+it.code+' · '+it.company+'</div></td>'+
-            branchInfoCell(it.mamora)+branchInfoCell(it.san)+branchInfoCell(it.bishr)+
+            BR_KEYS.map(function(k){ return branchInfoCell(it[k]); }).join('')+
             '<td style="font-weight:700;color:var(--danger);">'+BRANCHES[target2]+'</td>'+
             '<td>'+mSel+'</td><td>'+mQty+'<br>'+mBtn+'</td></tr>';
         });
@@ -1192,11 +1214,11 @@
       // افتراضيًا: اللي ليها رصيد بس (إلا لو فعّل إظهار بدون رصيد)
       var showZero = document.getElementById('lookup-show-zero') && document.getElementById('lookup-show-zero').checked;
       if(!showZero){
-        matches = matches.filter(function(it){ return ((it.mamora.stock||0)+(it.san.stock||0)+(it.bishr.stock||0)) > 0; });
+        matches = matches.filter(function(it){ return brSum(it,'stock') > 0; });
       }
       document.getElementById('result-count').textContent = matches.length+' نتيجة';
       if(!matches.length){ cont.innerHTML='<div class="loading-overlay">لا يوجد صنف بهذا الاسم أو الكود</div>'; return; }
-      var brs=['mamora','san','bishr'];
+      var brs=BR_KEYS;
       var shown=matches.slice(0,LOOKUP_MAX);
       var html='';
       shown.forEach(function(it){
@@ -1270,7 +1292,7 @@
       var search= (document.getElementById('search-input').value||'').trim().toLowerCase();
 
       var map = buildItemsMap();
-      var branches = (scope==='all') ? ['mamora','san','bishr'] : [scope];
+      var branches = (scope==='all') ? BR_KEYS : [scope];
       var rows = [];
       Object.keys(map).forEach(function(code){
         var it = map[code];
@@ -1537,7 +1559,7 @@
       disbComputed=sourceItems.map(function(p){
         var inv=itemsMapForDisb[p.code];
         var dist=distributePlan(p, from, coverDays);
-        var allB=['mamora','san','bishr'];
+        var allB=BR_KEYS;
         var addP=document.getElementById('add-purchase-toggle').checked;
         var totalStock = inv ? allB.reduce(function(s,b){
           var st=inv[b].stock; if(b===from && addP) st+=p.qty; return s+st;
@@ -1626,7 +1648,7 @@
       html+='<div class="res-wrap"><table class="res-table" style="min-width:1050px"><thead><tr>'+
         '<th class="name-cell" style="text-align:right">الصنف</th>';
       others.forEach(function(b){ html+='<th style="background:#0e7490">↤ '+BRANCHES[b]+'</th>'; });
-      ['mamora','san','bishr'].forEach(function(b){
+      BR_KEYS.forEach(function(b){
         var isSrc = (b===from);
         html+='<th'+(isSrc?' style="background:#15803d"':'')+'>'+BRANCHES[b]+(isSrc?'<br>(المصدر)':'')+'</th>';
       });
@@ -1653,7 +1675,7 @@
               'title="أقصى احتياج: '+Math.floor(r.max[b]||0)+'" oninput="editDisbQty(this)" onkeydown="qtyKeyNav(event,this)"></td>';
           }
         });
-        ['mamora','san','bishr'].forEach(function(b){
+        BR_KEYS.forEach(function(b){
           if(!r.inv){ html+='<td class="zero-stock">—</td>'; return; }
           var st=r.inv[b].stock, av=r.inv[b].avg;
           var isSrc=(b===from);
@@ -1665,10 +1687,10 @@
         html+='<td style="font-weight:700">'+r.qty+'</td>';
         html+='<td>'+r1(r.unitBuy)+'</td>';
         if(r.inv){
-          var totStock=['mamora','san','bishr'].reduce(function(s,b){
+          var totStock=BR_KEYS.reduce(function(s,b){
             var st=r.inv[b].stock; if(b===from && addP) st+=r.qty; return s+st;
           },0);
-          var totAvg=['mamora','san','bishr'].reduce(function(s,b){return s+r.inv[b].avg;},0);
+          var totAvg=BR_KEYS.reduce(function(s,b){return s+r.inv[b].avg;},0);
           var totColor = excess ? 'var(--danger)' : 'var(--accent-dark)';
           html+='<td><div class="bc-col"><span class="bc-num" style="color:'+totColor+'">'+totStock+(excess?' ⚠️':'')+'</span><span class="bc-lbl">معدل '+r1(totAvg)+'</span></div></td>';
         } else { html+='<td class="zero-stock">—</td>'; }
@@ -1749,13 +1771,16 @@
       var wb=XLSX.utils.book_new();
       var today=new Date().toISOString().slice(0,10);
       if(currentTab==='prices'){
-        var wsData=[['الكود','الصنف','الشركة','نوع','سعر المعمورة','سعر سان','سعر بشر','الفرق']];
+        var wsData=[['الكود','الصنف','الشركة','نوع']
+          .concat(BR_KEYS.map(function(k){ return 'سعر '+BRANCHES[k]; }))
+          .concat(['الفرق'])];
         filteredResults.forEach(function(it){
           var ps=[];
-          ['mamora','san','bishr'].forEach(function(br){ if(it[br].has&&it[br].price>0) ps.push(it[br].price); });
+          BR_KEYS.forEach(function(br){ if(it[br].has&&it[br].price>0) ps.push(it[br].price); });
           var diff=r1(Math.max.apply(null,ps)-Math.min.apply(null,ps));
-          wsData.push([it.code,it.name,it.company,it.isMedicine?'دواء':'تجميل',
-            it.mamora.has?it.mamora.price:'', it.san.has?it.san.price:'', it.bishr.has?it.bishr.price:'', diff]);
+          wsData.push([it.code,it.name,it.company,it.isMedicine?'دواء':'تجميل']
+            .concat(BR_KEYS.map(function(k){ return it[k].has?it[k].price:''; }))
+            .concat([diff]));
         });
         var ws=XLSX.utils.aoa_to_sheet(wsData);
         ws['!cols']=[{wch:12},{wch:40},{wch:20},{wch:8},{wch:12},{wch:12},{wch:12},{wch:8}];
