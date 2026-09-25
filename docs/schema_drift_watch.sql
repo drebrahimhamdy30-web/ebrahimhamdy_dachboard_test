@@ -87,6 +87,9 @@ norm(kind, obj, d) as (
     and split_part(c.obj, ':', 1) not in (select e.obj from excl e)   -- الجرانت شكله table:role
     -- قيود وفهارس الجداول المستثناة اسمها بيبدأ باسم الجدول
     and not exists (select 1 from excl e where c.obj like e.obj || '%')
+    -- جداول staging بتتعمل وتتمسح مع كل دورة مزامنة مخزون، فبتظهر
+    -- وتختفي من القايمة حسب توقيت التشغيل. وجودها مش انحراف.
+    and split_part(c.obj, ':', 1) not like '%\_staging'
 ),
 srv(kind, d) as (
   select kind,
@@ -114,7 +117,10 @@ select c.kind, c.obj
 from cloudsrc.v_migration_ddl c
 where c.obj not in (select e.obj from excl e)
   and split_part(c.obj, ':', 1) not in (select e.obj from excl e)
-  and not exists (select 1 from excl e where c.obj like e.obj || '%');
+  and not exists (select 1 from excl e where c.obj like e.obj || '%')
+    -- جداول staging بتتعمل وتتمسح مع كل دورة مزامنة مخزون، فبتظهر
+    -- وتختفي من القايمة حسب توقيت التشغيل. وجودها مش انحراف.
+    and split_part(c.obj, ':', 1) not like '%\_staging';
 
 -- ══ أرضية تعقّل — تتنفّذ قبل أي حكم ═════════════════════════════════
 -- الحارس عدّ من 1730 صف لصفر وقال «تمام». ماكانش فيه حاجة تسأل
