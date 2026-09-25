@@ -53,16 +53,16 @@ select coalesce(c.tbl, l.tbl) as "الجدول",
             when c.typ  is distinct from l.typ  then 'النوع مختلف'
             when c.nn   is distinct from l.nn   then 'not null مختلف'
             when c.dflt is distinct from l.dflt then 'القيمة الافتراضية مختلفة'
-            when c.pos  is distinct from l.pos  then 'ترتيب العمود مختلف'
        end as "الفرق",
+       -- ⚠️ مافيش فحص لترتيب الأعمدة: بوستجرس بيسيب فجوة في الترقيم
+       --    لما عمود يتشال، والسحابة اتشال منها أعمدة على مدى سنة.
+       --    فالأرقام مختلفة ومجموعة الأعمدة متطابقة — ٩٠ سطر ضوضاء.
        case when c.typ is distinct from l.typ then c.typ
             when c.nn is distinct from l.nn then c.nn::text
-            when c.dflt is distinct from l.dflt then coalesce(c.dflt,'(مفيش)')
-            when c.pos is distinct from l.pos then c.pos::text end as "السحابة",
+            when c.dflt is distinct from l.dflt then coalesce(c.dflt,'(مفيش)') end as "السحابة",
        case when c.typ is distinct from l.typ then l.typ
             when c.nn is distinct from l.nn then l.nn::text
-            when c.dflt is distinct from l.dflt then coalesce(l.dflt,'(مفيش)')
-            when c.pos is distinct from l.pos then l.pos::text end as "السيرفر"
+            when c.dflt is distinct from l.dflt then coalesce(l.dflt,'(مفيش)') end as "السيرفر"
 from _c_cols c
 full join _l_cols l on l.tbl = c.tbl and l.col = c.col
 where (c.tbl is null or exists (select 1 from _l_cols x where x.tbl = c.tbl))
@@ -70,8 +70,7 @@ where (c.tbl is null or exists (select 1 from _l_cols x where x.tbl = c.tbl))
   and (c.col is null or l.col is null
        or c.typ is distinct from l.typ
        or c.nn is distinct from l.nn
-       or c.dflt is distinct from l.dflt
-       or c.pos is distinct from l.pos)
+       or c.dflt is distinct from l.dflt)
 order by 1, coalesce(c.pos, l.pos);
 
 -- ── الصلاحيات ────────────────────────────────────────────────────
@@ -86,8 +85,8 @@ select * from dblink('cloud', $q$
 $q$) as t(tbl text, grantee text, privs text);
 
 create temp table _l_gr as
-select table_name::text, grantee::text,
-       string_agg(privilege_type::text, ',' order by privilege_type::text)
+select table_name::text as tbl, grantee::text as grantee,
+       string_agg(privilege_type::text, ',' order by privilege_type::text) as privs
 from information_schema.role_table_grants
 where table_schema = 'public' and grantee in ('anon','authenticated','service_role')
 group by 1,2;
