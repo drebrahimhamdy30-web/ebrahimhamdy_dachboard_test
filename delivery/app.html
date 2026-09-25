@@ -701,6 +701,39 @@ function buildQuickLinks() {
 let hsTimer = null;
 const hsEsc = s => String(s == null ? '' : s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const hsR1 = v => { const n = parseFloat(v); return isFinite(n) ? Math.round(n * 10) / 10 : 0; };
+/* quick_search_stock بترجّع q = { <حرف الفرع>: {name, sort, q, p} } مبني
+   من جدول الفروع (branches.letter)، فأي فرع جديد بيظهر هنا لوحده.
+   الأعمدة القديمة m_q/s_q/b_q لسه بترجع للتوافق — بنستعملها كاحتياطي
+   بس لو الترحيل ماوصلش للقاعدة اللي الصفحة دي بتقرا منها، عشان
+   مايظهرش سطر فاضي من غير سبب واضح. */
+function hsBranches(x) {
+  const o = x && x.q;
+  if (!o || typeof o !== 'object') return null;
+  const list = Object.keys(o).map(k => o[k]).filter(Boolean);
+  if (!list.length) return null;
+  return list.sort((a, b) => (a.sort == null ? 99 : a.sort) - (b.sort == null ? 99 : b.sort));
+}
+function hsQtyLine(x) {
+  const br = hsBranches(x);
+  if (!br) {   // احتياطي: دالة قديمة قبل الترحيل
+    return 'المعمورة: <b>' + hsR1(x.m_q) + '</b> · سان: <b>' + hsR1(x.s_q) + '</b> · بشر: <b>' + hsR1(x.b_q) + '</b>';
+  }
+  return br.map(b => hsEsc(b.name) + ': <b>' + hsR1(b.q) + '</b>').join(' · ');
+}
+/* السعر: أول سعر أكبر من صفر بترتيب الفروع. كان بياخد سعر المعمورة
+   دايمًا — يعني صنف موجود في فرع تاني بس كان بيظهر من غير سعر. */
+function hsPrice(x) {
+  const br = hsBranches(x);
+  if (br) {
+    for (let i = 0; i < br.length; i++) {
+      const p = parseFloat(br[i].p);
+      if (isFinite(p) && p > 0) return p;
+    }
+    return null;
+  }
+  const m = parseFloat(x.m_p);
+  return (isFinite(m) && m > 0) ? m : null;
+}
 function hsShow(html) { const r = document.getElementById('hsResults'); if (r) { r.innerHTML = html; r.classList.add('open'); } }
 function hsClose() { const r = document.getElementById('hsResults'); if (r) r.classList.remove('open'); }
 function hsDebounce() { clearTimeout(hsTimer); hsTimer = setTimeout(hsSearch, 300); }
@@ -716,8 +749,9 @@ async function hsSearch() {
       hsShow(data.map(x =>
         '<div class="hs-row"><b>' + hsEsc(x.name) + '</b> <span style="color:#94a3b8">' + hsEsc(x.code) + '</span>'
         + (x.company ? ' · <span style="color:#64748b">' + hsEsc(x.company) + '</span>' : '')
-        + '<div style="color:#334155;margin-top:2px">المعمورة: <b>' + hsR1(x.m_q) + '</b> · سان: <b>' + hsR1(x.s_q) + '</b> · بشر: <b>' + hsR1(x.b_q) + '</b>'
-        + (x.unit ? ' · ' + hsEsc(x.unit) : '') + (x.m_p ? ' · سعر ' + hsR1(x.m_p) : '') + '</div></div>').join(''));
+        + '<div style="color:#334155;margin-top:2px">' + hsQtyLine(x)
+        + (x.unit ? ' · ' + hsEsc(x.unit) : '')
+        + (hsPrice(x) != null ? ' · سعر ' + hsR1(hsPrice(x)) : '') + '</div></div>').join(''));
     } else {
       const qs = q.replace(/[,()%]/g, ' ').trim();
       const { data } = await db.from('store_item_prices')
