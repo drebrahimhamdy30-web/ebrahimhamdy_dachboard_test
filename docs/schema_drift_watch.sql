@@ -68,7 +68,10 @@ with excl as (
     -- جداول نسخ مؤقتة من إصلاحات قديمة — مالهاش لازمة على السيرفر
     'pos_shifts_dupe_backup_20260905','wallet_done_backfill_20260910',
     -- أدوات الترحيل نفسها
-    'v_migration_ddl','v_migration_post'
+    'v_migration_ddl','v_migration_post',
+    -- نسخ وstaging مؤقتة — مقصود إنها مش على السيرفر. الانحراف
+    -- المقصود بيخلّي العدّاد مش معبّر، فبنستثنيها.
+    'sip_code_backup_20260922','sip_namefill_staging'
   ]) as obj
 ),
 -- توحيد الصياغة: اسم السكيما، والمسافات المتكررة، وآخر فاصلة منقوطة
@@ -101,7 +104,10 @@ with excl as (
     'notify_fcm_on_assign','notify_on_driver_change','trg_delivery_perf',
     'trg_fail_perf','trg_trip_return_perf','sweep_unrated_perf',
     'pos_shifts_dupe_backup_20260905','wallet_done_backfill_20260910',
-    'v_migration_ddl','v_migration_post'
+    'v_migration_ddl','v_migration_post',
+    -- نسخ وstaging مؤقتة — مقصود إنها مش على السيرفر. الانحراف
+    -- المقصود بيخلّي العدّاد مش معبّر، فبنستثنيها.
+    'sip_code_backup_20260922','sip_namefill_staging'
   ]) as obj
 )
 select c.kind, c.obj
