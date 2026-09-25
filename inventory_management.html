@@ -130,7 +130,6 @@
         <button class="tab-btn active" data-tab="prices" onclick="switchTab('prices', this)">💲 فرق الأسعار بين الفروع</button>
         <button class="tab-btn" data-tab="transfer" onclick="switchTab('transfer', this)">🔄 تحويل بين الفروع</button>
         <button class="tab-btn" data-tab="missing" onclick="switchTab('missing', this)">📭 ناقص من فرع</button>
-        <button class="tab-btn" data-tab="minstock" onclick="switchTab('minstock', this)">⚠️ تحت الحد الأدنى <span id="ms-badge" style="display:none;background:var(--danger,#dc2626);color:#fff;border-radius:10px;padding:0 6px;font-size:0.7rem;margin-right:3px;">0</span></button>
         <button class="tab-btn" data-tab="pricechanges" onclick="switchTab('pricechanges', this)">📈 تغيّرات الأسعار</button>
         <button class="tab-btn" data-tab="disbursement" onclick="switchTab('disbursement', this)">📋 أذون الصرف</button>
         <button class="tab-btn" data-tab="overstock" onclick="switchTab('overstock', this)">📦 مخزون زائد</button>
@@ -216,25 +215,6 @@
             </div>
 
             <!-- شريط إعدادات تاب تغيّرات الأسعار -->
-            <!-- شريط إعدادات تاب «تحت الحد الأدنى» -->
-            <div class="settings-strip" id="ms-config-wrap" style="display:none;">
-              <div class="mini-field wide">
-                <span class="filter-label">الفرع <span class="help-ic">؟<span class="tip">اعرض الأصناف اللي تحت الحد في الفرع ده. «كل الفروع» = أي فرع تحت حده.</span></span></span>
-                <select data-branches="code" id="ms-branch" onchange="renderMinStock()">
-                  <option value="">كل الفروع</option>
-                </select>
-              </div>
-              <div class="mini-field wide">
-                <span class="filter-label">بحث</span>
-                <input type="text" id="ms-search" class="form-input" placeholder="اسم الصنف أو الكود..." oninput="msSearchChanged()">
-              </div>
-              <label class="check-label" style="align-self:center;">
-                <input type="checkbox" id="ms-below" checked onchange="renderMinStock()"> تحت الحد فقط ⚠️
-              </label>
-              <button class="btn btn-primary" onclick="msToggleAdd()" style="align-self:center;"><i class="fas fa-plus"></i> إضافة صنف للمراقبة</button>
-              <div id="ms-stock-at" style="font-size:0.75rem;color:var(--text-muted);margin-right:auto;align-self:center;"></div>
-            </div>
-
             <div class="settings-strip" id="pc-config-wrap" style="display:none;">
               <div class="mini-field wide">
                 <span class="filter-label">الفرع <span class="help-ic">؟<span class="tip">فلترة التغييرات حسب الفرع.</span></span></span>
@@ -362,8 +342,11 @@
   <script src="api.js?v=20260904c"></script>
   <script>
     const REFRESH_WEBHOOK = 'https://agent.ebrahimhamdy.com/webhook/refresh_stock';
-    const REFRESH_URLS = { mamora: REFRESH_WEBHOOK, san: REFRESH_WEBHOOK, bishr: REFRESH_WEBHOOK };
     const BRANCHES = Branches.codeMap();
+    const BR_KEYS  = Object.keys(BRANCHES);                 // أي فرع جديد بيدخل لوحده
+    // get_stock_summary بيرجّع الفرع بحرف: المعمورة m · سان s · بشر b · السيوف f
+    const BR_LETTER = { mamora:'m', san:'s', bishr:'b', seyouf:'f' };
+    const REFRESH_URLS = (function(){ var o={}; BR_KEYS.forEach(function(k){ o[k]=REFRESH_WEBHOOK; }); return o; })();
     // اسم المخزن → الكود المختصر
     const BRANCH_NAME_MAP = (function(){ var m={}; Branches.all().forEach(function(b){ (b.aliases||[]).forEach(function(a){ m[a]=b.code; }); }); return m; })();
     const STALE_HOURS = 12;
@@ -374,7 +357,7 @@
     var currentTab='prices';
     var currentPage=1;
     const PAGE_SIZE=30;
-    var branchUpdates={mamora:null, san:null, bishr:null};
+    var branchUpdates=(function(){ var o={}; BR_KEYS.forEach(function(k){ o[k]=null; }); return o; })();
 
     const LS_KEY='invmgmt_settings';
     function saveSettings(){
@@ -458,10 +441,8 @@
         if(currentTab==='pricechanges') loadPriceChanges();
         else if(currentTab==='overstock') renderOverstock();
         else if(currentTab==='lookup') renderLookup();
-        else if(currentTab==='minstock') renderMinStock();
         else if(currentTab!=='disbursement')
           document.getElementById('result-container').innerHTML='<div class="loading-overlay">اضغط "احسب" لعرض النتائج</div>';
-        if(currentTab!=='minstock') msBadgeRefresh();   // عدّاد «تحت الحد» يبان من غير ما تفتح التبويب
       }
     });
 
@@ -471,7 +452,7 @@
     }
 
     var stockLoaded=false;
-    var branchEmpty = {mamora:false, san:false, bishr:false};
+    var branchEmpty = (function(){ var o={}; BR_KEYS.forEach(function(k){ o[k]=false; }); return o; })();
     async function loadStockData(silent){
       if(stockLoaded) return true;
       if(!silent && currentTab!=='disbursement' && currentTab!=='pricechanges')
@@ -517,9 +498,7 @@
       salesData    = r[1].status==='fulfilled' ? r[1].value : [];
       var meta = stockSummary.meta || {};
 
-      branchEmpty.mamora = !(meta.mamora && meta.mamora.count>0);
-      branchEmpty.san    = !(meta.san    && meta.san.count>0);
-      branchEmpty.bishr  = !(meta.bishr  && meta.bishr.count>0);
+      BR_KEYS.forEach(function(k){ branchEmpty[k] = !(meta[k] && meta[k].count>0); });
 
       dataLoaded=true;
       stockLoaded=true;
@@ -553,9 +532,7 @@
       return isNaN(t)?null:t;
     }
     function computeBranchUpdates(){
-      branchUpdates.mamora=metaUpdated('mamora');
-      branchUpdates.san   =metaUpdated('san');
-      branchUpdates.bishr =metaUpdated('bishr');
+      BR_KEYS.forEach(function(k){ branchUpdates[k]=metaUpdated(k); });
     }
     function timeAgo(ts){
       if(!ts) return 'غير معروف';
@@ -612,11 +589,10 @@
         map[code]={
           code:code, name:item.n||'', company:item.co||'',
           unit:item.u||'',
-          isMedicine: (parseInt(item.med)||0)!==0,
-          mamora: branchObj(item.m),
-          san:    branchObj(item.s),
-          bishr:  branchObj(item.b)
+          isMedicine: (parseInt(item.med)||0)!==0
         };
+        // كل فرع من قايمة الفروع — والفرع اللي ملوش بيانات بياخد صفر بدل undefined
+        BR_KEYS.forEach(function(k){ map[code][k] = branchObj(item[BR_LETTER[k]]); });
       });
 
       // salesData بقت ملخّص جاهز من الـRPC: {itm_code, mamora_total, mamora_active, ...}
@@ -624,11 +600,12 @@
       salesData.forEach(function(row){
         var code=String(row.itm_code||'').trim();
         if(!code) return;
-        salesMap[code]={
-          mamora:{ total:parseFloat(row.mamora_total)||0, active:parseInt(row.mamora_active)||0 },
-          san:   { total:parseFloat(row.san_total)||0,    active:parseInt(row.san_active)||0 },
-          bishr: { total:parseFloat(row.bishr_total)||0,  active:parseInt(row.bishr_active)||0 }
-        };
+        salesMap[code]={};
+        // get_sales_summary بيرجّع <الكود>_total/_active — الفرع الجديد لسه مالوش
+        // أعمدة في monthly_sales فبيطلع صفر (يعني معدل استهلاكه 0 لحد ما تتضاف)
+        BR_KEYS.forEach(function(k){
+          salesMap[code][k] = { total:parseFloat(row[k+'_total'])||0, active:parseInt(row[k+'_active'])||0 };
+        });
       });
       function branchCalc(bs){
         var active=(bs&&bs.active)||0, total=(bs&&bs.total)||0;
@@ -636,8 +613,8 @@
         return {avg:avg, active:active};
       }
       Object.keys(map).forEach(function(code){
-        var sale=salesMap[code]||{mamora:{},san:{},bishr:{}};
-        ['mamora','san','bishr'].forEach(function(br){
+        var sale=salesMap[code]||{};
+        BR_KEYS.forEach(function(br){
           var c=branchCalc(sale[br]||{});
           map[code][br].avg=c.avg;
           map[code][br].active=c.active;
@@ -997,8 +974,6 @@
         overPage=1; renderOverstock();
       } else if(tab==='lookup'){
         renderLookup();
-      } else if(tab==='minstock'){
-        renderMinStock();
       } else if(hasCalculated){
         applyAndRender();
       } else {
@@ -1006,7 +981,7 @@
       }
     }
     function updateTabUI(){
-      var titles={lookup:'بحث في المخزون', prices:'فرق الأسعار بين الفروع', transfer:'التحويل بين الفروع', missing:'أصناف ناقصة من فرع', pricechanges:'تغيّرات الأسعار', disbursement:'أذون صرف التحويل', overstock:'مخزون زائد (Over Stock)', minstock:'تحت الحد الأدنى'};
+      var titles={lookup:'بحث في المخزون', prices:'فرق الأسعار بين الفروع', transfer:'التحويل بين الفروع', missing:'أصناف ناقصة من فرع', pricechanges:'تغيّرات الأسعار', disbursement:'أذون صرف التحويل', overstock:'مخزون زائد (Over Stock)'};
       document.getElementById('result-title').textContent=titles[currentTab]||'';
 
       var isPrices   = (currentTab==='prices');
@@ -1016,7 +991,6 @@
       var isDisb     = (currentTab==='disbursement');
       var isOver     = (currentTab==='overstock');
       var isLookup   = (currentTab==='lookup');
-      var isMin      = (currentTab==='minstock');
 
       document.getElementById('stock-toolbar').style.display = isDisb ? 'none' : 'block';
       document.getElementById('disb-toolbar').style.display  = isDisb ? 'block' : 'none';
@@ -1024,10 +998,10 @@
 
       // صف البحث + نوع الأصناف: يظهر فقط في الأصناف (مش في تغيّرات الأسعار)
       var searchRow = document.querySelector('#stock-toolbar .search-row');
-      if(searchRow) searchRow.style.display = (isPC || isMin) ? 'none' : 'flex';
+      if(searchRow) searchRow.style.display = isPC ? 'none' : 'flex';
 
       var mainCalc = document.getElementById('main-calc-btn');
-      if(mainCalc) mainCalc.style.display = (isDisb || isPC || isOver || isLookup || isMin) ? 'none' : 'inline-flex';
+      if(mainCalc) mainCalc.style.display = (isDisb || isPC || isOver || isLookup) ? 'none' : 'inline-flex';
 
       var needWrap = document.getElementById('need-config-wrap');
       if(needWrap) needWrap.style.display = isTransfer ? 'flex' : 'none';
@@ -1039,12 +1013,10 @@
       if(overWrap) overWrap.style.display = isOver ? 'flex' : 'none';
       var lookWrap = document.getElementById('lookup-config-wrap');
       if(lookWrap) lookWrap.style.display = isLookup ? 'flex' : 'none';
-      var msWrap = document.getElementById('ms-config-wrap');
-      if(msWrap) msWrap.style.display = isMin ? 'flex' : 'none';
 
       var excelBtn = document.getElementById('excel-btn');
       if(excelBtn){
-        if(isPrices || isPC || isOver || isLookup || isMin){ excelBtn.style.display='none'; }
+        if(isPrices || isPC || isOver || isLookup){ excelBtn.style.display='none'; }
         else if(isDisb){ excelBtn.style.display='inline-flex'; excelBtn.innerHTML='<i class="fas fa-file-excel"></i> تصدير أذون الصرف'; excelBtn.disabled = disbWithQty()===0; }
         else { excelBtn.style.display='inline-flex'; excelBtn.innerHTML='<i class="fas fa-file-excel"></i> Excel'; excelBtn.disabled=false; }
       }
@@ -1054,327 +1026,6 @@
       var v = document.getElementById('target-branch-missing').value;
       document.getElementById('target-branch').value = v;
       onFilterChange();
-    }
-
-    // ===================================================================
-    // ============ تاب «تحت الحد الأدنى» (Min Stock Alerts) =============
-    // ===================================================================
-    // الحدود في stock_limit (صف لكل صنف × فرع) — نفس جدول شاشة «حدود المخزون».
-    // الأرصدة والحدود بتيجي مرة واحدة من get_min_stock_alerts (migrate_26)،
-    // والفائض في الفرع المصدر = رصيده − حده الأدنى هو كمان عشان ما نفضّيش فرع
-    // على حساب فرع. التحويل بيتبعت بنفس طريقة تاب «ناقص من فرع».
-    var MS_SUF = { mamora:'m', san:'s', bishr:'b' };
-    var msRows = [], msLoaded = false, msAdmin = false, msMyBranch = '', msPage = 1, msPendBuy = {}, msAddOpen = false, msFound = [];
-    var MS_PER_PAGE = 50;
-
-    function msNum(v){ var n = parseFloat(v); return isNaN(n) ? 0 : n; }
-    function msCanEdit(code){ return msAdmin || Branches.same(BRANCHES[code] || '', msMyBranch); }
-    function msMin(r, c){ var v = r['min_' + MS_SUF[c]]; return (v === null || v === undefined || v === '') ? null : msNum(v); }
-    function msQty(r, c){ return msNum(r['qty_' + MS_SUF[c]]); }
-    function msPend(r, c){ return !!r['pend_' + MS_SUF[c]]; }
-    function msNeed(r, c){ var m = msMin(r, c); if(m === null) return 0; var d = m - msQty(r, c); return d > 0 ? Math.ceil(d) : 0; }
-    // الفائض المتاح للتحويل من فرع = رصيده − حده الأدنى (أو صفر)
-    function msSurplus(r, c){ var m = msMin(r, c); return Math.floor(msQty(r, c) - (m === null ? 0 : m)); }
-    function msBestSource(r, target){
-      var best = null, bestQty = 0;
-      Object.keys(MS_SUF).forEach(function(c){
-        if(c === target) return;
-        var s = msSurplus(r, c);
-        if(s > bestQty){ bestQty = s; best = c; }
-      });
-      return best ? { code: best, qty: bestQty } : null;
-    }
-    function msBelowAny(r){ return Object.keys(MS_SUF).some(function(c){ return msNeed(r, c) > 0; }); }
-
-    async function msLoad(force){
-      if(msLoaded && !force) return true;
-      try{
-        var r = await fetch(SB_URL_API + '/rest/v1/rpc/get_min_stock_alerts', {
-          method:'POST', headers: await sbH({'Content-Type':'application/json'}), body:'{}' });
-        var j = await r.json();
-        if(!j || !j.success) throw new Error((j && j.error) || 'فشل التحميل');
-        msRows = j.rows || []; msAdmin = !!j.is_admin; msMyBranch = j.my_branch || '';
-        var el = document.getElementById('ms-stock-at');
-        if(el && j.stock_at) el.textContent = 'المخزون محدّث: ' + new Date(j.stock_at).toLocaleString('ar-EG', { timeZone:'Africa/Cairo', dateStyle:'short', timeStyle:'short' });
-        await msLoadPendingBuys();
-        msLoaded = true;
-        msBadge();
-        return true;
-      }catch(e){ console.error('msLoad', e); return false; }
-    }
-    // طلبات شراء لسه مفتوحة للأصناف دي (عشان مانطلبش مرتين)
-    async function msLoadPendingBuys(){
-      msPendBuy = {};
-      try{
-        var since = new Date(Date.now() - 45*24*3600*1000).toISOString();
-        var r = await fetch(SB_URL_API + '/rest/v1/task?select=item_code,branch,state&type=eq.' + encodeURIComponent('شراء')
-          + '&state=in.(pending,ordered)&created_at=gte.' + since + '&limit=2000', { headers: await sbH() });
-        var rows = await r.json();
-        (Array.isArray(rows) ? rows : []).forEach(function(x){
-          msPendBuy[String(x.branch || '') + '|' + String(x.item_code || '')] = x.state;
-        });
-      }catch(e){}
-    }
-    function msBadge(){
-      var n = msRows.filter(msBelowAny).length;
-      var el = document.getElementById('ms-badge');
-      if(!el) return;
-      el.textContent = n;
-      el.style.display = n ? 'inline-block' : 'none';
-    }
-    async function msBadgeRefresh(){ if(!msLoaded) { await msLoad(); } else { msBadge(); } }
-
-    var msSearchTimer = null;
-    function msSearchChanged(){ clearTimeout(msSearchTimer); msSearchTimer = setTimeout(function(){ msPage = 1; renderMinStock(); }, 250); }
-
-    async function renderMinStock(){
-      var cont = document.getElementById('result-container');
-      if(!msLoaded){
-        cont.innerHTML = '<div class="loading-overlay">⏳ جاري تحميل الحدود والأرصدة...</div>';
-        var ok = await msLoad();
-        if(!ok){ cont.innerHTML = '<div class="loading-overlay" style="color:var(--danger)">❌ فشل تحميل البيانات — جرّب تحديث الصفحة</div>'; return; }
-      }
-      var br     = document.getElementById('ms-branch').value;
-      var below  = document.getElementById('ms-below').checked;
-      var search = (document.getElementById('ms-search').value || '').trim().toLowerCase();
-      var codes  = br ? [br] : Object.keys(MS_SUF);
-
-      var rows = msRows.filter(function(r){
-        if(itemType === 'med' && !r.med) return false;
-        if(itemType === 'cos' &&  r.med) return false;
-        if(search && String(r.name || '').toLowerCase().indexOf(search) === -1 && String(r.code).indexOf(search) === -1) return false;
-        if(br && msMin(r, br) === null) return false;          // الفرع ده مش متحط له حد
-        if(below && !codes.some(function(c){ return msNeed(r, c) > 0; })) return false;
-        return true;
-      });
-      // الأكتر نقصًا الأول
-      rows.sort(function(a, b){
-        var na = Math.max.apply(null, codes.map(function(c){ return msNeed(a, c); }));
-        var nb = Math.max.apply(null, codes.map(function(c){ return msNeed(b, c); }));
-        if(nb !== na) return nb - na;
-        return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
-      });
-
-      var totalBelow = msRows.filter(msBelowAny).length;
-      document.getElementById('result-count').textContent = rows.length + ' صنف معروض · ' + totalBelow + ' تحت الحد · ' + msRows.length + ' تحت المراقبة';
-
-      var pages = Math.max(1, Math.ceil(rows.length / MS_PER_PAGE));
-      if(msPage > pages) msPage = pages;
-      var view = rows.slice((msPage - 1) * MS_PER_PAGE, msPage * MS_PER_PAGE);
-
-      var h = msAddHtml();
-      if(!rows.length){
-        h += '<div class="loading-overlay">' + (msRows.length ? '✅ مفيش أصناف تحت الحد بالفلاتر دي' : 'مفيش أصناف تحت المراقبة — ابدأ بـ«إضافة صنف للمراقبة»') + '</div>';
-        cont.innerHTML = h; return;
-      }
-      h += '<div class="table-wrap"><table><thead><tr><th>الصنف</th>'
-         + Object.keys(MS_SUF).map(function(c){ return '<th style="text-align:center">' + BRANCHES[c] + '<div style="font-weight:400;font-size:0.68rem;color:var(--text-muted)">رصيد / حد أدنى</div></th>'; }).join('')
-         + '<th>الإجراء</th></tr></thead><tbody>';
-      view.forEach(function(r){
-        h += '<tr><td><div style="font-weight:700">' + msEsc(r.name) + '</div>'
-           + '<div style="font-size:0.7rem;color:var(--text-muted)">' + msEsc(r.code) + (r.company ? ' · ' + msEsc(r.company) : '') + (r.unit ? ' · ' + msEsc(r.unit) : '') + '</div></td>';
-        Object.keys(MS_SUF).forEach(function(c){
-          var m = msMin(r, c), q = msQty(r, c), need = msNeed(r, c);
-          var av = msNum(r['av_' + MS_SUF[c]]);
-          h += '<td style="text-align:center;' + (need > 0 ? 'background:var(--danger-bg,#fee2e2);' : '') + '">'
-             + '<div style="font-weight:700;' + (need > 0 ? 'color:var(--danger-strong,#b91c1c);' : '') + '">' + msFmt(q) + '</div>'
-             + '<input type="number" min="0" step="1" class="min-input" value="' + (m === null ? '' : m) + '" placeholder="—"'
-             + (msCanEdit(c) ? '' : ' disabled title="حد فرع تاني — الأدمن بس"')
-             + ' onchange="msSaveMin(\'' + r.code + '\',\'' + c + '\',this)" style="width:62px;padding:3px 6px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface-3);color:var(--text-primary);font-family:var(--font);font-size:0.8rem;text-align:center;margin-top:3px">'
-             + (need > 0 ? '<div style="font-size:0.68rem;color:var(--danger-strong,#b91c1c);font-weight:700;margin-top:2px">ناقص ' + need + '</div>' : '')
-             + (av ? '<div style="font-size:0.64rem;color:var(--text-muted)">معدل ' + msFmt(av) + '/شهر</div>' : '')
-             + '</td>';
-        });
-        h += '<td>' + msActionsHtml(r, codes) + '</td></tr>';
-      });
-      h += '</tbody></table></div>';
-      if(pages > 1){
-        h += '<div class="pagination">'
-           + '<button class="btn btn-outline btn-sm" ' + (msPage <= 1 ? 'disabled' : '') + ' onclick="msGoto(' + (msPage - 1) + ')">›</button>'
-           + '<span style="font-size:0.8rem">صفحة ' + msPage + ' من ' + pages + '</span>'
-           + '<button class="btn btn-outline btn-sm" ' + (msPage >= pages ? 'disabled' : '') + ' onclick="msGoto(' + (msPage + 1) + ')">‹</button></div>';
-      }
-      cont.innerHTML = h;
-    }
-    function msGoto(p){ msPage = p; renderMinStock(); document.getElementById('result-container').scrollIntoView({ behavior:'smooth', block:'start' }); }
-    function msFmt(v){ var n = msNum(v); return (Math.round(n * 100) / 100).toLocaleString('en-US'); }
-    function msEsc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-
-    // إجراء لكل فرع ناقص: تحويل من فرع فايض، وإلا شراء
-    function msActionsHtml(r, codes){
-      var out = [];
-      codes.forEach(function(c){
-        var need = msNeed(r, c);
-        if(need <= 0) return;
-        var target = BRANCHES[c];
-        if(msPend(r, c)){ out.push('<div style="font-size:0.72rem;font-weight:700;color:var(--warning,#f59e0b)">⏳ ' + msEsc(target) + ': تم طلب تحويله</div>'); return; }
-        var buy = msPendBuy[target + '|' + String(r.code)];
-        if(buy){ out.push('<div style="font-size:0.72rem;font-weight:700;color:var(--warning,#f59e0b)">⏳ ' + msEsc(target) + ': ' + (buy === 'ordered' ? 'اتطلب شراؤه' : 'طلب شراء مفتوح') + '</div>'); return; }
-        var src = msBestSource(r, c);
-        var qty = src ? Math.min(need, src.qty) : need;
-        if(src){
-          out.push('<button id="msbtn-' + r.code + '-' + c + '" class="btn btn-primary btn-sm" style="margin:2px 0;font-size:0.72rem"'
-            + ' onclick="msTransfer(\'' + r.code + '\',\'' + c + '\',\'' + src.code + '\',' + qty + ')">↪ ' + msEsc(target) + ': حوّل ' + qty + ' من ' + msEsc(BRANCHES[src.code]) + '</button>');
-        } else {
-          out.push('<button id="msbtn-' + r.code + '-' + c + '" class="btn btn-outline btn-sm" style="margin:2px 0;font-size:0.72rem"'
-            + ' onclick="msBuy(\'' + r.code + '\',\'' + c + '\',' + need + ')">🛒 ' + msEsc(target) + ': اطلب شراء ' + need + '</button>');
-        }
-      });
-      return out.join('') || '<span style="font-size:0.72rem;color:var(--text-muted)">—</span>';
-    }
-
-    async function msSaveMin(code, bcode, el){
-      var raw = String(el.value || '').trim();
-      var val = raw === '' ? null : parseFloat(raw);
-      if(val !== null && (isNaN(val) || val < 0)){ alert('الحد الأدنى لازم رقم موجب'); return; }
-      el.disabled = true;
-      var r = msRows.find(function(x){ return String(x.code) === String(code); });
-      try{
-        var res = await fetch(SB_URL_API + '/rest/v1/rpc/set_stock_limit', {
-          method:'POST', headers: await sbH({'Content-Type':'application/json'}),
-          body: JSON.stringify({ p_code: String(code), p_branch: BRANCHES[bcode], p_min: val, p_name: r ? r.name : null })
-        });
-        var j = await res.json();
-        if(!j || !j.success) throw new Error((j && j.error) || 'فشل الحفظ');
-        if(r) r['min_' + MS_SUF[bcode]] = val;
-        el.style.borderColor = 'var(--success,#16a34a)';
-        setTimeout(function(){ el.style.borderColor = ''; renderMinStock(); }, 400);
-        msBadge();
-      }catch(e){
-        alert('⚠️ ' + e.message);
-        if(r){ var old = r['min_' + MS_SUF[bcode]]; el.value = (old === null || old === undefined) ? '' : old; }
-      }
-      el.disabled = false;
-    }
-
-    async function msTransfer(code, targetCode, srcCode, qty){
-      var r = msRows.find(function(x){ return String(x.code) === String(code); });
-      if(!r || !(qty > 0)) return;
-      var targetName = BRANCHES[targetCode], sourceName = BRANCHES[srcCode];
-      var btn = document.getElementById('msbtn-' + code + '-' + targetCode);
-      if(btn){ btn.disabled = true; btn.textContent = '... جاري الإرسال'; }
-      await ensureBranchReps();
-      var out = await sbTaskInsert({
-        type:'تحويل',
-        user:(branchReps && branchReps[targetName]) || targetName,
-        target_branch: sourceName,
-        item_code: String(r.code),
-        item: r.name,
-        qty: qty,
-        note:'تحت الحد الأدنى — رصيد ' + targetName + ' ' + msFmt(msQty(r, targetCode)) + ' والحد ' + msMin(r, targetCode)
-      });
-      if(out && out.ok){
-        try{
-          await fetch(SB_URL_API + '/rest/v1/order_transfer_pending?on_conflict=branch,itm_code', {
-            method:'POST',
-            headers: await sbH({'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=minimal'}),
-            body: JSON.stringify({ branch: targetName, itm_code: String(r.code), qty: qty, requested_at: new Date().toISOString() })
-          });
-        }catch(e){}
-        r['pend_' + MS_SUF[targetCode]] = true;
-        renderMinStock();
-      }else{
-        alert('فشل إرسال طلب التحويل — حاول تاني');
-        renderMinStock();
-      }
-    }
-
-    async function msBuy(code, targetCode, qty){
-      var r = msRows.find(function(x){ return String(x.code) === String(code); });
-      if(!r || !(qty > 0)) return;
-      var targetName = BRANCHES[targetCode];
-      if(!confirm('اطلب شراء ' + qty + ' ' + (r.unit || '') + ' من «' + r.name + '» لفرع ' + targetName + '؟')) return;
-      var btn = document.getElementById('msbtn-' + code + '-' + targetCode);
-      if(btn){ btn.disabled = true; btn.textContent = '... جاري الإرسال'; }
-      await ensureBranchReps();
-      var out = await sbTaskInsert({
-        type:'شراء',
-        user:(branchReps && branchReps[targetName]) || targetName,
-        branch: targetName,
-        item_code: String(r.code),
-        item: r.name,
-        qty: qty,
-        order_type: r.med ? 'دواء' : 'كوزمو',
-        note:'تحت الحد الأدنى — مفيش فرع عنده فائض (رصيد ' + targetName + ' ' + msFmt(msQty(r, targetCode)) + ' والحد ' + msMin(r, targetCode) + ')'
-      });
-      if(out && out.ok){
-        msPendBuy[targetName + '|' + String(r.code)] = 'pending';
-        renderMinStock();
-      }else{
-        alert('فشل إرسال طلب الشراء — حاول تاني');
-        renderMinStock();
-      }
-    }
-
-    // ── إضافة صنف للمراقبة ──
-    function msToggleAdd(){ msAddOpen = !msAddOpen; msFound = []; renderMinStock(); if(msAddOpen) setTimeout(function(){ var el = document.getElementById('ms-add-q'); if(el) el.focus(); }, 50); }
-    function msAddHtml(){
-      if(!msAddOpen) return '';
-      var h = '<div style="background:var(--surface-2);border:1.5px solid var(--border);border-radius:var(--radius-md);padding:14px;margin-bottom:14px">'
-        + '<div style="font-weight:700;font-size:0.85rem;margin-bottom:10px">➕ إضافة صنف للمراقبة</div>'
-        + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
-        + '<input type="text" id="ms-add-q" class="form-input" style="min-width:240px" placeholder="كود الصنف أو جزء من اسمه..." onkeydown="if(event.key===\'Enter\')msSearchItem()">'
-        + '<button class="btn btn-primary" onclick="msSearchItem()"><i class="fas fa-search"></i> بحث</button>'
-        + '<button class="btn btn-outline" onclick="msToggleAdd()">إغلاق</button></div>'
-        + '<div id="ms-add-results" style="margin-top:10px">' + msFoundHtml() + '</div></div>';
-      return h;
-    }
-    function msFoundHtml(){
-      if(!msFound.length) return '';
-      return '<div class="table-wrap"><table><thead><tr><th>الصنف</th>'
-        + Object.keys(MS_SUF).map(function(c){ return '<th style="text-align:center">' + BRANCHES[c] + '<div style="font-weight:400;font-size:0.68rem;color:var(--text-muted)">رصيد / حد</div></th>'; }).join('')
-        + '<th></th></tr></thead><tbody>'
-        + msFound.map(function(it, i){
-            return '<tr><td><div style="font-weight:700">' + msEsc(it.n) + '</div><div style="font-size:0.7rem;color:var(--text-muted)">' + msEsc(it.itm_code) + (it.co ? ' · ' + msEsc(it.co) : '') + '</div></td>'
-              + Object.keys(MS_SUF).map(function(c){
-                  var q = msNum(it[MS_SUF[c] + '_q']);
-                  return '<td style="text-align:center"><div style="font-weight:700">' + msFmt(q) + '</div>'
-                    + '<input type="number" min="0" step="1" id="msadd-' + i + '-' + c + '" placeholder="—"' + (msCanEdit(c) ? '' : ' disabled title="فرع تاني — الأدمن بس"')
-                    + ' style="width:62px;padding:3px 6px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface-3);color:var(--text-primary);font-family:var(--font);font-size:0.8rem;text-align:center;margin-top:3px"></td>';
-                }).join('')
-              + '<td><button class="btn btn-primary btn-sm" onclick="msAddSave(' + i + ',this)">حفظ</button></td></tr>';
-          }).join('')
-        + '</tbody></table></div>';
-    }
-    async function msSearchItem(){
-      var q = (document.getElementById('ms-add-q').value || '').trim();
-      if(q.length < 2){ alert('اكتب كود أو حرفين على الأقل'); return; }
-      var box = document.getElementById('ms-add-results');
-      box.innerHTML = '<div style="font-size:0.8rem;color:var(--text-muted)">⏳ جاري البحث...</div>';
-      try{
-        var sel = 'select=itm_code,n,u,co,med,m_q,s_q,b_q&limit=10';
-        var url = /^[0-9]+$/.test(q)
-          ? SB_URL_API + '/rest/v1/stock_flat?' + sel + '&itm_code=eq.' + encodeURIComponent(q)
-          : SB_URL_API + '/rest/v1/stock_flat?' + sel + '&n=ilike.' + encodeURIComponent('*' + q + '*');
-        var r = await fetch(url, { headers: await sbH() });
-        var rows = await r.json();
-        msFound = Array.isArray(rows) ? rows : [];
-        box.innerHTML = msFound.length ? msFoundHtml() : '<div style="font-size:0.8rem;color:var(--danger)">مفيش نتائج — اتأكد من الكود</div>';
-      }catch(e){ box.innerHTML = '<div style="font-size:0.8rem;color:var(--danger)">❌ فشل البحث</div>'; }
-    }
-    async function msAddSave(i, btn){
-      var it = msFound[i]; if(!it) return;
-      var any = false, errs = [];
-      btn.disabled = true; btn.textContent = '...';
-      for(var c in MS_SUF){
-        var el = document.getElementById('msadd-' + i + '-' + c);
-        var raw = el ? String(el.value || '').trim() : '';
-        if(raw === '') continue;
-        var val = parseFloat(raw);
-        if(isNaN(val) || val < 0){ errs.push(BRANCHES[c] + ': رقم غير صحيح'); continue; }
-        try{
-          var res = await fetch(SB_URL_API + '/rest/v1/rpc/set_stock_limit', {
-            method:'POST', headers: await sbH({'Content-Type':'application/json'}),
-            body: JSON.stringify({ p_code: String(it.itm_code), p_branch: BRANCHES[c], p_min: val, p_name: it.n, p_type: it.med ? '1' : '0' })
-          });
-          var j = await res.json();
-          if(j && j.success) any = true; else errs.push(BRANCHES[c] + ': ' + ((j && j.error) || 'فشل'));
-        }catch(e){ errs.push(BRANCHES[c] + ': فشل الاتصال'); }
-      }
-      btn.disabled = false; btn.textContent = 'حفظ';
-      if(errs.length) alert('⚠️ ' + errs.join('\n'));
-      if(!any && !errs.length){ alert('اكتب الحد الأدنى في فرع واحد على الأقل'); return; }
-      if(any){ msFound = []; msPage = 1; await msLoad(true); renderMinStock(); }
     }
 
     // ===================================================================
@@ -1848,9 +1499,10 @@
       var srcBal = sourceBalance(item, from);
       var need={}, max={};
       others.forEach(function(b){
-        var cov = coverQtyDays(inv[b].avg, coverDays);
-        need[b] = inv[b].stock < cov;
-        max[b]  = need[b] ? Math.max(0, cov - inv[b].stock) : 0;
+        var d = inv[b] || {stock:0, avg:0};          // فرع لسه مالوش بيانات في الملخّص
+        var cov = coverQtyDays(d.avg, coverDays);
+        need[b] = d.stock < cov;
+        max[b]  = need[b] ? Math.max(0, cov - d.stock) : 0;
       });
       var totalNeeded = others.reduce(function(s,b){return s+max[b];},0);
       var raw={}, floor={};
