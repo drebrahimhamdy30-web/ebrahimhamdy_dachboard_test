@@ -266,7 +266,19 @@
     // أرصدة الفروع التلاتة وحدودها بتيجي من get_min_stock_alerts (migrate_26)
     // — نفس مصدر stock_flat اللي بيتحدّث كل 10 دقايق. الفائض في فرع =
     // رصيده − حده الأدنى هو كمان، عشان ما نفضّيش فرع على حساب فرع.
-    const BR_SUF = [['المعمورة','m'], ['سان ستيفانو','s'], ['سيدى بشر','b']];
+    /* [اسم الفرع, حرفه في رد الدالة]. بيتبني من `branches` اللي
+       get_min_stock_alerts بترجّعها (migrate_46)، فالفرع الجديد بيدخل
+       لوحده. المكتوب تحت احتياطي لو الترحيل ماوصلش للقاعدة دي —
+       من غيره الفرع كان هيختفي من مقارنة الفروع بالساكت. */
+    let BR_SUF = [['المعمورة','m'], ['سان ستيفانو','s'], ['سيدى بشر','b']];
+    function applyBranchList(list) {
+      if (!Array.isArray(list) || !list.length) {
+        console.warn('branches مش في رد get_min_stock_alerts — الرجوع للقايمة المكتوبة. طبّق migrate_46.');
+        return;
+      }
+      const out = list.filter(b => b && b.name && b.letter).map(b => [b.name, b.letter]);
+      if (out.length) BR_SUF = out;
+    }
     let crossMap = {};    // كود الصنف → أرصدة/حدود الفروع
     let pendBuy  = {};    // "فرع|كود" → طلب شراء مفتوح
     let branchReps = null;
@@ -301,7 +313,10 @@
           method: 'POST', headers: await sbH({ 'Content-Type': 'application/json' }), body: '{}' });
         const j = await r.json();
         crossMap = {};
-        if (j && j.success) (j.rows || []).forEach(x => { crossMap[String(x.code)] = x; });
+        if (j && j.success) {
+          applyBranchList(j.branches);   // الفروع جاية مع نفس الرد
+          (j.rows || []).forEach(x => { crossMap[String(x.code)] = x; });
+        }
         await loadPendingBuys();
       } catch (e) { crossMap = {}; }
     }
@@ -487,8 +502,8 @@
         if (btn) btn.innerHTML = '<i class="fas fa-save"></i> حفظ الصنف';
       }
       const suf = brs.length === 1 ? sufOf(brs[0]) : null;
-      document.getElementById('lookup-stock').value = suf ? nOf(m['qty_' + suf])
-        : (nOf(m.qty_m) + nOf(m.qty_s) + nOf(m.qty_b)) + ' (مجموع الفروع)';
+      document.getElementById('lookup-stock').value = suf ? nOf(matchQtyOf(m, suf))
+        : matchTotal(m) + ' (مجموع الفروع)';
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -498,6 +513,31 @@
     // الهمزات والتشكيل، وترتيب الكلمات مايفرقش، وبيسامح غلطة إملائية
     // (trigram)، والأصناف اللي عليها رصيد بتطلع فوق.
     let lastMatches = [];
+
+    /* search_stock_items بترجّع q = { <حرف>: {name, sort, q, p} } لكل
+       الفروع (migrate_50)، والمفاتيح القديمة qty_m/qty_s/qty_b لسه
+       بترجع للتوافق. الاتنين تحت بيفضّلوا q ويرجعوا للقديم لو مش موجود. */
+    function matchBranches(m) {
+      const o = m && m.q;
+      if (!o || typeof o !== 'object') return null;
+      const list = Object.keys(o).map(k => o[k]).filter(Boolean);
+      return list.length ? list.sort((a, b) => (a.sort == null ? 99 : a.sort) - (b.sort == null ? 99 : b.sort)) : null;
+    }
+    function matchQtyOf(m, suf) {
+      const o = m && m.q;
+      if (o && o[suf]) return nOf(o[suf].q);
+      return nOf(m['qty_' + suf]);
+    }
+    function matchTotal(m) {
+      const br = matchBranches(m);
+      if (br) return br.reduce((t, b) => t + nOf(b.q), 0);
+      return nOf(m.qty_m) + nOf(m.qty_s) + nOf(m.qty_b);
+    }
+    function matchQtyLine(m) {
+      const br = matchBranches(m);
+      if (br) return br.map(b => escHtml(b.name) + ' ' + nOf(b.q)).join(' | ');
+      return 'المعمورة ' + nOf(m.qty_m) + ' | سان ' + nOf(m.qty_s) + ' | بشر ' + nOf(m.qty_b);
+    }
 
     async function lookupItem() {
       const code = document.getElementById('lookup-code').value.trim();
@@ -552,7 +592,7 @@
               + (have ? ' <span style="font-size:0.7rem;color:var(--warning)">— متسجّل قبل كده</span>' : '') + '</div>'
               + '<div style="font-size:0.72rem;color:var(--text-muted)">' + escHtml(m.code)
               + (m.company ? ' · ' + escHtml(m.company) : '')
-              + ' · المعمورة ' + nOf(m.qty_m) + ' | سان ' + nOf(m.qty_s) + ' | بشر ' + nOf(m.qty_b) + '</div></button>';
+              + ' · ' + matchQtyLine(m) + '</div></button>';
           }).join('') + '</div>';
     }
     function escHtml(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
