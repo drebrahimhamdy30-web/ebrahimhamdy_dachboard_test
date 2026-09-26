@@ -481,8 +481,12 @@
         <div class="rep-content" data-rep="stale">
           <div class="rep-toolbar">
             <div>
-              <label class="modal-label" style="margin-bottom:4px;">لم تُجرد منذ (بالشهور)</label>
-              <input type="number" id="stale-months-input" class="form-input" value="3" min="1" style="width:100px;">
+              <label class="modal-label" style="margin-bottom:4px;">لم يُجرد في الفترة من</label>
+              <input type="date" id="stale-from-input" class="form-input" style="width:150px;">
+            </div>
+            <div>
+              <label class="modal-label" style="margin-bottom:4px;">إلى</label>
+              <input type="date" id="stale-to-input" class="form-input" style="width:150px;">
             </div>
             <button class="btn btn-primary" onclick="loadStaleReport()"><i class="fas fa-search"></i> بحث</button>
             <button class="btn btn-secondary" onclick="exportStaleReportToExcel()"><i class="fas fa-file-excel"></i> تصدير إكسل</button>
@@ -565,6 +569,23 @@
   </div>
 
   <!-- مودال: تسجيل عدم المطابقة (مشترك بين النظامين) -->
+  <!-- شاشة المراجع: بتوريه رصيد النظام ويكتب اللي لقاه فعلًا -->
+  <div id="review-modal" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <div class="modal-title">📝 تسجيل جرد الصنف</div>
+      <div class="modal-item-info" id="review-item-info"></div>
+      <label class="modal-label">الرصيد اللي لقيته فعليًا:</label>
+      <input type="number" id="review-balance-input" class="form-input" inputmode="decimal" placeholder="اكتب الرصيد...">
+      <div id="review-diff" style="font-size:0.8rem;font-weight:700;margin-top:6px;min-height:18px;"></div>
+      <label class="modal-label" style="margin-top:10px;">تاريخ الصلاحية <span style="font-weight:400;color:var(--text-muted);font-size:0.78rem;">(اختياري)</span></label>
+      <input type="month" id="review-exp-input" class="form-input">
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeStaleReview()">إلغاء</button>
+        <button class="btn btn-primary" onclick="confirmStaleReview()"><i class="fas fa-check"></i> تسجيل</button>
+      </div>
+    </div>
+  </div>
+
   <div id="mismatch-modal" class="modal-overlay" style="display:none;">
     <div class="modal-box">
       <div class="modal-title">❌ تسجيل عدم مطابقة</div>
@@ -1930,8 +1951,27 @@
     function openStaleReport() { showScreen('reports'); showReport('stale'); }
     function closeStaleReport() { /* inline */ }
 
+    // تواريخ القاهرة — مانعتمدش على توقيت الجهاز
+    function jardToday() {
+      return new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' });
+    }
+    function jardDaysAgo(n) {
+      const d = new Date(jardToday() + 'T12:00:00Z');
+      d.setUTCDate(d.getUTCDate() - n);
+      return d.toISOString().slice(0, 10);
+    }
+    // «إلى» بيفتح على النهاردة و«من» على ٣ شهور قبلها — وقابلين للتغيير
+    function ensureStaleDates() {
+      const f = document.getElementById('stale-from-input');
+      const t = document.getElementById('stale-to-input');
+      if (t && !t.value) t.value = jardToday();
+      if (f && !f.value) f.value = jardDaysAgo(90);
+    }
+
     async function loadStaleReport() {
-      const months = parseInt(document.getElementById('stale-months-input').value) || 3;
+      ensureStaleDates();
+      const dFrom = document.getElementById('stale-from-input').value;
+      const dTo   = document.getElementById('stale-to-input').value || jardToday();
       const body   = document.getElementById('stale-report-body');
       const summary = document.getElementById('stale-summary');
       body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري البحث...</td></tr>';
@@ -1939,7 +1979,7 @@
       staleCurrentPage = 1;
 
       try {
-        const items = await fetchStaleItems(userBranch, months);
+        const items = await fetchStaleItemsRange(userBranch, dFrom, dTo);
         // نفس منطق الترتيب حسب الفئة (أقراص/أشربة/حقن/لبوس/كريمات) ثم أبجديًا، المستخدم في باقي الصفحة
         currentStaleData = sortItemsForAudit(items).map(it => ({
           ...it,
@@ -1947,7 +1987,7 @@
           _systemQty: null
         }));
 
-        summary.textContent = `📦 عدد الأصناف: ${currentStaleData.length} — لم تُجرد منذ ${months} شهر أو أكتر (أو لم تُجرد أبدًا)`;
+        summary.textContent = `📦 عدد الأصناف: ${currentStaleData.length} — مفيش ليها جرد في الفترة من ${dFrom} إلى ${dTo} (أو لم تُجرد أبدًا)`;
 
         if (!currentStaleData.length) {
           body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--success,#16a34a);padding:20px;">✅ كل الأصناف اتجردت خلال المدة المحددة</td></tr>';
@@ -2008,11 +2048,10 @@
           actionCell = `<td data-label="إجراء"><span style="font-size:0.75rem;color:var(--text-muted);">اضغط الرصيد أولاً</span></td>`;
         } else {
           balCell = `<td id="stale-bal-${item.code}" data-label="الرصيد"><span class="balance-val">${item._systemQty}</span></td>`;
+          // زر واحد «تم»: بيفتح شاشة بتوريه رصيد النظام ويكتب فيها الرصيد
+          // اللي لقاه — والمطابقة بتتحدّد من الرقمين مش من زر منفصل.
           actionCell = `<td data-label="إجراء">
-              <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                <button class="btn-done" onclick="submitStaleMatched('${item.code}')">✅ مطابق</button>
-                <button class="btn-mismatch" onclick="openMismatchModal('${item.code}', 'stale')">❌ غير مطابق</button>
-              </div>
+              <button class="btn-done" onclick="openStaleReview('${item.code}')">✅ تم</button>
             </td>`;
         }
 
@@ -2062,9 +2101,11 @@
     // (لأنها مش تابعة لفئة محددة من الفئات الرسمية الخمسة، هي مراجعة عامة على كل المخزون)
     const STALE_AUDIT_CATEGORY = 'عام';
 
-    async function submitStaleMatched(code) {
+    async function submitStaleMatched(code, actualVal) {
       const item = currentStaleData.find(x => x.code === code);
       if (!item || !item._balanceFetched) return;
+      const actual = (actualVal === undefined || actualVal === null || actualVal === '')
+        ? item._systemQty : Number(actualVal);
 
       const ok = await jardGuardedSubmit({
         branch:      userBranch,
@@ -2074,7 +2115,7 @@
         itm_name_en: item.itm_name_en,
         matched:     true,
         system_qty:  item._systemQty,
-        actual_qty:  item._systemQty,
+        actual_qty:  actual,
         audited_by:  employeeName
       });
 
@@ -2085,6 +2126,75 @@
       } else {
         alert('⚠️ ' + ((typeof lastJardAuditError !== 'undefined' && lastJardAuditError) || 'فشل الحفظ، يرجى المحاولة مجدداً'));
       }
+    }
+
+    /* ═══ شاشة المراجع: رصيد النظام + الرصيد اللي لقاه ═══
+       المراجع كان بيضغط «مطابق» فيتسجّل الرصيد الفعلي = رصيد النظام من
+       غير ما يكتب حاجة — فلو لقى رقم تاني مكانش بيتسجّل، ولما يرجع
+       للتقرير مايعرفش هو لقى كام ساعتها. دلوقتي بيكتب الرقم، والمطابقة
+       بتتحسب من الفرق، والرقمين بيظهروا في التقرير الشامل (رصيد النظام /
+       الرصيد الفعلي / الفرق).                                          */
+    let reviewTargetCode = null;
+
+    function openStaleReview(code) {
+      const item = currentStaleData.find(x => x.code === code);
+      if (!item || !item._balanceFetched) return;
+      reviewTargetCode = code;
+
+      document.getElementById('review-item-info').innerHTML =
+        '<div><b>الكود:</b> ' + (item.code || '---') + '</div>' +
+        '<div><b>الاسم:</b> ' + (item.itm_name_ar || '---') + '</div>' +
+        '<div style="margin-top:6px;"><b>رصيد النظام:</b> ' +
+          '<span class="balance-val">' + item._systemQty + '</span></div>';
+
+      const bal = document.getElementById('review-balance-input');
+      bal.value = item._systemQty;                 // الغالب إنه مطابق — تعديل بضغطة
+      bal.style.borderColor = '';
+      bal.oninput = updateReviewDiff;
+      const exp = document.getElementById('review-exp-input');
+      if (exp) { exp.value = ''; exp.style.borderColor = ''; }
+      updateReviewDiff();
+      openModalFullScreen(document.getElementById('review-modal'));
+      setTimeout(() => { bal.focus(); bal.select(); }, 100);
+    }
+
+    function updateReviewDiff() {
+      const item = currentStaleData.find(x => x.code === reviewTargetCode);
+      const el   = document.getElementById('review-diff');
+      if (!item || !el) return;
+      const v = document.getElementById('review-balance-input').value.trim();
+      if (v === '') { el.textContent = ''; return; }
+      const diff = Number(v) - Number(item._systemQty);
+      el.textContent = diff === 0
+        ? '✅ مطابق لرصيد النظام'
+        : (diff > 0 ? '❌ زيادة ' : '❌ عجز ') + Math.abs(diff);
+      el.style.color = diff === 0 ? 'var(--success,#16a34a)' : 'var(--danger,#dc2626)';
+    }
+
+    function closeStaleReview() {
+      closeModalFullScreen(document.getElementById('review-modal'));
+      reviewTargetCode = null;
+    }
+
+    async function confirmStaleReview() {
+      const input = document.getElementById('review-balance-input');
+      const val   = input.value.trim();
+      if (val === '') { input.style.borderColor = 'var(--danger,#dc2626)'; input.focus(); return; }
+
+      const expEl = document.getElementById('review-exp-input');
+      const exp   = expEl ? String(expEl.value || '').trim() : '';
+      if (exp && !/^[0-9]{4}-(0[1-9]|1[0-2])$/.test(exp)) {
+        expEl.style.borderColor = 'var(--danger,#dc2626)'; expEl.focus(); return;
+      }
+
+      const code = reviewTargetCode;
+      const item = currentStaleData.find(x => x.code === code);
+      closeStaleReview();
+      if (!item) return;
+
+      // المطابقة من الرقمين نفسهم
+      if (Number(val) === Number(item._systemQty)) await submitStaleMatched(code, val);
+      else await submitStaleMismatchResult(code, val, exp);
     }
 
     async function submitStaleMismatchResult(code, actualVal, expYm) {
