@@ -237,15 +237,15 @@ async function sbMissingList() {
 
 // ---- متابعة النواقص: طلبات "غير متوفر يحتاج متابعة" + رصيد المخزون الحالي (stq) لحظيًا ----
 // بيرجّع Array فيه {id,item_name,item_code,user,branch,cust_name,cust_code,cust_state,createdAt,stq}
+/* ⚠️ الدالة بترجّع صفوف (setof)، وPostgREST بيقص عند 1000 قبل ما المتصفح
+      يشوف حاجة: «عام» (شاشة الأدمن) بترجّع 1,692 صف — يعني ~692 نقص كان
+      مختفي تمامًا. الفرع لوحده آمن (419–718) بس ده بالعدد الحالي بس.
+      الحل: نلفّ بالـoffset على ناتج الدالة — من غير ما نلمس الدالة
+      نفسها لأنها مشتركة بين القاعدتين.                                 */
 async function sbShortages(branch) {
   try {
-    const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_shortages`, {
-      method: 'POST',
-      headers: await sbH(),
-      body: JSON.stringify({ p_branch: branch || 'عام' })
-    });
-    if (!r.ok) return [];
-    const rows = await r.json();
+    const rows = await Session.rpcAll('get_shortages', { p_branch: branch || 'عام' },
+                                      { label: 'النواقص' });
     return Array.isArray(rows) ? rows : [];
   } catch (e) { console.error('sbShortages error:', e); return []; }
 }

@@ -152,7 +152,7 @@ tr:last-child td{border-bottom:none;}
 <div class="toast" id="toast"></div>
 
 <script src="config.js?v=20260904c"></script>
-<script src="session.js?v=20260917tabs"></script>
+<script src="session.js?v=20260926dl"></script>
 <script src="branches.js?v=20260904d"></script>
 <script src="pages.js?v=20260904d"></script>
 <script src="brand.js?v=20260904c"></script>
@@ -282,11 +282,13 @@ async function loadUnreviewed(){
   const effBranch = isAdminView ? topBranch : MY_BRANCH;
 
   // 1) الشيفتات غير المراجَعة (بدون تاريخ)
-  let q='pos_shifts?select=id,branch,grand_total,total_machines,total_wallets&is_settled=eq.false&limit=3000';
+  // ⚠️ كان limit=3000 — وهم: السقف 1000. الشيفتات غير المسوّاة 433 دلوقتي،
+  //    ولو عدّت 1000 كان إجمالي «في انتظار التأكيد» هيطلع ناقص من غير تحذير.
+  let q='pos_shifts?select=id,branch,grand_total,total_machines,total_wallets&is_settled=eq.false';
   if(effBranch) q+=`&branch=eq.${encodeURIComponent(effBranch)}`;
 
   try{
-    const shifts=await api(q);
+    const shifts=await Session.getAll(q, { label:'الشيفتات غير المسوّاة' });
     if(!shifts.length){
       area.innerHTML=`<div class="unrev-card" style="background:linear-gradient(135deg,#15803d,#16a34a);">
         <div class="unrev-title"><i class="fas fa-circle-check"></i> لا توجد معاملات في انتظار التأكيد${effBranch?` — ${esc(effBranch)}`:''} ✓</div>
@@ -305,8 +307,10 @@ async function loadUnreviewed(){
     try{
       const chunks=[];
       for(let i=0;i<ids.length;i+=100) chunks.push(ids.slice(i,i+100));
+      // 100 شيفت × أقصى 7 سطور = 700 < 1000، بس مابنعتمدش على الافتراض ده
       for(const c of chunks){
-        const lines=await api(`pos_shift_lines?select=method_key,display_name,method_type,actual_amount&shift_id=in.(${c.join(',')})&limit=5000`);
+        const lines=await Session.getAll(`pos_shift_lines?select=method_key,display_name,method_type,actual_amount&shift_id=in.(${c.join(',')})`,
+                                         { label:'سطور الشيفتات' });
         lines.forEach(l=>{
           const k=l.method_key||l.display_name;
           if(!byMethod[k]) byMethod[k]={name:l.display_name,type:l.method_type,total:0};

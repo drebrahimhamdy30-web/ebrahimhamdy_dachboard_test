@@ -411,6 +411,124 @@ const Session = (function () {
     return new Set(denied.map(x => x.tab_key));
   }
 
+
+  /* ═══════════════ طبقة جلب البيانات — سقف الـ1000 ═══════════════
+     PostgREST بيقص أي رد عند 1000 صف (db-max-rows)، والقص بيحصل **بعد**
+     الفلترة والترتيب — يعني «أحدث 1000» وخلاص، واللي أقدم بيختفي من غير
+     أي رسالة خطأ. و`limit=5000` وهم: بيرجّع 1000 برضه (اتجرّب على
+     customers: 21,356 صف والرد 1000 بالظبط).
+
+     القاعدة: أي شرط المستخدم بيختاره لازم يروح للسيرفر في الـURL — القاعدة
+     بتفحص كل الصفوف بالفهارس وترجّع النتيجة، والسقف بيتطبّق على النتيجة.
+     الفلترة في المتصفح بتشتغل على اللي وصل بس، فبتضيّع بيانات بصمت.
+
+     لما النتيجة نفسها أكبر من 1000، استعمل getAll() — بتلفّ بالـoffset
+     لحد ما تخلص، وبترجّع مع الصفوف:
+        rows.total       العدد الحقيقي من هيدر Content-Range
+        rows.incomplete  true لو حصل قص أو فشل نص الطريق                */
+  const MAX_ROWS = 1000;
+
+  function _withRange(path, limit, offset) {
+    const sep = path.indexOf('?') >= 0 ? '&' : '?';
+    return path + sep + 'limit=' + limit + '&offset=' + offset;
+  }
+  // «0-999/21356» → 21356 (بيرجع null لو السيرفر ماقالش العدد)
+  function _totalFrom(res) {
+    const cr = res.headers.get('content-range') || '';
+    const m = cr.match(/\/(\d+)\s*$/);
+    return m ? parseInt(m[1], 10) : null;
+  }
+
+  /* نداء واحد بصفحة محدّدة. opts: {limit, offset, count, method, body} */
+  async function fetchPage(path, opts) {
+    const o = opts || {};
+    const lim = Math.min(o.limit || MAX_ROWS, MAX_ROWS);
+    const h = await headers(o.count ? 'count=exact' : null);
+    const url = PHALIX_CONFIG.supabaseUrl + '/rest/v1/' + _withRange(path, lim, o.offset || 0);
+    const init = { method: o.method || 'GET', headers: h };
+    if (o.body != null) init.body = typeof o.body === 'string' ? o.body : JSON.stringify(o.body);
+    const r = await fetch(url, init);
+    if (!r.ok) return { ok: false, status: r.status, rows: [], total: null };
+    const rows = await r.json();
+    return { ok: true, status: r.status, rows: Array.isArray(rows) ? rows : [],
+             total: o.count ? _totalFrom(r) : null };
+  }
+
+  /* كل الصفوف مهما كان عددها — بيلفّ بالـoffset.
+     opts: {pageSize, maxRows, method, body, label}                     */
+  async function getAll(path, opts) {
+    const o = opts || {};
+    const size = Math.min(o.pageSize || MAX_ROWS, MAX_ROWS);
+    const cap  = o.maxRows || 50000;          // سقف أمان يمنع اللف اللانهائي
+    const out = [];
+    let total = null, incomplete = false;
+    for (let off = 0; off < cap; off += size) {
+      const p = await fetchPage(path, { limit: size, offset: off, count: off === 0,
+                                        method: o.method, body: o.body });
+      if (!p.ok) { incomplete = true; break; }
+      if (off === 0) total = p.total;
+      for (const row of p.rows) out.push(row);
+      if (p.rows.length < size) { incomplete = false; break; }
+      if (off + size >= cap) { incomplete = true; }
+    }
+    try {
+      Object.defineProperty(out, 'total', { value: total, enumerable: false });
+      Object.defineProperty(out, 'incomplete', { value: incomplete, enumerable: false });
+    } catch (e) {}
+    if (incomplete) dataWarn((o.label || path.split('?')[0]) + ': البيانات وصلت ناقصة');
+    return out;
+  }
+
+  /* نفس الفكرة لدالة RPC بترجّع صفوف (setof/table).
+     الفلاتر والـlimit/offset بتتطبّق على **ناتج الدالة**، فمش محتاجين
+     نعدّل الدالة نفسها (مشتركة بين القاعدتين).                        */
+  function rpcAll(fn, body, opts) {
+    const o = opts || {};
+    const qs = o.query ? ('?' + o.query) : '';
+    return getAll('rpc/' + fn + qs, Object.assign({}, o, { method: 'POST', body: body || {} }));
+  }
+
+  /* العدد الحقيقي من غير ما نجيب الصفوف */
+  async function count(path) {
+    const p = await fetchPage(path, { limit: 1, offset: 0, count: true });
+    return p.ok ? p.total : null;
+  }
+
+  /* ── تحذير مرئي: القص مايعدّيش بصمت ──────────────────────────────
+     الرقم الغلط أخطر من الخطأ الواضح — الموظف بياخد قرار على إجمالي
+     ناقص وهو مش عارف. فبنطلّع شريط أحمر فوق الشاشة.                 */
+  const _warned = new Set();
+  function dataWarn(msg) {
+    const text = String(msg || '').trim();
+    if (!text || _warned.has(text)) return;
+    _warned.add(text);
+    try { console.error('[بيانات ناقصة] ' + text); } catch (e) {}
+    const show = function () {
+      try {
+        if (!document.body) return;
+        let box = document.getElementById('phalix-data-warn');
+        if (!box) {
+          box = document.createElement('div');
+          box.id = 'phalix-data-warn';
+          box.setAttribute('dir', 'rtl');
+          box.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#b91c1c;' +
+            'color:#fff;font-family:Cairo,system-ui,sans-serif;font-size:13px;font-weight:700;' +
+            'padding:8px 14px;box-shadow:0 2px 10px rgba(0,0,0,.25);line-height:1.7;';
+          box.innerHTML = '<span style="float:left;cursor:pointer;padding:0 6px" ' +
+            'onclick="this.parentNode.remove()">✕</span>' +
+            '<div id="phalix-data-warn-list"></div>';
+          document.body.appendChild(box);
+        }
+        const list = document.getElementById('phalix-data-warn-list');
+        const line = document.createElement('div');
+        line.textContent = '⚠️ ' + text + ' — الأرقام المعروضة ممكن تكون ناقصة، بلّغ الدعم';
+        list.appendChild(line);
+      } catch (e) {}
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', show);
+    else show();
+  }
+
   /* ── حارس الصفحة ─────────────────────────────────────────────────
      require()                      → لازم يكون داخل
      require({roles:['admin']})     → ولازم دوره من دول
@@ -434,5 +552,39 @@ const Session = (function () {
            username, fullName, is, isAdmin, decodeJwt, jwtValid, tokenValid,
            refresh, validToken, bearer, headers, client,
            save, resolveBranchId, clear, logout, loginPage, thisPage,
-           pages, can, require, tabRules, tabAllowed, guardTabs };
+           pages, can, require, tabRules, tabAllowed, guardTabs,
+           MAX_ROWS, fetchPage, getAll, rpcAll, count, dataWarn };
 })();
+
+/* ═══════════ حارس القص الصامت (بيلفّ fetch مرة واحدة) ═══════════
+   الشاشات القديمة بتنادي fetch مباشرة، وبعضها بيجيب «كل الصفوف» من غير
+   ترقيم. لو الرد رجع 1000 صف بالظبط والنداء ماطلبش limit، يبقى ده قص
+   شبه مؤكّد — فبنطلّع تحذير مرئي بدل ما الشاشة تحسب على بيانات ناقصة.
+   بنفحص الردود الكبيرة بس (>20KB) عشان مانحمّلش كل نداء صغير.
+   ⚠️ supabase-js بيستعمل window.fetch برضه، فالحارس بيغطي شاشات
+      التوصيل كمان من غير أي تعديل فيها.                              */
+(function () {
+  if (typeof window === 'undefined' || !window.fetch || window.__phalixFetchGuard) return;
+  window.__phalixFetchGuard = true;
+  const orig = window.fetch.bind(window);
+  window.fetch = async function (input, init) {
+    const res = await orig(input, init);
+    try {
+      const url = typeof input === 'string' ? input : (input && input.url) || '';
+      if (url.indexOf('/rest/v1/') < 0 || /[?&]limit=/.test(url)) return res;
+      if (!res.ok) return res;
+      const ct = res.headers.get('content-type') || '';
+      if (ct.indexOf('json') < 0) return res;
+      res.clone().text().then(function (txt) {
+        if (!txt || txt.length < 20000 || txt[0] !== '[') return;
+        let rows; try { rows = JSON.parse(txt); } catch (e) { return; }
+        if (Array.isArray(rows) && rows.length === Session.MAX_ROWS) {
+          const path = url.split('/rest/v1/')[1].split('?')[0];
+          Session.dataWarn('«' + path + '» رجّع 1000 صف بالظبط (سقف السيرفر)');
+        }
+      }).catch(function () {});
+    } catch (e) {}
+    return res;
+  };
+})();
+
