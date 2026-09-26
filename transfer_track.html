@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>تتبع التحويلات - Phalix</title>
+  <link rel="stylesheet" href="tokens.css?v=20260906">
+  <script>/* phalix-theme-stamp — يختم الثيم قبل الرسم عشان مفيش وميض. */
+  try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_dark")==="1"?"dark":"light");document.documentElement.setAttribute("data-theme",_t==="dark"?"dark":"light");}catch(e){}</script>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    .tt-tabs { display:flex; gap:8px; margin:14px 0 10px; flex-wrap:wrap; }
+    .tt-tab { padding:7px 16px; border-radius:20px; border:1.5px solid var(--border); background:var(--surface-2);
+              color:var(--text-secondary); font-family:var(--font); font-weight:700; font-size:0.85rem; cursor:pointer; }
+    .tt-tab.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .tt-tab .cnt { font-size:0.75rem; opacity:0.85; margin-inline-start:5px; }
+
+    .tt-cards { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
+    .tt-card { flex:1; min-width:140px; background:var(--surface-2); border:1.5px solid var(--border);
+               border-radius:var(--radius-md); padding:10px 14px; }
+    .tt-card .k { font-size:0.75rem; color:var(--text-muted); font-weight:700; }
+    .tt-card .v { font-size:1.35rem; font-weight:800; color:var(--text-primary); line-height:1.5; }
+
+    .route { font-weight:800; font-size:0.86rem; white-space:nowrap; }
+    .route .arrow { color:var(--accent); margin:0 4px; }
+    .guess { font-size:0.68rem; color:var(--warning); font-weight:700; }
+
+    .step { display:inline-block; padding:2px 9px; border-radius:20px; font-size:0.72rem; font-weight:700; }
+    .st-wait { background:#fef3c7; color:#92400e; }
+    .st-road { background:#dbeafe; color:#1e40af; }
+    .st-done { background:#dcfce7; color:#15803d; }
+    .st-dead { background:#fee2e2; color:#991b1b; }
+
+    .drv { font-weight:700; font-size:0.83rem; }
+    .drv a { color:var(--accent); text-decoration:none; font-size:0.78rem; }
+    .with-btn { background:none; border:1.5px solid var(--border); border-radius:14px; padding:2px 9px;
+                cursor:pointer; font-family:var(--font); font-size:0.75rem; font-weight:700; color:var(--text-secondary); }
+    .with-btn:hover { border-color:var(--accent); color:var(--accent); }
+    .sub-row td { background:var(--surface-2); font-size:0.78rem; }
+    .sub-row .mini { display:inline-block; background:var(--surface-3); border:1px solid var(--border);
+                     border-radius:8px; padding:3px 8px; margin:3px; }
+
+    .forgot { background:#fef2f2 !important; }
+    .forgot td { color:#991b1b; }
+    .pager { display:flex; gap:6px; align-items:center; justify-content:center; margin-top:12px; flex-wrap:wrap; }
+    .pager button { min-width:32px; padding:4px 9px; border-radius:7px; border:1.5px solid var(--border);
+                    background:var(--surface-2); color:var(--text-secondary); font-family:var(--font);
+                    font-weight:700; font-size:0.8rem; cursor:pointer; }
+    .pager button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .pager button:disabled { opacity:0.4; cursor:default; }
+    .pager .info { font-size:0.78rem; color:var(--text-muted); margin-inline-start:8px; }
+  </style>
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+      <div class="page-header">
+        <div class="page-title">
+          <i class="fas fa-truck-fast"></i> تتبع التحويلات
+          <span class="highlight" id="branch-tag"></span>
+        </div>
+        <button class="btn btn-primary" onclick="loadAll()"><i class="fas fa-sync-alt"></i> تحديث</button>
+      </div>
+
+      <div class="filter-bar">
+        <div>
+          <label class="filter-label" style="display:block;margin-bottom:4px;">الفترة</label>
+          <select id="f-period" class="form-select" style="width:auto;" onchange="periodChanged()">
+            <option value="0">النهاردة</option>
+            <option value="2" selected>آخر ٣ أيام</option>
+            <option value="6">آخر أسبوع</option>
+            <option value="13">آخر أسبوعين</option>
+            <option value="custom">مخصص…</option>
+          </select>
+        </div>
+        <div id="custom-dates" style="display:none;">
+          <label class="filter-label" style="display:block;margin-bottom:4px;">من / إلى</label>
+          <div style="display:flex;gap:6px;">
+            <input type="date" id="f-from" class="form-select" style="width:auto;" onchange="loadAll()">
+            <input type="date" id="f-to"   class="form-select" style="width:auto;" onchange="loadAll()">
+          </div>
+        </div>
+        <div>
+          <label class="filter-label" style="display:block;margin-bottom:4px;">الفرع</label>
+          <select id="f-branch" class="form-select" style="width:auto;" onchange="render()">
+            <option value="all">كل الفروع</option>
+          </select>
+        </div>
+        <div>
+          <label class="filter-label" style="display:block;margin-bottom:4px;">الاتجاه</label>
+          <select id="f-dir" class="form-select" style="width:auto;" onchange="render()">
+            <option value="all" selected>الكل</option>
+            <option value="out">طالعة من الفرع 📤</option>
+            <option value="in">جاية للفرع 📥</option>
+          </select>
+        </div>
+        <div>
+          <label class="filter-label" style="display:block;margin-bottom:4px;">الحالة</label>
+          <select id="f-state" class="form-select" style="width:auto;" onchange="render()">
+            <option value="all" selected>الكل</option>
+            <option value="open">لسه في الطريق 🚚</option>
+            <option value="done">وصلت ✅</option>
+            <option value="stuck">معلّقة بدون طيار ⏳</option>
+          </select>
+        </div>
+        <div>
+          <label class="filter-label" style="display:block;margin-bottom:4px;">بحث</label>
+          <div style="position:relative;display:flex;align-items:center;">
+            <i class="fas fa-search" style="position:absolute;right:9px;font-size:13px;color:var(--text-muted);pointer-events:none;"></i>
+            <input type="text" id="f-q" placeholder="رقم التحويلة، طيار، صنف، مين عملها…"
+              oninput="searchTyped()"
+              style="padding:6px 30px 6px 10px;width:230px;font-size:13px;border-radius:8px;
+                     border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary);">
+          </div>
+        </div>
+      </div>
+
+      <div class="tt-cards" id="cards"></div>
+
+      <div class="tt-tabs">
+        <button class="tt-tab active" id="tab-ship" onclick="setTab('ship')">
+          🚚 التحويلات الطالعة <span class="cnt" id="cnt-ship"></span>
+        </button>
+        <button class="tt-tab" id="tab-req" onclick="setTab('req')">
+          📋 طلبات الأصناف <span class="cnt" id="cnt-req"></span>
+        </button>
+      </div>
+
+      <!-- تبويب التحويلات -->
+      <div id="pane-ship">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>التاريخ</th>
+                <th>المسار</th>
+                <th>عملها</th>
+                <th>الطيار</th>
+                <th>الرحلة</th>
+                <th>الحالة</th>
+                <th>ملاحظات</th>
+              </tr>
+            </thead>
+            <tbody id="ship-body">
+              <tr class="loading-row"><td colspan="7">⏳ جاري التحميل...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pager" id="ship-pager"></div>
+      </div>
+
+      <!-- تبويب طلبات الأصناف -->
+      <div id="pane-req" style="display:none;">
+        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+          <label style="font-size:0.82rem;font-weight:700;color:var(--text-secondary);cursor:pointer;">
+            <input type="checkbox" id="only-pending" checked onchange="render()"> المعلّق بس ⏳
+          </label>
+          <label style="font-size:0.82rem;font-weight:700;color:var(--danger);cursor:pointer;">
+            <input type="checkbox" id="only-forgot" onchange="render()"> اللي اتنسى بس ⚠️
+          </label>
+          <span style="font-size:0.75rem;color:var(--text-muted);">
+            «اتنسى» = طلب لسه معلّق رغم إن تحويلة طلعت من نفس الفرع لنفس الفرع بعد الطلب
+          </span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>التاريخ</th>
+                <th>المسار</th>
+                <th>الصنف</th>
+                <th>الكمية</th>
+                <th>العميل</th>
+                <th>الحالة</th>
+                <th>رد الفرع</th>
+                <th>مستنّي</th>
+              </tr>
+            </thead>
+            <tbody id="req-body">
+              <tr class="loading-row"><td colspan="8">⏳ جاري التحميل...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pager" id="req-pager"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="config.js?v=20260904c"></script>
+  <script src="session.js?v=20260905"></script>
+  <script src="branches.js?v=20260904d"></script>
+  <script src="pages.js?v=20260904d"></script>
+  <script src="brand.js?v=20260904c"></script>
+  <script src="api.js?v=20260904c"></script>
+  <script>
+    // ═════════════════════════════════════════════════════════════
+    //  تتبع التحويلات: الشيلة (طلب TRF في رحلة) + طلبات الأصناف (task)
+    //  في شاشة واحدة، عشان أي فرع يعرف تحويلته طلعت مع مين ووصلت
+    //  إمتى — ويكشف الصنف اللي اتطلب واتنسى.
+    // ═════════════════════════════════════════════════════════════
+    const PER_PAGE = 40;
+
+    let userBranch = '';
+    let isAdminUser = false;
+    let DATA = { shipments: [], requests: [] };
+    let tab = 'ship';
+    let pageShip = 1, pageReq = 1;
+    let searchTimer = null;
+
+    checkAuth().then(user => {
+      if (!user) return;
+      userBranch  = (Session.branch() || '').trim();
+      isAdminUser = Session.isAdmin();
+      document.getElementById('branch-tag').textContent = userBranch || 'كل الفروع';
+      Branches.ready().then(() => {
+        const sel = document.getElementById('f-branch');
+        Branches.names().forEach(n => {
+          const o = document.createElement('option');
+          o.value = n; o.textContent = n;
+          sel.appendChild(o);
+        });
+        // الفرع بيبدأ على فرعه، والأدمن على الكل — وبرضه يقدر يشوف أي فرع
+        if (userBranch && Branches.names().some(n => Branches.same(n, userBranch))) {
+          sel.value = Branches.names().find(n => Branches.same(n, userBranch));
+        }
+        loadAll();
+      });
+    });
+
+    function periodChanged() {
+      const v = document.getElementById('f-period').value;
+      const box = document.getElementById('custom-dates');
+      box.style.display = (v === 'custom') ? '' : 'none';
+      if (v === 'custom') {
+        // أول مرة: املا التواريخ بآخر ٣ أيام عشان ماتبعتش طلب فاضي
+        const f = document.getElementById('f-from'), t = document.getElementById('f-to');
+        if (!f.value || !t.value) { const r = rangeOf(2); f.value = r.from; t.value = r.to; }
+      }
+      loadAll();
+    }
+
+    // تواريخ القاهرة — مانعتمدش على توقيت الجهاز
+    function cairoToday() {
+      return new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Cairo' }); // YYYY-MM-DD
+    }
+    function rangeOf(daysBack) {
+      const to = cairoToday();
+      const d  = new Date(to + 'T12:00:00Z');
+      d.setUTCDate(d.getUTCDate() - daysBack);
+      return { from: d.toISOString().slice(0, 10), to };
+    }
+    function currentRange() {
+      const v = document.getElementById('f-period').value;
+      if (v === 'custom') {
+        return { from: document.getElementById('f-from').value || cairoToday(),
+                 to:   document.getElementById('f-to').value   || cairoToday() };
+      }
+      return rangeOf(parseInt(v, 10) || 0);
+    }
+
+    async function loadAll() {
+      const r = currentRange();
+      document.getElementById('ship-body').innerHTML = '<tr class="loading-row"><td colspan="7">⏳ جاري التحميل...</td></tr>';
+      document.getElementById('req-body').innerHTML  = '<tr class="loading-row"><td colspan="8">⏳ جاري التحميل...</td></tr>';
+      try {
+        const res = await fetch(SB_URL_API + '/rest/v1/rpc/get_transfer_tracking', {
+          method: 'POST',
+          headers: await sbH({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ p_from: r.from, p_to: r.to })
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const d = await res.json();
+        DATA = { shipments: d?.shipments || [], requests: d?.requests || [] };
+        markForgotten();
+        pageShip = pageReq = 1;
+        render();
+      } catch (e) {
+        console.error('get_transfer_tracking:', e);
+        const msg = '<td colspan="8" style="text-align:center;color:var(--danger);padding:30px;">'
+                  + '❌ فشل تحميل البيانات — جرّب تحديث الصفحة</td>';
+        document.getElementById('ship-body').innerHTML = '<tr>' + msg + '</tr>';
+        document.getElementById('req-body').innerHTML  = '<tr>' + msg + '</tr>';
+      }
+    }
+
+    // «اتنسى»: الطلب لسه معلّق رغم إن تحويلة طلعت من نفس الفرع للفرع الطالب بعد وقت الطلب
+    function markForgotten() {
+      DATA.requests.forEach(q => {
+        q._forgot = q.state === 'pending' && DATA.shipments.some(s =>
+          Branches.same(s.from_branch || '', q.from_branch || '') &&
+          Branches.same(s.to_branch   || '', q.req_branch  || '') &&
+          (s.created || '') > (q.created || '')
+        );
+      });
+    }
+
+    function searchTyped() {                 // debounce بسيط: مانرسمش على كل حرف
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => { pageShip = pageReq = 1; render(); }, 280);
+    }
+
+    function setTab(t) {
+      tab = t;
+      document.getElementById('tab-ship').classList.toggle('active', t === 'ship');
+      document.getElementById('tab-req').classList.toggle('active',  t === 'req');
+      document.getElementById('pane-ship').style.display = (t === 'ship') ? '' : 'none';
+      document.getElementById('pane-req').style.display  = (t === 'req')  ? '' : 'none';
+    }
+
+    // ─────────────── الفلترة (على كل البيانات، مش على الصفحة) ───────────────
+    function shipState(s) {
+      if (s.status === 'completed' || s.delivered) return 'done';
+      if (s.status === 'cancelled' || s.status === 'failed') return 'dead';
+      if (s.driver_name) return 'open';
+      return 'stuck';
+    }
+
+    function filteredShipments() {
+      const br = document.getElementById('f-branch').value;
+      const dir = document.getElementById('f-dir').value;
+      const st  = document.getElementById('f-state').value;
+      const q   = document.getElementById('f-q').value.trim().toLowerCase();
+
+      return DATA.shipments.filter(s => {
+        const isOut = br !== 'all' && Branches.same(s.from_branch || '', br);
+        const isIn  = br !== 'all' && Branches.same(s.to_branch   || '', br);
+        if (br !== 'all') {
+          if (dir === 'out' && !isOut) return false;
+          if (dir === 'in'  && !isIn)  return false;
+          if (dir === 'all' && !isOut && !isIn) return false;
+        }
+        if (st !== 'all' && shipState(s) !== st) return false;
+        if (q) {
+          const hay = [s.bill_no, s.from_branch, s.to_branch, s.to_hint, s.region,
+                       s.created_by, s.driver_name, s.driver_phone, s.notes]
+                       .map(v => String(v || '').toLowerCase()).join(' ');
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+    }
+
+    function filteredRequests() {
+      const br = document.getElementById('f-branch').value;
+      const dir = document.getElementById('f-dir').value;
+      const q   = document.getElementById('f-q').value.trim().toLowerCase();
+      const onlyPending = document.getElementById('only-pending').checked;
+      const onlyForgot  = document.getElementById('only-forgot').checked;
+
+      return DATA.requests.filter(r => {
+        // «طالعة» للطلب = المطلوب من الفرع ده يحوّل؛ «جاية» = الفرع هو اللي طالب
+        const isOut = br !== 'all' && Branches.same(r.from_branch || '', br);
+        const isIn  = br !== 'all' && Branches.same(r.req_branch  || '', br);
+        if (br !== 'all') {
+          if (dir === 'out' && !isOut) return false;
+          if (dir === 'in'  && !isIn)  return false;
+          if (dir === 'all' && !isOut && !isIn) return false;
+        }
+        if (onlyPending && r.state !== 'pending') return false;
+        if (onlyForgot  && !r._forgot) return false;
+        if (q) {
+          const hay = [r.item_code, r.item_name, r.from_branch, r.req_branch, r.req_name,
+                       r.cust_name, r.note, r.reply]
+                       .map(v => String(v || '').toLowerCase()).join(' ');
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+    }
+
+    // ─────────────── الرسم ───────────────
+    function esc(v) {
+      return String(v == null ? '' : v)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function dayTime(s) {               // "2026-09-26 15:22" → { d:'26/9', t:'15:22' }
+      const m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}:\d{2})$/);
+      if (!m) return { d: '-', t: '' };
+      return { d: (+m[3]) + '/' + (+m[2]), t: m[4] };
+    }
+    // حالات الطلب بالعربي — الجدول كان بيعرض completed/assigned زي ما هي
+    const ST_AR = { pending:'في الانتظار', assigned:'متعيّن لطيار', picked:'مع الطيار',
+                    completed:'اتوصّل', delivered:'اتوصّل', cancelled:'ملغي',
+                    failed:'فشل التسليم', postponed:'مؤجل', prep:'تحت التحضير' };
+    const stAr = s => ST_AR[s] || s || '';
+
+    function waited(min) {
+      const n = parseInt(min, 10) || 0;
+      if (n < 60) return n + ' د';
+      if (n < 1440) return Math.floor(n / 60) + ' س';
+      return Math.floor(n / 1440) + ' يوم';
+    }
+
+    function render() {
+      const ships = filteredShipments();
+      const reqs  = filteredRequests();
+
+      document.getElementById('cnt-ship').textContent = '(' + ships.length + ')';
+      document.getElementById('cnt-req').textContent  = '(' + reqs.length + ')';
+
+      renderCards(ships, reqs);
+      renderShips(ships);
+      renderReqs(reqs);
+    }
+
+    function renderCards(ships, reqs) {
+      // الإجماليات على كل البيانات المفلترة — مش على الصفحة المعروضة
+      const open  = ships.filter(s => shipState(s) === 'open').length;
+      const stuck = ships.filter(s => shipState(s) === 'stuck').length;
+      const done  = ships.filter(s => shipState(s) === 'done');
+      const pend  = DATA.requests.filter(r => r.state === 'pending').length;
+      const forgot = DATA.requests.filter(r => r._forgot).length;
+
+      // متوسط الزمن من إنشاء التحويلة لتوصيلها (بالدقايق)
+      let avg = null;
+      const spans = done.map(s => {
+        const c = dayTime(s.created), d = s.delivered;
+        if (!d || c.t === '') return null;
+        const cm = (+c.t.slice(0, 2)) * 60 + (+c.t.slice(3));
+        let dm = (+d.slice(0, 2)) * 60 + (+d.slice(3));
+        if (dm < cm) dm += 24 * 60;                // عدّى نص الليل
+        return dm - cm;
+      }).filter(v => v != null && v >= 0 && v < 12 * 60);
+      if (spans.length) avg = Math.round(spans.reduce((a, b) => a + b, 0) / spans.length);
+
+      document.getElementById('cards').innerHTML = `
+        <div class="tt-card"><div class="k">تحويلات الفترة</div><div class="v">${ships.length}</div></div>
+        <div class="tt-card"><div class="k">لسه في الطريق</div><div class="v" style="color:var(--info,#1e40af)">${open}</div></div>
+        <div class="tt-card"><div class="k">معلّقة بدون طيار</div><div class="v" style="color:var(--warning)">${stuck}</div></div>
+        <div class="tt-card"><div class="k">متوسط التوصيل</div><div class="v">${avg == null ? '—' : avg + ' <span style="font-size:.8rem">د</span>'}</div></div>
+        <div class="tt-card"><div class="k">طلبات معلّقة</div><div class="v">${pend}</div></div>
+        <div class="tt-card"><div class="k">يمكن اتنست</div><div class="v" style="color:var(--danger)">${forgot}</div></div>`;
+    }
+
+    function renderShips(rows) {
+      const body = document.getElementById('ship-body');
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted);">مفيش تحويلات في الفترة دي</td></tr>';
+        document.getElementById('ship-pager').innerHTML = '';
+        return;
+      }
+      const pages = Math.max(1, Math.ceil(rows.length / PER_PAGE));
+      if (pageShip > pages) pageShip = pages;
+      const slice = rows.slice((pageShip - 1) * PER_PAGE, pageShip * PER_PAGE);
+
+      body.innerHTML = slice.map(s => {
+        const dt = dayTime(s.created);
+        const stt = shipState(s);
+        const badge = stt === 'done'  ? '<span class="step st-done">✅ وصلت ' + esc(s.delivered || '') + '</span>'
+                    : stt === 'open'  ? '<span class="step st-road">🚚 مع الطيار</span>'
+                    : stt === 'dead'  ? '<span class="step st-dead">❌ ' + esc(stAr(s.status)) + '</span>'
+                    : '<span class="step st-wait">⏳ لسه ماطلعتش</span>';
+        const picked = s.picked ? '<div style="font-size:.7rem;color:var(--text-muted);margin-top:2px;">اتسلّمت ' + esc(s.picked) + '</div>' : '';
+        const others = (s.others || []).length;
+        const drv = s.driver_name
+          ? `<div class="drv">${esc(s.driver_name)}</div>` +
+            (s.driver_phone ? `<a href="tel:${esc(s.driver_phone)}"><i class="fas fa-phone"></i> ${esc(s.driver_phone)}</a>` : '')
+          : '<span style="color:var(--text-muted);font-size:.8rem;">— لسه</span>';
+        const trip = s.driver_name
+          ? (others
+              ? `<button class="with-btn" onclick="toggleWith('${esc(s.id)}')">` +
+                (others === 1 ? 'معاه طلب تاني' : 'معاه ' + others + ' طلبات تانية') +
+                ` <i class="fas fa-chevron-down"></i></button>`
+              : '<span style="font-size:.78rem;color:var(--text-muted);">التحويلة لوحدها</span>')
+          : '—';
+
+        const withRow = others ? `
+          <tr class="sub-row" id="with-${esc(s.id)}" style="display:none;">
+            <td colspan="7">
+              <b style="font-size:.78rem;">باقي طلبات نفس الرحلة:</b><br>
+              ${(s.others || []).map(o => `<span class="mini">${esc(o.name || o.bill_no)}
+                 <span style="color:var(--text-muted)">· ${esc(o.region || '')} · ${esc(stAr(o.status))}</span></span>`).join('')}
+            </td>
+          </tr>` : '';
+
+        return `
+          <tr>
+            <td style="font-size:.75rem;line-height:1.5;">${dt.d}<br>
+              <span style="color:var(--text-muted);font-size:.7rem;">${dt.t}</span></td>
+            <td>
+              <div class="route">${esc(s.from_branch || '؟')}<span class="arrow">→</span>${esc(s.to_branch || '؟')}</div>
+              ${s.to_exact ? '' : `<div class="guess" title="الفرع المستلم مستنتج من «${esc(s.to_hint || s.region || '')}»">؟ مستنتج</div>`}
+            </td>
+            <td style="font-size:.8rem;">${esc(s.created_by || '—')}</td>
+            <td>${drv}</td>
+            <td>${trip}</td>
+            <td>${badge}${picked}</td>
+            <td style="font-size:.78rem;color:var(--text-secondary);">${esc(s.notes || '')}</td>
+          </tr>${withRow}`;
+      }).join('');
+
+      renderPager('ship-pager', pageShip, pages, rows.length, p => { pageShip = p; render(); scrollTop(); });
+    }
+
+    function toggleWith(id) {
+      const el = document.getElementById('with-' + id);
+      if (el) el.style.display = (el.style.display === 'none') ? '' : 'none';
+    }
+
+    function renderReqs(rows) {
+      const body = document.getElementById('req-body');
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted);">مفيش طلبات مطابقة</td></tr>';
+        document.getElementById('req-pager').innerHTML = '';
+        return;
+      }
+      const pages = Math.max(1, Math.ceil(rows.length / PER_PAGE));
+      if (pageReq > pages) pageReq = pages;
+      const slice = rows.slice((pageReq - 1) * PER_PAGE, pageReq * PER_PAGE);
+
+      body.innerHTML = slice.map(r => {
+        const dt = dayTime(r.created);
+        const st = r.state === 'transferred' ? '<span class="step st-done">✅ تم</span>'
+                 : r.state === 'unavailable' ? '<span class="step st-dead">❌ غير متوفر</span>'
+                 : '<span class="step st-wait">⏳ انتظار</span>';
+        return `
+          <tr class="${r._forgot ? 'forgot' : ''}">
+            <td style="font-size:.75rem;line-height:1.5;">${dt.d}<br>
+              <span style="color:var(--text-muted);font-size:.7rem;">${dt.t}</span></td>
+            <td><div class="route">${esc(r.from_branch || '؟')}<span class="arrow">→</span>${esc(r.req_branch || '؟')}</div>
+              ${(r.req_name && r.req_name !== r.req_branch)
+                  ? `<div style="font-size:.7rem;color:var(--text-muted);">طلبها ${esc(r.req_name)}</div>` : ''}</td>
+            <td style="font-weight:700;font-size:.83rem;">${esc(r.item_name || '—')}
+              <div style="font-size:.72rem;color:var(--text-muted);">${esc(r.item_code || '')}</div>
+              ${r.note ? `<div style="font-size:.72rem;color:var(--danger);font-weight:700;"><i class="fas fa-triangle-exclamation"></i> ${esc(r.note)}</div>` : ''}
+            </td>
+            <td><b style="color:var(--warning);">${esc(r.qty || '1')}</b></td>
+            <td style="font-size:.78rem;">${esc(r.cust_name || '—')}</td>
+            <td>${st}${r._forgot ? '<div style="font-size:.7rem;font-weight:800;color:var(--danger);margin-top:3px;">⚠️ طلعت تحويلة وهو لسه معلّق</div>' : ''}</td>
+            <td style="font-size:.78rem;">${esc(r.reply || '')}</td>
+            <td style="font-size:.78rem;">${r.state === 'pending' ? waited(r.age_min) : '—'}</td>
+          </tr>`;
+      }).join('');
+
+      renderPager('req-pager', pageReq, pages, rows.length, p => { pageReq = p; render(); scrollTop(); });
+    }
+
+    function scrollTop() {
+      document.querySelector('.tt-tabs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // شريط الصفحات: « ‹ 1 2 … › »  + «صفحة X من Y»
+    function renderPager(elId, page, pages, total, go) {
+      const el = document.getElementById(elId);
+      if (pages <= 1) { el.innerHTML = `<span class="info">${total} صف</span>`; return; }
+      const nums = [];
+      const push = p => nums.push(`<button class="${p === page ? 'on' : ''}" data-p="${p}">${p}</button>`);
+      const win = 2;
+      push(1);
+      if (page - win > 2) nums.push('<span class="info">…</span>');
+      for (let p = Math.max(2, page - win); p <= Math.min(pages - 1, page + win); p++) push(p);
+      if (page + win < pages - 1) nums.push('<span class="info">…</span>');
+      if (pages > 1) push(pages);
+
+      el.innerHTML =
+        `<button data-p="1" ${page === 1 ? 'disabled' : ''}>«</button>
+         <button data-p="${page - 1}" ${page === 1 ? 'disabled' : ''}>‹</button>
+         ${nums.join('')}
+         <button data-p="${page + 1}" ${page === pages ? 'disabled' : ''}>›</button>
+         <button data-p="${pages}" ${page === pages ? 'disabled' : ''}>»</button>
+         <span class="info">صفحة ${page} من ${pages} · ${total} صف</span>`;
+      el.querySelectorAll('button[data-p]').forEach(b => {
+        b.onclick = () => { const p = parseInt(b.dataset.p, 10); if (p >= 1 && p <= pages) go(p); };
+      });
+    }
+  </script>
+</body>
+</html>

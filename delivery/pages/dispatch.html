@@ -441,6 +441,15 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
 
       <!-- نوع 2 و 3: تحويلة / طلب طيار -->
       <div id="ao-manual" style="display:none">
+        <!-- الفرع المستلم: التحويلة لازم تقول رايحة فين بشكل صريح، عشان
+             شاشة «تتبع التحويلات» تعرف المسار بدل ما تستنتجه من اسم
+             العميل/المنطقة (اللي بيتكتب فيه «تحويله» في أغلب الصفوف). -->
+        <div class="form-group" id="ao-tobranch-wrap" style="display:none">
+          <label>الفرع المستلم *</label>
+          <select class="form-control" id="ao-tobranch">
+            <option value="">— اختر الفرع —</option>
+          </select>
+        </div>
         <div class="form-group">
           <label>اسم العميل / الجهة</label>
           <input type="text" class="form-control" id="ao-cust" placeholder="اختياري">
@@ -2286,6 +2295,17 @@ async function openAddOrder(){
   document.getElementById('ao-addr').value='';
   document.getElementById('ao-amount').value='0';
   document.getElementById('ao-notes').value='';
+  document.getElementById('ao-tobranch-wrap').style.display='none';
+
+  // فروع الاستلام — كل الفروع ما عدا الفرع اللي بيحوّل
+  try{
+    await Branches.ready();
+    const meName = Branches.toName(branchId) || '';
+    document.getElementById('ao-tobranch').innerHTML =
+      '<option value="">— اختر الفرع —</option>' +
+      Branches.names().filter(n=>!meName || !Branches.same(n, meName))
+        .map(n=>`<option value="${(n||'').replace(/"/g,'&quot;')}">${n}</option>`).join('');
+  }catch(e){ console.error('فروع التحويلة:', e); }
 
   // حمّل المناطق في قائمة بحث بالكتابة (datalist)
   const {data:regions} = await db.from('regions').select('name').eq('branch_id',branchId).eq('is_active',true).order('name');
@@ -2303,6 +2323,7 @@ function setAoType(type, btn){
   btn.classList.add('active');
   document.getElementById('ao-invoice').style.display = type==='invoice'?'block':'none';
   document.getElementById('ao-manual').style.display  = type==='invoice'?'none':'block';
+  document.getElementById('ao-tobranch-wrap').style.display = type==='transfer'?'block':'none';
   document.getElementById('ao-invoice-preview').innerHTML='';
 }
 
@@ -2452,6 +2473,9 @@ async function saveNewOrder(){
     if(isNaN(amount) || amount < 0){ showToast('القيمة غير صحيحة'); return; }
 
     const isTransfer = aoType === 'transfer';
+    // الفرع المستلم إجباري في التحويلة — من غيره التتبع بيرجع تخمين
+    const toBranch = isTransfer ? (document.getElementById('ao-tobranch').value || '') : '';
+    if(isTransfer && !toBranch){ showToast('اختر الفرع المستلم'); return; }
     const prefix = isTransfer ? 'TRF' : 'DRV';
     const label  = isTransfer ? 'تحويلة' : 'طلب من طيار';
     const billNo = `${prefix}-${Date.now().toString().slice(-8)}`;
@@ -2467,7 +2491,8 @@ async function saveNewOrder(){
       bill_type: label,
       bill_status: 'Pending',
       bill_date: billDate,
-      customer_name: cust || label,
+      // اسم واضح للطيار وللتتبع: «تحويلة → سيدى بشر» لو الموظف ماكتبش اسم
+      customer_name: cust || (isTransfer ? (label + ' → ' + toBranch) : label),
       customer_address: addr || null,
       cust_region: region,
       count_of_items: 0,
@@ -2481,7 +2506,8 @@ async function saveNewOrder(){
       driver_id: null,
       deliveryman: null,
       attempt_count: 0,
-      source_data: { source: aoType, added_by: currentUser?.full_name||'—' },
+      source_data: { source: aoType, added_by: currentUser?.full_name||'—',
+                     ...(isTransfer ? { to_branch: toBranch } : {}) },
       created_at: now,
       updated_at: now
     };
