@@ -261,10 +261,21 @@
       tbody.innerHTML = '<tr class="loading-row"><td colspan="9">⏳ جاري جلب البيانات...</td></tr>';
       try {
         await Promise.all([loadUserBranchMap(), loadUserNameMap()]);
-        const response = await sbTaskList({ type: 'تحويل' });
-        let items = (response && response[0]?.data)
-          ? response[0].data
-          : (response.data || response || []);
+        // ⚠️ PostgREST بيسقّف أي جلب عند 1000 صف، وجدول التحويلات فيه
+        //    ~10 آلاف صف — فالنداء الواحد بيرجّع أحدث 1000 بس، وأي طلب
+        //    معلّق من شهور بيقع برّه القايمة فمايظهرش لحد ومحدش يقدر
+        //    يقفله. (اتكشف 2026-09-26: ٣ أصناف معلّقة على المعمورة من
+        //    مايو/يوليو/أغسطس كانت بتتعدّ في شاشة التتبع ومش موجودة هنا.)
+        //    الحل: نداءين — كل المعلّق مهما كان عمره + أحدث 1000 للمحسوم.
+        const [pendingRows, recentRows] = await Promise.all([
+          sbTaskList({ type: 'تحويل', states: ['pending'], limit: 1000 }),
+          sbTaskList({ type: 'تحويل', limit: 1000 })
+        ]);
+        const byId = new Map();
+        (recentRows || []).forEach(r => byId.set(r.id, r));
+        (pendingRows || []).forEach(r => byId.set(r.id, r));   // المعلّق يغلب النسخة القديمة
+        let items = Array.from(byId.values())
+          .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
 
         if (items.length > 0) {
           rawData = items.filter(item => item.type === "تحويل");
