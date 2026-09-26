@@ -53,6 +53,10 @@
 
     .empty { text-align:center; padding:26px; color:var(--text-muted); font-size:0.86rem;
              border:1.5px dashed var(--border); border-radius:var(--radius-md); }
+    .grp-title { display:flex; align-items:center; gap:7px; font-size:0.85rem; font-weight:800;
+                 color:var(--text-secondary); margin:14px 0 8px; }
+    .grp-title .n { background:var(--surface-3); border:1px solid var(--border); border-radius:20px;
+                    padding:0 9px; font-size:0.74rem; font-weight:700; }
     .forgot { background:#fef2f2 !important; }
     .forgot td { color:#991b1b; }
     .pager { display:flex; gap:6px; align-items:center; justify-content:center; margin-top:12px; flex-wrap:wrap; }
@@ -110,14 +114,13 @@
       <div class="sec-title">🚚 تحويلات جارية <span class="n" id="n-live">0</span></div>
       <div class="live-grid" id="live-grid"></div>
 
-      <!-- (2) أصناف مطلوبة لم تُحوَّل بعد -->
+      <!-- (2) أصناف مطلوبة لم تُحوَّل بعد — مقسّمة: طلبات فرعك / المطلوب منه -->
       <div class="sec-title">⏳ أصناف مطلوبة لم تُحوَّل بعد <span class="n" id="n-req">0</span>
         <span style="font-size:0.74rem;font-weight:400;color:var(--text-muted);">
           (لم يردّ عليها الفرع المطلوب منه — والصف الأحمر معناه أن تحويلة خرجت بعد الطلب ولم يُنفَّذ)
         </span>
       </div>
-      <div id="req-wrap"></div>
-      <div class="pager" id="req-pager"></div>
+      <div id="req-sections"></div>
     </div>
   </div>
 
@@ -141,7 +144,7 @@
     let userBranch = '';
     let DATA  = { shipments: [], requests: [] };
     let TODAY = '';
-    let pageReq = 1;
+    let pageOf = { mine: 1, theirs: 1, all: 1 };   // صفحة لكل مجموعة
     let searchTimer = null;
 
     checkAuth().then(user => {
@@ -164,7 +167,7 @@
 
     async function loadAll() {
       document.getElementById('live-grid').innerHTML = '<div class="empty">⏳ جاري التحميل...</div>';
-      document.getElementById('req-wrap').innerHTML  = '';
+      document.getElementById('req-sections').innerHTML = '';
       try {
         const res = await fetch(SB_URL_API + '/rest/v1/rpc/get_open_transfers', {
           method: 'POST',
@@ -201,7 +204,7 @@
 
     function searchTyped() {                 // debounce بسيط: مانرسمش على كل حرف
       clearTimeout(searchTimer);
-      searchTimer = setTimeout(function () { pageReq = 1; render(); }, 280);
+      searchTimer = setTimeout(function () { pageOf = { mine:1, theirs:1, all:1 }; render(); }, 280);
     }
 
     // ─────────────── فلترة (على كل البيانات) ───────────────
@@ -357,27 +360,66 @@
       if (el) el.style.display = (el.style.display === 'none') ? '' : 'none';
     }
 
-    // (2) الأصناف المطلوبة اللي لسه ما اتحوّلتش
+    // (2) الأصناف المطلوبة اللي لسه ما اتحوّلتش — مقسّمة على اتجاهين:
+    //     الفرع بيهمّه الأول «أنا طلبت إيه ولسه ماوصلنيش»، وبعدين «مطلوب مني إيه».
+    //     لما الفلتر على «كل الفروع» (الأدمن) بنعرض جدول واحد بالمسار.
     function renderReqs(rows) {
-      const box = document.getElementById('req-wrap');
-      const pg  = document.getElementById('req-pager');
-      if (!rows.length) { box.innerHTML = '<div class="empty">لا توجد أصناف معلّقة 👌</div>'; pg.innerHTML = ''; return; }
+      const box = document.getElementById('req-sections');
+      if (!rows.length) {
+        box.innerHTML = '<div class="empty">لا توجد أصناف معلّقة 👌</div>';
+        return;
+      }
+      const br = document.getElementById('f-branch').value;
 
-      const pages = Math.max(1, Math.ceil(rows.length / PER_PAGE));
-      if (pageReq > pages) pageReq = pages;
-      const slice = rows.slice((pageReq - 1) * PER_PAGE, pageReq * PER_PAGE);
+      if (br === 'all') {
+        box.innerHTML = reqBlock('all', '📋 كل الأصناف المطلوبة المعلّقة', rows, 'route');
+        bindReqPager('all', rows);
+        return;
+      }
+
+      const mine   = rows.filter(function (r) { return Branches.same(r.req_branch  || '', br); });
+      const theirs = rows.filter(function (r) { return Branches.same(r.from_branch || '', br); });
 
       box.innerHTML =
+        reqBlock('mine',   '📥 أصناف طلبها فرعك من الفروع الأخرى ولم تُحوَّل بعد', mine,   'from') +
+        reqBlock('theirs', '📤 أصناف مطلوبة من فرعك ولم يتم تحويلها بعد',        theirs, 'to');
+      bindReqPager('mine', mine);
+      bindReqPager('theirs', theirs);
+    }
+
+    // مجموعة واحدة: عنوان + جدول + مكان شريط الصفحات
+    //   mode='from'  → العمود التاني: الفرع المطلوب منه التحويل
+    //   mode='to'    → العمود التاني: الفرع الطالب
+    //   mode='route' → المسار كامل (للأدمن على كل الفروع)
+    function reqBlock(key, title, rows, mode) {
+      const head = mode === 'from' ? 'مطلوب من فرع'
+                 : mode === 'to'   ? 'الفرع الطالب' : 'المسار';
+      let html = '<div class="grp-title">' + title +
+                 ' <span class="n">' + rows.length + '</span></div>';
+      if (!rows.length) {
+        return html + '<div class="empty" style="margin-bottom:14px;">لا يوجد شيء هنا 👌</div>';
+      }
+
+      const pages = Math.max(1, Math.ceil(rows.length / PER_PAGE));
+      if (pageOf[key] > pages) pageOf[key] = pages;
+      const slice = rows.slice((pageOf[key] - 1) * PER_PAGE, pageOf[key] * PER_PAGE);
+
+      html +=
         '<div class="table-wrap"><table>' +
-          '<thead><tr><th>وقت الطلب</th><th>المسار</th><th>الصنف</th><th>الكمية</th>' +
+          '<thead><tr><th>وقت الطلب</th><th>' + head + '</th><th>الصنف</th><th>الكمية</th>' +
           '<th>العميل</th><th>مدة الانتظار</th></tr></thead><tbody>' +
           slice.map(function (r) {
+            const who = mode === 'from'
+              ? '<b>' + esc(r.from_branch || '؟') + '</b>'
+              : mode === 'to'
+                ? '<b>' + esc(r.req_branch || '؟') + '</b>' +
+                  ((r.req_name && r.req_name !== r.req_branch)
+                    ? '<div style="font-size:.7rem;color:var(--text-muted);">طلبها: ' + esc(r.req_name) + '</div>' : '')
+                : '<b>' + esc(r.from_branch || '؟') + '</b> <span style="color:var(--accent);font-size:1.05rem;">←</span> <b>' +
+                  esc(r.req_branch || '؟') + '</b>';
             return '<tr class="' + (r._forgot ? 'forgot' : '') + '">' +
               '<td style="font-size:.76rem;white-space:nowrap;">' + esc(when(r.created_d, r.created)) + '</td>' +
-              '<td><b>' + esc(r.from_branch || '؟') + '</b> <span style="color:var(--accent);font-size:1.05rem;">←</span> <b>' +
-                esc(r.req_branch || '؟') + '</b>' +
-                ((r.req_name && r.req_name !== r.req_branch)
-                  ? '<div style="font-size:.7rem;color:var(--text-muted);">طلبها: ' + esc(r.req_name) + '</div>' : '') +
+              '<td>' + who +
                 (r._forgot ? '<div style="font-size:.7rem;font-weight:800;color:var(--danger);">⚠️ خرجت تحويلة بعد هذا الطلب ولم يُنفَّذ</div>' : '') +
               '</td>' +
               '<td style="font-weight:700;font-size:.83rem;">' + esc(r.item_name || '—') +
@@ -390,14 +432,23 @@
               '<td style="font-size:.78rem;white-space:nowrap;">' + esc(waited(r.age_min)) + '</td>' +
             '</tr>';
           }).join('') +
-        '</tbody></table></div>';
+        '</tbody></table></div>' +
+        '<div class="pager" id="pager-' + key + '"></div>';
+      return html;
+    }
 
-      renderPager(pageReq, pages, rows.length, function (p) { pageReq = p; render(); });
+    function bindReqPager(key, rows) {
+      const el = document.getElementById('pager-' + key);
+      if (!el || !rows.length) return;
+      const pages = Math.max(1, Math.ceil(rows.length / PER_PAGE));
+      renderPager('pager-' + key, pageOf[key], pages, rows.length, function (p) {
+        pageOf[key] = p; render();
+      });
     }
 
     // شريط الصفحات: « ‹ 1 2 … › »  + «صفحة X من Y»
-    function renderPager(page, pages, total, go) {
-      const el = document.getElementById('req-pager');
+    function renderPager(elId, page, pages, total, go) {
+      const el = document.getElementById(elId);
       if (pages <= 1) { el.innerHTML = '<span class="info">' + total + ' صنف</span>'; return; }
       const nums = [];
       const push = function (p) {
