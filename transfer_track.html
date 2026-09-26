@@ -127,7 +127,8 @@
     //  كله من get_open_transfers() — دالة قراءة، مفيش أي تخزين.
     // ═════════════════════════════════════════════════════════════
     const PER_PAGE = 40;
-    const AUTO_MS  = 60000;   // تحديث صامت كل دقيقة عشان الشاشة تفضل صح
+    // مفيش تحديث تلقائي: الشاشة بتحمّل عند الفتح وبزر «تحديث» بس — عشان
+    // ماتعملش نداءات على السيرفر وهي مفتوحة على مكتب طول اليوم.
 
     let userBranch = '';
     let DATA = { shipments: [], requests: [] };
@@ -149,16 +150,13 @@
         const mine = Branches.names().find(n => Branches.same(n, userBranch));
         if (mine) sel.value = mine;
         loadAll();
-        setInterval(function () { loadAll(true); }, AUTO_MS);
       });
     });
 
-    async function loadAll(silent) {
-      if (!silent) {
-        document.getElementById('live-grid').innerHTML = '<div class="empty">⏳ جاري التحميل...</div>';
-        document.getElementById('done-wrap').innerHTML = '';
-        document.getElementById('req-wrap').innerHTML  = '';
-      }
+    async function loadAll() {
+      document.getElementById('live-grid').innerHTML = '<div class="empty">⏳ جاري التحميل...</div>';
+      document.getElementById('done-wrap').innerHTML = '';
+      document.getElementById('req-wrap').innerHTML  = '';
       try {
         const res = await fetch(SB_URL_API + '/rest/v1/rpc/get_open_transfers', {
           method: 'POST',
@@ -170,14 +168,13 @@
         DATA = { shipments: d && d.shipments ? d.shipments : [],
                  requests:  d && d.requests  ? d.requests  : [] };
         markForgotten();
-        document.getElementById('last-upd').textContent = 'آخر تحديث ' + ((d && d.now) || '');
+        // الوقت ده وقت آخر تحميل — الشاشة مابتجدّدش نفسها، فمهم يبان
+        document.getElementById('last-upd').textContent = 'البيانات لحظة ' + ((d && d.now) || '');
         render();
       } catch (e) {
         console.error('get_open_transfers:', e);
-        if (!silent) {
-          document.getElementById('live-grid').innerHTML =
-            '<div class="empty" style="color:var(--danger);border-color:var(--danger);">❌ فشل تحميل البيانات — جرّب تحديث الصفحة</div>';
-        }
+        document.getElementById('live-grid').innerHTML =
+          '<div class="empty" style="color:var(--danger);border-color:var(--danger);">❌ فشل تحميل البيانات — اضغط «تحديث» تاني</div>';
       }
     }
 
