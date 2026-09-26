@@ -451,11 +451,13 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
             <option value="">— اختر الفرع —</option>
           </select>
         </div>
-        <div class="form-group">
+        <!-- العميل والعنوان والقيمة بتختفي في التحويلة: دي حركة بين
+             فرعين — مافيش عميل ولا مبلغ، والفرع المستلم والمنطقة بيكفّوا -->
+        <div class="form-group" id="ao-cust-wrap">
           <label>اسم العميل / الجهة</label>
           <input type="text" class="form-control" id="ao-cust" placeholder="اختياري">
         </div>
-        <div class="form-group">
+        <div class="form-group" id="ao-addr-wrap">
           <label>العنوان</label>
           <input type="text" class="form-control" id="ao-addr" placeholder="اختياري">
         </div>
@@ -464,7 +466,7 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
           <input type="text" class="form-control" id="ao-region" list="ao-region-list" placeholder="🔍 اكتب حرف لتصفية المناطق" autocomplete="off">
           <datalist id="ao-region-list"></datalist>
         </div>
-        <div class="form-group">
+        <div class="form-group" id="ao-amount-wrap">
           <label>القيمة (ج.م) *</label>
           <input type="number" class="form-control" id="ao-amount" value="0" min="0" step="0.01">
           <div style="font-size:.68rem;color:var(--text-muted);margin-top:.25rem">صفر مقبول — مثلاً مرتجع أو مشوار بدون مبلغ</div>
@@ -2297,6 +2299,9 @@ async function openAddOrder(){
   document.getElementById('ao-amount').value='0';
   document.getElementById('ao-notes').value='';
   document.getElementById('ao-tobranch-wrap').style.display='none';
+  ['ao-cust-wrap','ao-addr-wrap','ao-amount-wrap'].forEach(function(id){
+    document.getElementById(id).style.display = 'block';
+  });
 
   // فروع الاستلام — كل الفروع ما عدا الفرع اللي بيحوّل
   try{
@@ -2324,7 +2329,12 @@ function setAoType(type, btn){
   btn.classList.add('active');
   document.getElementById('ao-invoice').style.display = type==='invoice'?'block':'none';
   document.getElementById('ao-manual').style.display  = type==='invoice'?'none':'block';
-  document.getElementById('ao-tobranch-wrap').style.display = type==='transfer'?'block':'none';
+  const isTr = (type === 'transfer');
+  document.getElementById('ao-tobranch-wrap').style.display = isTr ? 'block' : 'none';
+  // التحويلة: مافيش عميل/عنوان/قيمة
+  ['ao-cust-wrap','ao-addr-wrap','ao-amount-wrap'].forEach(function(id){
+    document.getElementById(id).style.display = isTr ? 'none' : 'block';
+  });
   document.getElementById('ao-invoice-preview').innerHTML='';
 }
 
@@ -2470,18 +2480,20 @@ async function saveNewOrder(){
       || _aoRegionNames.find(n=>(n||'').trim().toLowerCase()===region.toLowerCase());
     if(!_rmatch){ showToast('اكتب حرف واختر منطقة من القائمة'); return; }
     region = _rmatch;
-    const amount = parseFloat(document.getElementById('ao-amount').value);
-    if(isNaN(amount) || amount < 0){ showToast('القيمة غير صحيحة'); return; }
-
     const isTransfer = aoType === 'transfer';
+    // التحويلة بصفر دايمًا — حقل القيمة متخفي فمابنقراهوش
+    const amount = isTransfer ? 0 : parseFloat(document.getElementById('ao-amount').value);
+    if(!isTransfer && (isNaN(amount) || amount < 0)){ showToast('القيمة غير صحيحة'); return; }
+
     // الفرع المستلم إجباري في التحويلة — من غيره التتبع بيرجع تخمين
     const toBranch = isTransfer ? (document.getElementById('ao-tobranch').value || '') : '';
     if(isTransfer && !toBranch){ showToast('اختر الفرع المستلم'); return; }
     const prefix = isTransfer ? 'TRF' : 'DRV';
     const label  = isTransfer ? 'تحويلة' : 'طلب من طيار';
     const billNo = `${prefix}-${Date.now().toString().slice(-8)}`;
-    const cust   = document.getElementById('ao-cust').value.trim();
-    const addr   = document.getElementById('ao-addr').value.trim();
+    // نتجاهل أي قيم قديمة سايبها الموظف في الحقول المخفية
+    const cust   = isTransfer ? '' : document.getElementById('ao-cust').value.trim();
+    const addr   = isTransfer ? '' : document.getElementById('ao-addr').value.trim();
     const notes  = document.getElementById('ao-notes').value.trim();
 
     // السيرفر بقى بيستخدم bill_date بالوقت الحقيقي (مافيش خصم ساعتين) — نحطّ وقت الإنشاء الحقيقي
