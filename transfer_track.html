@@ -44,6 +44,16 @@
     .stp .sub { font-size:0.77rem; color:var(--text-secondary); margin-top:2px; }
     .stp .sub a { color:var(--accent); text-decoration:none; font-weight:700; }
 
+    .trip-box { margin-top:10px; border-top:1px dashed var(--border); padding-top:9px; font-size:0.81rem; }
+    .trip-box .hd { display:flex; justify-content:space-between; align-items:center; gap:8px; color:var(--text-secondary); }
+    .trip-box b { color:var(--text-primary); }
+    .with-btn { background:none; border:1.5px solid var(--border); border-radius:14px; padding:2px 10px;
+                cursor:pointer; font-family:var(--font); font-size:0.74rem; font-weight:700; color:var(--text-secondary); }
+    .with-btn:hover { border-color:var(--accent); color:var(--accent); }
+    .mini { display:inline-block; background:var(--surface-3); border:1px solid var(--border);
+            border-radius:8px; padding:2px 7px; margin:2px; font-size:0.72rem; }
+    .mini.trf { border-color:var(--accent); color:var(--accent); font-weight:700; }
+
     .cnt-box { margin-top:11px; border-top:1px dashed var(--border); padding-top:9px; }
     .cnt-line { display:flex; justify-content:space-between; align-items:center; gap:8px;
                 font-size:0.79rem; color:var(--text-secondary); padding:3px 0; }
@@ -142,6 +152,15 @@
              '</div></div>';
     }
 
+    const ST_AR = { pending:'في الانتظار', assigned:'مُسنَد', picked:'مع الطيار',
+                    completed:'تم التسليم', delivered:'تم التسليم', postponed:'مؤجل',
+                    failed:'تعذّر التسليم', prep:'تحت التحضير' };
+    function stAr(s) { return ST_AR[s] || s || ''; }
+    function toggleWith(id) {
+      const el = document.getElementById('with-' + id);
+      if (el) el.style.display = (el.style.display === 'none') ? '' : 'none';
+    }
+
     function render(rows, pending) {
       const box = document.getElementById('cards');
       if (!rows.length) {
@@ -184,6 +203,30 @@
           ? step('ok', 'وصلت إلى ' + esc(s.to_branch || 'الفرع المستلم'), when(s.delivered_d, s.delivered), '')
           : step(dead ? 'x' : 'no', 'لم تصل بعد', '', '');
 
+        /* الرحلة: الطيار ماشي بكام طلب غير التحويلة — الفرع بيسأل عن ده
+           عشان يعرف التحويلة هتوصل بسرعة ولا الطيار عليه لفّة. */
+        const others = (s.others || []);
+        const tripLine = s.driver_name ? (
+          '<div class="trip-box">' +
+            '<div class="hd"><span>🧾 معاها في نفس الرحلة: <b>' +
+              (others.length ? others.length + (others.length === 1 ? ' طلب' : ' طلبات') : 'مفيش — التحويلة لوحدها') +
+            '</b></span>' +
+            (others.length
+              ? '<button class="with-btn" onclick="toggleWith(&#39;' + esc(s.id) + '&#39;)">عرض <i class="fas fa-chevron-down"></i></button>'
+              : '') +
+            '</div>' +
+            (others.length
+              ? '<div id="with-' + esc(s.id) + '" style="display:none;margin-top:6px;">' +
+                  others.map(function (o) {
+                    return '<span class="mini' + (o.is_transfer ? ' trf' : '') + '">' +
+                           (o.is_transfer ? '🔄 ' : '') + esc(o.name || o.bill_no) +
+                           ' <span style="color:var(--text-muted)">· ' + esc(o.region || '') +
+                           ' · ' + esc(stAr(o.status)) + '</span></span>';
+                  }).join('') +
+                '</div>'
+              : '') +
+          '</div>') : '';
+
         // عدّادات الفرع المُرسِل — أصناف معلّقة في شاشة التحويلات
         const p  = (pending && pending[s.from_branch]) || { requested: 0, required: 0 };
         const br = esc(s.from_branch || 'الفرع');
@@ -206,6 +249,7 @@
               '<div>' + state + '</div>' +
             '</div>' +
             '<div class="steps">' + steps + '</div>' +
+            tripLine +
             counts +
           '</div>';
       }).join('');
