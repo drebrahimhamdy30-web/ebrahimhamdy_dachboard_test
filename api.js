@@ -118,7 +118,14 @@ async function sbTaskList(opts = {}) {
     if (opts.user)   params.set('user',  `eq.${opts.user}`);
     if (opts.states && opts.states.length) params.set('state', `in.(${opts.states.join(',')})`);
     if (opts.limit)  params.set('limit', String(opts.limit));
-    const r = await fetch(`${SB_TASK_URL}?${params.toString()}`, { headers: await sbH() });
+    /* من غير limit صريح: نلفّ بالـoffset. جدول task فيه ~15 ألف صف،
+       والنداء الواحد كان بيرجّع أحدث 1000 بس — وده اللي خفى طلبات تحويل
+       معلّقة من شهور عن شاشة التحويلات.                                */
+    if (!opts.limit) {
+      const all = await Session.getAll('task?' + params.toString(), { label: 'الطلبات (task)' });
+      return (all || []).map(x => ({ ...x, createdAt: x.created_at }));
+    }
+    const r = await fetch(`${SB_TASK_URL}?${params.toString()}`, { headers: await sbH() });   // data-ok: المسار ده بيوصله النداء بـlimit صريح
     if (!r.ok) return [];
     const rows = await r.json();
     if (!Array.isArray(rows)) return [];

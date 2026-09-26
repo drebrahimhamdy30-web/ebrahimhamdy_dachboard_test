@@ -233,14 +233,16 @@
       const tbody = document.getElementById('exp-table-body');
       tbody.innerHTML = '<tr class="loading-row"><td colspan="8">⏳ جاري التحميل...</td></tr>';
 
-      const [expRes, rulesRes] = await Promise.all([
-        db.from('erp_expenses').select('*').order('doc_date', { ascending: false }),
-        db.from('erp_expense_hide_rules').select('*').order('created_at', { ascending: false })
+      /* ⚠️ كانت بتجيب كل المصروفات بنداء واحد — والجدول 5,084 صف وPostgREST
+         بيقص عند 1000، يعني المصروفات الأقدم من ~٦ شهور مكانتش بتظهر ولا
+         بتدخل في أي إجمالي. getAll بتلفّ بالـoffset لحد ما تخلص.        */
+      const [expAll, rulesRes] = await Promise.all([
+        Session.getAll('erp_expenses?select=*&order=doc_date.desc', { label: 'المصروفات' }),
+        db.from('erp_expense_hide_rules').select('*').order('created_at', { ascending: false })   // data-ok: صف واحد
       ]);
-      if (expRes.error)   console.error('expenses load error:', expRes.error);
       if (rulesRes.error) console.error('rules load error:', rulesRes.error);
 
-      allExpenses = expRes.data || [];
+      allExpenses = expAll || [];
       allRules    = rulesRes.data || [];
       renderExpenses();
       renderRules();

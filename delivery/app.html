@@ -1014,7 +1014,7 @@ async function scLoad() {
       db.from('supplier_balance_snapshots').select('branch,rows,taken_at,taken_by')
         .order('taken_at', { ascending: false }).limit(40),
       db.from('supplier_balance_notes').select('branch,code,supplier_name,balance,note,created_by,created_at')
-        .order('created_at', { ascending: false }).limit(3000)
+        .order('created_at', { ascending: false }).limit(1000)   // data-ok: 156 صف والأحدث أولًا
     ]);
     // جدول أسباب الأرصدة ممكن يكون لسه ماتعملش — مش سبب نوقّف البحث كله
     if (snaps.error) throw snaps.error;
@@ -1213,14 +1213,19 @@ document.addEventListener('keydown', e => {
 
 async function loadHeaderStats() {
   try {
-    const { data } = await db.from('orders').select('status,bill_date,created_at');
-    if (!data) return;
-    const pending = data.filter(o => o.status === 'pending').length;
-    const picked  = data.filter(o => o.status === 'picked').length;
-    const late    = data.filter(o => {
-      if (['completed','cancelled','delivered'].includes(o.status)) return false;
-      return (new Date() - new Date(o.bill_date || o.created_at)) / 60000 > 30;
-    }).length;
+    /* ⚠️ كانت: db.from('orders').select(...) لكل الطلبات (36 ألف صف) والعدّ
+       في المتصفح — وPostgREST بيقص عند 1000، فالعدّادات كانت محسوبة على
+       شريحة مش كل البيانات (والقص من غير ORDER = صفوف عشوائية تقريبًا).
+       دلوقتي العدّ بيحصل في القاعدة: تلات نداءات خفيفة بترجّع رقم بس.  */
+    const lateBefore = new Date(Date.now() - 30 * 60000).toISOString();
+    const [pending, picked, late] = await Promise.all([
+      Session.count('orders?select=id&status=eq.pending'),
+      Session.count('orders?select=id&status=eq.picked'),
+      // المتأخر: لسه في الشارع وعدّى عليه نص ساعة من وقت الفاتورة
+      Session.count('orders?select=id&status=not.in.(completed,cancelled,delivered)' +
+                    '&bill_date=lt.' + encodeURIComponent(lateBefore))
+    ]);
+    if (pending == null && picked == null) return;
 
     const ordersBadge = document.getElementById('nav-badge-orders');
     if (ordersBadge) { ordersBadge.textContent = pending; ordersBadge.style.display = pending > 0 ? 'inline-block' : 'none'; }
