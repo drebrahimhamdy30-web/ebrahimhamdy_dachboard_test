@@ -462,14 +462,20 @@ const Session = (function () {
     const cap  = o.maxRows || 50000;          // سقف أمان يمنع اللف اللانهائي
     const out = [];
     let total = null, incomplete = false;
-    for (let off = 0; off < cap; off += size) {
+    /* بنتقدّم بعدد اللي وصل فعلًا مش بحجم الصفحة اللي طلبناها:
+       السيرفر الذاتي ممكن يكون سقفه (PGRST_DB_MAX_ROWS) غير سقف السحابة،
+       فلو طلبنا 1000 وهو رجّع 500، التقدّم بـ1000 كان هيتخطّى نص البيانات. */
+    let off = 0;
+    while (off < cap) {
       const p = await fetchPage(path, { limit: size, offset: off, count: off === 0,
                                         method: o.method, body: o.body });
       if (!p.ok) { incomplete = true; break; }
       if (off === 0) total = p.total;
       for (const row of p.rows) out.push(row);
-      if (p.rows.length < size) { incomplete = false; break; }
-      if (off + size >= cap) { incomplete = true; }
+      if (!p.rows.length) break;                       // مفيش صفوف تانية
+      off += p.rows.length;
+      if (total != null && out.length >= total) break; // خلّصنا العدد الحقيقي
+      if (off >= cap) { incomplete = true; break; }    // سقف الأمان
     }
     try {
       Object.defineProperty(out, 'total', { value: total, enumerable: false });
