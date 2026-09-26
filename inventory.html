@@ -155,7 +155,9 @@
     .ds-day-val{ font-weight:700; min-width:46px; text-align:left; font-variant-numeric:tabular-nums; }
     .report-table { width:100%; border-collapse:collapse; font-size:0.8rem; }
     .report-table th, .report-table td { padding:6px 8px; border-bottom:1px solid var(--border); text-align:right; }
-    .report-table th { background:var(--surface-3); position:sticky; top:0; }
+    /* ⚠️ style.css بيدّي th لون خط أبيض (لأن خلفيته teal). هنا الخلفية
+       فاتحة، فلازم نرجّع لون الخط — من غيره الهيدر أبيض على أبيض. */
+    .report-table th { background:var(--surface-3); color:var(--text-primary); position:sticky; top:0; }
 
     @media print {
       body * { visibility:hidden; }
@@ -577,11 +579,13 @@
       <label class="modal-label">الرصيد اللي لقيته فعليًا:</label>
       <input type="number" id="review-balance-input" class="form-input" inputmode="decimal" placeholder="اكتب الرصيد...">
       <div id="review-diff" style="font-size:0.8rem;font-weight:700;margin-top:6px;min-height:18px;"></div>
-      <label class="modal-label" style="margin-top:10px;">تاريخ الصلاحية <span style="font-weight:400;color:var(--text-muted);font-size:0.78rem;">(اختياري)</span></label>
-      <input type="month" id="review-exp-input" class="form-input">
+      <div id="review-exp-wrap">
+        <label class="modal-label" style="margin-top:10px;">تاريخ الصلاحية <span style="font-weight:400;color:var(--text-muted);font-size:0.78rem;">(اختياري)</span></label>
+        <input type="month" id="review-exp-input" class="form-input">
+      </div>
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeStaleReview()">إلغاء</button>
-        <button class="btn btn-primary" onclick="confirmStaleReview()"><i class="fas fa-check"></i> تسجيل</button>
+        <button class="btn btn-primary" id="review-confirm-btn" onclick="reviewConfirm()"><i class="fas fa-check"></i> تسجيل</button>
       </div>
     </div>
   </div>
@@ -1718,7 +1722,7 @@
       } catch (e) {}
       return SB_ANON_API;
     }
-    async function sbResolveJard(id, by, resolved) {
+    async function sbResolveJard(id, by, resolved, reviewQty, reviewSys) {
       try {
         let jwt = invUserAuth();
         // التوكن منتهي؟ (بيرجع anon) — جدّده قبل النداء لأن الـRPC محمي بالدور (admin/inventory/reviewer)
@@ -1728,17 +1732,94 @@
         const r = await fetch(`${SB_URL_API}/rest/v1/rpc/resolve_jard_audit`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'apikey': SB_ANON_API, 'Authorization': 'Bearer ' + jwt },
-          body: JSON.stringify({ p_id: id, p_by: by || null, p_resolved: resolved !== false })
+          body: JSON.stringify({ p_id: id, p_by: by || null, p_resolved: resolved !== false,
+                                 p_review_qty: reviewQty ?? null, p_review_sys_qty: reviewSys ?? null })
         });
         return r.ok;
       } catch (e) { return false; }
     }
-    async function markReportResolved(ri, resolved) {
+    async function markReportResolved(ri, resolved, reviewQty, reviewSys) {
       const row = currentFullReportData[ri];
       if (!row || row.id == null) return;
-      const ok = await sbResolveJard(row.id, employeeName, resolved);
-      if (ok) { row._resolved = resolved; row.resolved_by = resolved ? employeeName : null; renderFullReport(); }
+      const ok = await sbResolveJard(row.id, employeeName, resolved, reviewQty, reviewSys);
+      if (ok) {
+        row._resolved   = resolved;
+        row.resolved_by = resolved ? employeeName : null;
+        row.review_qty     = resolved ? (reviewQty ?? row.review_qty) : null;
+        row.review_sys_qty = resolved ? (reviewSys ?? row.review_sys_qty) : null;
+        renderFullReport();
+      }
       else { alert('⚠️ فشل الحفظ، حاول تاني'); }
+    }
+
+    /* ═══ شاشة مراجعة صنف من التقرير الشامل ═══
+       «تم» كانت بتعلّم الصف «تمّت المراجعة» وبس. دلوقتي بتفتح شاشة
+       بتوريه رصيد النظام **دلوقتي** (بتتجلب لحظتها) والرصيد اللي عدّه
+       موظف الجرد، وبيكتب هو لقى كام — والرقم بيتخزّن ويفضل ظاهر في
+       التقرير بعد كده.                                                */
+    let reportReviewRi = null;
+
+    async function openReportReview(ri) {
+      const row = currentFullReportData[ri];
+      if (!row) return;
+      reportReviewRi = ri;
+
+      const info = document.getElementById('review-item-info');
+      info.innerHTML =
+        '<div><b>الكود:</b> ' + (row.code || '---') + '</div>' +
+        '<div><b>الاسم:</b> ' + (row.itm_name_ar || '---') + '</div>' +
+        '<div style="margin-top:6px;"><b>وقت الجرد:</b> رصيد النظام ' + (row.system_qty ?? '—') +
+          ' · المجرود ' + (row.actual_qty ?? '—') + '</div>' +
+        '<div id="review-now" style="margin-top:4px;"><b>رصيد النظام دلوقتي:</b> ⏳ جاري الجلب…</div>';
+
+      const bal = document.getElementById('review-balance-input');
+      bal.value = ''; bal.style.borderColor = '';
+      bal.oninput = updateReportReviewDiff;
+      const exp = document.getElementById('review-exp-input');
+      document.getElementById('review-exp-wrap').style.display = 'none';
+      document.getElementById('review-diff').textContent = '';
+      openModalFullScreen(document.getElementById('review-modal'));
+
+      // رصيد النظام دلوقتي — بنجيبه لحظة فتح الشاشة
+      let now = row._balanceFetched ? row._systemQty : null;
+      if (now === null) {
+        try {
+          const res  = await fetch(`${BALANCE_URL}?code=${encodeURIComponent(row.code)}&branch=${encodeURIComponent(userBranch)}`);
+          const raw  = await res.json();
+          const data = Array.isArray(raw) ? raw[0] : raw;
+          if (data && data.found) { now = data.balance; row._systemQty = now; row._balanceFetched = true; }
+        } catch (e) {}
+      }
+      const nowEl = document.getElementById('review-now');
+      if (nowEl) {
+        nowEl.innerHTML = (now === null || now === undefined)
+          ? '<b>رصيد النظام دلوقتي:</b> <span style="color:var(--text-muted)">مش متاح</span>'
+          : '<b>رصيد النظام دلوقتي:</b> <span class="balance-val">' + now + '</span>';
+      }
+      if (now !== null && now !== undefined && bal.value === '') { bal.value = now; updateReportReviewDiff(); }
+      setTimeout(() => { bal.focus(); bal.select(); }, 100);
+    }
+
+    function updateReportReviewDiff() {
+      const row = currentFullReportData[reportReviewRi];
+      const el  = document.getElementById('review-diff');
+      if (!row || !el) return;
+      const v = document.getElementById('review-balance-input').value.trim();
+      if (v === '' || row._systemQty === null || row._systemQty === undefined) { el.textContent = ''; return; }
+      const diff = Number(v) - Number(row._systemQty);
+      el.textContent = diff === 0 ? '✅ مطابق لرصيد النظام دلوقتي'
+                                  : (diff > 0 ? '❌ زيادة ' : '❌ عجز ') + Math.abs(diff);
+      el.style.color = diff === 0 ? 'var(--success,#16a34a)' : 'var(--danger,#dc2626)';
+    }
+
+    async function confirmReportReview() {
+      const input = document.getElementById('review-balance-input');
+      const val   = input.value.trim();
+      if (val === '') { input.style.borderColor = 'var(--danger,#dc2626)'; input.focus(); return; }
+      const ri  = reportReviewRi;
+      const row = currentFullReportData[ri];
+      closeStaleReview();
+      await markReportResolved(ri, true, Number(val), (row && row._systemQty != null) ? Number(row._systemQty) : null);
     }
 
     async function loadFullReport() {
@@ -1814,15 +1895,19 @@
 
         let action;
         if (i._resolved) {
+          // رصيد المراجع بيفضل ظاهر عشان لما يرجع للصنف يعرف لقى كام ساعتها
+          const rq = (i.review_qty !== null && i.review_qty !== undefined)
+            ? `<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:2px;">المراجع لقى: <b>${i.review_qty}</b>${(i.review_sys_qty !== null && i.review_sys_qty !== undefined) ? ' · رصيد النظام وقتها ' + i.review_sys_qty : ''}</div>` : '';
           action = `<span style="font-size:0.75rem;font-weight:700;color:var(--success,#16a34a);">✅ تمّت المراجعة${i.resolved_by ? ' — ' + i.resolved_by : ''}</span>`
-                 + (canEdit ? ` <button class="btn-skip" style="padding:3px 9px;font-size:0.7rem;" onclick="markReportResolved(${i._ri}, false)">تراجع</button>` : '');
+                 + (canEdit ? ` <button class="btn-skip" style="padding:3px 9px;font-size:0.7rem;" onclick="markReportResolved(${i._ri}, false)">تراجع</button>` : '')
+                 + rq;
         } else if (!canEdit) {
           action = i._balanceFetched ? `<span class="balance-val">${i._systemQty}</span>` : '—';
         } else {
           const bal = i._balanceFetched
             ? `<span class="balance-val" style="font-size:0.9rem;">${i._systemQty}</span>`
             : `<button class="btn-balance" onclick="fetchFullReportBalance(${i._ri})"><i class="fas fa-database"></i> الرصيد</button>`;
-          action = `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">${bal}<button class="btn-done" onclick="markReportResolved(${i._ri}, true)">✅ تم</button></div>`;
+          action = `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">${bal}<button class="btn-done" onclick="openReportReview(${i._ri})">✅ تم</button></div>`;
         }
 
         // الفرق = الرصيد الفعلي − رصيد النظام (+ زيادة / − عجز)
@@ -2147,6 +2232,8 @@
         '<div style="margin-top:6px;"><b>رصيد النظام:</b> ' +
           '<span class="balance-val">' + item._systemQty + '</span></div>';
 
+      reportReviewRi = null;                       // مصدر الشاشة: الجرد الناقص
+      document.getElementById('review-exp-wrap').style.display = '';
       const bal = document.getElementById('review-balance-input');
       bal.value = item._systemQty;                 // الغالب إنه مطابق — تعديل بضغطة
       bal.style.borderColor = '';
@@ -2174,6 +2261,15 @@
     function closeStaleReview() {
       closeModalFullScreen(document.getElementById('review-modal'));
       reviewTargetCode = null;
+      reportReviewRi   = null;
+      const w = document.getElementById('review-exp-wrap');
+      if (w) w.style.display = '';          // نرجّعها للوضع الافتراضي
+    }
+
+    // نفس الشاشة بتخدم مصدرين: «لم يُجرد منذ مدة» و«التقرير الشامل»
+    function reviewConfirm() {
+      if (reportReviewRi !== null && reportReviewRi !== undefined) return confirmReportReview();
+      return confirmStaleReview();
     }
 
     async function confirmStaleReview() {
