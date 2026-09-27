@@ -43,10 +43,22 @@ Deno.serve(async (req) => {
       .in('id', ack).is('delivered_at', null)
   }
 
-  // التنبيهات المعلّقة
+  // نافذة التنبيه: 10 دقايق. أي حدث أقدم من كده مايتنبّهش عليه — بيتصفّى بس
+  // (يتعلّم مُسلَّم) عشان مايتراكمش ويغرق الطيار بإنذارات قديمة أول ما يفتح
+  // التطبيق. الطيار اللي بيشتغل على الويب مابيأكّدش (ack) الأحداث دي، فكانت
+  // بتفضل معلّقة بالآلاف لشهور وتدق كلها دفعة واحدة عند فتح الأبليكيشن.
+  const cutoff = new Date(Date.now() - 10 * 60_000).toISOString()
+
+  // تصفية الأحداث القديمة المعلّقة لهذا الطيار (من غير تنبيه)
+  await supabase.from('driver_events')
+    .update({ delivered_at: new Date().toISOString() })
+    .eq('driver_id', driverId).is('delivered_at', null).lt('created_at', cutoff)
+
+  // التنبيهات المعلّقة الحديثة فقط (آخر 10 دقايق)
   const { data } = await supabase.from('driver_events')
     .select('id,type,title,body,order_id,created_at')
     .eq('driver_id', driverId).is('delivered_at', null)
+    .gte('created_at', cutoff)
     .order('id', { ascending: true }).limit(20)
 
   return json({ events: data ?? [] })
