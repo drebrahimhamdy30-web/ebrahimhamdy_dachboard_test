@@ -451,6 +451,11 @@
               <input type="date" id="full-report-to" class="form-input" style="width:150px;">
             </div>
             <button class="btn btn-primary" onclick="loadFullReport()"><i class="fas fa-search"></i> بحث</button>
+            <div>
+              <label class="modal-label" style="margin-bottom:4px;">بحث بالكود أو الاسم</label>
+              <input type="text" id="full-report-q" class="form-input" style="width:190px;"
+                placeholder="كود أو جزء من الاسم…" oninput="onFullReportSearch()">
+            </div>
             <button class="btn btn-secondary" onclick="exportFullReportToExcel()"><i class="fas fa-file-excel"></i> تصدير إكسل</button>
           </div>
           <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
@@ -465,10 +470,10 @@
           <div class="table-wrap">
             <table class="report-table">
               <thead>
-                <tr><th>الكود</th><th>الاسم</th><th>الفئة</th><th>الحالة</th><th>رصيد النظام</th><th>الرصيد الفعلي</th><th>الفرق</th><th>بواسطة</th><th>التاريخ</th><th>الرصيد / مراجعة</th></tr>
+                <tr><th>الكود</th><th>الاسم</th><th>الفئة</th><th>الحالة</th><th>رصيد النظام</th><th>الرصيد الفعلي</th><th>الصلاحية</th><th>الفرق</th><th>بواسطة</th><th>التاريخ</th><th>الرصيد / مراجعة</th></tr>
               </thead>
               <tbody id="full-report-body">
-                <tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>
+                <tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>
               </tbody>
             </table>
           </div>
@@ -1828,7 +1833,7 @@
       const dateTo   = document.getElementById('full-report-to').value;
       const body     = document.getElementById('full-report-body');
 
-      body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>';
+      body.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري التحميل...</td></tr>';
       fullReportPage = 1;
 
       try {
@@ -1843,14 +1848,16 @@
         }));
         renderFullReport();
       } catch(e) {
-        body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--danger);padding:20px;">❌ فشل تحميل التقرير</td></tr>';
+        body.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--danger);padding:20px;">❌ فشل تحميل التقرير</td></tr>';
       }
     }
 
     function getFullReportFiltered() {
-      if (fullReportStatus === 'matched')  return currentFullReportData.filter(i => i._matched);
-      if (fullReportStatus === 'mismatch') return currentFullReportData.filter(i => !i._matched);
-      return currentFullReportData;
+      // الحالة + البحث بالكود/الاسم — الاتنين على كل البيانات مش على الصفحة
+      let rows = currentFullReportData;
+      if (fullReportStatus === 'matched')  rows = rows.filter(i => i._matched);
+      else if (fullReportStatus === 'mismatch') rows = rows.filter(i => !i._matched);
+      return rows.filter(fullReportMatchesSearch);
     }
 
     function setFullReportStatus(s, el) {
@@ -1865,6 +1872,30 @@
       const pages = Math.max(1, Math.ceil(getFullReportFiltered().length / FULL_REPORT_PAGE_SIZE));
       fullReportPage = Math.min(Math.max(1, fullReportPage + dir), pages);
       renderFullReport();
+    }
+
+    /* تاريخ الصلاحية اللي كتبه موظف الجرد مع عدم المطابقة (شهر/سنة).
+       القيمة متخزّنة في jard_audit_log.exp_ym — المراجع محتاج يشوفها
+       عشان يعرف الصلاحية الحقيقية وقت الجرد. */
+    function expCell(i) {
+      const v = (i.exp_ym || '') || (i.exp_date ? String(i.exp_date).slice(0, 7) : '');
+      if (!v) return '<span style="color:var(--text-muted)">—</span>';
+      const m = String(v).match(/^(\d{4})-(\d{2})/);
+      return m ? (m[2] + '/' + m[1]) : v;          // 2028-05 → 05/2028
+    }
+
+    // بحث فوري بالكود أو الاسم (على كل البيانات المحمّلة مش على الصفحة)
+    let _frSearchTimer = null;
+    function onFullReportSearch() {
+      clearTimeout(_frSearchTimer);
+      _frSearchTimer = setTimeout(function () { fullReportPage = 1; renderFullReport(); }, 250);
+    }
+    function fullReportMatchesSearch(i) {
+      const el = document.getElementById('full-report-q');
+      const q = el ? el.value.trim().toLowerCase() : '';
+      if (!q) return true;
+      return [i.code, i.itm_name_ar, i.itm_name_en, i.audited_by]
+        .some(function (v) { return String(v || '').toLowerCase().includes(q); });
     }
 
     function renderFullReport() {
@@ -1883,7 +1914,7 @@
       document.getElementById('fr-btn-next').disabled = fullReportPage >= pages;
 
       if (!data.length) {
-        body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:20px;">لا توجد نتائج</td></tr>';
+        body.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:20px;">لا توجد نتائج</td></tr>';
         return;
       }
 
@@ -1925,6 +1956,7 @@
           <td data-label="الحالة" style="color:${isMatched ? 'var(--success,#16a34a)' : 'var(--danger,#dc2626)'};font-weight:700;">${isMatched ? '✅ مطابق' : '❌ غير مطابق'}</td>
           <td data-label="رصيد النظام">${i.system_qty ?? '—'}</td>
           <td data-label="الرصيد الفعلي">${i.actual_qty ?? '—'}</td>
+          <td data-label="الصلاحية" style="white-space:nowrap;font-size:.78rem;">${expCell(i)}</td>
           <td data-label="الفرق">${diffCell}</td>
           <td data-label="بواسطة">${i.audited_by || '—'}</td>
           <td data-label="التاريخ" style="font-size:0.72rem;">${i.audited_at || ''}</td>
@@ -1989,6 +2021,7 @@
         'الحالة': (i.matched === true || i.matched === 'true') ? 'مطابق' : 'غير مطابق',
         'رصيد النظام': i.system_qty ?? '',
         'الرصيد الفعلي': i.actual_qty ?? '',
+        'الصلاحية': i.exp_ym || (i.exp_date ? String(i.exp_date).slice(0,7) : ''),
         'الفرق': (i.system_qty != null && i.actual_qty != null && !isNaN(Number(i.system_qty)) && !isNaN(Number(i.actual_qty))) ? (Math.round((Number(i.actual_qty) - Number(i.system_qty)) * 100) / 100) : '',
         'بواسطة': i.audited_by || '',
         'التاريخ': i.audited_at ? new Date(i.audited_at).toLocaleString('ar-EG') : ''
