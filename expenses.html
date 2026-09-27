@@ -87,7 +87,9 @@
     <div class="card">
 
       <div class="exp-header">
-        <div class="page-title" style="margin:0;"><i class="fas fa-receipt"></i> المصروفات</div>
+        <div class="page-title" style="margin:0;"><i class="fas fa-receipt"></i> المصروفات
+          <span id="exp-scope-tag" class="highlight" style="font-size:.8rem;font-weight:700;"></span>
+        </div>
         <div class="exp-header-right">
           <label class="check-label">
             <input type="checkbox" id="showHiddenToggle" onchange="renderExpenses()">
@@ -101,7 +103,7 @@
         <button class="exp-tab-btn active" data-tab="list" onclick="switchTab('list')">
           <i class="fas fa-list"></i> المصروفات
         </button>
-        <button class="exp-tab-btn" data-tab="rules" onclick="switchTab('rules')">
+        <button class="exp-tab-btn" data-tab="rules" id="rules-section" onclick="switchTab('rules')">
           <i class="fas fa-filter"></i> قواعد الإخفاء التلقائي
         </button>
       </div>
@@ -218,13 +220,26 @@
       branch: 'الفرع', doc_code: 'رقم المستند'
     };
 
+    /* الأدمن يشوف كل الفروع، ومدير الفرع يشوف **فرعه بس** — والفلترة
+       بتتم على السيرفر (get_expenses بتقرا الدور والفرع من التوكن)،
+       مش في المتصفح. اللي هنا مجرد رسالة مهذّبة للأدوار التانية.
+       ⚠️ مين يفتح الصفحة أصلًا بيتحدد من شاشة الصلاحيات. */
+    let EXP_SCOPE = null;      // null = كل الفروع · أو اسم الفرع
+    let EXP_IS_ADMIN = false;
+
     checkAuth().then(async user => {
       if (!user) return;
       const role = (Session.role() || '').trim();
-      if (role !== 'admin') {
+      EXP_IS_ADMIN = (role === 'admin');
+      if (role !== 'admin' && role !== 'manager') {
         document.querySelector('.card').innerHTML =
-          '<div class="empty-note"><i class="fas fa-lock"></i>الصفحة دي متاحة للأدمن بس</div>';
+          '<div class="empty-note"><i class="fas fa-lock"></i>الصفحة دي متاحة للأدمن ومدير الفرع بس</div>';
         return;
+      }
+      // قواعد الإخفاء إدارتها للأدمن بس
+      if (!EXP_IS_ADMIN) {
+        const rulesCard = document.getElementById('rules-section');
+        if (rulesCard) rulesCard.style.display = 'none';
       }
       await loadAll();
     });
@@ -236,14 +251,27 @@
       /* ⚠️ كانت بتجيب كل المصروفات بنداء واحد — والجدول 5,084 صف وPostgREST
          بيقص عند 1000، يعني المصروفات الأقدم من ~٦ شهور مكانتش بتظهر ولا
          بتدخل في أي إجمالي. getAll بتلفّ بالـoffset لحد ما تخلص.        */
-      const [expAll, rulesRes] = await Promise.all([
-        Session.getAll('erp_expenses?select=*&order=doc_date.desc', { label: 'المصروفات' }),
-        db.from('erp_expense_hide_rules').select('*').order('created_at', { ascending: false })   // data-ok: صف واحد
-      ]);
-      if (rulesRes.error) console.error('rules load error:', rulesRes.error);
+      /* نداء واحد محروس: بيرجّع المصروفات (متفلترة بفرع المستخدم على
+         السيرفر) + قواعد الإخفاء. الجدول نفسه مقفول على anon/authenticated
+         فمفيش طريقة يقرا بيها حد مصروفات فرع تاني.                      */
+      let payload = null;
+      try {
+        const r = await fetch(SB_URL_API + '/rest/v1/rpc/get_expenses', {
+          method: 'POST', headers: await sbH({ 'Content-Type': 'application/json' }), body: '{}'
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        payload = await r.json();
+      } catch (e) {
+        console.error('get_expenses:', e);
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:24px;">❌ تعذّر تحميل المصروفات — جرّب تحديث الصفحة</td></tr>';
+        return;
+      }
 
-      allExpenses = expAll || [];
-      allRules    = rulesRes.data || [];
+      EXP_SCOPE   = payload && payload.branch ? payload.branch : null;
+      allExpenses = (payload && payload.expenses) || [];
+      allRules    = (payload && payload.rules)    || [];
+      const scopeEl = document.getElementById('exp-scope-tag');
+      if (scopeEl) scopeEl.textContent = EXP_SCOPE ? ('مصروفات فرع ' + EXP_SCOPE) : 'كل الفروع';
       renderExpenses();
       renderRules();
     }
@@ -341,7 +369,7 @@
                <i class="fas fa-undo"></i> تراجع
              </button>`
           : `<button class="btn btn-success btn-sm" onclick="markSeen('${exp.doc_code}','${exp.branch}')">
-               <i class="fas fa-check"></i> شوفتها
+               <i class="fas fa-check"></i> تم
              </button>`;
         return `<tr class="${rowClass}">
           <td style="font-size:0.78rem;white-space:nowrap;">${dateStr}</td>
@@ -356,10 +384,22 @@
       }).join('');
     }
 
+    /* التعليم بيتم عبر دالة محروسة: السيرفر بيرفض أي تعديل على فرع
+       غير فرع المستخدم (الأدمن مستثنى).                                */
+    async function expSetSeen(docCode, branch, seen) {
+      try {
+        const r = await fetch(SB_URL_API + '/rest/v1/rpc/set_expense_seen', {
+          method: 'POST', headers: await sbH({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ p_doc_code: docCode, p_branch: branch, p_seen: !!seen })
+        });
+        if (!r.ok) return { message: (await r.text()).slice(0, 160) };
+        const d = await r.json();
+        return (d && d.ok) ? null : { message: 'الحركة دي مش من فرعك' };
+      } catch (e) { return { message: String(e.message || e) }; }
+    }
+
     async function markSeen(docCode, branch) {
-      const { error } = await db.from('erp_expenses')
-        .update({ is_seen: true, seen_at: new Date().toISOString() })
-        .eq('doc_code', docCode).eq('branch', branch);
+      const error = await expSetSeen(docCode, branch, true);
       if (error) { alert('⚠️ فشل تحديث الحالة: ' + error.message); return; }
       const item = allExpenses.find(e => e.doc_code === docCode && e.branch === branch);
       if (item) { item.is_seen = true; item.seen_at = new Date().toISOString(); }
@@ -367,9 +407,7 @@
     }
 
     async function undoSeen(docCode, branch) {
-      const { error } = await db.from('erp_expenses')
-        .update({ is_seen: false, seen_at: null })
-        .eq('doc_code', docCode).eq('branch', branch);
+      const error = await expSetSeen(docCode, branch, false);
       if (error) { alert('⚠️ فشل التراجع: ' + error.message); return; }
       const item = allExpenses.find(e => e.doc_code === docCode && e.branch === branch);
       if (item) { item.is_seen = false; item.seen_at = null; }
@@ -407,9 +445,11 @@
       const label    = document.getElementById('ruleLabel').value.trim();
       if (!value) { alert('اكتب القيمة المطلوبة للقاعدة'); return; }
 
-      const { error } = await db.from('erp_expense_hide_rules')
-        .insert({ field, operator, value, label: label || null });
-      if (error) { alert('⚠️ فشل إضافة القاعدة: ' + error.message); return; }
+      const r = await fetch(SB_URL_API + '/rest/v1/rpc/add_expense_hide_rule', {
+        method: 'POST', headers: await sbH({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ p_field: field, p_operator: operator, p_value: value, p_label: label || null })
+      });
+      if (!r.ok) { alert('⚠️ فشل إضافة القاعدة: ' + (await r.text()).slice(0, 120)); return; }
       document.getElementById('ruleValue').value = '';
       document.getElementById('ruleLabel').value = '';
       await loadAll();
@@ -417,8 +457,11 @@
 
     async function removeRule(id) {
       if (!confirm('متأكد من حذف القاعدة دي؟')) return;
-      const { error } = await db.from('erp_expense_hide_rules').delete().eq('id', id);
-      if (error) { alert('⚠️ فشل حذف القاعدة: ' + error.message); return; }
+      const r = await fetch(SB_URL_API + '/rest/v1/rpc/del_expense_hide_rule', {
+        method: 'POST', headers: await sbH({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ p_id: id })
+      });
+      if (!r.ok) { alert('⚠️ فشل حذف القاعدة: ' + (await r.text()).slice(0, 120)); return; }
       await loadAll();
     }
 
