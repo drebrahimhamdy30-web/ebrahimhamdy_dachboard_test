@@ -458,7 +458,8 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
 const STATUS_COLORS = { pending:'#16a34a', picked:'#0891b2', delivered:'#ca8a04', completed:'#6b7280', cancelled:'#dc2626', postponed:'#7c3aed' };
 const STATUS_LABELS = { pending:'جاهز', picked:'في الطريق', delivered:'تم التسليم', completed:'مكتمل', cancelled:'ملغي', postponed:'مؤجل' };
 
-let reportOrders = [];
+let REP = null;        // ناتج get_delivery_report — كل مؤشرات الشاشة محسوبة في القاعدة
+let ordLists = {};     // حالة كل قائمة طلبات (الصفحة الحالية + الإجمالي)
 
 // المستخدم والفرع (الأدمن يقدر يفلتر كل الفروع/فرع؛ غيره يتقيّد بفرعه)
 const RUSER = (typeof getCurrentUser==='function') ? getCurrentUser() : {role:'',branch_id:null};
@@ -551,8 +552,8 @@ async function step(fn) { try { await fn(); } catch (e) { console.error('report 
    تبويبات المبيعات (sa_) كانت كسولة خلاص، لكن الأربعة الرئيسية كانت
    بتتحمّل كلها في loadReport مهما كان المفتوح — يعني عشان تشوف
    «تقارير الطيارين» كنت بتستنى الحوافز والجرد كمان.
-   ⚠️ الجلب الكبير (reportOrders) بيفضل فوري لأن الأربعة بيشتغلوا عليه —
-      الكسل هنا للنداءات الزيادة والحسابات التقيلة اللي فوقه.
+   ⚠️ المؤشرات كلها بتيجي من نداء واحد (get_delivery_report) في loadReport،
+      فالكسل هنا للنداءات الزيادة بتاعة كل تبويب بس.
    ⚠️ renderSlaAnalysis في تبويب **الطلبات** مش الطيارين (slaSummary
       جوّه pane تقارير الطلبات) — سهل يتحط في الخانة الغلط. */
 const mainLoaded = new Set();
@@ -678,7 +679,18 @@ function renderDriverShift(){
 function _alTime(t){ try{ const d=new Date(t); const dt=d.toLocaleDateString('en-GB',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit'}); const tm=d.toLocaleTimeString('en-US',{timeZone:'Africa/Cairo',hour:'numeric',minute:'2-digit',hour12:true}).replace(/\s*AM/i,' ص').replace(/\s*PM/i,' م'); return dt+' '+tm; }catch(_){ return ''; } }
 function _alHrs(m){ m=+m||0; const h=Math.floor(m/60),mm=m%60; return h>0?(h+'س'+(mm?(' '+mm+'د'):'')):(mm+'د'); }
 let _takenRows=[];
-function toggleTaken(i){ const el=document.getElementById('tk-'+i); if(el) el.style.display=el.style.display==='none'?'':'none'; }
+/* التفاصيل بترسم عند أول فتح بس — قبل كده كانت بتترسم كلها مقدّمًا
+   (3.5 ميجا HTML و~6 ثواني في المتصفح على فترة شهر). */
+function toggleTaken(i){
+  const el=document.getElementById('tk-'+i); if(!el) return;
+  if(!el.dataset.filled){ el.innerHTML=takenDetailHtml(_takenRows[i]); el.dataset.filled='1'; }
+  el.style.display=el.style.display==='none'?'':'none';
+}
+function takenDetailHtml(r){
+  return ((r&&r.details)||[]).map(function(d){
+    return '<div style="font-size:.72rem;padding:.12rem 0;color:var(--text-secondary)">• <b>'+(d.customer||'؟')+'</b> <span style="color:#7c3aed">('+(d.region||'—')+')</span> → راح لـ <b>'+(d.to||'؟')+'</b> · بواسطة '+(d.by||'؟')+' · <span style="color:var(--text-muted)">'+_alTime(d.at)+'</span></div>';
+  }).join('');
+}
 async function loadDriverAlerts(from,to){
   const p={p_from:from||null,p_to:(to||from)||null,p_branch:effectiveBranch()||null};
   try{ const {data,error}=await db.rpc('get_taken_off_report',p); if(error) throw error; _takenRows=data||[]; renderTakenOff(); }
@@ -698,11 +710,8 @@ function renderTakenOff(){
       +'<span style="flex:1;font-weight:700;font-size:.82rem">'+(r.driver_name||'—')+'</span>'
       +'<span style="font-size:.66rem;color:var(--text-muted)">'+r.events+' مرة'+(r.branch?(' · '+r.branch):'')+'</span>'
       +'<span style="color:var(--text-muted);font-size:.7rem">▾</span></div>'
-      +'<div id="tk-'+i+'" style="display:none;padding:.1rem 0 .6rem">';
-    (r.details||[]).forEach(d=>{
-      h+='<div style="font-size:.72rem;padding:.12rem 0;color:var(--text-secondary)">• <b>'+(d.customer||'؟')+'</b> <span style="color:#7c3aed">('+(d.region||'—')+')</span> → راح لـ <b>'+(d.to||'؟')+'</b> · بواسطة '+(d.by||'؟')+' · <span style="color:var(--text-muted)">'+_alTime(d.at)+'</span></div>';
-    });
-    h+='</div></div>';
+      +'<div id="tk-'+i+'" style="display:none;padding:.1rem 0 .6rem"></div>';
+    h+='</div>';
   });
   el.innerHTML=h;
 }
@@ -780,22 +789,28 @@ function renderLate(rows){
   el.innerHTML=h;
 }
 
+/* الشاشة كانت بتنزّل كل طلبات الفترة (16 ألف صف ≈ 9 ميجا على 17 نداء
+   متسلسل) وتحسب المؤشرات في المتصفح. دلوقتي نداء واحد بيرجّع كل
+   المؤشرات محسوبة في القاعدة، والقوايم بتتجاب صفحة صفحة. */
 async function loadReport() {
   showLoading(true);
   const from = document.getElementById('dateFrom').value;
-  const to = document.getElementById('dateTo').value;
-
+  const to   = document.getElementById('dateTo').value;
   const branchId = effectiveBranch();
-  reportOrders = await fetchAllPaged(() => {
-    let q = db.from('orders').select('*').order('created_at', { ascending: false });
-    if (branchId) q = q.eq('branch_id', branchId);
-    if (from) q = q.gte('created_at', from + 'T00:00:00');
-    if (to) q = q.lte('created_at', to + 'T23:59:59');
-    return q;
-  });
+
+  REP = null;
+  if (from && to) {
+    try {
+      const { data, error } = await db.rpc('get_delivery_report',
+        { p_from: from, p_to: to, p_branch: branchId || null });
+      if (error) throw error;
+      REP = data || null;
+    } catch (e) { console.error('get_delivery_report:', e); REP = null; }
+  }
 
   // الفترة/الفرع اتغيّروا: كل التبويبات بقت بايتة — نحمّل المفتوح بس،
   // والباقي أول ما يتفتح (زي ما تبويبات المبيعات بتعمل من الأول)
+  ordLists = {};                 // كل قائمة ترجع لأول صفحة
   mainLoaded.clear();
   saMarkDirty();
   if (currentTab.indexOf('sa_') === 0) await step(() => loadSalesTab(currentTab));
@@ -865,13 +880,11 @@ async function loadIncentivesTab(from, to) {
 
   // إجمالي حافز كل فرع مفعّل = عدد الطلبات المسلّمة × قيمة الطلب في الحافز (incentive_per_order)
   const branchPool = {};   // branch_id -> { rate, orders, pool }
-  reportOrders.forEach(o => {
-    if (!['delivered','completed'].includes(o.status)) return;
-    const s = incSettingsMap[o.branch_id];
+  Object.entries((REP && REP.branch_delivered) || {}).forEach(([bid, n]) => {
+    const s = incSettingsMap[bid];
     if (!s || s.incentive_enabled !== true) return;
     const rate = (s.incentive_per_order_enabled !== false) ? Number(s.incentive_per_order || 0) : 0;
-    const b = branchPool[o.branch_id] || (branchPool[o.branch_id] = { rate, orders: 0, pool: 0 });
-    b.orders++; b.pool += rate;
+    branchPool[bid] = { rate, orders: Number(n) || 0, pool: rate * (Number(n) || 0) };
   });
 
   // إحصائيات كل طيار من نفس أرقام جدول الأداء (طلبات/رحلات/مسافة/ساعات) — محسوبة في loadDriverPerfTab
@@ -984,108 +997,26 @@ function exportIncentivesCSV() {
 }
 
 // ===== تاب تقارير الطلبات =====
-let breakSettingsMap = null; // branch_id -> max_picked_minutes
 function custName(o){ return o.customer_name || o.cust_name || '—'; }
 
 async function loadOrdersTab(from, to) {
-  // حد التأخير لكل فرع (من الاستلام للتسليم)
-  if (!breakSettingsMap) {
-    const { data } = await db.from('dispatch_settings').select('branch_id,max_picked_minutes');
-    breakSettingsMap = {};
-    (data||[]).forEach(s => { breakSettingsMap[s.branch_id] = Number(s.max_picked_minutes)||30; });
-  }
-  const thr = o => breakSettingsMap[o.branch_id] || 30;
+  // كل الأرقام من نداء التقرير (محسوبة على كل البيانات في القاعدة)،
+  // والقوايم صفحة صفحة من get_delivery_orders
+  const T = (REP && REP.orders_tab) ||
+            { cancelled:0, late:0, fails_total:0, top_cancel:[], top_late:[], fail_drivers:[] };
 
-  // الملغية
-  const cancelled = reportOrders.filter(o => o.status === 'cancelled');
-  // المتأخرة (أداء الفرع): تقييم الصيدلية «متأخر» — تعدّت وقت المنطقة (SLA)
-  // _lateMin = عدد الدقائق الزيادة عن وقت المنطقة
-  const late = reportOrders.filter(o => o.sla_rating === 'متأخر')
-    .map(o => ({ ...o, _lateMin: Math.max(0, Math.round((Number(o.sla_actual_minutes)||0) - (Number(o.sla_minutes)||0))) }));
-
-  // أكثر الطيارين تعذّرًا: من order_logs (order_postponed) لأن الطلب المتعذّر بيرجع للتوزيع ويفقد الطيار
-  const branchId = effectiveBranch();
-  let failByDriver = [];
-  let totalFails = 0;
-  try {
-    const logs = await fetchAllPaged(() => {
-      let q = db.from('order_logs')
-        .select('user_name,details,created_at,orders!inner(branch_id)')
-        .eq('event','order_postponed').order('created_at',{ascending:false});
-      if (branchId) q = q.eq('orders.branch_id', branchId);
-      if (from) q = q.gte('created_at', from + 'T00:00:00');
-      if (to) q = q.lte('created_at', to + 'T23:59:59');
-      return q;
-    });
-    // نجيب أسماء الطيارين الحقيقيين عشان نستبعد أسماء الفروع (سان ستيفانو/المعمورة)
-    // وحسابات الإدارة اللي بتسجّل تعذّر من اللوحة — مش طيارين
-    if (!driversCache) { const { data } = await db.from('drivers').select('id,full_name'); driversCache = data || []; }
-    const driverNames = new Set((driversCache||[]).map(d => (d.full_name||'').trim()));
-    const m = {};
-    logs.forEach(l => {
-      const d = l.details || {};
-      // تعذّر توصيل حقيقي فقط = اللي الطيار سجّله بنفسه من التطبيق (kept_in_trip).
-      // نستبعد إجراءات اللوحة الإدارية: إزالة الطلب من رحلة (removed_from_trip)،
-      // التأجيل اليدوي من اللوحة، والإرجاع عند إنهاء الرحلة (released_on_trip_complete)
-      // — دي مش فشل توصيل من الطيار، وبتشيل الطيار من الطلب أصلاً.
-      if (d.kept_in_trip !== true) return;
-      totalFails++;
-      const n = (l.user_name || '').trim();
-      // أمان إضافي: نعدّ الطيارين الحقيقيين فقط
-      if (!n || !driverNames.has(n)) return;
-      m[n] = (m[n]||0)+1;
-    });
-    failByDriver = Object.entries(m).sort((a,b)=>b[1]-a[1]);
-  } catch(e){ console.error(e); }
-
-  renderOrdKPIs(cancelled, late, failByDriver, totalFails);
-  renderRankList('topCancelCustomers', groupCount(cancelled, custName), 'طلب');
-  lateOrders = late;
-  renderRankList('topLateCustomers', groupCount(late, custName), 'طلب', 'openCustomerLateOrders');
-  renderRankList('topFailDrivers', failByDriver, 'مرة');
-  renderOrderList('cancelledList', cancelled, 'cancelledCount', false);
-  renderOrderList('lateList', late, 'lateCount', true);
+  renderOrdKPIs(T.cancelled||0, T.late||0, T.fails_total||0);
+  renderRankList('topCancelCustomers', T.top_cancel||[], 'طلب');
+  renderRankList('topLateCustomers',  T.top_late||[],   'طلب', 'openCustomerLateOrders');
+  renderRankList('topFailDrivers',    T.fail_drivers||[], 'مرة');
+  await showOrderList('cancelledList', 'cancelled', 'cancelledCount', {});
+  await showOrderList('lateList',      'late',      'lateCount',      { showLate: true });
 }
 
-// أداء التوصيل لكل طلب (بعد ما الـ trigger + Google يحسبوه)
-function renderPerf() {
-  const perf = reportOrders.filter(o => o.perf_rating && o.expected_minutes != null && o.actual_minutes != null);
-  const counts = { 'ممتاز':0, 'جيد':0, 'متأخر':0 };
-  perf.forEach(o => { counts[o.perf_rating] = (counts[o.perf_rating]||0)+1; });
-  const colors = { 'ممتاز':'#16a34a', 'جيد':'#ca8a04', 'متأخر':'#dc2626' };
-  document.getElementById('perfCount').textContent = `(${perf.length} طلب)`;
-  document.getElementById('perfSummary').innerHTML = ['ممتاز','جيد','متأخر'].map(k=>`
-    <div style="flex:1;min-width:90px;background:${colors[k]}14;border:1px solid ${colors[k]}44;border-radius:10px;padding:.6rem;text-align:center">
-      <div style="font-size:1.3rem;font-weight:800;color:${colors[k]}">${counts[k]||0}</div>
-      <div style="font-size:.72rem;color:${colors[k]}">${k}</div>
-    </div>`).join('');
-  const el = document.getElementById('perfList');
-  if (!perf.length) { el.innerHTML = '<div class="empty-state"><p>لا يوجد بيانات أداء بعد (تظهر للطلبات الجديدة اللي اتوصّلت بموقع)</p></div>'; return; }
-  // الأبطأ أولاً
-  perf.sort((a,b)=> (b.actual_minutes/b.expected_minutes) - (a.actual_minutes/a.expected_minutes));
-  el.innerHTML = perf.map(o=>{
-    const c = colors[o.perf_rating] || '#6b7280';
-    return `<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.45rem 0;border-bottom:1px solid var(--border);font-size:.76rem">
-      <div style="flex:1;min-width:0">
-        <span style="font-weight:700;color:var(--primary)">#${o.bill_no||(o.id||'').slice(0,6)}</span>
-        <span style="color:var(--text-muted)"> · ${custName(o)} · ${o.deliveryman||'—'}</span>
-      </div>
-      <span style="white-space:nowrap">فعلي <strong>${o.actual_minutes}</strong> / متوقع <strong>${o.expected_minutes}</strong> د</span>
-      <span style="white-space:nowrap;color:${c};font-weight:700;background:${c}14;border-radius:6px;padding:.1rem .5rem">${o.perf_rating}</span>
-    </div>`;
-  }).join('');
-}
-
-function groupCount(arr, keyFn) {
-  const m = {};
-  arr.forEach(x => { const k = keyFn(x); m[k] = (m[k]||0)+1; });
-  return Object.entries(m).sort((a,b)=>b[1]-a[1]);
-}
-
-function renderOrdKPIs(cancelled, late, failByDriver, totalFails) {
+function renderOrdKPIs(cancelled, late, totalFails) {
   document.getElementById('ordKpiGrid').innerHTML = `
-    <div class="stat-card"><div class="stat-label">طلبات ملغية</div><div class="stat-value" style="color:#dc2626">${cancelled.length}</div></div>
-    <div class="stat-card"><div class="stat-label">طلبات متأخرة</div><div class="stat-value" style="color:#b45309">${late.length}</div></div>
+    <div class="stat-card"><div class="stat-label">طلبات ملغية</div><div class="stat-value" style="color:#dc2626">${cancelled}</div></div>
+    <div class="stat-card"><div class="stat-label">طلبات متأخرة</div><div class="stat-value" style="color:#b45309">${late}</div></div>
     <div class="stat-card"><div class="stat-label">مرات تعذّر التوصيل</div><div class="stat-value" style="color:#7c3aed">${totalFails}</div></div>`;
 }
 
@@ -1100,27 +1031,94 @@ function renderRankList(elId, entries, unit, clickFn) {
     </div>`).join('');
 }
 
-function renderOrderList(elId, orders, countId, showLate) {
-  const el = document.getElementById(elId);
-  document.getElementById(countId).textContent = `(${orders.length})`;
-  if (!orders.length) { el.innerHTML = '<div class="empty-state"><p>لا يوجد</p></div>'; return; }
-  el.innerHTML = orders.map(o=>`
-    <div ${showLate?`onclick="openDelayAnatomy('${o.id}')" title="اضغط لتشريح التأخير"`:''} style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.45rem 0;border-bottom:1px solid var(--border);font-size:.76rem${showLate?';cursor:pointer':''}">
+/* ═══ قوايم الطلبات — الصفحات من السيرفر ═══
+   قبل كده القائمة كانت بترسم كل الصفوف مرة واحدة (7,681 طلب متأخر في
+   شهر!) من مصفوفة محمّلة في الذاكرة. دلوقتي 40 صف في الصفحة،
+   والإجمالي بييجي من السيرفر محسوب على كل البيانات المفلترة. */
+const LIST_PAGE = 40;
+
+async function showOrderList(elId, kind, countId, opts) {
+  opts = opts || {};
+  const st = ordLists[elId] || (ordLists[elId] = { page: 1 });
+  st.kind = kind; st.countId = countId; st.opts = opts;
+  const el = document.getElementById(elId); if (!el) return;
+  el.innerHTML = '<div class="empty-state"><p>⏳ جاري التحميل...</p></div>';
+
+  const from = document.getElementById('dateFrom').value;
+  const to   = document.getElementById('dateTo').value;
+  let d;
+  try {
+    const { data, error } = await db.rpc('get_delivery_orders', {
+      p_from: from || null, p_to: to || null, p_branch: effectiveBranch() || null,
+      p_kind: kind,
+      p_region: opts.region || null, p_region_branch: opts.regionBranch || null,
+      p_customer: opts.customer || null, p_sort: opts.sort || null,
+      p_limit: LIST_PAGE, p_offset: (st.page - 1) * LIST_PAGE
+    });
+    if (error) throw error;
+    d = data || { total: 0, rows: [] };
+  } catch (e) {
+    console.error('get_delivery_orders:', e);
+    el.innerHTML = '<div class="empty-state"><p style="color:#dc2626">تعذّر تحميل القائمة</p></div>';
+    return;
+  }
+
+  st.total = d.total || 0;
+  if (countId) { const c = document.getElementById(countId); if (c) c.textContent = `(${st.total})`; }
+  if (!st.total) { el.innerHTML = `<div class="empty-state"><p>${opts.empty || 'لا يوجد'}</p></div>`; return; }
+
+  const rows = d.rows || [];
+  const body = rows.map(o => orderRowHtml(o, !!opts.showLate)).join('');
+  el.innerHTML = body + ordPagerHtml(elId, st);
+}
+
+function orderRowHtml(o, showLate) {
+  return `<div ${showLate?`onclick="openDelayAnatomy('${o.id}')" title="اضغط لتشريح التأخير"`:''} style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.45rem 0;border-bottom:1px solid var(--border);font-size:.76rem${showLate?';cursor:pointer':''}">
       <div style="flex:1;min-width:0">
         <span style="font-weight:700;color:var(--primary)">#${o.bill_no||(o.id||'').slice(0,6)}</span>
         <span style="color:var(--text-muted)"> · ${custName(o)}</span>
       </div>
-      ${showLate ? `<span style="color:#b45309;font-weight:700;white-space:nowrap">${o._lateMin} د</span>` : `<span style="white-space:nowrap">${Number(o.total_bill_net||0).toLocaleString()} ج</span>`}
-      <span style="color:var(--text-muted);white-space:nowrap">${new Date(o.created_at).toLocaleDateString('ar-EG',{day:'numeric',month:'numeric'})}</span>
-    </div>`).join('');
+      ${showLate ? `<span style="color:#b45309;font-weight:700;white-space:nowrap">${o.late_min} د</span>` : `<span style="white-space:nowrap">${Number(o.total_bill_net||0).toLocaleString()} ج</span>`}
+      <span style="color:var(--text-muted);white-space:nowrap">${new Date(o.created_at).toLocaleDateString('ar-EG',{timeZone:'Africa/Cairo',day:'numeric',month:'numeric'})}</span>
+    </div>`;
+}
+
+function ordPagerHtml(elId, st) {
+  const pages = Math.max(1, Math.ceil(st.total / LIST_PAGE));
+  if (pages <= 1) return '';
+  const btn = (dir, label, off) => `<button onclick="changeOrdPage('${elId}',${dir})" ${off?'disabled':''} style="border:1px solid var(--border);background:${off?'var(--surface-3)':'var(--surface)'};color:${off?'var(--text-muted)':'var(--text)'};border-radius:6px;min-width:26px;height:26px;cursor:${off?'default':'pointer'};font-weight:800">${label}</button>`;
+  return `<div style="display:flex;align-items:center;justify-content:center;gap:.5rem;padding:.6rem 0;font-size:.72rem;color:var(--text-secondary)">
+    ${btn(-1,'‹', st.page<=1)}
+    <span>صفحة ${st.page} من ${pages} · ${st.total} طلب</span>
+    ${btn(1,'›', st.page>=pages)}
+  </div>`;
+}
+
+async function changeOrdPage(elId, dir) {
+  const st = ordLists[elId]; if (!st) return;
+  const pages = Math.max(1, Math.ceil(st.total / LIST_PAGE));
+  const next = Math.min(pages, Math.max(1, st.page + dir));
+  if (next === st.page) return;
+  st.page = next;
+  await showOrderList(elId, st.kind, st.countId, st.opts);
+  const el = document.getElementById(elId);
+  if (el) el.scrollIntoView({ behavior:'smooth', block:'start' });
 }
 
 // ===== تشريح التأخير: يوضّح المشكلة من الطيار ولا الصيدلية ولا التوزيع =====
 function _gapMins(a,b){ if(!a||!b) return null; const d=Math.round((new Date(b)-new Date(a))/60000); return d>=0?d:null; }
 function _fmtT(t){ if(!t) return '—'; try{ return new Date(t).toLocaleString('ar-EG',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }catch(e){ return '—'; } }
-function openDelayAnatomy(orderId){
-  const o = reportOrders.find(x=>x.id===orderId);
-  if(!o){ alert('الطلب غير موجود'); return; }
+async function openDelayAnatomy(orderId){
+  // الطلب بيتجاب لوحده من دالة محروسة (قبل كده كان بيتدوّر عليه في
+  // مصفوفة كل طلبات الفترة المحمّلة في الذاكرة). بنستعمل RPC مش قراءة
+  // مباشرة عشان الشاشة تفضل شغالة من غير ما تعتمد على صلاحية الجدول.
+  let o = null;
+  try {
+    const { data, error } = await db.rpc('get_order_timeline', { p_id: orderId });
+    if (error) throw error;
+    o = data;
+  } catch(e){ console.error('get_order_timeline:', e); }
+  if(!o){ alert('تعذّر تحميل الطلب'); return; }
   const activated = (o.last_activated_at && Math.abs(new Date(o.last_activated_at)-new Date(o.created_at))>60000) ? o.last_activated_at : null;
   const startT = activated || o.created_at;
   const seq = [
@@ -1180,15 +1178,13 @@ function openDelayAnatomy(orderId){
   const wrap=document.createElement('div'); wrap.innerHTML=html.trim(); document.body.appendChild(wrap.firstElementChild);
 }
 
-// الطلبات المتأخرة الحالية (لفتح طلبات عميل معيّن من قايمة «أكثر العملاء تأخيرًا»)
-let lateOrders = [];
-function openCustomerLateOrders(name){
-  const list = (lateOrders||[]).filter(o=>custName(o)===name);
+async function openCustomerLateOrders(name){
+  const list = await fetchLateOrders({ customer: name });
   if(!list.length){ alert('لا توجد طلبات متأخرة لهذا العميل'); return; }
   if(list.length===1){ openDelayAnatomy(list[0].id); return; }
   const rows = list.map(o=>`<div onclick="openDelayAnatomy('${o.id}')" style="display:flex;justify-content:space-between;gap:.5rem;padding:.5rem .6rem;border:1px solid var(--border);border-radius:8px;margin-bottom:.35rem;cursor:pointer">
       <span style="font-weight:700"><b style="color:var(--primary,#1a56db)">#${o.bill_no||(o.id||'').slice(0,6)}</b> · ${o.cust_region||'—'}</span>
-      <span style="color:#b45309;font-weight:800;white-space:nowrap">${o._lateMin} د</span>
+      <span style="color:#b45309;font-weight:800;white-space:nowrap">${o.late_min} د</span>
     </div>`).join('');
   const html=`<div data-anatomy="1" style="position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:1rem" onclick="if(event.target===this)this.remove()">
     <div style="background:var(--surface,#fff);color:var(--text,#0f172a);max-width:440px;width:100%;max-height:86vh;overflow:auto;border-radius:16px;padding:1rem;font-family:'Cairo',sans-serif;direction:rtl">
@@ -1203,13 +1199,12 @@ function openCustomerLateOrders(name){
 }
 
 // فتح طلبات منطقة معيّنة المتأخرة (من جدول «حسب المنطقة») — كل طلب يفتح تشريحه
-function openRegionLateOrders(region, bid){
-  const list = (lateOrders||[]).filter(o=> (o.cust_region||'—')===region && String(o.branch_id||'')===String(bid))
-    .sort((a,b)=>(b._lateMin||0)-(a._lateMin||0));
+async function openRegionLateOrders(region, bid){
+  const list = await fetchLateOrders({ region: region, regionBranch: String(bid||'') });
   if(!list.length){ alert('لا توجد طلبات متأخرة في هذه المنطقة'); return; }
   const rows = list.map(o=>`<div onclick="openDelayAnatomy('${o.id}')" style="display:flex;justify-content:space-between;gap:.5rem;padding:.5rem .6rem;border:1px solid var(--border);border-radius:8px;margin-bottom:.35rem;cursor:pointer">
       <span style="font-weight:700"><b style="color:var(--primary,#1a56db)">#${o.bill_no||(o.id||'').slice(0,6)}</b> · ${custName(o)}</span>
-      <span style="color:#b45309;font-weight:800;white-space:nowrap">${o._lateMin} د</span>
+      <span style="color:#b45309;font-weight:800;white-space:nowrap">${o.late_min} د</span>
     </div>`).join('');
   const html=`<div data-anatomy="1" style="position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:1rem" onclick="if(event.target===this)this.remove()">
     <div style="background:var(--surface,#fff);color:var(--text,#0f172a);max-width:460px;width:100%;max-height:86vh;overflow:auto;border-radius:16px;padding:1rem;font-family:'Cairo',sans-serif;direction:rtl">
@@ -1221,6 +1216,25 @@ function openRegionLateOrders(region, bid){
       ${rows}
     </div></div>`;
   const w=document.createElement('div'); w.innerHTML=html.trim(); document.body.appendChild(w.firstElementChild);
+}
+
+/* الطلبات المتأخرة لعميل/منطقة — بتتجاب من السيرفر عند الضغط بس
+   (أول 200 طلب، الأكتر تأخيرًا الأول) */
+async function fetchLateOrders(extra){
+  const from = document.getElementById('dateFrom').value;
+  const to   = document.getElementById('dateTo').value;
+  try {
+    const { data, error } = await db.rpc('get_delivery_orders', {
+      p_from: from || null, p_to: to || null, p_branch: effectiveBranch() || null,
+      p_kind: 'late', p_sort: 'late_desc',
+      p_region: (extra && extra.region) || null,
+      p_region_branch: (extra && extra.regionBranch) || null,
+      p_customer: (extra && extra.customer) || null,
+      p_limit: 200, p_offset: 0
+    });
+    if (error) throw error;
+    return (data && data.rows) || [];
+  } catch(e){ console.error('get_delivery_orders:', e); return []; }
 }
 
 // كاش لأسماء الطيارين عشان ما نجيبهاش كل مرة
@@ -1244,29 +1258,24 @@ async function loadFairScores(from, to) {
 }
 
 function renderKPIs() {
-  const orders = reportOrders;
-  const total = orders.length;
-  const completed = orders.filter(o => ['delivered','completed'].includes(o.status)).length;
-  const cancelled = orders.filter(o => o.status === 'cancelled').length;
-  const revenue = orders.filter(o => ['delivered','completed'].includes(o.status)).reduce((s, o) => s + Number(o.total_bill_net||0), 0);
-  const rate = total > 0 ? Math.round((completed/total)*100) : 0;
-  const avgOrder = completed > 0 ? Math.round(revenue / completed) : 0;
+  const k = (REP && REP.kpis) || { total:0, completed:0, cancelled:0, revenue:0, rate:0, avg_order:0 };
+  const revenue = Number(k.revenue) || 0;
 
   document.getElementById('kpiGrid').innerHTML = `
     <div class="stat-card">
       <div class="stat-icon" style="background:var(--blue-light)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0891b2" stroke-width="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/></svg></div>
       <div class="stat-label">إجمالي الطلبات</div>
-      <div class="stat-value">${total}</div>
+      <div class="stat-value">${k.total}</div>
     </div>
     <div class="stat-card">
       <div class="stat-icon" style="background:var(--green-light)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div>
       <div class="stat-label">تم التوصيل</div>
-      <div class="stat-value">${completed}</div>
+      <div class="stat-value">${k.completed}</div>
     </div>
     <div class="stat-card">
       <div class="stat-icon" style="background:var(--red-light)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></div>
       <div class="stat-label">ملغي</div>
-      <div class="stat-value">${cancelled}</div>
+      <div class="stat-value">${k.cancelled}</div>
     </div>
     <div class="stat-card">
       <div class="stat-icon" style="background:#fff7ed"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ea580c" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
@@ -1277,39 +1286,34 @@ function renderKPIs() {
     <div class="stat-card">
       <div class="stat-icon" style="background:var(--purple-light)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg></div>
       <div class="stat-label">معدل الإنجاز</div>
-      <div class="stat-value">${rate}%</div>
+      <div class="stat-value">${k.rate}%</div>
     </div>
     <div class="stat-card">
       <div class="stat-icon" style="background:var(--yellow-light)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ca8a04" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></div>
       <div class="stat-label">متوسط الطلب</div>
-      <div class="stat-value" style="font-size:1.05rem">${avgOrder.toLocaleString()}</div>
+      <div class="stat-value" style="font-size:1.05rem">${Number(k.avg_order||0).toLocaleString()}</div>
       <div class="stat-sub">جنيه</div>
     </div>`;
 }
 
 function renderDailyChart() {
-  const dayMap = {};
-  reportOrders.forEach(o => {
-    const day = o.created_at?.split('T')[0];
-    if (day) dayMap[day] = (dayMap[day] || 0) + 1;
-  });
-  const days = Object.entries(dayMap).sort((a,b) => a[0].localeCompare(b[0])).slice(-14);
-  const max = Math.max(...days.map(d => d[1]), 1);
+  // التجميع بتاريخ القاهرة من السيرفر (قبل كده كان بتاريخ UTC في المتصفح)
+  const days = ((REP && REP.daily) || []).slice(-14);
+  const max = Math.max(...days.map(x => x.n), 1);
 
-  document.getElementById('dailyBars').innerHTML = days.map(([day, count]) =>
-    `<div class="bc-bar" style="height:${(count/max)*100}%" title="${count} طلب">
-      <div class="bc-bar-tooltip">${count}</div>
+  document.getElementById('dailyBars').innerHTML = days.map(x =>
+    `<div class="bc-bar" style="height:${(x.n/max)*100}%" title="${x.n} طلب">
+      <div class="bc-bar-tooltip">${x.n}</div>
     </div>`
   ).join('');
-  document.getElementById('dailyLabels').innerHTML = days.map(([day]) =>
-    `<span class="bc-label">${day.slice(5)}</span>`
+  document.getElementById('dailyLabels').innerHTML = days.map(x =>
+    `<span class="bc-label">${String(x.d).slice(5)}</span>`
   ).join('');
 }
 
 function renderStatusPie() {
-  const counts = {};
-  reportOrders.forEach(o => counts[o.status] = (counts[o.status]||0)+1);
-  const total = reportOrders.length || 1;
+  const rows  = (REP && REP.status) || [];
+  const total = ((REP && REP.kpis && REP.kpis.total) || 0) || 1;
   const r = 35, circ = 2 * Math.PI * r;
   let offset = 0;
   const svg = document.getElementById('statusPie');
@@ -1317,7 +1321,7 @@ function renderStatusPie() {
   while (svg.children.length > 1) svg.removeChild(svg.lastChild);
   const legend = document.getElementById('pieLegend');
   legend.innerHTML = '';
-  Object.entries(counts).sort((a,b)=>b[1]-a[1]).forEach(([status, count]) => {
+  rows.forEach(({ s: status, n: count }) => {
     const pct = count / total;
     const dash = pct * circ;
     const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
@@ -1338,46 +1342,48 @@ function renderStatusPie() {
 }
 
 function renderRegions() {
-  const regionMap = {};
-  reportOrders.forEach(o => { if (o.cust_region) regionMap[o.cust_region] = (regionMap[o.cust_region]||0)+1; });
-  const sorted = Object.entries(regionMap).sort((a,b)=>b[1]-a[1]).slice(0,8);
-  const max = sorted[0]?.[1] || 1;
-  document.getElementById('regionsChart').innerHTML = sorted.length ? sorted.map(([region, count]) => `
+  const sorted = ((REP && REP.regions) || []).filter(x => x.r && x.r !== '—').slice(0, 8);
+  const max = sorted[0]?.n || 1;
+  document.getElementById('regionsChart').innerHTML = sorted.length ? sorted.map(x => `
     <div class="region-row">
-      <span class="region-name">${region}</span>
-      <div class="region-bar-wrap"><div class="region-bar"><div class="region-bar-fill" style="width:${(count/max)*100}%"></div></div></div>
-      <span class="region-count">${count}</span>
+      <span class="region-name">${x.r}</span>
+      <div class="region-bar-wrap"><div class="region-bar"><div class="region-bar-fill" style="width:${(x.n/max)*100}%"></div></div></div>
+      <span class="region-count">${x.n}</span>
     </div>`).join('') : '<div class="empty-state"><p>لا بيانات</p></div>';
 }
 
-function renderDriverRankings() {
-  const driverMap = {};
-  reportOrders.filter(o => ['delivered','completed'].includes(o.status) && o.deliveryman)
-    .forEach(o => {
-      if (!driverMap[o.deliveryman]) driverMap[o.deliveryman] = { count: 0, revenue: 0 };
-      driverMap[o.deliveryman].count++;
-      driverMap[o.deliveryman].revenue += Number(o.total_bill_net||0);
-    });
-  const sorted = Object.entries(driverMap).sort((a,b)=>b[1].count-a[1].count).slice(0,8);
-  document.getElementById('driverRankings').innerHTML = sorted.length ? sorted.map(([name, data], i) => {
-    const rankClass = i===0?'top1':i===1?'top2':i===2?'top3':'';
-    return `<div class="rank-row">
-      <div class="rank-num ${rankClass}">${i+1}</div>
-      <span class="rank-name">${name}</span>
-      <span class="rank-val">${data.count} طلب · ${data.revenue.toLocaleString()} ج</span>
-    </div>`;
-  }).join('') : '<div class="empty-state"><p>لا بيانات</p></div>';
-}
-
-function exportCSV() {
+async function exportCSV() {
+  // التصدير بياخد كل طلبات الفترة — بيتجابوا على دفعات عند الضغط بس
+  showLoading(true);
+  const from = document.getElementById('dateFrom').value;
+  const to   = document.getElementById('dateTo').value;
+  const all = [];
+  try {
+    for (let off = 0; ; off += 1000) {
+      const { data, error } = await db.rpc('get_delivery_orders', {
+        p_from: from || null, p_to: to || null, p_branch: effectiveBranch() || null,
+        p_kind: 'all', p_limit: 1000, p_offset: off
+      });
+      if (error) throw error;
+      const rows = (data && data.rows) || [];
+      all.push(...rows);
+      if (rows.length < 1000 || all.length >= (data.total || 0)) break;
+    }
+  } catch (e) {
+    showLoading(false);
+    console.error('export:', e);
+    alert('تعذّر تجهيز التصدير');
+    return;
+  }
+  showLoading(false);
   const headers = ['رقم الفاتورة','اسم العميل','المنطقة','المبلغ','نوع الدفع','الحالة','الطيار','التاريخ'];
-  const rows = reportOrders.map(o => [
-    o.bill_no||'', o.customer_name||o.cust_name||'', o.cust_region||'',
+  const rows = all.map(o => [
+    o.bill_no||'', o.customer_name||'', o.cust_region||'',
     o.total_bill_net||0, o.bill_type||'', STATUS_LABELS[o.status]||o.status,
-    o.deliveryman||'', o.created_at?.split('T')[0]||''
+    o.deliveryman||'', new Date(o.created_at).toLocaleDateString('en-CA',{timeZone:'Africa/Cairo'})
   ]);
   const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
-  const blob = new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'});
+  const blob = new Blob(['﻿'+csv], {type:'text/csv;charset=utf-8'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = `تقرير_${new Date().toISOString().split('T')[0]}.csv`;
   a.click();
@@ -1385,50 +1391,38 @@ function exportCSV() {
 
 // ===== أداء الصيدلية (SLA المنطقة) — تاب الطلبات =====
 function renderSlaAnalysis() {
-  const rated = reportOrders.filter(o => o.sla_rating);
-  const C = { 'ممتاز':0, 'جيد':0, 'متأخر':0 };
-  rated.forEach(o => C[o.sla_rating] = (C[o.sla_rating]||0)+1);
+  const S = (REP && REP.sla) || { rated:0, counts:{}, cause:{}, regions:[] };
+  const C = S.counts || {};
   const col = { 'ممتاز':'#16a34a', 'جيد':'#ca8a04', 'متأخر':'#dc2626' };
-  document.getElementById('slaCount').textContent = `(${rated.length} طلب مقيّم)`;
+  document.getElementById('slaCount').textContent = `(${S.rated||0} طلب مقيّم)`;
   document.getElementById('slaSummary').innerHTML = ['ممتاز','جيد','متأخر'].map(k=>`
     <div style="flex:1;min-width:90px;background:${col[k]}14;border:1px solid ${col[k]}44;border-radius:10px;padding:.6rem;text-align:center">
       <div style="font-size:1.3rem;font-weight:800;color:${col[k]}">${C[k]||0}</div>
       <div style="font-size:.72rem;color:${col[k]}">${k}</div></div>`).join('');
 
   // سبب التأخير للطلبات المتأخرة (SLA=متأخر): صيدلية vs طيار
-  const late = rated.filter(o => o.sla_rating==='متأخر');
-  const byDriver   = late.filter(o => o.perf_rating==='متأخر').length;
-  const byPharmacy = late.filter(o => o.perf_rating && o.perf_rating!=='متأخر').length;
-  const unknown    = late.length - byDriver - byPharmacy;
-  document.getElementById('slaCause').innerHTML = late.length ? `
-    <div style="font-size:.8rem;font-weight:700;margin-bottom:.45rem">سبب التأخير (${late.length} طلب متأخر):</div>
+  const cs = S.cause || {};
+  const lateN = cs.late_total || 0;
+  document.getElementById('slaCause').innerHTML = lateN ? `
+    <div style="font-size:.8rem;font-weight:700;margin-bottom:.45rem">سبب التأخير (${lateN} طلب متأخر):</div>
     <div style="display:flex;gap:.6rem;flex-wrap:wrap">
       <div style="flex:1;min-width:120px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:.6rem;text-align:center">
-        <div style="font-size:1.25rem;font-weight:800;color:#b91c1c">${byPharmacy}</div>
+        <div style="font-size:1.25rem;font-weight:800;color:#b91c1c">${cs.by_pharmacy||0}</div>
         <div style="font-size:.72rem;color:#b91c1c">بسبب الصيدلية <span style="font-size:.62rem;color:var(--text-muted)">(الطيار كان كويس)</span></div></div>
       <div style="flex:1;min-width:120px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:.6rem;text-align:center">
-        <div style="font-size:1.25rem;font-weight:800;color:#c2410c">${byDriver}</div>
+        <div style="font-size:1.25rem;font-weight:800;color:#c2410c">${cs.by_driver||0}</div>
         <div style="font-size:.72rem;color:#c2410c">بسبب الطيار <span style="font-size:.62rem;color:var(--text-muted)">(Google متأخر)</span></div></div>
-      ${unknown>0?`<div style="flex:1;min-width:120px;background:var(--surface-3);border:1px solid var(--border);border-radius:10px;padding:.6rem;text-align:center"><div style="font-size:1.25rem;font-weight:800">${unknown}</div><div style="font-size:.72rem;color:var(--text-muted)">غير محدّد (لا تقييم طيار)</div></div>`:''}
+      ${(cs.unknown||0)>0?`<div style="flex:1;min-width:120px;background:var(--surface-3);border:1px solid var(--border);border-radius:10px;padding:.6rem;text-align:center"><div style="font-size:1.25rem;font-weight:800">${cs.unknown}</div><div style="font-size:.72rem;color:var(--text-muted)">غير محدّد (لا تقييم طيار)</div></div>`:''}
     </div>` : '';
 
-  // حسب المنطقة (+ الفرع) — مع السبب الغالب + التجاوز + توصية + ضغط لفتح الطلبات
-  const byReg = {};
-  rated.forEach(o => {
-    const bid = String(o.branch_id||'');
-    const key = (o.cust_region||'—') + '|' + bid;
-    if (!byReg[key]) byReg[key] = { region:o.cust_region||'—', bid, branch:branchNameById[o.branch_id]||'—', total:0, late:0, byDriver:0, byPharmacy:0, sla:o.sla_minutes, sumActual:0 };
-    const x = byReg[key]; x.total++; x.sumActual += Number(o.sla_actual_minutes)||0;
-    if (o.sla_minutes) x.sla = o.sla_minutes;
-    if (o.sla_rating==='متأخر'){ x.late++;
-      if (o.perf_rating==='متأخر') x.byDriver++;
-      else if (o.perf_rating) x.byPharmacy++;
-    }
+  // حسب المنطقة (+ الفرع) — الترتيب والتجميع من السيرفر
+  const rows = ((S.regions)||[]).map(x => {
+    const o = Object.assign({}, x);
+    o.pct  = o.total ? Math.round(o.late / o.total * 100) : 0;
+    o.avg  = Number(o.avg) || 0;
+    o.over = (o.sla != null) ? Math.round(o.avg - o.sla) : null;
+    return o;
   });
-  const rows = Object.values(byReg)
-    .map(x=>{ x.pct=x.total?Math.round(x.late/x.total*100):0; x.avg=x.total?x.sumActual/x.total:0;
-              x.over=x.sla!=null?Math.round(x.avg-x.sla):null; x.sev=x.total?(x.late*x.late/x.total):0; return x; })
-    .filter(x=>x.late>0).sort((a,b)=>b.sev-a.sev).slice(0,30);
   document.getElementById('slaByRegion').innerHTML = rows.length ? `
     <div style="font-size:.8rem;font-weight:700;margin:.4rem 0">حسب المنطقة (الأكثر تأخيرًا): <span style="font-size:.66rem;color:var(--text-muted);font-weight:400">— اضغط أي منطقة تشوف طلباتها المتأخرة وتشرّحها</span></div>
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.74rem">
@@ -1439,26 +1433,27 @@ function renderSlaAnalysis() {
       <tbody>${rows.map(x=>{
         const c = x.pct>=50?'#dc2626':x.pct>=25?'#ca8a04':'#16a34a';
         let cause='—', causeC='var(--text-muted)';
-        if(x.byPharmacy>x.byDriver){ cause='صيدلية'; causeC='#b91c1c'; }
-        else if(x.byDriver>x.byPharmacy){ cause='طيار'; causeC='#c2410c'; }
-        else if(x.byDriver>0||x.byPharmacy>0){ cause='مشترك'; causeC='#7c3aed'; }
+        if(x.by_pharmacy>x.by_driver){ cause='صيدلية'; causeC='#b91c1c'; }
+        else if(x.by_driver>x.by_pharmacy){ cause='طيار'; causeC='#c2410c'; }
+        else if(x.by_driver>0||x.by_pharmacy>0){ cause='مشترك'; causeC='#7c3aed'; }
         let rec='—', recC='var(--text-muted)';
         if(x.total<3){ rec='عيّنة صغيرة'; }
-        else if(x.byPharmacy>x.byDriver){ rec='مشكلة تجهيز — راجع الفرع'; recC='#b91c1c'; }
-        else if(x.byDriver>=x.byPharmacy && x.over!=null && x.over>=Math.max(10,(x.sla||0)*0.4)){ rec='راجع وقت المنطقة (SLA)'; recC='#c2410c'; }
+        else if(x.by_pharmacy>x.by_driver){ rec='مشكلة تجهيز — راجع الفرع'; recC='#b91c1c'; }
+        else if(x.by_driver>=x.by_pharmacy && x.over!=null && x.over>=Math.max(10,(x.sla||0)*0.4)){ rec='راجع وقت المنطقة (SLA)'; recC='#c2410c'; }
         else if(x.pct>=50){ rec='متابعة — نسبة تأخير عالية'; recC='#b45309'; }
         return `<tr onclick="openRegionLateOrders(this.dataset.region,this.dataset.bid)" data-region="${String(x.region).replace(/"/g,'&quot;')}" data-bid="${x.bid}" title="اضغط لعرض طلبات المنطقة المتأخرة" style="border-bottom:1px solid var(--border);cursor:pointer">
           <td style="padding:.4rem;font-weight:700">${x.region}</td>
           <td style="padding:.4rem;color:var(--text-muted)">${x.branch}</td>
           <td style="padding:.4rem">${x.total}</td>
-          <td style="padding:.4rem;color:#dc2626;font-weight:700">${x.late}</td>
-          <td style="padding:.4rem;color:${c};font-weight:800">${x.pct}%</td>
-          <td style="padding:.4rem">${x.sla??'—'} د</td>
-          <td style="padding:.4rem">${x.avg.toFixed(0)} د</td>
-          <td style="padding:.4rem;font-weight:800;color:${x.over>0?'#dc2626':'#16a34a'}">${x.over==null?'—':((x.over>0?'+':'')+x.over+' د')}</td>
-          <td style="padding:.4rem;color:${causeC};font-weight:700">${cause}</td>
-          <td style="padding:.4rem;color:${recC};font-weight:700;font-size:.7rem">${rec}</td></tr>`;}).join('')}
-      </tbody></table></div>` : '<div class="empty-state"><p>لا يوجد طلبات مقيّمة</p></div>';
+          <td style="padding:.4rem;font-weight:700;color:${c}">${x.late}</td>
+          <td style="padding:.4rem;font-weight:800;color:${c}">${x.pct}%</td>
+          <td style="padding:.4rem">${x.sla!=null?x.sla+' د':'—'}</td>
+          <td style="padding:.4rem">${Math.round(x.avg)} د</td>
+          <td style="padding:.4rem;font-weight:700;color:${x.over!=null&&x.over>0?'#dc2626':'#16a34a'}">${x.over!=null?(x.over>0?'+':'')+x.over+' د':'—'}</td>
+          <td style="padding:.4rem;font-weight:700;color:${causeC}">${cause}</td>
+          <td style="padding:.4rem;font-size:.7rem;color:${recC}">${rec}</td>
+        </tr>`;
+      }).join('')}</tbody></table></div>` : '';
 }
 
 // ===== أداء الطيارين — إحصائيات شاملة + النتيجة المركّبة (أفضل الطيارين) =====
@@ -1514,23 +1509,16 @@ async function loadDriverPerfTab(from, to) {
   if (!driversCache) { const { data } = await db.from('drivers').select('id,full_name'); driversCache = data || []; }
   const nameById = {}; (driversCache || []).forEach(d => nameById[d.id] = d.full_name);
 
-  // 4) تجميع الطلبات المسلّمة + المسافة + تقييم Google لكل طيار (بالـ driver_id)
-  const m = {};
-  reportOrders.filter(o => ['delivered', 'completed'].includes(o.status) && o.driver_id).forEach(o => {
-    const id = o.driver_id;
-    if (!m[id]) m[id] = { driver_id: id, name: nameById[id] || o.deliveryman || '—', orders: 0, km: 0, 'ممتاز': 0, 'جيد': 0, 'متأخر': 0, rated: 0 };
-    const x = m[id];
-    x.orders++;
-    x.km += (Number(o.distance_meters) || 0) / 1000;
-    if (o.perf_rating) { x[o.perf_rating] = (x[o.perf_rating] || 0) + 1; x.rated++; }
-  });
-
-  // مسافة الرِجل المتعذّرة (الطيار راح للعميل وما لقاهوش) — تُضاف لمسافة الطيار مهما كانت حالة الطلب الآن
-  const failKmByDrv = {};
-  reportOrders.forEach(o => {
-    if (o.driver_id && o.fail_distance_meters) {
-      failKmByDrv[o.driver_id] = (failKmByDrv[o.driver_id] || 0) + (Number(o.fail_distance_meters) || 0) / 1000;
-    }
+  // 4) طلبات/مسافة/تقييم كل طيار — محسوبة في القاعدة (get_delivery_report)
+  //    شاملة مسافة الرِجل المتعذّرة (راح للعميل وما لقاهوش)
+  const m = {}, failKmByDrv = {};
+  ((REP && REP.driver_stats) || []).forEach(sx => {
+    const id = sx.driver_id;
+    m[id] = { driver_id: id, name: nameById[id] || sx.name || '—',
+              orders: Number(sx.orders) || 0, km: Number(sx.km) || 0,
+              'ممتاز': Number(sx['ممتاز']) || 0, 'جيد': Number(sx['جيد']) || 0,
+              'متأخر': Number(sx['متأخر']) || 0, rated: Number(sx.rated) || 0 };
+    if (Number(sx.fail_km)) failKmByDrv[id] = Number(sx.fail_km);
   });
 
   driverPerfRows = Object.values(m).map(r => {
