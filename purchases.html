@@ -355,7 +355,7 @@
       const tbody = document.getElementById('table-body');
       tbody.innerHTML = '<tr class="loading-row"><td colspan="10">⏳ جاري جلب البيانات...</td></tr>';
       try {
-        await loadUserNameMap();
+        await Promise.all([loadUserNameMap(), loadUserBranchMapPur()]);
         const response = await sbTaskList({ type: 'شراء' });
         let items = (response && response[0]?.data)
           ? response[0].data
@@ -376,7 +376,8 @@
             order_type:    item.order_type || '',
             type:          item.type || '',
             note:          (item.note && item.note !== 'null') ? item.note : '',
-            createdAt:     item.createdAt
+            createdAt:     item.createdAt,
+            _branch:       purBranchOf(item.branch)   // الفرع المطبّع — للعرض والفلترة
           })).filter(i => String(i.type).includes("شراء"));
 
           generateBranches(rawData);
@@ -390,9 +391,44 @@
       }
     }
 
+    /* ═══ الفرع في طلبات الشراء ═══
+       عمود branch في جدول task مش دايمًا فرع: فيه صفوف قديمة اتخزّن فيها
+       اسم مستخدم («accountant») أو رقم موبايل أو «عام»/«كل الفروع» أو
+       فاضي — والشاشة كانت بتبني خانة لكل قيمة خام، فتطلع 7 خانات بدل 3.
+       (الحارس trg_task_branch بيمنع الجديد من 2026-09-23، والقديم باقي.)
+       دلوقتي بنطبّع القيمة: فرع مسجّل → اسمه القياسي؛ اسم مستخدم/موبايل →
+       فرعه من خريطة المستخدمين؛ أي حاجة تانية → «غير محدد». */
+    let PUR_USER_BRANCH = {};
+    async function loadUserBranchMapPur() {
+      try {
+        const res = await fetch(SB_URL_API + '/rest/v1/rpc/get_user_branch_map', {
+          method: 'POST', headers: await sbH({ 'Content-Type': 'application/json' }), body: '{}'
+        });
+        const d = await res.json();
+        PUR_USER_BRANCH = (d && typeof d === 'object' && !Array.isArray(d)) ? d : {};
+      } catch (e) { PUR_USER_BRANCH = {}; }
+    }
+    const PUR_UNKNOWN = 'غير محدد';
+    function purBranchOf(v) {
+      const raw = String(v == null ? '' : v).trim();
+      if (!raw || raw === '-') return PUR_UNKNOWN;
+      const known = (typeof Branches !== 'undefined') ? Branches.names() : [];
+      const hit = known.find(n => Branches.same(n, raw));
+      if (hit) return hit;
+      const byUser = PUR_USER_BRANCH[raw];
+      if (byUser) {
+        const h2 = known.find(n => Branches.same(n, byUser));
+        if (h2) return h2;
+      }
+      return PUR_UNKNOWN;            // «عام» و«كل الفروع» وأي قيمة غريبة
+    }
+
     function generateBranches(data) {
       const container = document.getElementById('branchList');
-      const branches  = [...new Set(data.map(i => i.branch))].filter(b => b !== '-').sort();
+      // الترتيب من قايمة الفروع الرسمية، و«غير محدد» في الآخر لو موجود
+      const present = new Set(data.map(i => i._branch || purBranchOf(i.branch)));
+      const branches = (typeof Branches !== 'undefined' ? Branches.names() : []).filter(b => present.has(b));
+      if (present.has(PUR_UNKNOWN)) branches.push(PUR_UNKNOWN);
       container.innerHTML = branches.map(b => `
         <label class="check-label" style="background:var(--surface-3);padding:5px 10px;border-radius:20px;border:1px solid var(--border);">
           <input type="checkbox" class="branch-cb" value="${b}" checked onchange="applyFilter()"> ${b}
@@ -409,7 +445,7 @@
 
       const filtered = rawData.filter(i => {
         const sMatch = (statusVal === 'all' || i.status === statusVal);
-        const bMatch = selectedBranches.includes(i.branch);
+        const bMatch = selectedBranches.includes(i._branch || purBranchOf(i.branch));
         const tMatch = (orderTypeVal === 'all' || String(i.order_type).includes(orderTypeVal));
         const _sug = SRC_MAP[i.id] ? suggestedEntry(SRC_MAP[i.id]) : null;
         const stMatch = (storeVal === 'all' || (_sug && _sug.e && _sug.e.store === storeVal));
@@ -452,9 +488,9 @@
               <span style="color:var(--text-muted);font-size:0.7rem;">${displayTime}</span>
             </td>
             <td>
-              ${(nameOf(i.user) && nameOf(i.user) !== i.branch)
+              ${(nameOf(i.user) && nameOf(i.user) !== i._branch)
                 ? `<div style="font-weight:600;font-size:0.8rem;">${nameOf(i.user)}</div>` : ''}
-              <span class="branch-tag">${i.branch}</span>
+              <span class="branch-tag">${i._branch || i.branch}</span>
             </td>
             <td>${orderTypeBadge}</td>
             <td style="text-align:right;">
@@ -619,7 +655,7 @@
       const item = rawData.find(x => x.id == id);
       if (!item) return;
 
-      const branches = Branches.names().filter(b => b !== item.branch);
+      const branches = Branches.names().filter(b => b !== (item._branch || item.branch));
       const selected = await showBranchPicker(branches);
       if (!selected) return;
 
