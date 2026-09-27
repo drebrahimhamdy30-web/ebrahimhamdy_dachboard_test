@@ -134,6 +134,7 @@
         <button class="tab-btn" data-tab="disbursement" onclick="switchTab('disbursement', this)">📋 أذون الصرف</button>
         <button class="tab-btn" data-tab="overstock" onclick="switchTab('overstock', this)">📦 مخزون زائد</button>
         <button class="tab-btn" data-tab="lookup" onclick="switchTab('lookup', this)">🔍 بحث في المخزون</button>
+        <button class="tab-btn" data-tab="dupcodes" onclick="switchTab('dupcodes', this)">🧬 أكواد بأكتر من اسم</button>
       </div>
       <div class="branch-updates" id="branch-updates"></div>
     </div>
@@ -238,6 +239,18 @@
               <button class="btn-refresh-branch" onclick="loadPriceChanges()" style="align-self:flex-end;margin-bottom:1px"><i class="fas fa-sync-alt"></i> تحديث</button>
             </div>
 
+            <div class="settings-strip" id="dup-config-wrap" style="display:none;">
+              <div class="mini-field wide">
+                <span class="filter-label">الفرع <span class="help-ic">؟<span class="tip">الفحص بيقارن اسم الصنف في المخزون والمبيعات والجرد لنفس الكود</span></span></span>
+                <select data-branches id="dup-branch" onchange="loadDupCodes()"></select>
+              </div>
+              <div class="mini-field auto">
+                <label class="filter-label" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                  <input type="checkbox" id="dup-risky-only" onchange="renderDupCodes()"> الأرقام مختلفة بس ⚠️
+                </label>
+              </div>
+              <button class="btn btn-primary" onclick="loadDupCodes()"><i class="fas fa-sync-alt"></i> فحص</button>
+            </div>
             <div class="settings-strip" id="over-config-wrap" style="display:none;">
               <div class="mini-field wide">
                 <span class="filter-label">النطاق <span class="help-ic">؟<span class="tip">احسب الفائض على إجمالي الفروع مجتمعة، أو على فرع واحد لوحده.</span></span></span>
@@ -996,6 +1009,8 @@
         overPage=1; renderOverstock();
       } else if(tab==='lookup'){
         renderLookup();
+      } else if(tab==='dupcodes'){
+        dupPage=1; loadDupCodes();
       } else if(hasCalculated){
         applyAndRender();
       } else {
@@ -1003,7 +1018,7 @@
       }
     }
     function updateTabUI(){
-      var titles={lookup:'بحث في المخزون', prices:'فرق الأسعار بين الفروع', transfer:'التحويل بين الفروع', missing:'أصناف ناقصة من فرع', pricechanges:'تغيّرات الأسعار', disbursement:'أذون صرف التحويل', overstock:'مخزون زائد (Over Stock)'};
+      var titles={dupcodes:'أكواد بأكتر من اسم صنف', lookup:'بحث في المخزون', prices:'فرق الأسعار بين الفروع', transfer:'التحويل بين الفروع', missing:'أصناف ناقصة من فرع', pricechanges:'تغيّرات الأسعار', disbursement:'أذون صرف التحويل', overstock:'مخزون زائد (Over Stock)'};
       document.getElementById('result-title').textContent=titles[currentTab]||'';
 
       var isPrices   = (currentTab==='prices');
@@ -1013,6 +1028,7 @@
       var isDisb     = (currentTab==='disbursement');
       var isOver     = (currentTab==='overstock');
       var isLookup   = (currentTab==='lookup');
+      var isDup      = (currentTab==='dupcodes');
 
       document.getElementById('stock-toolbar').style.display = isDisb ? 'none' : 'block';
       document.getElementById('disb-toolbar').style.display  = isDisb ? 'block' : 'none';
@@ -1023,7 +1039,7 @@
       if(searchRow) searchRow.style.display = isPC ? 'none' : 'flex';
 
       var mainCalc = document.getElementById('main-calc-btn');
-      if(mainCalc) mainCalc.style.display = (isDisb || isPC || isOver || isLookup) ? 'none' : 'inline-flex';
+      if(mainCalc) mainCalc.style.display = (isDisb || isPC || isOver || isLookup || isDup) ? 'none' : 'inline-flex';
 
       var needWrap = document.getElementById('need-config-wrap');
       if(needWrap) needWrap.style.display = isTransfer ? 'flex' : 'none';
@@ -1035,10 +1051,12 @@
       if(overWrap) overWrap.style.display = isOver ? 'flex' : 'none';
       var lookWrap = document.getElementById('lookup-config-wrap');
       if(lookWrap) lookWrap.style.display = isLookup ? 'flex' : 'none';
+      var dupWrap = document.getElementById('dup-config-wrap');
+      if(dupWrap) dupWrap.style.display = isDup ? 'flex' : 'none';
 
       var excelBtn = document.getElementById('excel-btn');
       if(excelBtn){
-        if(isPrices || isPC || isOver || isLookup){ excelBtn.style.display='none'; }
+        if(isPrices || isPC || isOver || isLookup || isDup){ excelBtn.style.display='none'; }
         else if(isDisb){ excelBtn.style.display='inline-flex'; excelBtn.innerHTML='<i class="fas fa-file-excel"></i> تصدير أذون الصرف'; excelBtn.disabled = disbWithQty()===0; }
         else { excelBtn.style.display='inline-flex'; excelBtn.innerHTML='<i class="fas fa-file-excel"></i> Excel'; excelBtn.disabled=false; }
       }
@@ -1276,6 +1294,103 @@
         await fetch(SB_URL_API+'/rest/v1/overstock_exclusions?code=eq.'+encodeURIComponent(code), { method:'DELETE', headers: await sbH() });
         overExcl.delete(String(code)); renderOverstock();
       }catch(e){ alert('فشل إلغاء الاستثناء'); }
+    }
+
+    /* ═══ أكواد بأكتر من اسم ═══
+       في eplus ممكن نفس الكود يتحطّ على أكتر من صنف (مثال: 90003806 عليه
+       «فيونا فاميلي ابيض» و«اسود» و«طاردة للناموس» بسعرين). الكتالوج مش
+       متخزّن عندنا، فالدالة بتقارن اسم الصنف لنفس الكود في: مخزون الفرع
+       والمبيعات والجرد وأصناف الجرد — وبتتجاهل فروق الكتابة (ي/ى، مسافات)
+       عشان «مومنتا/مومينتا» ماتعدّش تعارض.                                */
+    var dupRows = [], dupPage = 1;
+    var DUP_PAGE = 40;
+
+    async function loadDupCodes(){
+      var cont = document.getElementById('result-container');
+      var sel  = document.getElementById('dup-branch');
+      var br   = sel ? sel.value : '';
+      cont.innerHTML = '<div class="loading-overlay">⏳ جاري الفحص...</div>';
+      try{
+        var r = await fetch(SB_URL_API + '/rest/v1/rpc/get_code_name_conflicts', {
+          method:'POST', headers: await sbH({ 'Content-Type':'application/json' }),
+          body: JSON.stringify({ p_branch: br || null })
+        });
+        if(!r.ok) throw new Error('HTTP ' + r.status);
+        var d = await r.json();
+        dupRows = Array.isArray(d) ? d : [];
+        dupPage = 1;
+        renderDupCodes();
+      }catch(e){
+        console.error('get_code_name_conflicts:', e);
+        cont.innerHTML = '<div class="loading-overlay" style="color:var(--danger)">❌ فشل الفحص — جرّب تاني</div>';
+      }
+    }
+
+    function dupEsc(v){
+      return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+             .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function renderDupCodes(){
+      var cont = document.getElementById('result-container');
+      var riskyOnly = document.getElementById('dup-risky-only') && document.getElementById('dup-risky-only').checked;
+      // الأخطر الأول: الأرقام مختلفة (حجم/عدد) يعني غالبًا صنفين مختلفين
+      var rows = dupRows.filter(function(r){ return !riskyOnly || r.digits_differ; })
+                        .sort(function(a,b){
+                          if(!!b.digits_differ !== !!a.digits_differ) return b.digits_differ ? 1 : -1;
+                          return (b.count||0) - (a.count||0);
+                        });
+      var risky = dupRows.filter(function(r){ return r.digits_differ; }).length;
+      document.getElementById('result-count').textContent = rows.length + ' كود';
+
+      if(!rows.length){
+        cont.innerHTML = '<div class="loading-overlay">✅ مفيش كود عليه أكتر من اسم في الفرع ده</div>';
+        return;
+      }
+
+      var totalPages = Math.max(1, Math.ceil(rows.length/DUP_PAGE));
+      if(dupPage > totalPages) dupPage = totalPages;
+      var pageRows = rows.slice((dupPage-1)*DUP_PAGE, dupPage*DUP_PAGE);
+
+      var html = '<div class="summary-bar">'+
+        '<div class="summary-item">أكواد بأكتر من اسم: <b>'+dupRows.length+'</b></div>'+
+        '<div class="summary-item" style="color:var(--danger)">الأرقام مختلفة (راجعها): <b>'+risky+'</b></div>'+
+        '<div class="summary-item" style="font-size:.75rem;color:var(--text-muted)">المصدر: المخزون + المبيعات + الجرد — الكود المكرر في eplus ومالوش حركة مايظهرش هنا</div>'+
+        '</div>';
+
+      html += '<div class="table-wrap"><table><thead><tr>'+
+        '<th>الكود</th><th>عدد الأسماء</th><th>الأسماء (المصدر · عدد المرات)</th>'+
+        '<th>الاسم في المخزون</th><th>الرصيد</th></tr></thead><tbody>';
+
+      pageRows.forEach(function(r){
+        var names = (r.names||[]).map(function(n){
+          return '<div style="padding:2px 0;">• '+dupEsc(n.name)+
+                 ' <span style="color:var(--text-muted);font-size:.72rem;">('+dupEsc(n.src)+' · '+(n.hits||0)+')</span></div>';
+        }).join('');
+        html += '<tr'+(r.digits_differ?' style="background:#fef2f2"':'')+'>'+
+          '<td><b>'+dupEsc(r.code)+'</b>'+(r.digits_differ?'<div style="font-size:.7rem;color:var(--danger);font-weight:700;">⚠️ الأرقام مختلفة</div>':'')+'</td>'+
+          '<td style="text-align:center;font-weight:700;">'+(r.count||0)+'</td>'+
+          '<td style="text-align:right;">'+names+'</td>'+
+          '<td style="font-size:.82rem;">'+dupEsc(r.stock_name||'—')+'</td>'+
+          '<td style="text-align:center;">'+dupEsc(r.qty==null?'—':r.qty)+'</td>'+
+          '</tr>';
+      });
+      html += '</tbody></table></div>';
+
+      if(totalPages > 1){
+        html += '<div class="pagination" style="justify-content:center;margin-top:12px;gap:6px;">'+
+          '<button class="page-btn" onclick="changeDupPage(-1)">‹</button>'+
+          '<span style="font-size:.8rem;color:var(--text-secondary)">صفحة '+dupPage+' من '+totalPages+' · '+rows.length+' كود</span>'+
+          '<button class="page-btn" onclick="changeDupPage(1)">›</button></div>';
+      }
+      cont.innerHTML = html;
+    }
+
+    function changeDupPage(d){
+      dupPage += d;
+      renderDupCodes();
+      var c = document.getElementById('result-container');
+      if(c) c.scrollIntoView({behavior:'smooth', block:'start'});
     }
 
     async function renderOverstock(){
