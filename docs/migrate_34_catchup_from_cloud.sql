@@ -176,6 +176,8 @@ declare
   r record;
   tbl text;
   stmt text;
+  sig text;
+  acl text;
 begin
   -- ١) كل حاجة من قايمة الناقص، بترتيب ord
   for r in select * from _todo order by ord, obj loop
@@ -211,7 +213,30 @@ begin
       execute r.ddl;
       insert into _log values (r.ord, r.kind, r.obj, true, null);
     exception when others then
-      insert into _log values (r.ord, r.kind, r.obj, false, left(sqlerrm, 160));
+      -- create or replace مابتقدرش تغيّر نوع الإرجاع. قابلتنا مرتين
+      -- (list_sales_months ثم sales_price_review) فبقت تتعالج لوحدها
+      -- بدل ما تتصلّح بالإيد كل مرة. الـdrop بيشيل الصلاحيات معاه
+      -- فبنرجّعها من fn_acl بتاع السحابة.
+      if r.kind = 'function' and sqlerrm like '%cannot change return type%' then
+        begin
+          for sig in select pp.oid::regprocedure::text
+                     from pg_proc pp join pg_namespace nn on nn.oid = pp.pronamespace
+                     where nn.nspname = 'public' and pp.proname = r.obj
+          loop
+            execute 'drop function if exists ' || sig;
+          end loop;
+          execute r.ddl;
+          select d.ddl into acl from _cloud_ddl d
+           where d.kind = 'fn_acl' and d.obj = r.obj limit 1;
+          if acl is not null then execute acl; end if;
+          insert into _log values (r.ord, r.kind, r.obj, true,
+            'اتشالت واتعملت من جديد بصلاحياتها (نوع الإرجاع اتغيّر)');
+        exception when others then
+          insert into _log values (r.ord, r.kind, r.obj, false, left(sqlerrm, 160));
+        end;
+      else
+        insert into _log values (r.ord, r.kind, r.obj, false, left(sqlerrm, 160));
+      end if;
     end;
   end loop;
 
@@ -247,8 +272,10 @@ select obj as "الاسم", err as "الملحوظة"
 from _log where ok and err is not null and err not like '(موجود%' order by obj;
 
 \echo ''
-\echo '⚠️ شغّل schema_drift_watch.sql دلوقتي — لازم ينزل من 135 لرقم صغير.'
-\echo '   الباقي المتوقّع: الدوال الستة المعزولة بس.'
+\echo '⚠️ الاستلحاق عمليتين: ده أولهم. شغّل migrate_35 بعده —'
+\echo '   السيرفر الذاتي بيدّي authenticated كل حاجة على أي جدول جديد،'
+\echo '   وGRANT بتضيف مابتشيلش. من غير 35 الجرانت يفضل أوسع من السحابة.'
+\echo '   أو استعمل scripts/catchup.sh اللي بيعمل الاتنين والحارس.'
 
 \else
 \echo ''
