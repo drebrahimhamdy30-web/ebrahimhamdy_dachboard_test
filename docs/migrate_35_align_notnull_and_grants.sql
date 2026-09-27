@@ -39,10 +39,13 @@
 \pset pager off
 
 -- ── جداول السحابة (عشان منلمسش جداول محلية بحتة) ─────────────────
+-- الأنواع الأربعة عن قصد: عادي (r) · مقسّم (p) · view (v) · matview (m).
+-- الصلاحيات بتتحط على كل دول. ضيّقت الفلتر تلات مرات وفي كل مرة فات
+-- عليه نوع: الجداول المقسّمة (branch_stock) ثم الـviews (branch_map).
 create temp table _ctabs as
 select * from dblink('cloud',
   'select c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace
-   where n.nspname=''public'' and c.relkind in (''r'',''p'')') as t(tbl text);
+   where n.nspname=''public'' and c.relkind in (''r'',''p'',''v'',''m'')') as t(tbl text);
 
 do $$
 declare n int;
@@ -128,7 +131,7 @@ where c.privs is distinct from l.privs
   -- السحابة مالهاش رأي في صلاحياته، فمنلمسوش.
   and coalesce(c.tbl, l.tbl) in (select tbl from _ctabs)
   and exists (select 1 from pg_class k join pg_namespace n on n.oid = k.relnamespace
-              where n.nspname = 'public' and k.relname = coalesce(c.tbl, l.tbl) and k.relkind in ('r','p'));
+              where n.nspname = 'public' and k.relname = coalesce(c.tbl, l.tbl) and k.relkind in ('r','p','v','m'));
 
 \echo ''
 \echo '════ فروق الصلاحيات ════'
