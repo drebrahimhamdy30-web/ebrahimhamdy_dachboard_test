@@ -200,8 +200,8 @@ select نوع as "النوع", هدف as "الهدف",
 from _log order by ok, نوع, هدف;
 
 \echo ''
-\echo '⚠️ شغّل schema_drift_watch.sql — المتوقّع ينزل لحوالي ٨:'
-\echo '   ٦ دوال معزولة عمدًا + جدولين نسخ/staging مقصودين.'
+echo '⚠️ شغّل schema_drift_watch.sql — المتوقّع صفر.'
+echo '   (الدوال المعزولة وجداول النسخ مستثناة في الحارس نفسه.)'
 
 \else
 \echo ''
