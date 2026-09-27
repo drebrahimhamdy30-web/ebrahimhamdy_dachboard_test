@@ -230,7 +230,7 @@
     async function _srcCall(slice){
       const rows = slice.map(i => ({ k: String(i.id), code: i.item_code || '', name: i.item_name || '' }));
       try {
-        const res = await fetch(SB_URL_API + '/rest/v1/rpc/suggest_purchase_sources', {
+        const res = await fetch(SB_URL_API + '/rest/v1/rpc/suggest_purchase_sources', {   // data-ok: بيتنادى بدفعات 500 صنف
           method:'POST', headers: await SRC_H(), body: JSON.stringify({ p_rows: rows })
         });
         const data = await res.json();
@@ -247,8 +247,16 @@
       const hasCode = i => { const c = String(i.item_code || '').trim(); return c && !/^0+$/.test(c); };
       const coded = pending.filter(hasCode);
       const named = pending.filter(i => !hasCode(i));
-      // 1) الأصناف بكود: نداء واحد كبير الأول → الشاشة تتعمّر والفلتر يشتغل بسرعة
-      if (coded.length) await _srcCall(coded);
+      /* 1) الأصناف بكود: دفعات مش نداء واحد كبير.
+            ⚠️ الدالة بترجّع صف لكل صنف، وPostgREST بيقص عند 1000 صف —
+            فالنداء الواحد بـ5 آلاف صنف كان بيرجّع أول 1000 بس والباقي
+            يفضل من غير مخزن مقترح، من غير أي رسالة. (اتكشف بالشريط
+            الأحمر بتاع حارس القص 2026-09-27، بعد ما الشاشة بقت بتجيب
+            كل طلبات الشراء بدل أحدث 1000.)                            */
+      const CODED_CHUNK = 500;
+      for (let x = 0; x < coded.length; x += CODED_CHUNK) {
+        await _srcCall(coded.slice(x, x + CODED_CHUNK));
+      }
       if (_sel) _sel.disabled = false;
       populateStoreFilter();
       // 2) الأصناف بالاسم: دفعات صغيرة على التوازي (حدّ 4 عشان مانحمّلش القاعدة) — بتتعمّر تدريجيًا

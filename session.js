@@ -366,7 +366,7 @@ const Session = (function () {
   async function tabRules() {
     if (_tabCache) return _tabCache;
     try {
-      const r = await fetch(`${PHALIX_CONFIG.supabaseUrl}/rest/v1/rpc/get_role_tabs`, {
+      const r = await fetch(`${PHALIX_CONFIG.supabaseUrl}/rest/v1/rpc/get_role_tabs`, {   // data-ok: تبويبات الدور (عشرات الصفوف)
         method: 'POST', headers: await headers(), body: JSON.stringify({ p_role: role() })
       });
       _tabCache = r.ok ? (await r.json()) || [] : [];

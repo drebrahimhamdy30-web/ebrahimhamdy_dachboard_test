@@ -372,7 +372,7 @@ async function sbCsOrders(branch, pendingOnly, opts) {
     for (let page = 0; page < CS_MAX_PAGES; page++) {
       const qs = '?' + CS_HAS_CUSTOMER + '&order=id.desc' + since +
                  '&limit=' + CS_PAGE + '&offset=' + (page * CS_PAGE);
-      const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_cs_orders${qs}`, {
+      const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_cs_orders${qs}`, {   // data-ok: الـqs فيه limit/offset — اللفّ بالصفحات فوق
         method: 'POST', headers: await sbH(), body
       });
       if (!r.ok) { rows.incomplete = true; break; }   // فشل نص الطريق = بيانات ناقصة، نقولها
@@ -481,7 +481,7 @@ async function sbOfferDelete(id) {
 const SB_STOCKLIMIT_URL = `${SB_URL_API}/rest/v1/stock_limit`;
 async function sbStockLimits(branch) {
   try {
-    const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_stock_limits`, {
+    const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_stock_limits`, {   // data-ok: حدود المخزون عشرات الصفوف (41 دلوقتي)
       method: 'POST', headers: await sbH(),
       body: JSON.stringify({ p_branch: branch || 'عام' })
     });
@@ -900,7 +900,7 @@ async function fetchStaleItemsRange(branch, from, to) {
 // معدل الجرد اليومي — يُحسب مباشرة من jard_audit_log عبر RPC في Supabase (بدل webhook n8n)
 async function fetchDailyJardStats(dateFrom, dateTo, branch) {
   try {
-    const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_jard_daily_stats`, {
+    const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_jard_daily_stats`, {   // data-ok: إحصائية يوم×موظف لفترة محدودة
       method: 'POST',
       headers: await sbH({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ p_from: dateFrom || null, p_to: (dateTo || dateFrom) || null, p_branch: branch || null })

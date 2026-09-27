@@ -95,7 +95,11 @@ function scanFile(file) {
         bare.startsWith('<!--') || bare.startsWith('--')) return;
     const at = rel + ':' + (i + 1);
     const ctx = lines.slice(i, i + WINDOW).join(' ');        // الاستعلام ممكن يكمل تحت
-    const isWrite = WRITE.test(ctx) && !/Session\.rpcAll/.test(ctx);
+    /* ⚠️ نداء RPC بيبقى POST دايمًا — فلو اعتبرناه «كتابة» بنتخطّاه ومانفحصوش،
+       وده اللي خلّى suggest_purchase_sources تفوت من الحارس وتتقص على
+       البرودكشن. فحص الكتابة بيتطبّق على نداءات الجداول بس. */
+    const isRpcLine = line.indexOf('/rest/v1/rpc/') >= 0;
+    const isWrite = !isRpcLine && WRITE.test(ctx) && !/Session.rpcAll/.test(ctx);
 
     // ② limit أكبر من السقف = وهم
     const big = line.match(/limit=(\d{4,})/) || line.match(/\.limit\((\d{4,})\)/);
