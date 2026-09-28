@@ -1242,6 +1242,15 @@
 
     // حارس تسجيل الجرد: يسمح فقط لموظف الجرد (دور inventory) أو الأدمن، ويمنع «الدخول العام للفرع»
     // (الحساب اللي اسمه الكامل = اسم الفرع) — عشان الجرد يتسجّل باسم الموظف الحقيقي دايمًا.
+    /* ═══ قفل ضد الازدواج ═══
+       الضغطة الواحدة كانت بتتبعت أكتر من مرة (شفنا 4 صفوف لنفس الصنف
+       في 375 جزء من الثانية) فعدد فواتير الموظف بيتضخّم. هنا لو نفس
+       (الفرع + الكود) لسه نداؤه في الطريق، النداء التاني بيستنى نفس
+       الوعد ويرجّع نفس النتيجة بدل ما يبعت طلب جديد.
+       والسيرفر كمان بيحدّث الصف بدل ما يضيف صف تاني (migrate_77) —
+       طبقتين عشان لو حد فتح الشاشة من جهازين. */
+    const _jardInFlight = new Map();
+
     async function jardGuardedSubmit(payload) {
       const role = (userRole || '').trim();
       const name = (employeeName || '').trim();
@@ -1255,7 +1264,12 @@
         alert('🚫 لا يمكن تسجيل الجرد من «دخول عام للفرع».\nسجّل الدخول باسمك (حساب موظف الجرد) عشان يتسجّل الجرد باسمك.');
         return false;
       }
-      return await submitJardAudit(payload);
+      const key = String(payload && payload.branch || '') + '|' + String(payload && payload.code || '');
+      if (_jardInFlight.has(key)) return await _jardInFlight.get(key);
+      const pending = submitJardAudit(payload);
+      _jardInFlight.set(key, pending);
+      try { return await pending; }
+      finally { _jardInFlight.delete(key); }
     }
 
     async function submitLiveMatched(id) {
