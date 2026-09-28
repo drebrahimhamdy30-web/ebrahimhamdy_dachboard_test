@@ -1141,6 +1141,27 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     const phSaveDone = set => { try { localStorage.setItem(PH_DONE_KEY, JSON.stringify([...set])); } catch (e) {} };
 
     function phOpenSite() { window.open(PH_URL, 'phMarket'); }
+    /* كود الصنف عند فارما (supplier_code). بنجيبه بكودنا إحنا لأن الصف
+       في الطلبيات أصلًا اتطابق بالكود. الموقع بيعرض الكود مختصر
+       (57496) والـAPI بيرجّعه مصفّر لـ18 خانة — بنشيل الأصفار. */
+    const phShort = c => String(c || '').replace(/^0+/, '') || '';
+    const PH_CODES = {};   // كودنا → { code, name }
+    async function phLoadCodes(ourCodes) {
+      const need = [...new Set(ourCodes.filter(c => c && PH_CODES[c] === undefined))];
+      for (let i = 0; i < need.length; i += 120) {
+        const part = need.slice(i, i + 120).map(c => '"' + String(c).replace(/"/g, '') + '"').join(',');
+        try {
+          const r = await fetch(REST + 'store_item_prices?select=code,item_name,supplier_code'
+            + '&store=eq.' + encodeURIComponent('فارما اوفر سيز')
+            + '&code=in.(' + encodeURIComponent(part) + ')', { headers: H });   // data-ok: مقصور على أكواد الصفحة المعروضة
+          (await r.json() || []).forEach(x => {
+            if (!x.supplier_code) return;
+            if (!PH_CODES[x.code]) PH_CODES[x.code] = { code: x.supplier_code, name: x.item_name };
+          });
+        } catch (e) { /* نكمّل بالاسم */ }
+        need.slice(i, i + 120).forEach(c => { if (PH_CODES[c] === undefined) PH_CODES[c] = null; });
+      }
+    }
     async function phCopy(text) {
       try { await navigator.clipboard.writeText(text); return true; }
       catch (e) {
@@ -1155,11 +1176,15 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     }
     async function phCopyOne(id) {
       const r = ordById[id]; if (!r) return;
+      await phLoadCodes([r.itm_code]);
+      const sc = PH_CODES[r.itm_code] && PH_CODES[r.itm_code].code;
       const nm = r.best_item_name || r.itm_name || '';
-      const ok = await phCopy(nm);
-      if (!ok) { alert('تعذّر النسخ — انسخ الاسم يدويًا:\n' + nm); return; }
+      const txt = sc ? phShort(sc) : nm;
+      const ok = await phCopy(txt);
+      if (!ok) { alert('تعذّر النسخ — انسخ يدويًا:\n' + txt); return; }
       window.open(PH_URL, 'phMarket');
-      toast('اتنسخ: ' + nm.slice(0, 40) + ' — الصق في خانة «ادخل منتجات» ✓');
+      toast(sc ? ('اتنسخ الكود ' + phShort(sc) + ' — الصق في خانة «ادخل منتجات» ✓')
+               : ('مفيش كود فارما للصنف ده — اتنسخ الاسم: ' + nm.slice(0, 30)));
       const d = phDone(); d.add(r.itm_code); phSaveDone(d);
     }
     async function phOpenList() {
@@ -1185,6 +1210,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       } catch (e) { alert('تعذّر جلب أصناف فارما'); return; }
       if (!PH_ROWS.length) { alert('مفيش أصناف مخزنها فارما اوفر سيز في الفلتر الحالي.'); return; }
       document.getElementById('ph-bg').classList.add('open');
+      document.getElementById('ph-wrap').innerHTML = '<div class="et-note">جارٍ جلب أكواد فارما…</div>';
+      await phLoadCodes(PH_ROWS.map(r => r.itm_code));
       phRender();
     }
     function phClose() { document.getElementById('ph-bg').classList.remove('open'); }
@@ -1193,12 +1220,17 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const done = PH_ROWS.filter(r => d.has(r.itm_code)).length;
       document.getElementById('ph-count').textContent = PH_ROWS.length + ' صنف · اتنسخ ' + done;
       document.getElementById('ph-wrap').innerHTML =
-        '<table class="cr-table"><thead><tr><th>#</th><th style="text-align:right">اسم الصنف عند فارما</th><th>الكمية</th><th>سعر البيع</th><th>الخصم</th><th>نسخ</th></tr></thead><tbody>'
+        '<table class="cr-table"><thead><tr><th>#</th><th>كود فارما</th><th style="text-align:right">اسم الصنف عند فارما</th><th>الكمية</th><th>سعر البيع</th><th>الخصم</th><th>نسخ</th></tr></thead><tbody>'
         + PH_ROWS.map((r, i) => {
             const nm = r.best_item_name || r.itm_name || '';
             const ok = d.has(r.itm_code);
+            const pc = PH_CODES[r.itm_code] && PH_CODES[r.itm_code].code;
+            const cCell = pc
+              ? '<span style="font-weight:800" title="الكود الكامل: ' + esc(pc) + '">' + esc(phShort(pc)) + '</span>'
+              : '<span style="color:#b91c1c;font-size:.7rem" title="الصنف ده لسه مااتجابش كوده من فارما — هيتنسخ بالاسم">بالاسم</span>';
             return '<tr' + (ok ? ' style="opacity:.55;background:#f0fdf4"' : '') + '>'
               + '<td>' + (i + 1) + '</td>'
+              + '<td>' + cCell + '</td>'
               + '<td style="text-align:right;font-weight:600">' + esc(nm) + (ok ? ' <span style="color:#15803d">✓</span>' : '') + '</td>'
               + '<td style="font-weight:800;color:#b91c1c">' + r.net_required + '</td>'
               + '<td>' + numv(r.best_price) + '</td>'
@@ -1210,19 +1242,26 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     }
     async function phCopyRow(i) {
       const r = PH_ROWS[i]; if (!r) return;
+      const pc = PH_CODES[r.itm_code] && PH_CODES[r.itm_code].code;
       const nm = r.best_item_name || r.itm_name || '';
-      const ok = await phCopy(nm);
+      const txt = pc ? phShort(pc) : nm;
+      const ok = await phCopy(txt);
       const msg = document.getElementById('ph-msg');
       if (!ok) { msg.innerHTML = '<span class="msg-err">تعذّر النسخ — انسخ يدويًا</span>'; return; }
       const d = phDone(); d.add(r.itm_code); phSaveDone(d);
-      msg.innerHTML = '<span class="msg-ok">اتنسخ «' + esc(nm.slice(0, 34)) + '» — الصق في خانة «ادخل منتجات» (الكمية ' + r.net_required + ')</span>';
+      msg.innerHTML = '<span class="msg-ok">اتنسخ ' + (pc ? ('الكود <b>' + esc(phShort(pc)) + '</b>') : ('الاسم «' + esc(nm.slice(0, 30)) + '»'))
+        + ' — الصق في خانة «ادخل منتجات» والكمية ' + r.net_required + '</span>';
       phRender();
     }
     async function phCopyAll() {
-      const txt = PH_ROWS.map(r => (r.best_item_name || r.itm_name || '')).join('\n');
+      const txt = PH_ROWS.map(r => {
+        const pc = PH_CODES[r.itm_code] && PH_CODES[r.itm_code].code;
+        return pc ? phShort(pc) : (r.best_item_name || r.itm_name || '');
+      }).join('\n');
       const ok = await phCopy(txt);
+      const noCode = PH_ROWS.filter(r => !(PH_CODES[r.itm_code] && PH_CODES[r.itm_code].code)).length;
       document.getElementById('ph-msg').innerHTML = ok
-        ? '<span class="msg-ok">اتنسخت ' + PH_ROWS.length + ' اسم — سطر لكل صنف</span>'
+        ? '<span class="msg-ok">اتنسخ ' + PH_ROWS.length + ' سطر' + (noCode ? ' (منهم ' + noCode + ' بالاسم لأن مالهمش كود)' : ' — كلهم أكواد') + '</span>'
         : '<span class="msg-err">تعذّر النسخ</span>';
     }
     function phResetDone() { phSaveDone(new Set()); phRender(); }
