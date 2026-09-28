@@ -78,6 +78,7 @@ body.dark .ptab.active{background:#0f2748}
     <button class="ptab active" data-t="prep" onclick="setTab('prep')">🧪 تحت التجهيز <span class="cnt" id="cnt-prep">0</span></button>
     <button class="ptab" data-t="ready" onclick="setTab('ready')">📦 اتحضّر <span class="cnt" id="cnt-ready">0</span></button>
     <button class="ptab" data-t="hold" onclick="setTab('hold')">⏸️ موقوف <span class="cnt" id="cnt-hold">0</span></button>
+    <button class="ptab" data-t="skipped" onclick="setTab('skipped')">🚫 مستثناة <span class="cnt" id="cnt-skipped">0</span></button>
   </div>
   <input type="text" class="search" id="search" placeholder="🔎 بحث بكود العميل أو الاسم" oninput="render()">
 </div>
@@ -164,11 +165,13 @@ async function refreshCounts(){
     let q1=db.from('orders').select('id',{count:'exact',head:true}).is('prep_done_at',null).not('prep_hold','is',true).is('prep_excluded_at',null).in('status',['pending','assigned','postponed']);
     let q2=db.from('orders').select('id',{count:'exact',head:true}).not('prep_done_at','is',null).is('picked_at',null).is('prep_excluded_at',null).in('status',['pending','assigned','postponed']);
     let q3=db.from('orders').select('id',{count:'exact',head:true}).is('prep_done_at',null).is('prep_hold',true).is('prep_excluded_at',null).in('status',['pending','assigned','postponed']);
-    if(branchId){ q1=q1.eq('branch_id',branchId); q2=q2.eq('branch_id',branchId); q3=q3.eq('branch_id',branchId); }
-    const [r1,r2,r3]=await Promise.all([q1,q2,q3]);
+    let q4=db.from('orders').select('id',{count:'exact',head:true}).not('prep_excluded_at','is',null).in('status',['pending','assigned','postponed']);
+    if(branchId){ q1=q1.eq('branch_id',branchId); q2=q2.eq('branch_id',branchId); q3=q3.eq('branch_id',branchId); q4=q4.eq('branch_id',branchId); }
+    const [r1,r2,r3,r4]=await Promise.all([q1,q2,q3,q4]);
     document.getElementById('cnt-prep').textContent = r1.count||0;
     document.getElementById('cnt-ready').textContent = r2.count||0;
     document.getElementById('cnt-hold').textContent = r3.count||0;
+    document.getElementById('cnt-skipped').textContent = r4.count||0;
   }catch(e){}
 }
 
@@ -181,6 +184,9 @@ async function load(){
     q=q.is('prep_done_at',null).not('prep_hold','is',true).is('prep_excluded_at',null).in('status',['pending','assigned','postponed']).order('created_at',{ascending:true});
   }else if(tab==='hold'){
     q=q.is('prep_done_at',null).is('prep_hold',true).is('prep_excluded_at',null).in('status',['pending','assigned','postponed']).order('created_at',{ascending:true});
+  }else if(tab==='skipped'){
+    // الطلبات اللي اتشالت من الشاشة ولسه مفتوحة — عشان الرجوع ينفع
+    q=q.not('prep_excluded_at','is',null).in('status',['pending','assigned','postponed']).order('prep_excluded_at',{ascending:false});
   }else{
     q=q.not('prep_done_at','is',null).is('picked_at',null).is('prep_excluded_at',null)
        .in('status',['pending','assigned','postponed']).order('prep_done_at',{ascending:false});
@@ -192,6 +198,21 @@ async function load(){
   refreshCounts();
 }
 
+// نصوص كل تبويب — كانت مكتوبة على تبويبين بس، فتبويب «موقوف» كان
+// بيقول «لا توجد طلبات متحضّرة بانتظار الطيار» وهو فاضي
+const TAB_EMPTY = {
+  prep:   '✅ لا توجد طلبات تحت التجهيز حاليًا',
+  ready:  'لا توجد طلبات متحضّرة بانتظار الطيار',
+  hold:   'مفيش طلبات موقوفة',
+  skipped:'مفيش طلبات متشالة من الشاشة'
+};
+const TAB_COUNT = {
+  prep:   ' طلب تحت التجهيز — الأقدم فوق',
+  ready:  ' طلب متحضّر بانتظار استلام الطيار',
+  hold:   ' طلب موقوف',
+  skipped:' طلب اتشال من شاشة التحضير — الأحدث فوق'
+};
+
 function render(){
   const term=(document.getElementById('search').value||'').trim().toLowerCase();
   let rows=allRows;
@@ -202,10 +223,10 @@ function render(){
   const list=document.getElementById('list');
   if(!rows.length){
     document.getElementById('count').textContent='';
-    list.innerHTML='<div class="empty">'+(term?'مفيش نتيجة للبحث ده':(tab==='prep'?'✅ لا توجد طلبات تحت التجهيز حاليًا':'لا توجد طلبات متحضّرة بانتظار الطيار'))+'</div>';
+    list.innerHTML='<div class="empty">'+(term?'مفيش نتيجة للبحث ده':(TAB_EMPTY[tab]||'لا يوجد'))+'</div>';
     return;
   }
-  document.getElementById('count').textContent = rows.length + (tab==='prep'?' طلب تحت التجهيز — الأقدم فوق':' طلب متحضّر بانتظار استلام الطيار');
+  document.getElementById('count').textContent = rows.length + (TAB_COUNT[tab]||' طلب');
 
   list.innerHTML=rows.map((o,i)=>{
     if(tab==='prep'||tab==='hold'){
@@ -232,6 +253,18 @@ function render(){
         </div>
         <div class="hint">👆 اضغط لعرض الأصناف والأسعار</div>
         ${btns}
+      </div>`;
+    }else if(tab==='skipped'){
+      const w=_mins(o.prep_excluded_at);
+      return `<div class="card held" onclick="openItems('${o.id}')">
+        <div class="nm">${esc(o.customer_name||o.cust_name||'—')}</div>
+        <div class="meta">
+          🧾 <b>${esc(o.bill_no||'—')}</b> · كود ${esc(o.cust_code||'—')} · 💰 ${Number(o.total_bill_net||0).toLocaleString()} ج<br>
+          📍 ${esc(o.cust_region||'—')}<br>
+          🚫 شاله: <b>${esc(o.prep_excluded_by||'—')}</b> · من <span class="wait">${fm(w)}</span>
+        </div>
+        <div class="hint">👆 اضغط لعرض الأصناف والأسعار</div>
+        <button class="btn btn-resume" onclick="event.stopPropagation();unexcludeOrder('${o.id}',this)">↩ رجوع للتحضير</button>
       </div>`;
     }else{
       const w=_mins(o.prep_done_at);
@@ -276,6 +309,18 @@ async function excludeOrder(id, btn){
     if(data && data.success===false) throw new Error(data.error||'تعذّر');
     allRows=allRows.filter(o=>o.id!==id); render(); refreshCounts();
   }catch(e){ btn.disabled=false; btn.textContent='🚫 إزالة'; alert('تعذّر: '+(e.message||'حاول تاني')); }
+}
+
+// رجوع الطلب لشاشة التحضير (لو اتشال بالغلط) — بيمسح علامة الاستثناء
+// ويتسجّل حدث prep_unexcluded في تتبّع الطلب
+async function unexcludeOrder(id, btn){
+  btn.disabled=true; btn.textContent='…';
+  try{
+    const { data, error } = await db.rpc('prep_unexclude_order',{ p_order_id:id, p_user_name:(currentUser&&currentUser.full_name)||'' });
+    if(error) throw error;
+    if(data && data.success===false) throw new Error(data.error||'تعذّر');
+    allRows=allRows.filter(o=>o.id!==id); render(); refreshCounts();
+  }catch(e){ btn.disabled=false; btn.textContent='↩ رجوع للتحضير'; alert('تعذّر: '+(e.message||'حاول تاني')); }
 }
 
 async function holdOrder(id, btn){
