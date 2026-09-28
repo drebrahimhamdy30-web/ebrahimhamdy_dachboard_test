@@ -101,6 +101,17 @@ docker exec -u node "$C" n8n export:workflow --all --output="$BK" >/dev/null 2>&
 docker cp "$C:$BK" "/root/n8n_backup_$STAMP.json" >/dev/null 2>&1
 echo "${G}تمام${N}  → /root/n8n_backup_$STAMP.json"
 
+# ── الحالة قبل الاستيراد — عشان نرجّعها زي ما كانت ────────────────
+# مش «نفعّل كل حاجة» — نرجّع **الحالة السابقة**. ورك فلو كان واقف
+# عن قصد لازم يفضل واقف.
+WAS="$(docker exec "$C" node -e '
+  const fs=require("fs");
+  const a=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+  console.log((Array.isArray(a)?a:[a])
+    .filter(w=>String(w.name||"").includes(process.argv[2]))
+    .map(w=>w.id+"|"+(w.active?1:0)+"|"+w.name).join("\n"));
+' "$BK" "$WF" 2>/dev/null)"
+
 # ── ٤) التحويل (معاينة) ────────────────────────────────────────────
 OUT="/tmp/n8n_envified_$STAMP.json"
 docker cp "$HERE/n8n-envify.js" "$C:/tmp/n8n-envify.js" >/dev/null 2>&1 || {
@@ -139,24 +150,47 @@ else
   exit 1
 fi
 
-# ── ٦) اتأكد إنه فضل شغّال ─────────────────────────────────────────
-# الاستيراد ساعات بيسيب الورك فلو متوقّف. ودي مزامنة ساعية — لو وقفت
-# هنكتشفها بعد ساعات لما الأرصدة تبان قديمة.
+# ── ٦) رجّع التفعيل لو الاستيراد وقّفه ─────────────────────────────
+# 🔴 حصل فعلًا 2026-09-28: الاستيراد سـاب «sync customers balances»
+#    متوقّف. ودي مزامنة **ساعية** — لو فضلت واقفة مش هتظهر كخطأ،
+#    هتظهر بعد يوم كـ«أرصدة العملاء قديمة». والمالك هو اللي لاحظها.
+#
+#    والنسخة الأولى من الفحص ده كانت بتتفرّج بس وتقول «فعّله من
+#    الواجهة». أداة بتعرف إنها كسرت حاجة وبتسيبك تصلّحها بإيدك دي
+#    نص أداة — دلوقتي بترجّعه بنفسها، وبترجّع **الحالة السابقة** بس
+#    (ورك فلو كان واقف قبل الاستيراد يفضل واقف).
 VER="/tmp/n8n_verify_$STAMP.json"
 docker exec "$C" sh -c "n8n export:workflow --all --output=$VER >/dev/null 2>&1" || true
-ACTIVE="$(docker exec "$C" node -e '
-  const fs=require("fs");
-  const a=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
-  const w=(Array.isArray(a)?a:[a]).filter(x=>String(x.name||"").includes(process.argv[2]));
-  console.log(w.map(x=>(x.active?"✓ ":"✗ ")+x.name).join("\n"));
-' "$VER" "$WF" 2>/dev/null)"
-echo ""
-echo "${B}حالة الورك فلو بعد الاستيراد:${N}"
-echo "$ACTIVE" | sed 's/^/  /'
-case "$ACTIVE" in
-  *✗*) echo "  ${R}⚠️ وقف! فعّله من الواجهة حالًا — دي مزامنة ساعية.${N}" ;;
-  *)   echo "  ${G}شغّال.${N}" ;;
-esac
+
+cur_active() {  # $1=id  → 1 شغّال · 0 واقف
+  docker exec "$C" node -e '
+    const fs=require("fs");
+    const a=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+    const w=(Array.isArray(a)?a:[a]).find(x=>String(x.id)===process.argv[2]);
+    console.log(w && w.active ? 1 : 0);
+  ' "$VER" "$1" 2>/dev/null
+}
+
+printf '\n%sحالة الورك فلو بعد الاستيراد:%s\n' "$B" "$N"
+FAILED=0
+printf '%s\n' "$WAS" | while IFS='|' read -r id was name; do
+  [ -n "$id" ] || continue
+  now="$(cur_active "$id")"
+  if [ "$was" = "1" ] && [ "$now" != "1" ]; then
+    printf '  %s⚠️ %s — وقف بعد الاستيراد، برجّعه...%s\n' "$Y" "$name" "$N"
+    if docker exec -u node "$C" n8n update:workflow --id="$id" --active=true >/dev/null 2>&1 \
+       || docker exec "$C" n8n update:workflow --id="$id" --active=true >/dev/null 2>&1; then
+      printf '  %s✓ %s — رجع شغّال%s\n' "$G" "$name" "$N"
+    else
+      printf '  %s🔴 %s — مرجعش. فعّله من الواجهة حالًا.%s\n' "$R" "$name" "$N"
+      FAILED=1
+    fi
+  elif [ "$now" = "1" ]; then
+    printf '  %s✓ %s — شغّال%s\n' "$G" "$name" "$N"
+  else
+    printf '  ○ %s — واقف (وكان واقف قبل الاستيراد كمان)\n' "$name"
+  fi
+done
 
 docker exec "$C" rm -f "$OUT" "$VER" /tmp/n8n-envify.js >/dev/null 2>&1
 
