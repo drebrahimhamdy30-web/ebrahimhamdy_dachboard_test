@@ -135,6 +135,25 @@
     </div>
   </div>
 
+
+  <!-- Modal اختيار المرتجع/المرتجعات المقابلة لفاتورة التعاقد -->
+  <div id="ret-picker-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:99999;align-items:center;justify-content:center;padding:16px;">
+    <div class="card" style="width:100%;max-width:700px;max-height:92vh;overflow:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <b>اختر المرتجع المقابل للفاتورة</b>
+        <button class="btn" style="background:var(--surface-3)" onclick="closeRetPicker(true)">✕</button>
+      </div>
+      <div id="rp-info" class="sc-mini" style="margin-bottom:10px;line-height:1.7;"></div>
+      <input type="text" id="rp-search" class="form-input" placeholder="بحث برقم المرتجع أو اسم/كود العميل..." style="margin-bottom:12px;">
+      <div id="rp-list"><div class="sc-mini">⏳ جاري التحميل...</div></div>
+      <div id="rp-pager" style="margin-top:10px;"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
+        <button class="btn" style="background:var(--surface-3)" onclick="closeRetPicker(true)">إلغاء</button>
+        <button class="btn btn-primary" id="rp-confirm" onclick="confirmReturnLinks()" disabled>ربط المحدد</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal الإضافة/التعديل -->
   <div id="edit-modal" style="
     display:none;position:fixed;inset:0;
@@ -770,6 +789,10 @@ function getNextSerial(billType) {
       const item = allData.find(x => x.id == id);
       if (!item) return;
 
+      // «مقابل مرتجع» مابقتش مجرد حالة: بتفتح نافذة اختيار المرتجع/المرتجعات،
+      // والربط نفسه (match_contract_return) هو اللي بيحوّل حالة الفاتورة.
+      if (newState === 'مقابل مرتجع') { openReturnsPicker(id); return; }
+
       if (newState === 'فاتورة') {
         const hasBillType    = item.bill_type    && item.bill_type    !== 'null' && item.bill_type    !== '';
         const hasPaymentType = item.payment_type && item.payment_type !== 'null' && item.payment_type !== '';
@@ -822,6 +845,147 @@ function getNextSerial(billType) {
         alert("❌ فشل التحديث");
         applyFilter();
       }
+    }
+
+
+    /* ═══ ربط فاتورة تعاقد بمرتجع (أو أكتر) ═══
+       الربط كان في اتجاه واحد: من المرتجع تختار الفاتورة. دلوقتي كمان
+       من الفاتورة: أول ما تختار «مقابل مرتجع» تفتح النافذة دي.
+       الترتيب من suggest_contract_returns — نفس العميل الأول وبعدين
+       الأقرب في الوقت. 10 في الصفحة وبحد أقصى 5 صفحات.
+       الفاتورة الواحدة ممكن تقابل أكتر من مرتجع؛ كل مرتجع بيتكتب
+       قدامه نفس رقم فاتورة التعاقد في عمود «الفاتورة المقابلة». */
+    const RP_PAGE = 10, RP_MAX_PAGES = 5;
+    let rpInvoice = null, rpRows = [], rpPage = 1, rpSel = new Set(), rpTimer = null;
+
+    function rpKey(x){ return String(x.return_bill_no) + "|" + String(x.return_branch || ""); }
+
+    function openReturnsPicker(id){
+      const item = allData.find(x => x.id == id);
+      if (!item) { applyFilter(); return; }
+      rpInvoice = item; rpRows = []; rpPage = 1; rpSel = new Set();
+      document.getElementById("rp-info").innerHTML =
+        "الفاتورة <b>" + retEsc(item.bill_no) + "</b> · العميل <b>" + retEsc(item.cust_name_ar || item.cust_code || "—") + "</b>" +
+        " · القيمة <b>" + (item.total_bill == null ? 0 : item.total_bill) + "</b> · " + retFmtDate(item.bill_date) + "<br>" +
+        '<span class="sc-mini">المقترح فوق: نفس العميل وأقرب وقت. تقدر تختار أكتر من مرتجع — كلهم هيتكتب قدامهم رقم الفاتورة دي.</span>';
+      const s = document.getElementById("rp-search");
+      s.value = "";
+      s.oninput = () => { clearTimeout(rpTimer); rpTimer = setTimeout(() => loadReturnSuggestions(s.value.trim()), 300); };
+      document.getElementById("ret-picker-modal").style.display = "flex";
+      loadReturnSuggestions("");
+    }
+
+    function closeRetPicker(revert){
+      document.getElementById("ret-picker-modal").style.display = "none";
+      rpInvoice = null; rpRows = []; rpSel = new Set();
+      if (revert) applyFilter();   // القايمة ترجع لحالة الفاتورة الأصلية
+    }
+
+    async function loadReturnSuggestions(search){
+      const box = document.getElementById("rp-list");
+      box.innerHTML = '<div class="sc-mini">⏳ جاري البحث...</div>';
+      try {
+        const r = await fetch(RPC + "suggest_contract_returns", { method:"POST", headers: await CI_H(), body: JSON.stringify({
+          p_cust_code:  rpInvoice.cust_code   || null,
+          p_cust_name:  rpInvoice.cust_name_ar || null,
+          p_bill_date:  rpInvoice.bill_date   || null,
+          p_bill_value: rpInvoice.total_bill  || 0,
+          p_search:     search || null,
+          p_limit:      RP_PAGE * RP_MAX_PAGES
+        }) });
+        const rows = await r.json();
+        rpRows = Array.isArray(rows) ? rows : [];
+        rpPage = 1;
+        renderRetSuggestions();
+      } catch(e){ box.innerHTML = '<div style="color:var(--danger)">خطأ في جلب المرتجعات</div>'; }
+    }
+
+    function renderRetSuggestions(){
+      const box = document.getElementById("rp-list");
+      const pagerEl = document.getElementById("rp-pager");
+      const btn = document.getElementById("rp-confirm");
+      btn.disabled = !rpSel.size;
+      btn.textContent = rpSel.size ? ("ربط المحدد (" + rpSel.size + ")") : "ربط المحدد";
+      if (!rpRows.length){ box.innerHTML = '<div class="sc-mini">مفيش مرتجعات مطابقة.</div>'; pagerEl.innerHTML = ""; return; }
+
+      const totalPages = Math.min(RP_MAX_PAGES, Math.max(1, Math.ceil(rpRows.length / RP_PAGE)));
+      if (rpPage > totalPages) rpPage = totalPages;
+      const pageRows = rpRows.slice((rpPage - 1) * RP_PAGE, rpPage * RP_PAGE);
+
+      box.innerHTML = pageRows.map((x, i) => {
+        const k = rpKey(x);
+        const on = rpSel.has(k);
+        const best = (rpPage === 1 && i === 0 && x.same_customer);
+        const linked = x.matched_invoice_bill_no
+          ? `<div class="sc-mini" style="color:#b45309;font-weight:700">⚠️ مربوط حاليًا بفاتورة ${retEsc(x.matched_invoice_bill_no)}</div>` : "";
+        return `<div class="sc-pick-item ${best ? "best" : ""}" style="cursor:pointer" onclick="toggleRetPick('${k.replace(/'/g, "\\'")}')">
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <input type="checkbox" ${on ? "checked" : ""} onclick="event.stopPropagation();toggleRetPick('${k.replace(/'/g, "\\'")}')" style="width:18px;height:18px;margin-top:3px">
+            <div>
+              <div><b>${retEsc(x.return_bill_no)}</b> ${best ? '<span class="sc-badge-ok">مقترح</span>' : ""} ${x.same_customer ? '<span class="sc-mini">· نفس العميل</span>' : ""}</div>
+              <div class="sc-mini">${retFmtDate(x.return_date)} · ${retEsc(x.cust_name || "—")}</div>
+              <div class="sc-mini">القيمة ${x.total_value} · ${x.items_count} صنف · فرق ${rpGap(x.hours_diff)}</div>
+              ${linked}
+            </div>
+          </div>
+        </div>`;
+      }).join("");
+
+      pagerEl.innerHTML = totalPages > 1
+        ? `<div style="display:flex;gap:6px;justify-content:center;align-items:center;">
+             <button class="btn btn-sm" ${rpPage <= 1 ? "disabled" : ""} onclick="rpGo(${rpPage - 1})">‹</button>
+             <span class="sc-mini">صفحة ${rpPage} من ${totalPages}</span>
+             <button class="btn btn-sm" ${rpPage >= totalPages ? "disabled" : ""} onclick="rpGo(${rpPage + 1})">›</button>
+           </div>` : "";
+    }
+
+    // فرق الوقت بشكل مقروء: دقايق/ساعات/أيام
+    function rpGap(h){
+      const hrs = Math.abs(Number(h) || 0);
+      if (hrs < 1)  return Math.round(hrs * 60) + " دقيقة";
+      if (hrs < 48) return Math.round(hrs) + " ساعة";
+      return Math.round(hrs / 24) + " يوم";
+    }
+    function rpGo(p){ rpPage = p; renderRetSuggestions(); }
+    function toggleRetPick(k){ if (rpSel.has(k)) rpSel.delete(k); else rpSel.add(k); renderRetSuggestions(); }
+
+    async function confirmReturnLinks(){
+      if (!rpInvoice || !rpSel.size) return;
+      const picked  = rpRows.filter(x => rpSel.has(rpKey(x)));
+      const invNo   = rpInvoice.bill_no;
+      const invId   = rpInvoice.id;
+      const already = picked.filter(x => x.matched_invoice_bill_no && String(x.matched_invoice_bill_no) !== String(invNo));
+      if (already.length){
+        const list = already.map(x => "• مرتجع " + x.return_bill_no + " → مربوط بفاتورة " + x.matched_invoice_bill_no).join("\n");
+        if (!confirm("⚠️ المرتجعات دي مربوطة بفواتير قبل كده:\n\n" + list +
+                     "\n\nتكمّل؟ الربط القديم هيتفك وحالة الفاتورة القديمة هترجع زي ما كانت.")) return;
+      }
+      const btn = document.getElementById("rp-confirm");
+      btn.disabled = true; btn.textContent = "⏳ جاري الربط...";
+      let ok = 0; const fail = [];
+      for (const x of picked){
+        try {
+          const r = await fetch(RPC + "match_contract_return", { method:"POST", headers: await CI_H(), body: JSON.stringify({
+            p_return_bill_no: x.return_bill_no,
+            p_return_branch:  x.return_branch || "",
+            p_invoice_id:     Number(invId),
+            p_return_value:   x.total_value || 0,
+            p_user:           ciReviewer()
+          }) });
+          const res = await r.json();
+          if (res && res.success === false) fail.push(x.return_bill_no + " (" + (res.error || "") + ")");
+          else ok++;
+        } catch(e){ fail.push(String(x.return_bill_no)); }
+      }
+      const item = allData.find(y => y.id == invId);
+      if (ok && item) item.bill_state = "مقابل مرتجع";
+      closeRetPicker(false);
+      applyFilter();
+      retsLoaded = false;   // تبويب المرتجعات يتحمّل من جديد عشان يبان الربط
+      if (document.getElementById("pane-returns").style.display !== "none") loadReturns();
+      alert(fail.length
+        ? ("تم ربط " + ok + " مرتجع · فشل: " + fail.join(" · "))
+        : ("✅ اتربط " + ok + " مرتجع بالفاتورة " + invNo));
     }
 
     async function quickUpdateBillType(id, newVal) {
