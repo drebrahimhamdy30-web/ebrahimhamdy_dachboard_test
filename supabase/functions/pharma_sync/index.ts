@@ -45,13 +45,24 @@ async function pool<T, R>(items: T[], size: number, fn: (t: T) => Promise<R>): P
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   const SYNC_KEY = Deno.env.get("SYNC_KEY");
-  const isCron = !!SYNC_KEY && (req.headers.get("x-sync-key") || "") === SYNC_KEY;
+  const hdrKey = req.headers.get("x-sync-key") || "";
+  let isCron = !!SYNC_KEY && hdrKey === SYNC_KEY;
   const claims = claimFromJwt(req.headers.get("Authorization") || "");
   const isAdmin = !!claims && ADMIN_ROLES.includes(String(claims?.user_role ?? claims?.app_metadata?.user_role ?? claims?.app_role ?? ""));
-  if (!isCron && !isAdmin) return jsonRes({ ok: false, error: "unauthorized" }, 403);
 
   let opt: any = {}; try { opt = await req.json(); } catch { /* */ }
   const supa = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
+  /* مفتاح الكرون محفوظ في vault مش في متغيّرات البيئة — الكرون بيقراه
+     من هناك ويبعته، وإحنا بنتحقق منه بدالة. كده مفيش خطوة يدوية في
+     لوحة التحكم ولا مفتاح بيتنقل بره القاعدة. */
+  if (!isCron && !isAdmin && hdrKey) {
+    try {
+      const { data } = await supa.rpc("is_pharma_sync_key", { p_key: hdrKey });
+      isCron = data === true;
+    } catch { /* */ }
+  }
+  if (!isCron && !isAdmin) return jsonRes({ ok: false, error: "unauthorized" }, 403);
 
   // الإنهاء: أي صنف مااتحدّثش في الجولة دي = مش متاح
   if (opt.finalize === true) {
@@ -66,8 +77,22 @@ Deno.serve(async (req) => {
   if (!rawCreds) return jsonRes({ ok: false, error: "secret_not_set" }, 500);
   let o: any; try { o = JSON.parse(rawCreds); } catch { return jsonRes({ ok: false, error: "bad_secret_json" }, 500); }
   const api = String(o.api || DEF_API).replace(/\/$/, ""); const site = String(o.site || "pharma");
-  const fromPage = Math.max(0, Number(opt.from_page) || 0);
-  const pagesN = Math.min(Math.max(Number(opt.pages) || 40, 1), 80);
+  let fromPage = Math.max(0, Number(opt.from_page) || 0);
+  let pagesN = Math.min(Math.max(Number(opt.pages) || 40, 1), 80);
+  const t0 = Date.now();
+
+  /* التشغيل المجدول: الحالة في الجدول هي اللي بتقول نبدأ من فين، وكل
+     تشغيلة بتسجّل نفسها في pharma_sync_log وتقدّم المؤشّر — فأي فشل
+     بيبان في السجل وفي عدّاد الفشل المتتالي بدل ما يعدّي ساكت. */
+  let sched: any = null;
+  if (opt.scheduled === true) {
+    const { data: st, error: stErr } = await supa.from("pharma_sync_state").select("*").eq("id", 1).single();
+    if (stErr || !st) return jsonRes({ ok: false, error: "state_read_failed", detail: stErr?.message }, 500);
+    if (!st.enabled) { await supa.from("pharma_sync_state").update({ running_since: null }).eq("id", 1); return jsonRes({ ok: true, mode: "scheduled", skipped: "disabled" }); }
+    sched = st;
+    fromPage = Math.max(0, Number(st.next_page) || 0);
+    pagesN = Math.min(Math.max(Number(st.pages_per_run) || 10, 1), 80);
+  }
   const cSearch = Math.min(Math.max(Number(opt.concurrency) || 8, 1), 12);
   const cDetail = Math.min(Math.max(Number(opt.detail_concurrency) || 15, 1), 24);
   const startedIso = new Date().toISOString();
@@ -77,7 +102,14 @@ Deno.serve(async (req) => {
     body: new URLSearchParams({ client_id: "mobile_android", client_secret: "secret", grant_type: "password", username: String(o.user), password: String(o.pass) })
   });
   const tt = await tr.text();
-  if (!tr.ok) return jsonRes({ ok: false, error: "oauth_failed", detail: tt.slice(0, 200) }, 502);
+  if (!tr.ok) {
+    if (sched) {
+      await supa.from("pharma_sync_log").insert({ from_page: fromPage, ok: false, error: "oauth_failed: " + tt.slice(0, 160) });
+      await supa.from("pharma_sync_state").update({ running_since: null, last_run_at: new Date().toISOString(), last_ok: false,
+        last_error: "فشل الدخول على فارما", consecutive_failures: (Number(sched.consecutive_failures) || 0) + 1 }).eq("id", 1);
+    }
+    return jsonRes({ ok: false, error: "oauth_failed", detail: tt.slice(0, 200) }, 502);
+  }
   const token = JSON.parse(tt).access_token;
   const H = { "Authorization": "Bearer " + token, "Accept": "application/json", "Accept-Language": "ar" };
   const fields = "products(code,name,price(value),publicPrice(value),stock(stockLevelStatus)),pagination(totalPages,totalResults)";
@@ -95,7 +127,14 @@ Deno.serve(async (req) => {
   }
 
   const fr = await fetch(pageUrl(fromPage), { headers: H });
-  if (!fr.ok) return jsonRes({ ok: false, error: "search_failed", status: fr.status }, 502);
+  if (!fr.ok) {
+    if (sched) {
+      await supa.from("pharma_sync_log").insert({ from_page: fromPage, ok: false, error: "search_failed status " + fr.status });
+      await supa.from("pharma_sync_state").update({ running_since: null, last_run_at: new Date().toISOString(), last_ok: false,
+        last_error: "فشل البحث (status " + fr.status + ")", consecutive_failures: (Number(sched.consecutive_failures) || 0) + 1 }).eq("id", 1);
+    }
+    return jsonRes({ ok: false, error: "search_failed", status: fr.status }, 502);
+  }
   const fj = await fr.json();
   const totalPages = Number(fj.pagination?.totalPages) || 1;
   const totalResults = Number(fj.pagination?.totalResults) || 0;
@@ -140,7 +179,7 @@ Deno.serve(async (req) => {
     else if (it.pub != null && it.pub > 0 && it.net != null) { price = it.pub; disc = clampD(round2((1 - it.net / it.pub) * 100)); }
     else if (it.net != null) { price = it.net; disc = 0; }
     else return null;
-    return { item_name: it.name, price, discount_perc: disc, available: true };
+    return { item_name: it.name, price, discount_perc: disc, available: true, supplier_code: it.code };
   });
   const all = rows.filter(Boolean) as any[];
 
@@ -152,5 +191,46 @@ Deno.serve(async (req) => {
     upserted += Number(data) || 0;
   }
 
-  return jsonRes({ ok: !upErr, mode: "chunk", chunk_started: startedIso, from_page: fromPage, to_page: lastPage, total_pages: totalPages, catalog_total: totalResults, processed: all.length, failed_pages: failedPages, detail_fails: detailFails, upserted, up_error: upErr });
+  const secs = Math.round((Date.now() - t0) / 100) / 10;
+  const okRun = !upErr && failedPages === 0;
+
+  if (sched) {
+    const cycleStart = fromPage === 0 ? new Date().toISOString() : (sched.cycle_started_at || new Date().toISOString());
+    const finished = lastPage >= totalPages - 1;
+    let finalized: number | null = null;
+
+    // آخر دفعة في الدورة: أي صنف مااتشافش في الدورة دي = خرج من الكتالوج
+    if (okRun && finished) {
+      try {
+        const { data } = await supa.rpc("pharma_prices_finalize", { p_before: cycleStart });
+        finalized = Number(data) || 0;
+      } catch { /* */ }
+    }
+
+    await supa.from("pharma_sync_log").insert({
+      from_page: fromPage, to_page: lastPage, total_pages: totalPages,
+      processed: all.length, upserted, codes: all.filter((x: any) => x.supplier_code).length,
+      failed_pages: failedPages, detail_fails: detailFails,
+      ok: okRun, error: upErr, seconds: secs
+    });
+
+    await supa.from("pharma_sync_state").update({
+      running_since: null,
+      last_run_at: new Date().toISOString(),
+      last_ok: okRun,
+      last_error: okRun ? null : (upErr || (failedPages ? failedPages + " صفحة فشلت" : "غير معروف")),
+      consecutive_failures: okRun ? 0 : (Number(sched.consecutive_failures) || 0) + 1,
+      total_pages: totalPages,
+      cycle_started_at: cycleStart,
+      // الدفعة الفاشلة بتتعاد في النبضة الجاية بدل ما نتخطاها
+      next_page: okRun ? (finished ? 0 : lastPage + 1) : fromPage,
+      cycle_no: (okRun && finished) ? (Number(sched.cycle_no) || 0) + 1 : sched.cycle_no
+    }).eq("id", 1);
+
+    return jsonRes({ ok: okRun, mode: "scheduled", from_page: fromPage, to_page: lastPage, total_pages: totalPages,
+      processed: all.length, upserted, failed_pages: failedPages, detail_fails: detailFails,
+      cycle_finished: finished, finalized, seconds: secs, up_error: upErr });
+  }
+
+  return jsonRes({ ok: !upErr, mode: "chunk", chunk_started: startedIso, from_page: fromPage, to_page: lastPage, total_pages: totalPages, catalog_total: totalResults, processed: all.length, failed_pages: failedPages, detail_fails: detailFails, upserted, seconds: secs, up_error: upErr });
 });
