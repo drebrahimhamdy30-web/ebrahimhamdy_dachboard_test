@@ -105,7 +105,7 @@ crontab -l | grep sync-from-cloud             # لازم السطر يبقى م�
 | # | الخطوة | الحجم | الرجوع |
 |---|---|---|---|
 | 0 | `n8n export:workflow --all --output=/tmp/wf_backup.json` | دقيقة | نسخة كاملة |
-| 1 | كريدنشيال **`Postgres account`** → مضيف `db` بورت `5432` | **تعديل واحد = ٤٧ عقدة في ١٤ ورك فلو** | تعديل واحد |
+| 1 | كريدنشيال **`Postgres account`** → مضيف `db` بورت **`5433`** | **تعديل واحد = ٤٧ عقدة في ١٤ ورك فلو** | تعديل واحد |
 | 2 | `login` — ٣ عقد: بدّل الكريدنشيال لـ**`Supabase server`** (موجود ومجرّب من البروفة) | ٣ قوايم منسدلة | ٣ قوايم |
 | 3 | `login` — الروابط: `Verify Login` · `Insert Session` · `HTTP Request` · `إنشاء رمز الاستعادة` | ٤ روابط | نسخ/لصق |
 | 4 | `login` — `إنشاء رمز الاستعادة`: **المفتاح مكتوب في العقدة** (مش من كريدنشيال) | ١ | نسخ/لصق |
@@ -133,6 +133,10 @@ docker compose up -d n8n
 
 ```bash
 docker network connect supabase_default n8n    # مرة واحدة — بعدها n8n يشوف القاعدة باسم db
+# (اتعمل خلاص — بيقول "endpoint already exists" لو اتكرر)
+
+# ⚠️ البورت **5433** مش 5432. اتأكد قبل اليوم — ماتفترضهوش:
+for p in 5432 5433 6543; do docker exec n8n node -e "require('net').createConnection($p,'db').on('connect',()=>{console.log('$p مفتوح');process.exit(0)}).on('error',e=>{console.log('$p '+e.code);process.exit(1)})"; done
 ```
 
 **اعرف حجم الشغل قبل اليوم — ماتعتمدش على الجدول ده لوحده:**
