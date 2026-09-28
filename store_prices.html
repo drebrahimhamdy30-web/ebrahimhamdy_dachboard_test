@@ -97,6 +97,7 @@
           <button class="sp-up-btn" id="sp-open-st" style="display:none;background:var(--surface-3);color:var(--text-primary);" onclick="openStores()"><i class="fas fa-warehouse"></i> إدارة المخازن</button>
           <button class="sp-up-btn" id="sp-open-up" style="display:none;" onclick="openUpload()"><i class="fas fa-file-arrow-up"></i> رفع شيت مخزن</button>
           <button class="sp-up-btn" id="sp-open-pharma" style="display:none;background:#0d9488;color:#fff;" onclick="syncPharma()"><i class="fas fa-cloud-arrow-down"></i> تحديث مخزون فارما اوفر سيز</button>
+          <button class="sp-up-btn" id="sp-pharma-codes" style="display:none;background:#1d4ed8;color:#fff;" onclick="syncPharmaCodes()" title="يجيب كود الصنف عند فارما (اللي بيتلزق في خانة الطلب عندهم) من غير ما يلمس الأسعار"><i class="fas fa-barcode"></i> جلب أكواد فارما</button>
         </div>
       </div>
 
@@ -809,8 +810,49 @@
         document.getElementById('sp-open-up').style.display = 'inline-flex';
         document.getElementById('sp-open-st').style.display = 'inline-flex';
         document.getElementById('sp-open-pharma').style.display = 'inline-flex';
+        document.getElementById('sp-pharma-codes').style.display = 'inline-flex';
       }
     })();
+
+    /* جلب كود الصنف عند فارما (supplier_code) — تمريرة خفيفة على صفحات
+       البحث بس، من غير نداء تفاصيل لكل صنف (اللي هو اللي بيتقل المزامنة
+       الكاملة). الكود ده هو اللي بيتلزق في خانة «ادخل منتجات» عندهم،
+       لأنهم مابيقبلوش لصق الاسم. مابيلمسش السعر/الخصم/التوفر. */
+    async function syncPharmaCodes() {
+      const btn = document.getElementById('sp-pharma-codes');
+      if (btn.disabled) return;
+      const _sp = await SP_AUTH(); const jwt = (_sp && _sp !== SB_ANON_API) ? _sp : null;
+      if (!jwt) { alert('سجّل الدخول بحساب مصرّح (أدمن/مدير/مشتريات)'); return; }
+      const ans = prompt('كام صفحة نجيب أكوادها؟ (الصفحة = 100 صنف · الكتالوج ~221 صفحة)\nابدأ بـ1 للتجربة.', '1');
+      if (ans === null) return;
+      const pages = Math.min(Math.max(parseInt(ans) || 1, 1), 80);
+      const from = parseInt(prompt('نبدأ من صفحة رقم كام؟ (0 = من الأول)', '0') || '0') || 0;
+      const orig = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جارٍ جلب الأكواد…';
+      try {
+        const r = await fetch(SB_URL_API + '/functions/v1/pharma_sync', {
+          method: 'POST',
+          headers: { apikey: SB_ANON_API, Authorization: 'Bearer ' + jwt, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ codes_only: true, from_page: from, pages: pages })
+        });
+        const j = await r.json();
+        if (j && j.ok) {
+          btn.innerHTML = '<i class="fas fa-check"></i> اتحدّث ' + (Number(j.updated) || 0) + ' كود';
+          alert('تمام ✓\n\nصفحات: ' + j.from_page + ' → ' + j.to_page + ' من ' + j.total_pages
+              + '\nأصناف اتقروا: ' + j.scanned
+              + '\nأكواد اتسجّلت: ' + j.updated
+              + (j.failed_pages ? '\nصفحات فشلت: ' + j.failed_pages : ''));
+          spPage = 1; loadPage();
+        } else {
+          const msg = (j && j.error === 'unauthorized') ? 'ليس لديك صلاحية' : ((j && (j.hint || j.up_error || j.error)) || 'فشل الجلب');
+          btn.innerHTML = '<i class="fas fa-triangle-exclamation"></i> ' + msg;
+        }
+      } catch (e) {
+        btn.innerHTML = '<i class="fas fa-triangle-exclamation"></i> تعذّر الاتصال';
+      }
+      setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 6000);
+    }
 
     // سحب كتالوج «فارما اوفر سيز» المتاح لحظيًا من موقع المورد (زر يدوي) — يحدّث السعر/الخصم/التوفر
     async function syncPharma() {

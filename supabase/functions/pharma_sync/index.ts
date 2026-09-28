@@ -111,6 +111,23 @@ Deno.serve(async (req) => {
   });
   for (const arr of pageArrs) for (const it of arr) items.push(it);
 
+  /* وضع «الأكواد بس»: بيقف عند صفحات البحث ومابيعملش نداء تفاصيل لكل
+     صنف (اللي هو 19 ألف نداء في الجولة الكاملة). الكود بيجي في صفحة
+     البحث أصلًا، فالتمريرة دي ~221 نداء بس وحملها تافه. مابيلمسش
+     السعر/الخصم/التوفر — تحديث عمود supplier_code وخلاص. */
+  if (opt.codes_only === true) {
+    const crows = items.map((it) => ({ item_name: it.name, supplier_code: it.code }));
+    let matched = 0; let cErr: string | null = null;
+    for (let i = 0; i < crows.length; i += 1000) {
+      const { data, error } = await supa.rpc("pharma_codes_upsert", { p_rows: crows.slice(i, i + 1000) });
+      if (error) { cErr = error.message; break; }
+      matched += Number(data) || 0;
+    }
+    return jsonRes({ ok: !cErr, mode: "codes_only", from_page: fromPage, to_page: lastPage,
+      total_pages: totalPages, catalog_total: totalResults, scanned: items.length,
+      updated: matched, failed_pages: failedPages, up_error: cErr });
+  }
+
   // الخصم المُعلَن للصيدليات — نداء تفصيلي لكل صنف
   const detUrl = (c: string) => `${api}/occ/v2/${site}/products/${c}?fields=pharmacyDiscount(value)`;
   let detailFails = 0;
