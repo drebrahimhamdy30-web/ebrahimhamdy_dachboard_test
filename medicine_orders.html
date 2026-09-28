@@ -246,6 +246,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
             <input type="number" id="ord-req-v" class="form-input" style="max-width:66px" placeholder="—" oninput="ordDebounce()"></span>
           <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;font-weight:700;cursor:pointer;white-space:nowrap"><input type="checkbox" id="ord-surp-only" onchange="ordPage=1;loadOrders()" style="width:16px;height:16px;accent-color:var(--primary)"> فائض فقط</label>
           <button class="cr-up-btn" style="background:#16a34a" onclick="exportOrders()"><i class="fas fa-file-excel"></i> تصدير Excel</button>
+          <button class="cr-up-btn" id="ord-pharma-btn" style="background:#1d4ed8" onclick="phOpenList()"><i class="fas fa-cart-plus"></i> قائمة فارما</button>
           <button class="cr-up-btn" id="ord-clear" style="display:none;background:#b91c1c" onclick="clearAllSelections()"><i class="fas fa-eraser"></i> مسح تحت الطلب (يوم جديد)</button>
           <button class="cr-up-btn" id="ord-refresh" style="display:none" onclick="refreshOrders()"><i class="fas fa-rotate"></i> تحديث الطلبيات</button>
           <button class="cr-up-btn" id="ord-fit-btn" style="background:var(--surface-3);color:var(--text-primary)" onclick="ordToggleFit()" title="تصغير كل الأعمدة على حجم النص"><i class="fas fa-text-width"></i> محاذاة على النص</button>
@@ -358,6 +359,26 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           <div style="margin-top:6px"><button class="btn btn-sm" style="background:var(--surface-3);color:var(--text-primary);border:none;padding:5px 12px;border-radius:8px;cursor:pointer;font-weight:700" onclick="nbAddTier()"><i class="fas fa-plus"></i> إضافة شريحة</button></div>
           <div style="margin-top:10px"><button class="btn btn-primary" onclick="nbSave()"><i class="fas fa-save"></i> حفظ وإعادة حساب المعدل والطلبيات</button> <span id="nb-msg" style="margin-right:8px"></span></div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- modal قائمة فارما اوفر سيز -->
+  <div class="cr-modal-bg" id="ph-bg" onclick="if(event.target===this)phClose()">
+    <div class="cr-modal" style="max-width:820px">
+      <div class="cr-modal-hd">
+        <div style="font-weight:800;font-size:0.9rem;">أصناف فارما اوفر سيز — <span id="ph-count">—</span></div>
+        <button class="cr-close" onclick="phClose()">✕</button>
+      </div>
+      <div class="cr-modal-bd">
+        <div class="et-note">اضغط <b>نسخ</b> جنب الصنف، وبعدين الصق في خانة <b>«ادخل منتجات»</b> اللي تحت في صفحة فارما (مش خانة البحث اللي فوق) واضغط Enter — الصنف بيتضاف للعربة لو متاح. الصف بيتعلّم ✓ بعد النسخ عشان تعرف وصلت لفين.</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+          <button class="cr-up-btn" style="background:#1d4ed8" onclick="phOpenSite()"><i class="fas fa-up-right-from-square"></i> افتح صفحة فارما</button>
+          <button class="cr-up-btn" style="background:var(--surface-3);color:var(--text-primary)" onclick="phCopyAll()"><i class="fas fa-copy"></i> نسخ كل الأسماء (سطر لكل صنف)</button>
+          <button class="cr-up-btn" style="background:var(--surface-3);color:var(--text-primary)" onclick="phResetDone()"><i class="fas fa-rotate-left"></i> تصفير العلامات</button>
+          <span id="ph-msg" style="font-size:.78rem;font-weight:700"></span>
+        </div>
+        <div class="cr-wrap" id="ph-wrap" style="max-height:60vh;overflow:auto"></div>
       </div>
     </div>
   </div>
@@ -756,7 +777,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const surpOnly = document.getElementById('ord-surp-only').checked;
       // أعمدة الفائض بتتبني من الفروع — كانت تلاتة مكتوبة بالإيد
       const surpCols = BR_KEYS.map(k => 'surplus_' + k).join(',');
-      let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,net_required,' + surpCols + ',surplus_other,best_store,best_price,best_disc,active_months,ex_archived'
+      let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,net_required,' + surpCols + ',surplus_other,best_store,best_price,best_disc,best_item_name,active_months,ex_archived'
         + '&branch=eq.' + encodeURIComponent(ordBranch)
         + '&order=' + ((ordSortCol && ORD_SORT_MAP[ordSortCol]) ? (ORD_SORT_MAP[ordSortCol] + '.' + ordSortDir + '.nullslast') : 'required.desc,itm_name.asc')
         + '&limit=' + ORD_SIZE + '&offset=' + offset;
@@ -1107,6 +1128,105 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       XLSX.writeFile(wb, 'طلبية_' + ordBranch + (w ? '_' + w : '') + '.xlsx');
     }
 
+    /* ═══════ فارما اوفر سيز: نسخ الاسم + فتح صفحة الطلب ═══════
+       موقع فارما على دومين تاني، والمتصفح بيمنع أي صفحة إنها تكتب في
+       صفحة دومين تاني — فمش ممكن نملأ خانة البحث عندهم برمجيًا. اللي
+       ينفع: ننسخ الاسم زي ما هو **عند المخزن** (مش اسمنا) ونفتح لهم
+       الصفحة، والباقي لصق + Enter.  */
+    const PH_URL = 'https://shop.pharmaemarket.com/pharma/ar/EGP/my-account/quick-order';
+    const phIsPharma = s => /فارما\s*اوفر|فارما\s*أوفر|overseas/i.test(String(s || ''));
+    let PH_ROWS = [];
+    const PH_DONE_KEY = 'ph_done_v1';
+    const phDone = () => { try { return new Set(JSON.parse(localStorage.getItem(PH_DONE_KEY) || '[]')); } catch (e) { return new Set(); } };
+    const phSaveDone = set => { try { localStorage.setItem(PH_DONE_KEY, JSON.stringify([...set])); } catch (e) {} };
+
+    function phOpenSite() { window.open(PH_URL, 'phMarket'); }
+    async function phCopy(text) {
+      try { await navigator.clipboard.writeText(text); return true; }
+      catch (e) {
+        // fallback لو الحافظة محجوبة (اتصال غير آمن أو صلاحية مرفوضة)
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text; ta.style.cssText = 'position:fixed;top:-1000px';
+          document.body.appendChild(ta); ta.select();
+          const ok = document.execCommand('copy'); ta.remove(); return ok;
+        } catch (e2) { return false; }
+      }
+    }
+    async function phCopyOne(id) {
+      const r = ordById[id]; if (!r) return;
+      const nm = r.best_item_name || r.itm_name || '';
+      const ok = await phCopy(nm);
+      if (!ok) { alert('تعذّر النسخ — انسخ الاسم يدويًا:\n' + nm); return; }
+      window.open(PH_URL, 'phMarket');
+      toast('اتنسخ: ' + nm.slice(0, 40) + ' — الصق في خانة «ادخل منتجات» ✓');
+      const d = phDone(); d.add(r.itm_code); phSaveDone(d);
+    }
+    async function phOpenList() {
+      const w = document.getElementById('ord-wh').value;
+      if (w && !phIsPharma(w)) { /* الفلتر على مخزن تاني — بنجيب فارما برضه */ }
+      const co = document.getElementById('ord-company').value;
+      const q  = document.getElementById('ord-search').value.trim();
+      const surpOnly = document.getElementById('ord-surp-only').checked;
+      let base = REST + 'purchase_orders_flat?select=itm_code,itm_name,best_item_name,net_required,best_price,best_disc'
+        + '&branch=eq.' + encodeURIComponent(ordBranch) + '&net_required=gt.0'
+        + '&best_store=ilike.*فارما*&order=itm_name.asc';
+      if (co) base += '&company=eq.' + encodeURIComponent(co);
+      if (surpOnly) base += '&surplus_other=gt.0';
+      if (q) { const e = encodeURIComponent(q); base += '&or=(itm_name.ilike.*' + e + '*,itm_code.eq.' + e + ')'; }
+      base += ordExtraFilters();
+      PH_ROWS = [];
+      try {
+        let off = 0, SIZE = 1000;
+        for (;;) {
+          const b = await (await fetch(base + '&limit=' + SIZE + '&offset=' + off, { headers: H })).json();
+          PH_ROWS = PH_ROWS.concat(b); if (!Array.isArray(b) || b.length < SIZE) break; off += SIZE;
+        }
+      } catch (e) { alert('تعذّر جلب أصناف فارما'); return; }
+      if (!PH_ROWS.length) { alert('مفيش أصناف مخزنها فارما اوفر سيز في الفلتر الحالي.'); return; }
+      document.getElementById('ph-bg').classList.add('open');
+      phRender();
+    }
+    function phClose() { document.getElementById('ph-bg').classList.remove('open'); }
+    function phRender() {
+      const d = phDone();
+      const done = PH_ROWS.filter(r => d.has(r.itm_code)).length;
+      document.getElementById('ph-count').textContent = PH_ROWS.length + ' صنف · اتنسخ ' + done;
+      document.getElementById('ph-wrap').innerHTML =
+        '<table class="cr-table"><thead><tr><th>#</th><th style="text-align:right">اسم الصنف عند فارما</th><th>الكمية</th><th>سعر البيع</th><th>الخصم</th><th>نسخ</th></tr></thead><tbody>'
+        + PH_ROWS.map((r, i) => {
+            const nm = r.best_item_name || r.itm_name || '';
+            const ok = d.has(r.itm_code);
+            return '<tr' + (ok ? ' style="opacity:.55;background:#f0fdf4"' : '') + '>'
+              + '<td>' + (i + 1) + '</td>'
+              + '<td style="text-align:right;font-weight:600">' + esc(nm) + (ok ? ' <span style="color:#15803d">✓</span>' : '') + '</td>'
+              + '<td style="font-weight:800;color:#b91c1c">' + r.net_required + '</td>'
+              + '<td>' + numv(r.best_price) + '</td>'
+              + '<td>' + (r.best_disc == null ? 0 : r.best_disc) + '%</td>'
+              + '<td><button class="ord-actbtn" style="background:#dbeafe;color:#1d4ed8" title="نسخ الاسم" onclick="phCopyRow(' + i + ')"><i class="fas fa-copy"></i></button></td>'
+              + '</tr>';
+          }).join('')
+        + '</tbody></table>';
+    }
+    async function phCopyRow(i) {
+      const r = PH_ROWS[i]; if (!r) return;
+      const nm = r.best_item_name || r.itm_name || '';
+      const ok = await phCopy(nm);
+      const msg = document.getElementById('ph-msg');
+      if (!ok) { msg.innerHTML = '<span class="msg-err">تعذّر النسخ — انسخ يدويًا</span>'; return; }
+      const d = phDone(); d.add(r.itm_code); phSaveDone(d);
+      msg.innerHTML = '<span class="msg-ok">اتنسخ «' + esc(nm.slice(0, 34)) + '» — الصق في خانة «ادخل منتجات» (الكمية ' + r.net_required + ')</span>';
+      phRender();
+    }
+    async function phCopyAll() {
+      const txt = PH_ROWS.map(r => (r.best_item_name || r.itm_name || '')).join('\n');
+      const ok = await phCopy(txt);
+      document.getElementById('ph-msg').innerHTML = ok
+        ? '<span class="msg-ok">اتنسخت ' + PH_ROWS.length + ' اسم — سطر لكل صنف</span>'
+        : '<span class="msg-err">تعذّر النسخ</span>';
+    }
+    function phResetDone() { phSaveDone(new Set()); phRender(); }
+
     // ===== التحويل =====
     /* اسم الفرع → عمود رصيده في stock_flat (بالحرف) أو معدله في
        consumption_flat (بالكود). الاتنين بيتبنوا من جدول الفروع. */
@@ -1190,8 +1310,11 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const mismatch = r && chosen.price != null && r.price != null && Math.abs(Number(chosen.price) - Number(r.price)) > 0.01;
       const col = mismatch ? '#dc2626' : 'var(--primary)';
       const ttl = mismatch ? ' title="سعر بيع المخزن (' + chosen.price + ') مختلف عن سعر الصيدلية (' + r.price + ')"' : '';
+      const phBtn = phIsPharma(chosen.store)
+        ? ' <button class="ord-actbtn" style="background:#dbeafe;color:#1d4ed8" title="انسخ اسم الصنف عند فارما وافتح صفحة الطلب" onclick="event.stopPropagation();phCopyOne(' + id + ')"><i class="fas fa-copy"></i></button>'
+        : '';
       return '<span onclick="openWh(' + id + ')"' + ttl + ' style="cursor:pointer;color:' + col + ';font-weight:700;text-decoration:underline">' + esc(chosen.store) + '</span>'
-        + (chosen.av ? '' : ' <span style="color:#b91c1c;font-size:.65rem">(غير متاح)</span>');
+        + (chosen.av ? '' : ' <span style="color:#b91c1c;font-size:.65rem">(غير متاح)</span>') + phBtn;
     }
     async function openWh(id) {
       const r = ordById[id]; if (!r) return;
