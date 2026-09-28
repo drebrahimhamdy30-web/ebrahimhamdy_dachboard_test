@@ -98,6 +98,17 @@ if [ -f "$DRIFT_SQL" ]; then
     echo "── انحراف عن السحابة ──"
     printf %s\n "$drift"
   fi
+
+  # نسجّل النتيجة في ملف حالة عشان فحص الصحة يقراها ويصرخ.
+  # من غير ده الحارس بيكتب في اللوج وبس — وحارس محدش بيقراه مش مختلف
+  # عن حارس مش موجود. ده اللي خلّى ٧ جداول ناقصة تعدّي أسبوع.
+  # -1 معناها «الفحص نفسه فشل» — ودي **مش** نفس معنى صفر.
+  if printf %s "$drift" | grep -q 'مفيش انحراف'; then dc=0
+  elif printf %s "$drift" | grep -qE '[0-9]+ حاجة منحرفة'; then
+    dc="$(printf %s "$drift" | grep -oE '[0-9]+ حاجة منحرفة' | grep -oE '^[0-9]+')"
+  else dc=-1; fi
+  mkdir -p /var/lib 2>/dev/null
+  printf '%s\n' "$dc" > "${PHALIX_DRIFT_STATE:-/var/lib/phalix-drift.state}" 2>/dev/null || true
 fi
 
 # فشل جدول واحد مابيوقّفش السكربت (بيتسجّل في اللوج) — بس لازم نتكلم عنه

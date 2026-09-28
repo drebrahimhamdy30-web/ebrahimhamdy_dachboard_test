@@ -157,7 +157,52 @@ if [ -n "$CID" ]; then
   if [ "${j:-0}" != "0" ]; then
     fail isolation "🔴 فيه $j مهمة cron شغّالة على السيرفر — الطيارين ممكن ياخدوا إشعارات مزدوجة"
   else ok "العزل شغّال (صفر cron)"; fi
+
+  # ── أسرار vault ──────────────────────────────────────────────────
+  # ٦ دوال بتقرا أسرارها من vault. لو سر ضاع، الدالة بتفشل **بصمت**:
+  # driver-poll بترجّع {"events":[]} و200، يعني الطيارين مايجيلهمش
+  # إشعارات والتطبيق مايشتكيش. فالسر الناقص هو أوضح إشارة نقدر نمسكها.
+  v=$(docker exec -i "$CID" psql -U supabase_admin -d postgres -tAc \
+      "select count(*) from vault.decrypted_secrets where name in ('driver_app_secret','مفتاح الخدمة لإرسال الإشعارات','eplus_sync_key','backup_trigger_token','perf_functions_secret','apk_publish_secret')" 2>/dev/null | tr -d ' ')
+  if [ "${v:-0}" -lt 6 ]; then
+    fail vault "أسرار vault ${v:-0} من ٦ — دوال هتفشل بصمت (الإشعارات أولها)"
+  else ok "أسرار vault كاملة (٦)"; fi
 fi
+
+# ── انحراف السكيما ───────────────────────────────────────────────────
+# الحارس بيشتغل مع المزامنة الساعة ٦ وبيكتب نتيجته في لوج محدش بيفتحه.
+# وحارس محدش بيقراه مش مختلف عن حارس مش موجود — ده اللي خلّى ٧ جداول
+# ناقصة تعدّي أسبوع. فالمزامنة بقت تسجّل العدد هنا، وإحنا بنصرخ عليه.
+#
+# تلات حالات مختلفة، ومهم نفرّق بينهم:
+#   العدد > 0   → فيه انحراف حقيقي
+#   العدد = -1  → الفحص **نفسه** فشل، يعني مانعرفش الحالة
+#   الملف قديم  → الحارس ماشتغلش أصلًا — وده أخطر من انحراف لأنه صمت
+DRIFT_STATE="${PHALIX_DRIFT_STATE:-/var/lib/phalix-drift.state}"
+if [ ! -f "$DRIFT_STATE" ]; then
+  fail drift "مفيش أي نتيجة لحارس الانحراف — يشتغل مع المزامنة، فالمزامنة غالبًا مابتوصلوش"
+else
+  d="$(tr -d ' \n' < "$DRIFT_STATE" 2>/dev/null)"
+  dage=$(( ( $(date +%s) - $(stat -c %Y "$DRIFT_STATE") ) / 3600 ))
+  if [ "$dage" -gt "$AGE_MAX_H" ]; then
+    fail drift "حارس الانحراف ماشتغلش من $dage ساعة — السيرفر ممكن يكون منحرف ومحدش عارف"
+  elif [ "$d" = "-1" ]; then
+    fail drift "🔴 فحص الانحراف نفسه فشل — مانعرفش الحالة (مش نفس معنى «مفيش انحراف»)"
+  elif [ "${d:-0}" != "0" ]; then
+    fail drift "فيه $d حاجة منحرفة عن السحابة — شغّل scripts/catchup.sh --apply"
+  else ok "مفيش انحراف عن السحابة (من $dage ساعة)"; fi
+fi
+
+# ── دالة إشعارات الطيارين ────────────────────────────────────────────
+# ⚠️ بنفحص إنها **حيّة** بس. driver-poll بترجّع 200 و{"events":[]} في
+#    الحالتين — لما التحقّق يفشل ولما مفيش أحداث فعلًا — فمفيش طريقة
+#    نفرّق من الرد. اللي بيحمينا هو فحص vault فوق.
+pc=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST \
+     "$DOMAIN/functions/v1/driver-poll" -H 'Content-Type: application/json' \
+     -d '{}' 2>/dev/null || echo 000)
+if [ "$pc" != "200" ]; then
+  fail edge "driver-poll رجّعت $pc — دالة إشعارات الطيارين مش شغّالة"
+else ok "driver-poll حيّة"; fi
 
 # ── قارن بالحالة السابقة: نبعت عند التغيير بس ──────────────────────
 NOW="$(echo $FAILED | tr ' ' '\n' | sort | tr '\n' ' ')"
