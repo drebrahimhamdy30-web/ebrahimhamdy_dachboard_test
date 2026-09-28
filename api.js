@@ -879,16 +879,8 @@ async function fetchStaleItems(branch, months) {
 /* نفس الفكرة بس بنطاق تاريخ: الأصناف اللي **مفيش ليها أي جرد** بين
    التاريخين (مع اللي ما اتجردتش أبدًا). الدالة بترجّع jsonb صف واحد
    فمش متأثرة بسقف الـ1000. */
-async function fetchStaleItemsRange(branch, from, to) {
-  const data = await sbJardRpc('get_jard_stale', {
-    p_branch: branch, p_from: from || null, p_to: to || null
-  });
-  return Array.isArray(data) ? data : [];
-}
-
-/* نفس الفكرة بس بنطاق تاريخ: الأصناف اللي **مفيش ليها أي جرد** بين
-   التاريخين (مع اللي ما اتجردتش أبدًا). الدالة بترجّع jsonb صف واحد
-   فمش متأثرة بسقف الـ1000. */
+/* الأصناف اللي **مفيش ليها أي جرد** بين التاريخين (مع اللي ما اتجردتش
+   أبدًا). الدالة بترجّع jsonb صف واحد فمش متأثرة بسقف الـ1000. */
 async function fetchStaleItemsRange(branch, from, to) {
   const data = await sbJardRpc('get_jard_stale', {
     p_branch: branch, p_from: from || null, p_to: to || null

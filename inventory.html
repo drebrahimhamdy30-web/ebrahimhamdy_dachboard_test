@@ -725,12 +725,44 @@
       }
     }
 
+    /* ═══ مطابقة الكلمة المفتاحية ═══
+       كانت «يحتوي على» بشكل أعمى، فـSHAMPOO كانت بتتصنّف **حقن** لأن
+       جوّاها amp، وSUPPORT/SUPPLEMENT بتتصنّف **لبوس** لأن جوّاها supp.
+       دلوقتي الاسم بيتقسّم لكلمات والمطابقة بتحترم حدود الكلمة، مع
+       نجمة اختيارية للتحكّم (بتتكتب في شاشة إعدادات الجرد):
+         كلمة    → كلمة كاملة بس        (amp ≠ shampoo)
+         ‎*كلمة   → آخر الكلمة           (‎*gel = emulgel/hydrogel)
+         كلمة‎*   → أول الكلمة           (امبول‎* = امبولات)
+         ‎*كلمة‎*  → في أي مكان (السلوك القديم — للعربي غالبًا)
+       الأرقام بتتفصل عن الحروف كمان: 24TAB → «24» و«tab». */
+    function catTokens(s) {
+      return String(s || '').toLowerCase()
+        .replace(/([0-9])([a-z\u0600-\u06FF])/g, '$1 $2')
+        .replace(/([a-z\u0600-\u06FF])([0-9])/g, '$1 $2')
+        .split(/[^0-9a-z\u0600-\u06FF]+/)
+        .filter(Boolean);
+    }
+
+    function catKeyMatch(tokens, kw) {
+      if (!kw) return false;
+      const pre = kw.charAt(0) === '*';
+      const suf = kw.charAt(kw.length - 1) === '*';
+      const core = kw.replace(/^\*/, '').replace(/\*$/, '');
+      if (!core) return false;
+      return tokens.some(t =>
+        t === core
+        || (pre && suf && t.indexOf(core) >= 0)
+        || (pre && !suf && t.endsWith(core))
+        || (!pre && suf && t.startsWith(core))
+      );
+    }
+
     function detectCategory(item) {
-      const nameAr = String(item.itm_name_ar || '').toLowerCase();
-      const nameEn = String(item.itm_name_en || '').toLowerCase();
+      const ar = catTokens(item.itm_name_ar);
+      const en = catTokens(item.itm_name_en);
       for (const cat of formCategoryRules) {
-        if (cat.ar.some(k => k && nameAr.includes(k))) return cat;
-        if (cat.en.some(k => k && nameEn.includes(k))) return cat;
+        if (cat.ar.some(k => catKeyMatch(ar, k))) return cat;
+        if (cat.en.some(k => catKeyMatch(en, k))) return cat;
       }
       return OTHER_CATEGORY;
     }
