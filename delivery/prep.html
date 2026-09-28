@@ -37,10 +37,12 @@ body.dark .ptab.active{background:#0f2748}
 .btn-return{background:#b45309}
 .btn-hold{background:#64748b}
 .btn-resume{background:#0d9488}
+.btn-skip{background:#94a3b8}
 .btns{display:flex;gap:.5rem;margin-top:.65rem}
 .btns .btn{margin-top:0}
 .btns .btn-done{flex:2}
 .btns .btn-hold{flex:1}
+.btns .btn-skip{flex:1}
 .btn:disabled{opacity:.6}
 .empty{text-align:center;padding:3rem 1rem;color:var(--text-muted);font-size:.95rem}
 .tag{display:inline-block;font-size:.68rem;font-weight:800;padding:.12rem .45rem;border-radius:6px;margin-top:.15rem}
@@ -157,9 +159,11 @@ function setTab(t){
 
 async function refreshCounts(){
   try{
-    let q1=db.from('orders').select('id',{count:'exact',head:true}).is('prep_done_at',null).not('prep_hold','is',true).in('status',['pending','assigned','postponed']);
-    let q2=db.from('orders').select('id',{count:'exact',head:true}).not('prep_done_at','is',null).is('picked_at',null).in('status',['pending','assigned','postponed']);
-    let q3=db.from('orders').select('id',{count:'exact',head:true}).is('prep_done_at',null).is('prep_hold',true).in('status',['pending','assigned','postponed']);
+    // .is('prep_excluded_at',null) في كل نداء: الطلب اللي اتشال من الشاشة
+    // (الصيدلي حضّره / خارج وقت المحضّر) مايظهرش ومايتعدّش
+    let q1=db.from('orders').select('id',{count:'exact',head:true}).is('prep_done_at',null).not('prep_hold','is',true).is('prep_excluded_at',null).in('status',['pending','assigned','postponed']);
+    let q2=db.from('orders').select('id',{count:'exact',head:true}).not('prep_done_at','is',null).is('picked_at',null).is('prep_excluded_at',null).in('status',['pending','assigned','postponed']);
+    let q3=db.from('orders').select('id',{count:'exact',head:true}).is('prep_done_at',null).is('prep_hold',true).is('prep_excluded_at',null).in('status',['pending','assigned','postponed']);
     if(branchId){ q1=q1.eq('branch_id',branchId); q2=q2.eq('branch_id',branchId); q3=q3.eq('branch_id',branchId); }
     const [r1,r2,r3]=await Promise.all([q1,q2,q3]);
     document.getElementById('cnt-prep').textContent = r1.count||0;
@@ -174,11 +178,11 @@ async function load(){
   if(branchId) q=q.eq('branch_id',branchId);
   if(tab==='prep'){
     // كل طلب مش متحضّر ولسه ماتستلمش (جاهز/متعيّن/مؤجّل) — عشان مفيش طلب مش متحضّر يختفي
-    q=q.is('prep_done_at',null).not('prep_hold','is',true).in('status',['pending','assigned','postponed']).order('created_at',{ascending:true});
+    q=q.is('prep_done_at',null).not('prep_hold','is',true).is('prep_excluded_at',null).in('status',['pending','assigned','postponed']).order('created_at',{ascending:true});
   }else if(tab==='hold'){
-    q=q.is('prep_done_at',null).is('prep_hold',true).in('status',['pending','assigned','postponed']).order('created_at',{ascending:true});
+    q=q.is('prep_done_at',null).is('prep_hold',true).is('prep_excluded_at',null).in('status',['pending','assigned','postponed']).order('created_at',{ascending:true});
   }else{
-    q=q.not('prep_done_at','is',null).is('picked_at',null)
+    q=q.not('prep_done_at','is',null).is('picked_at',null).is('prep_excluded_at',null)
        .in('status',['pending','assigned','postponed']).order('prep_done_at',{ascending:false});
   }
   const { data, error } = await q.limit(300);
@@ -206,12 +210,17 @@ function render(){
   list.innerHTML=rows.map((o,i)=>{
     if(tab==='prep'||tab==='hold'){
       const w=_mins(o.created_at); const old=tab==='prep'&&((i===0&&!term)||w>=20);
+      const skipBtn = `<button class="btn btn-skip" onclick="event.stopPropagation();excludeOrder('${o.id}',this)" title="يشيله من الشاشة من غير ما يتحسب تحضير">🚫 إزالة</button>`;
       const btns = tab==='prep'
         ? `<div class="btns">
              <button class="btn btn-done" onclick="event.stopPropagation();markDone('${o.id}',this)">✓ تم التحضير</button>
              <button class="btn btn-hold" onclick="event.stopPropagation();holdOrder('${o.id}',this)">⏸ إيقاف</button>
+             ${skipBtn}
            </div>`
-        : `<button class="btn btn-resume" onclick="event.stopPropagation();resumeOrder('${o.id}',this)">▶ استئناف التحضير</button>`;
+        : `<div class="btns">
+             <button class="btn btn-resume" onclick="event.stopPropagation();resumeOrder('${o.id}',this)">▶ استئناف التحضير</button>
+             ${skipBtn}
+           </div>`;
       return `<div class="card ${old?'old':''} ${tab==='hold'?'held':''}" onclick="openItems('${o.id}')">
         <div class="nm">${esc(o.customer_name||o.cust_name||'—')}</div>
         <div class="meta">
@@ -252,6 +261,21 @@ async function markDone(id, btn){
     allRows=allRows.filter(o=>o.id!==id);
     render();
   }catch(e){ btn.disabled=false; btn.textContent='✓ تم التحضير'; alert('تعذّر الحفظ — حاول تاني'); }
+}
+
+/* «إزالة»: الطلب يختفي من شاشة التحضير وبس — حالته ورحلته وطياره
+   زي ما هم بالظبط، ومابيتكتبش سجل «تم التحضير» فماتأثرش على تقارير
+   المحضّرين. بيتسجّل حدث prep_excluded باسم اللي شاله، فيبان في
+   تتبّع الطلب. الحراسة على السيرفر (المحضّر ومدير الفرع والأدمن). */
+async function excludeOrder(id, btn){
+  if(!confirm('إزالة الطلب من شاشة التحضير؟\n\nالطلب هيفضل زي ما هو بالظبط (حالته ورحلته) — هو بس هيختفي من الشاشة دي، ومش هيتحسب تحضير.')) return;
+  btn.disabled=true; btn.textContent='…';
+  try{
+    const { data, error } = await db.rpc('prep_exclude_order',{ p_order_id:id, p_user_name:(currentUser&&currentUser.full_name)||'' });
+    if(error) throw error;
+    if(data && data.success===false) throw new Error(data.error||'تعذّر');
+    allRows=allRows.filter(o=>o.id!==id); render(); refreshCounts();
+  }catch(e){ btn.disabled=false; btn.textContent='🚫 إزالة'; alert('تعذّر: '+(e.message||'حاول تاني')); }
 }
 
 async function holdOrder(id, btn){
