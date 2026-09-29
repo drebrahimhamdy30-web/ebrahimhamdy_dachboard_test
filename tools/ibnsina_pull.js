@@ -139,21 +139,21 @@ async function getPage(token, page) {
 const STALE_MONTHS = 12;
 const STALE_BEFORE = (() => { const d = new Date(); d.setMonth(d.getMonth() - STALE_MONTHS); return d.toISOString(); })();
 
+/* ⚠️ pharmacyPrice **قبل الضريبة**. فيه أصناف خاضعة لـ14% وأصناف
+   معفاة ومفيش علَم في الكتالوج يفرّق (جرّبنا itemGroupCode واستنتاج
+   الأرقام — الاتنين مايصلحوش). فبنبعت الرقمين الخام زي ما هما،
+   والقاعدة بتضيف الضريبة من جدول ibnsina_tax اللي اتبنى من الفواتير
+   الحقيقية. كده قاعدة الضريبة في مكان واحد، وأي فاتورة جديدة بتحسّن
+   الخريطة تنعكس على المزامنة اللي بعدها من غير ما نلمس الكود ده. */
 function toRow(x) {
   const name = String(x.nameAr || x.name || '').replace(/\s+/g, ' ').trim();
   if (!name) return null;
   const pub = Number(x.price);
   const net = Number(x.pharmacyPrice);
-  let price, disc;
-  if (Number.isFinite(pub) && pub > 0 && Number.isFinite(net) && net > 0) {
-    price = pub;
-    disc = Math.min(Math.max(Math.round((1 - net / pub) * 10000) / 100, 0), 100);
-  } else if (Number.isFinite(net) && net > 0) {
-    price = net; disc = 0;
-  } else return null;   // سعر صفر = مش بيتباع
+  if (!(Number.isFinite(pub) && pub > 0 && Number.isFinite(net) && net > 0)) return null;
   const upd = String(x.updatedOnUtc || '');
   return {
-    item_name: name, price, discount_perc: disc,
+    item_name: name, public_price: pub, pharmacy_price: net,
     available: !(upd && upd < STALE_BEFORE),
     supplier_code: x.itemCode ? String(x.itemCode) : null
   };
@@ -174,7 +174,7 @@ async function rpc(cfg, fn, body) {
   const cfg = readConfig();
   const t0 = Date.now();
   const startedIso = new Date().toISOString();
-  let scanned = 0, upserted = 0, unavailable = 0, stale = 0;
+  let scanned = 0, upserted = 0, unavailable = 0, stale = 0, taxUnknown = 0;
 
   try {
     log('🔐 جارٍ الدخول…');
@@ -206,8 +206,9 @@ async function rpc(cfg, fn, body) {
     const flush = async () => {
       while (buffer.length) {
         const chunk = buffer.splice(0, WRITE_CHUNK);
-        const n = await rpc(cfg, 'ibnsina_prices_upsert', { p_key: cfg.syncKey, p_rows: chunk });
-        upserted += Number(n) || 0;
+        const res = await rpc(cfg, 'ibnsina_prices_upsert', { p_key: cfg.syncKey, p_rows: chunk });
+        upserted += Number(res && res.upserted) || 0;
+        taxUnknown += Number(res && res.tax_unknown) || 0;
         if (buffer.length) await sleep(WRITE_PAUSE_MS);
       }
     };
@@ -240,7 +241,8 @@ async function rpc(cfg, fn, body) {
       p_row: { account: cfg.account, scanned, upserted, unavailable, ok: true, seconds: secs, source: 'local' }
     });
     log(`\n✅ خلصت في ${secs}ث — اتقرا ${scanned} · اتحدّث ${upserted}`);
-    log(`   منهم ${stale} سعرهم مااتغيّرش من ${STALE_MONTHS} شهر فاتعلّموا «مش متاح»`
+    log(`   ضريبتهم غير مؤكدة: ${taxUnknown} (اتحسبوا بـ14% للاحتياط)`);
+    log(`   ${stale} سعرهم مااتغيّرش من ${STALE_MONTHS} شهر فاتعلّموا «مش متاح»`
       + (unavailable ? ` · و${unavailable} اختفوا من الكتالوج` : ''));
   } catch (e) {
     const secs = Math.round((Date.now() - t0) / 100) / 10;
