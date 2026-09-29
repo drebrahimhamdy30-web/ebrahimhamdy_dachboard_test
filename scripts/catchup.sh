@@ -57,6 +57,17 @@ if [ "$APPLY" != 1 ]; then
   exit 0
 fi
 
+# الجسر الأول: cloudsrc لقطة، وأي عمود جديد على السحابة مش فيها.
+# migrate_34 بيقرا بـdblink (طازة) فمش متأثر، بس migrate_35 والحارس
+# بيقروا من cloudsrc — فلازم يتبني قبلهم.
+printf '\n%s── ٠/٣ إعادة بناء جسر السحابة ──%s\n' "$B" "$N"
+if docker exec -i "$CID" psql -U "$DB_USER" -d postgres -q -v ON_ERROR_STOP=1 \
+     < "$REPO/docs/reimport_cloudsrc.sql" >/dev/null 2>&1; then
+  echo "  ✓ الجسر اتبنى من الأول"
+else
+  echo "  ${Y}⚠️ فشلت — الأعمدة الجديدة ممكن ترجع فاضية${N}"
+fi
+
 run migrate_34_catchup_from_cloud.sql "١/٣ الناقص من السحابة" apply
 run migrate_35_align_notnull_and_grants.sql "٢/٣ الصلاحيات و not null" apply
 
