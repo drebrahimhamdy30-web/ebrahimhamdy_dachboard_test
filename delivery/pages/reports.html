@@ -675,6 +675,21 @@ function renderDriverShift(){
   host.innerHTML=html;
 }
 
+/* يفتح شاشة الرحلات على رحلة بعينها بتفاصيلها (نفس أسلوب باقي الشاشات:
+   رسالة للشل، ولو مفتوحة لوحدها بيفتح تبويب جديد). */
+function openTripDetails(tripId){
+  if(!tripId) return;
+  const page = 'trips.html?trip=' + encodeURIComponent(tripId);
+  try{
+    const p = (window.parent && window.parent !== window) ? window.parent : null;
+    if (p && p.document.querySelector('[data-page="trips.html"]')) {
+      p.postMessage({ type:'navigate', page: page, title:'الرحلات' }, '*');
+      return;
+    }
+  }catch(e){ console.error('openTripDetails:', e); }
+  window.open('trips.html?trip=' + encodeURIComponent(tripId), '_blank');
+}
+
 /* ═══ تنبيهات الطيارين: سحب طلبات + خمول ساعة+ + عودة متأخرة الضعف ═══ */
 function _alTime(t){ try{ const d=new Date(t); const dt=d.toLocaleDateString('en-GB',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit'}); const tm=d.toLocaleTimeString('en-US',{timeZone:'Africa/Cairo',hour:'numeric',minute:'2-digit',hour12:true}).replace(/\s*AM/i,' ص').replace(/\s*PM/i,' م'); return dt+' '+tm; }catch(_){ return ''; } }
 function _alHrs(m){ m=+m||0; const h=Math.floor(m/60),mm=m%60; return h>0?(h+'س'+(mm?(' '+mm+'د'):'')):(mm+'د'); }
@@ -774,7 +789,7 @@ function renderLate(rows){
   const el=document.getElementById('alertLate'); if(!el) return;
   let h='<div style="font-weight:800;font-size:.82rem;color:#dc2626;margin-bottom:.4rem">🐢 عودة متأخرة الضعف (وقت العودة الفعلي ≥ 2× المتوقع) <span style="font-weight:400;color:var(--text-muted)">— اضغط رقم الرحلة تظهر طلباتها</span></div>';
   if(!rows.length){ h+='<div style="color:var(--text-muted);font-size:.75rem">لا يوجد</div>'; el.innerHTML=h; return; }
-  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.78rem"><thead><tr style="color:var(--text-muted);font-size:.7rem"><th style="text-align:right;padding:.3rem">الطيار</th><th style="padding:.3rem">رقم الرحلة</th><th style="padding:.3rem">وقت الرحلة</th><th style="padding:.3rem">متوقع</th><th style="padding:.3rem">فعلي</th><th style="padding:.3rem">النسبة</th></tr></thead><tbody>';
+  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.78rem"><thead><tr style="color:var(--text-muted);font-size:.7rem"><th style="text-align:right;padding:.3rem">الطيار</th><th style="padding:.3rem">رقم الرحلة</th><th style="padding:.3rem">وقت الرحلة</th><th style="padding:.3rem">متوقع</th><th style="padding:.3rem">فعلي</th><th style="padding:.3rem">النسبة</th><th style="padding:.3rem"></th></tr></thead><tbody>';
   rows.slice(0,150).forEach((r,i)=>{
     h+='<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="toggleLate('+i+')">'
       +'<td style="padding:.3rem;font-weight:700">'+(r.driver_name||'—')+'</td>'
@@ -782,8 +797,11 @@ function renderLate(rows){
       +'<td style="padding:.3rem;text-align:center;font-size:.68rem;color:var(--text-muted);white-space:nowrap">'+_alTime(r.trip_at)+'</td>'
       +'<td style="padding:.3rem;text-align:center">'+r.expected+'د</td>'
       +'<td style="padding:.3rem;text-align:center;font-weight:700">'+r.actual+'د</td>'
-      +'<td style="padding:.3rem;text-align:center;font-weight:800;color:#dc2626">'+r.ratio+'×</td></tr>';
-    h+='<tr id="lt-'+i+'" style="display:none;background:#f8fafc"><td colspan="6" style="padding:.5rem .8rem">'+_lateTimeline(r)+'</td></tr>';
+      +'<td style="padding:.3rem;text-align:center;font-weight:800;color:#dc2626">'+r.ratio+'×</td>'
+      +'<td style="padding:.3rem;text-align:center">'+(r.trip_id
+          ? '<button onclick="event.stopPropagation();openTripDetails(\''+r.trip_id+'\')" style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:8px;padding:.25rem .6rem;font-size:.7rem;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap">🔎 تفاصيل الرحلة</button>'
+          : '')+'</td></tr>';
+    h+='<tr id="lt-'+i+'" style="display:none;background:#f8fafc"><td colspan="7" style="padding:.5rem .8rem">'+_lateTimeline(r)+'</td></tr>';
   });
   h+='</tbody></table></div>';
   el.innerHTML=h;

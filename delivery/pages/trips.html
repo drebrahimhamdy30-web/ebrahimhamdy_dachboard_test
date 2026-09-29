@@ -175,12 +175,23 @@ const COLORS=['#1a56db','#7c3aed','#16a34a','#ea580c','#0891b2','#ca8a04','#dc26
 let pageRows=[], tripOrdersCache={}, tripPerf={}, totalCount=0, _perfIds=null;
 let currentPage=1, pageSize=40, sortCol='created_at', sortDir=-1, statusFilter='';
 let currentUser=null, expandedRows=new Set();
+/* ?trip=<id> — الدخول من شاشة تانية (تنبيه العودة المتأخرة مثلاً) على
+   رحلة بعينها: بنتجاهل كل الفلاتر عشان تظهر مهما كان تاريخها، وبنفتح
+   تفاصيلها على طول. */
+let focusTripId = null;
 
 async function init(){
   currentUser=getCurrentUser();if(!currentUser)return;
+  try{ focusTripId = new URLSearchParams(location.search).get('trip') || null; }catch(e){}
   const today=new Date().toISOString().split('T')[0];
   document.getElementById('dateFrom').value=today;
   document.getElementById('dateTo').value=today;
+  if(focusTripId){
+    document.getElementById('dateFrom').value='';
+    document.getElementById('dateTo').value='';
+    expandedRows.add(focusTripId);          // تفاصيلها تتفتح لوحدها
+    showFocusBanner();
+  }
   if(currentUser?.role==='admin'){
     const {data:br}=await db.from('branches').select('id,name').order('name');
     const sel=document.getElementById('branchFilter');
@@ -195,6 +206,8 @@ async function init(){
 // يبني استعلام الرحلات مع كل الفلاتر على السيرفر (فرع/حالة/تاريخ/بحث/أداء)
 function buildTripsQuery(sel,opts){
   let q=db.from('trips').select(sel,opts||{});
+  if(focusTripId) return q.eq('id',focusTripId);   // رحلة واحدة: من غير أي فلتر تاني
+
   const branchVal=document.getElementById('branchFilter')?.value;
   if(branchVal) q=q.eq('branch_id',branchVal);
   else if(currentUser?.role!=='admin'&&currentUser?.branch_id) q=q.eq('branch_id',currentUser.branch_id);
@@ -251,6 +264,25 @@ async function loadAll(){
     const tw=document.querySelector('.table-wrap'); if(tw) tw.scrollTop=0;
   }catch(e){console.error(e);}
   showLoad(false);
+}
+
+// شريط بيوضّح إننا على رحلة واحدة + زر رجوع لكل الرحلات
+function showFocusBanner(){
+  const row=document.getElementById('statsRow'); if(!row) return;
+  const d=document.createElement('div');
+  d.id='focusBanner';
+  d.style.cssText='width:100%;display:flex;align-items:center;gap:.6rem;background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;border-radius:10px;padding:.5rem .8rem;font-size:.78rem;font-weight:700;margin-bottom:.5rem';
+  d.innerHTML='🔎 بتشوف رحلة واحدة بتفاصيلها'
+    + '<button onclick="clearFocusTrip()" style="margin-inline-start:auto;background:#1e40af;color:#fff;border:none;border-radius:8px;padding:.3rem .7rem;font-weight:700;cursor:pointer;font-family:inherit">عرض كل الرحلات</button>';
+  row.parentNode.insertBefore(d,row);
+}
+function clearFocusTrip(){
+  focusTripId=null;
+  const b=document.getElementById('focusBanner'); if(b) b.remove();
+  const t=new Date().toISOString().split('T')[0];
+  document.getElementById('dateFrom').value=t;
+  document.getElementById('dateTo').value=t;
+  currentPage=1; loadAll();
 }
 
 function fmDate(dt){if(!dt)return '—';return new Date(dt).toLocaleString('ar-EG',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}
