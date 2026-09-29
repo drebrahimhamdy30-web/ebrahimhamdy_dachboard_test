@@ -43,6 +43,10 @@
 -- ═══════════════════════════════════════════════════════════════════
 
 \set ON_ERROR_STOP on
+\if :{?srv_url}
+\else
+  \set srv_url 'https://supabase.ebrahimhamdy.com'
+\endif
 \if :{?apply}
 \else
   \set apply 0
@@ -105,10 +109,17 @@ where not exists (select 1 from srv s where s.kind = n.kind and s.d = n.d);
 -- السيرفر يبقى بينده **السحابة**، ومايبانش: بيشتغل، مابيرميش خطأ،
 -- وبيبعت للمكان الغلط.
 -- الحاجز ده بيشيلها من التنفيذ ويوديها لقايمة «محتاجة تدخّل يدوي».
+-- __TARGET_URL__ **عنصر نائب مقصود**: الفيو على السحابة بيحطه مكان
+-- رابط السحابة عشان نستبدله بعنوان السيرفر. ده المسار المصمّم مش خطر.
+-- الخطر هو رابط سحابة **مكتوب صريح** — وده اللي بيتمنع تحت.
+-- الحاجز الأول كان بيعامل الاتنين بنفس الطريقة، فمنع الحالة السليمة
+-- كمان وخلّى pharma_sync_tick تقف من غير سبب.
+update _todo set ddl = replace(ddl, '__TARGET_URL__', :'srv_url')
+where ddl like '%__TARGET_URL__%';
+
 create temp table _blocked as
 select * from _todo
-where ddl like '%__TARGET_URL__%'
-   or ddl ~* 'supabase[.]co'
+where ddl ~* 'supabase[.]co'
    or ddl ~* 'rxtjoqulmgkkcohmgzgi';
 
 delete from _todo t
@@ -146,8 +157,7 @@ select kind as "النوع", count(*) as "العدد" from _todo group by 1 orde
 \echo ''
 \echo '════ 🔴 اتمنعت — فيها رابط، محتاجة تدخّل يدوي ════'
 select kind as "النوع", obj as "الاسم",
-       case when ddl like '%__TARGET_URL__%' then 'عنصر نائب __TARGET_URL__'
-            else 'رابط السحابة مكتوب صريح' end as "السبب"
+       'رابط السحابة مكتوب صريح في الـDDL' as "السبب"
 from _blocked order by 1, 2;
 
 
@@ -186,13 +196,15 @@ begin
         -- CREATE INDEX من غير if not exists — نتخطّى لو الاسم موجود
         if exists (select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace
                    where n.nspname='public' and c.relname = r.obj) then
-          insert into _log values (r.ord, r.kind, r.obj, true, '(موجود — اتخطّى)');
+          insert into _log values (r.ord, r.kind, r.obj, false,
+            'موجود بنفس الاسم وتعريف مختلف — محتاج قرار بشري');
           continue;
         end if;
 
       elsif r.kind in ('constraint','fk') then
         if exists (select 1 from pg_constraint where conname = split_part(r.obj,':',1)) then
-          insert into _log values (r.ord, r.kind, r.obj, true, '(موجود — اتخطّى)');
+          insert into _log values (r.ord, r.kind, r.obj, false,
+            'موجود بنفس الاسم وتعريف مختلف — محتاج قرار بشري');
           continue;
         end if;
 
