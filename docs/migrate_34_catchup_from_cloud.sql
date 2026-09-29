@@ -202,9 +202,21 @@ begin
         end if;
 
       elsif r.kind in ('constraint','fk') then
-        if exists (select 1 from pg_constraint where conname = split_part(r.obj,':',1)) then
+        -- ⚠️ اسم القيد **مش فريد** في القاعدة. one_row موجود على
+        --    purchase_settings و pharma_sync_state في السحابة، والفحص
+        --    بالاسم لوحده كان بيلاقي الأول ويتخطّى، فالتاني عمره
+        --    ما كان هيتعمل. نفس غلطة التريجرات (trg_closed_period على
+        --    ٤ جداول) — اتصلحت هناك وفاتت هنا.
+        --    أسماء الفهارس فريدة في السكيما، فهي مش محتاجة ده.
+        tbl := substring(r.ddl from 'alter table public\.([A-Za-z0-9_]+)');
+        if tbl is not null and exists (
+             select 1 from pg_constraint c
+             join pg_class k on k.oid = c.conrelid
+             join pg_namespace nn on nn.oid = k.relnamespace
+             where nn.nspname = 'public' and k.relname = tbl
+               and c.conname = split_part(r.obj,':',1)) then
           insert into _log values (r.ord, r.kind, r.obj, false,
-            'موجود بنفس الاسم وتعريف مختلف — محتاج قرار بشري');
+            'موجود على ' || tbl || ' بتعريف مختلف — محتاج قرار بشري');
           continue;
         end if;
 
