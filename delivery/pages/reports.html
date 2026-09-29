@@ -675,19 +675,114 @@ function renderDriverShift(){
   host.innerHTML=html;
 }
 
-/* يفتح شاشة الرحلات على رحلة بعينها بتفاصيلها (نفس أسلوب باقي الشاشات:
-   رسالة للشل، ولو مفتوحة لوحدها بيفتح تبويب جديد). */
-function openTripDetails(tripId){
-  if(!tripId) return;
-  const page = 'trips.html?trip=' + encodeURIComponent(tripId);
-  try{
-    const p = (window.parent && window.parent !== window) ? window.parent : null;
-    if (p && p.document.querySelector('[data-page="trips.html"]')) {
-      p.postMessage({ type:'navigate', page: page, title:'الرحلات' }, '*');
-      return;
+/* ═══ كارت تفاصيل الرحلة ═══
+   بيفتح في نفس الشاشة (من غير انتقال) ويقول «إيه اللي حصل في الرحلة»:
+   كل طلب باسم عميله وعنوانه، والتوقيتات الأربعة — إنشاء الطلب، تعيين
+   الطيار، استلام الطيار، التسليم — والفروق بينها، وأطول مرحلة متعلّمة
+   بالأحمر عشان تبان مصدر التأخير من نظرة.
+   البيانات من get_trip_details (نداء واحد، migrate_79). */
+function _tdT(t){
+  if(!t) return '—';
+  try{ return new Date(t).toLocaleString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',hour:'numeric',minute:'2-digit',hour12:true}); }
+  catch(e){ return '—'; }
+}
+function _tdGap(a,b){
+  if(!a||!b) return null;
+  const m = Math.round((new Date(b) - new Date(a))/60000);
+  return m >= 0 ? m : null;
+}
+function _tdMin(m){ if(m==null) return '—'; return m>=60 ? (Math.floor(m/60)+'س '+(m%60)+'د') : (m+'د'); }
+function _tdEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function _tdOrderCard(o){
+  const start = (o.last_activated_at && Math.abs(new Date(o.last_activated_at)-new Date(o.created_at))>60000)
+                ? o.last_activated_at : o.created_at;
+  const steps = [
+    { label: (start===o.created_at ? 'إنشاء الطلب' : 'تفعيل الطلب'), t: start,          who:'' },
+    { label: 'تعيين الطيار',   t: o.assigned_at,  who:'التوزيع' },
+    { label: 'استلام الطيار',  t: o.picked_at,    who:'الصيدلية/التجهيز' },
+    { label: 'التسليم للعميل', t: o.delivered_at, who:'الطيار (الطريق)' }
+  ].filter(s=>s.t);
+
+  const gaps=[];
+  for(let i=1;i<steps.length;i++){
+    const g=_tdGap(steps[i-1].t, steps[i].t);
+    if(g!=null) gaps.push({i, mins:g, who:steps[i].who});
+  }
+  const worst = gaps.length ? gaps.reduce((a,b)=> b.mins>a.mins ? b : a) : null;
+  const total = steps.length>1 ? _tdGap(steps[0].t, steps[steps.length-1].t) : null;
+
+  let rows='';
+  steps.forEach((s,i)=>{
+    if(i>0){
+      const g=gaps.find(x=>x.i===i);
+      const bad = worst && g && g.i===worst.i && g.mins>=10;
+      rows += '<div style="display:flex;align-items:center;gap:.4rem;padding:.1rem 0 .1rem .9rem;font-size:.68rem;color:'+(bad?'#dc2626':'var(--text-muted)')+';font-weight:'+(bad?'800':'400')+'">'
+            + '<span>↓</span><span>'+(g?_tdMin(g.mins):'—')+(bad?' ⚠️ أطول مرحلة':'')+(g&&g.who?(' <span style="font-weight:400">· '+g.who+'</span>'):'')+'</span></div>';
     }
-  }catch(e){ console.error('openTripDetails:', e); }
-  window.open('trips.html?trip=' + encodeURIComponent(tripId), '_blank');
+    rows += '<div style="display:flex;justify-content:space-between;gap:.5rem;font-size:.74rem;padding:.12rem 0">'
+          + '<span style="font-weight:700">'+s.label+'</span>'
+          + '<span style="color:var(--text-secondary)">'+_tdT(s.t)+'</span></div>';
+  });
+
+  const sla = o.sla_rating ? ('<span style="font-size:.66rem;font-weight:800;padding:.08rem .4rem;border-radius:6px;background:'
+            + (o.sla_rating==='متأخر'?'#fef2f2;color:#b91c1c':'#f0fdf4;color:#15803d')+'">'+_tdEsc(o.sla_rating)+'</span>') : '';
+
+  return '<div style="border:1px solid var(--border);border-radius:10px;padding:.6rem .7rem;margin-bottom:.5rem;background:var(--surface)">'
+    + '<div style="display:flex;justify-content:space-between;gap:.5rem;align-items:center;margin-bottom:.15rem">'
+    +   '<div style="font-weight:800;font-size:.8rem">🧾 '+_tdEsc(o.bill_no||'—')+' · '+_tdEsc(o.customer_name||'—')+'</div>'
+    +   '<div style="white-space:nowrap;font-size:.74rem">'+Number(o.total_bill_net||0).toLocaleString()+' ج '+sla+'</div>'
+    + '</div>'
+    + '<div style="font-size:.68rem;color:var(--text-muted);margin-bottom:.4rem">📍 '+_tdEsc(o.cust_region||'—')
+    +   (o.customer_address?('<br>🏠 '+_tdEsc(o.customer_address)):'')+'</div>'
+    + rows
+    + (total!=null ? ('<div style="margin-top:.35rem;padding-top:.3rem;border-top:1px dashed var(--border);font-size:.72rem;font-weight:800">من الإنشاء للتسليم: '+_tdMin(total)+'</div>') : '')
+    + '</div>';
+}
+
+async function openTripDetails(tripId){
+  if(!tripId) return;
+  const old=document.querySelector('[data-tripcard]'); if(old) old.remove();
+  const wrap=document.createElement('div');
+  wrap.setAttribute('data-tripcard','1');
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:1rem';
+  wrap.onclick=e=>{ if(e.target===wrap) wrap.remove(); };
+  wrap.innerHTML='<div style="background:var(--surface,#fff);color:var(--text,#0f172a);max-width:520px;width:100%;max-height:88vh;overflow:auto;border-radius:16px;padding:1rem;font-family:\'Cairo\',sans-serif;direction:rtl"><div style="text-align:center;padding:1.5rem;color:var(--text-muted);font-size:.8rem">⏳ جاري تحميل تفاصيل الرحلة...</div></div>';
+  document.body.appendChild(wrap);
+  const box=wrap.firstElementChild;
+
+  let d=null;
+  try{
+    const { data, error } = await db.rpc('get_trip_details', { p_trip_id: tripId });
+    if(error) throw error;
+    d=data;
+  }catch(e){ console.error('get_trip_details:', e); }
+
+  if(!d || !d.trip){
+    box.innerHTML='<div style="text-align:center;padding:1.5rem;color:#dc2626;font-size:.8rem">تعذّر تحميل تفاصيل الرحلة</div>'
+      +'<button onclick="this.closest(\'[data-tripcard]\').remove()" style="width:100%;margin-top:.5rem;border:none;background:#f1f5f9;border-radius:10px;padding:.5rem;font-weight:800;cursor:pointer;font-family:inherit">إغلاق</button>';
+    return;
+  }
+
+  const t=d.trip, orders=d.orders||[];
+  const dur=_tdGap(t.created_at, t.completed_at);
+  const retBad = (t.return_actual_minutes!=null && t.return_expected_minutes && Number(t.return_actual_minutes) >= 2*Number(t.return_expected_minutes));
+
+  box.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">'
+    +   '<div style="font-weight:800;font-size:.92rem">🛵 تفاصيل الرحلة</div>'
+    +   '<button onclick="this.closest(\'[data-tripcard]\').remove()" style="border:none;background:#f1f5f9;border-radius:8px;width:28px;height:28px;cursor:pointer;font-weight:800">✕</button>'
+    + '</div>'
+    + '<div style="background:var(--surface-3);border:1px solid var(--border);border-radius:10px;padding:.5rem .7rem;margin-bottom:.7rem;font-size:.74rem;line-height:1.9">'
+    +   '<div><b>'+_tdEsc(t.driver_name||'—')+'</b> · '+_tdEsc(t.branch||'—')+' · '+orders.length+' طلب</div>'
+    +   '<div style="color:var(--text-secondary)">بدأت: '+_tdT(t.created_at)+(t.completed_at?(' · خلصت: '+_tdT(t.completed_at)):'')+(dur!=null?(' · المدة: <b>'+_tdMin(dur)+'</b>'):'')+'</div>'
+    +   (t.return_actual_minutes!=null
+        ? ('<div style="color:'+(retBad?'#dc2626':'var(--text-secondary)')+';font-weight:'+(retBad?'800':'400')+'">🐢 العودة للصيدلية: فعلي '+t.return_actual_minutes+'د مقابل متوقع '+(t.return_expected_minutes??'—')+'د'
+           +(t.return_distance_meters!=null?(' · '+(Number(t.return_distance_meters)/1000).toFixed(1)+' كم'):'')+'</div>')
+        : '')
+    + '</div>'
+    + (orders.length ? orders.map(_tdOrderCard).join('')
+                     : '<div style="text-align:center;color:var(--text-muted);font-size:.78rem;padding:1rem">مفيش طلبات على الرحلة دي</div>');
 }
 
 /* ═══ تنبيهات الطيارين: سحب طلبات + خمول ساعة+ + عودة متأخرة الضعف ═══ */
