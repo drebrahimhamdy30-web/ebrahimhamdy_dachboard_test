@@ -94,7 +94,10 @@ Deno.serve(async (req) => {
     pagesN = Math.min(Math.max(Number(st.pages_per_run) || 10, 1), 80);
   }
   const cSearch = Math.min(Math.max(Number(opt.concurrency) || 8, 1), 12);
-  const cDetail = Math.min(Math.max(Number(opt.detail_concurrency) || 15, 1), 24);
+  /* 6 بدل 15: النبضة بتعمل ~1000 نداء على صفحات المنتجات، والتوازي
+     العالي كان بيرشّهم في 9 ثوانٍ (~110 نداء/ثانية على سيرفرهم).
+     بـ6 بتاخد ~25 ثانية — نفس العدد بس مفرود، ولسه جوّه حدود النبضة. */
+  const cDetail = Math.min(Math.max(Number(opt.detail_concurrency) || 6, 1), 24);
   const startedIso = new Date().toISOString();
 
   const tr = await fetch(api + "/authorizationserver/oauth/token", {
@@ -114,6 +117,38 @@ Deno.serve(async (req) => {
   const H = { "Authorization": "Bearer " + token, "Accept": "application/json", "Accept-Language": "ar" };
   const fields = "products(code,name,price(value),publicPrice(value),stock(stockLevelStatus)),pagination(totalPages,totalResults)";
   const pageUrl = (p: number) => `${api}/occ/v2/${site}/products/search?query=:relevance&currentPage=${p}&pageSize=100&lang=ar&fields=${encodeURIComponent(fields)}`;
+
+  /* ── وضع الفحص ────────────────────────────────────────────────
+     {lookup:"جزء من الاسم"} بيدوّر على صنف ويرجّع الحقول الخام زي ما
+     فارما بعتتها بالظبط، من غير أي حساب ولا كتابة. ده اللي بيفرّق بين
+     «المزامنة بايظة» و«فارما نفسها عندها السعر القديم». */
+  if (typeof opt.lookup === "string" && opt.lookup.trim()) {
+    const q = opt.lookup.trim();
+    const lu = `${api}/occ/v2/${site}/products/search?query=${encodeURIComponent(q)}&currentPage=0&pageSize=10&lang=ar`
+      + `&fields=${encodeURIComponent("products(code,name,price(value),publicPrice(value),stock(stockLevelStatus)),pagination(totalResults)")}`;
+    const lr2 = await fetch(lu, { headers: H });
+    if (!lr2.ok) return jsonRes({ ok: false, error: "lookup_failed", status: lr2.status }, 502);
+    const lj2 = await lr2.json();
+    const found = [];
+    for (const p of (lj2.products || []).slice(0, 6)) {
+      let det: any = null;
+      try {
+        const dr = await fetch(`${api}/occ/v2/${site}/products/${p.code}?fields=FULL`, { headers: H });
+        if (dr.ok) det = await dr.json();
+      } catch { /* */ }
+      found.push({
+        code: p.code, name: stripTags(p.name),
+        search_publicPrice: p.publicPrice?.value ?? null,   // ← ده اللي بنخزّنه حاليًا
+        search_price: p.price?.value ?? null,
+        detail_publicPrice: det?.publicPrice?.value ?? null, // ← الصفحة عندهم بتعرض ده
+        detail_price: det?.price?.value ?? null,
+        detail_discount: det?.pharmacyDiscount?.value ?? null,
+        detail_tax: det?.taxValue ?? det?.tax?.value ?? det?.vat ?? null,
+        stock: p.stock?.stockLevelStatus ?? null
+      });
+    }
+    return jsonRes({ ok: true, mode: "lookup", query: q, total: lj2.pagination?.totalResults ?? null, found });
+  }
 
   type Item = { code: string; name: string; pub: number | null; net: number | null };
   function itemsOf(prods: any[]): Item[] {
@@ -167,17 +202,45 @@ Deno.serve(async (req) => {
       updated: matched, failed_pages: failedPages, up_error: cErr });
   }
 
-  // الخصم المُعلَن للصيدليات — نداء تفصيلي لكل صنف
-  const detUrl = (c: string) => `${api}/occ/v2/${site}/products/${c}?fields=pharmacyDiscount(value)`;
+  /* السعر الصح من صفحة المنتج مش من فهرس البحث ⚠️
+     ────────────────────────────────────────────
+     اتكشف 2026-09-29: فهرس البحث عندهم **بيقدم**. «ليمتلس فورتاليز»
+     كان البحث بيقول publicPrice=57 وصفحة المنتج بتقول 70 (وموقعهم
+     نفسه بيعرض 70).
+     الخصم نفسه (`pharmacyDiscount`) **مابيتغيّرش** — ده الخصم
+     التعاقدي الحقيقي بقرار المالك. اللي اتصلح هو مصدر **السعر** بس.
+     وإحنا أصلًا بنضرب صفحة المنتج لكل صنف، فالإصلاح مجاني — مجرد
+     طلب حقلين زيادة في نفس النداء. */
+  const detUrl = (c: string) => `${api}/occ/v2/${site}/products/${c}?fields=pharmacyDiscount(value),price(value),publicPrice(value)&lang=ar`;
   let detailFails = 0;
+  let staleSearch = 0;   // كام صنف البحث كان غلط فيه
   const rows = await pool(items, cDetail, async (it) => {
-    let adv: number | null = null; let got = false;
-    for (let a = 0; a < 2; a++) { try { const r = await fetch(detUrl(it.code), { headers: H }); if (r.ok) { const d = await r.json(); adv = d?.pharmacyDiscount?.value ?? null; got = true; break; } } catch { /* */ } }
+    let adv: number | null = null, dPub: number | null = null, dNet: number | null = null;
+    let got = false;
+    for (let a = 0; a < 2; a++) {
+      try {
+        const r = await fetch(detUrl(it.code), { headers: H });
+        if (r.ok) {
+          const d = await r.json();
+          adv = d?.pharmacyDiscount?.value ?? null;
+          dPub = d?.publicPrice?.value ?? null;
+          dNet = d?.price?.value ?? null;
+          got = true; break;
+        }
+      } catch { /* */ }
+    }
     if (!got) detailFails++;
+    if (dPub != null && it.pub != null && dPub !== it.pub) staleSearch++;
+
+    /* الخصم زي ما هو: pharmacyDiscount هو الخصم التعاقدي الحقيقي
+       (قرار المالك). اللي اتغيّر هو **مصدر السعر** بس — صفحة المنتج
+       بدل فهرس البحث القديم. */
+    const pub = dPub ?? it.pub;
+    const net = dNet ?? it.net;
     let price: number | null, disc: number;
-    if (adv != null) { price = (it.pub ?? it.net); disc = clampD(Number(adv)); }
-    else if (it.pub != null && it.pub > 0 && it.net != null) { price = it.pub; disc = clampD(round2((1 - it.net / it.pub) * 100)); }
-    else if (it.net != null) { price = it.net; disc = 0; }
+    if (adv != null) { price = (pub ?? net); disc = clampD(Number(adv)); }
+    else if (pub != null && pub > 0 && net != null) { price = pub; disc = clampD(round2((1 - net / pub) * 100)); }
+    else if (net != null) { price = net; disc = 0; }
     else return null;
     return { item_name: it.name, price, discount_perc: disc, available: true, supplier_code: it.code };
   });
@@ -228,9 +291,9 @@ Deno.serve(async (req) => {
     }).eq("id", 1);
 
     return jsonRes({ ok: okRun, mode: "scheduled", from_page: fromPage, to_page: lastPage, total_pages: totalPages,
-      processed: all.length, upserted, failed_pages: failedPages, detail_fails: detailFails,
+      processed: all.length, upserted, failed_pages: failedPages, detail_fails: detailFails, stale_search: staleSearch,
       cycle_finished: finished, finalized, seconds: secs, up_error: upErr });
   }
 
-  return jsonRes({ ok: !upErr, mode: "chunk", chunk_started: startedIso, from_page: fromPage, to_page: lastPage, total_pages: totalPages, catalog_total: totalResults, processed: all.length, failed_pages: failedPages, detail_fails: detailFails, upserted, seconds: secs, up_error: upErr });
+  return jsonRes({ ok: !upErr, mode: "chunk", chunk_started: startedIso, from_page: fromPage, to_page: lastPage, total_pages: totalPages, catalog_total: totalResults, processed: all.length, failed_pages: failedPages, detail_fails: detailFails, stale_search: staleSearch, upserted, seconds: secs, up_error: upErr });
 });
