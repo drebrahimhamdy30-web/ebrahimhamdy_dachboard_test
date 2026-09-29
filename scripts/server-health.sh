@@ -65,7 +65,8 @@ done
 
 FAILED=""; DETAIL=""
 fail() { FAILED="$FAILED $1"; DETAIL="$DETAIL
-  ✗ $2"; }
+  ✗ $2"
+         [ "$QUIET" = 1 ] || printf '  ✗ %s\n' "$2"; }
 ok()   { [ "$QUIET" = 1 ] || printf '  ✓ %s\n' "$1"; }
 
 cd "$COMPOSE_DIR" 2>/dev/null || { echo "مجلد سوبابيز مش موجود"; exit 1; }
