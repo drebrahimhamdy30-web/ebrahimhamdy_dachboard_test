@@ -172,9 +172,11 @@ if [ -n "$CID" ]; then
   # فحص عمر المزامنة بيقول إنها **اشتغلت** — مش إنها **نجحت**. وده
   # الفرق اللي خلّى ٧ جداول تفشل والفحص يقول ✓ (2026-09-29).
   # بنستثني الملاحظات الحميدة (views — المزامنة مابتنقلش views وده عادي).
+  # وبنعدّ **آخر تشغيلة** بس مش آخر ٣٠ ساعة: فشل اتصلح خلاص كان
+  # هيفضل يصرخ يوم كامل، وده إنذار كاذب — ونفس العيب اللي بنصلّحه.
   sf=$(docker exec -i "$CID" psql -U supabase_admin -d postgres -tAc \
       "select count(*) from public.cloud_sync_log
-        where ran_at > now() - interval '30 hours'
+        where ran_at = (select max(ran_at) from public.cloud_sync_log)
           and status <> 'ok'
           and coalesce(detail,'') not like '%وده عادي%'" 2>/dev/null | tr -d ' ')
   if [ "${sf:-0}" != "0" ]; then
