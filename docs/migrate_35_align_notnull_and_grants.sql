@@ -144,6 +144,47 @@ select tbl as "الجدول", grantee as "الدور",
             else '⚠️ مختلفة' end as "الحالة"
 from _gd order by 1, 2;
 
+
+-- ═══ ٣) صلاحيات تنفيذ الدوال ══════════════════════════════════════
+-- نفس منطق الجداول بالظبط: GRANT بتضيف مابتشيلش. والسيرفر الذاتي
+-- بيدّي authenticated تنفيذ أي دالة جديدة تلقائيًا، فالزيادة بتفضل
+-- للأبد. اتكشفت 2026-09-29 في دوال ابن سينا: ٧ fn_acl فضلوا منحرفين
+-- بعد استلحاق نجح — لأن migrate_35 كان بيسوّي الجداول بس.
+create temp table _cfn as
+select * from dblink('cloud', $q$
+  select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')',
+         array_to_string(array(
+           select r.r from (values ('anon'),('authenticated'),('service_role')) r(r)
+           where has_function_privilege(r.r, p.oid, 'EXECUTE')), ',')
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e')
+$q$) as t(sig text, roles text);
+
+create temp table _lfn as
+select p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as sig,
+       array_to_string(array(
+         select r.r from (values ('anon'),('authenticated'),('service_role')) r(r)
+         where has_function_privilege(r.r, p.oid, 'EXECUTE')), ',') as roles
+from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e');
+
+create temp table _fdiff as
+select c.sig, c.roles as cloud_roles, l.roles as srv_roles
+from _cfn c join _lfn l using (sig)          -- الموجودة في الجهتين بس
+where c.roles is distinct from l.roles;
+
+\echo ''
+\echo '════ فروق صلاحيات تنفيذ الدوال ════'
+select sig as "الدالة",
+       coalesce(nullif(cloud_roles,''), '(محدش)') as "السحابة",
+       coalesce(nullif(srv_roles,''),   '(محدش)') as "السيرفر",
+       case when length(srv_roles) > length(cloud_roles) then '🟡 أوسع — هتتظبط'
+            when srv_roles = '' then '🔴 ناقصة'
+            else '⚠️ مختلفة' end as "الحالة"
+from _fdiff order by 1;
+
 -- ═══ التنفيذ ══════════════════════════════════════════════════════
 \if :apply
 
@@ -183,6 +224,19 @@ begin
         coalesce(r.cloud_privs, '(اتشالت خالص)'));
     exception when others then
       insert into _log values ('صلاحية', r.tbl||' → '||r.grantee, false, left(sqlerrm, 150));
+    end;
+  end loop;
+
+  -- ٣) صلاحيات تنفيذ الدوال — REVOKE الأول برضه
+  for r in select * from _fdiff order by sig loop
+    begin
+      execute format('revoke execute on function public.%s from anon, authenticated, service_role', r.sig);
+      if coalesce(r.cloud_roles,'') <> '' then
+        execute format('grant execute on function public.%s to %s', r.sig, r.cloud_roles);
+      end if;
+      insert into _log values ('دالة', r.sig, true, coalesce(nullif(r.cloud_roles,''),'(اتشالت خالص)'));
+    exception when others then
+      insert into _log values ('دالة', r.sig, false, left(sqlerrm, 150));
     end;
   end loop;
 end $run$;
