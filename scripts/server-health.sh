@@ -167,6 +167,19 @@ if [ -n "$CID" ]; then
   if [ "${v:-0}" -lt 6 ]; then
     fail vault "أسرار vault ${v:-0} من ٦ — دوال هتفشل بصمت (الإشعارات أولها)"
   else ok "أسرار vault كاملة (٦)"; fi
+
+  # ── جداول فشلت في آخر مزامنة ───────────────────────────────────
+  # فحص عمر المزامنة بيقول إنها **اشتغلت** — مش إنها **نجحت**. وده
+  # الفرق اللي خلّى ٧ جداول تفشل والفحص يقول ✓ (2026-09-29).
+  # بنستثني الملاحظات الحميدة (views — المزامنة مابتنقلش views وده عادي).
+  sf=$(docker exec -i "$CID" psql -U supabase_admin -d postgres -tAc \
+      "select count(*) from public.cloud_sync_log
+        where ran_at > now() - interval '30 hours'
+          and status <> 'ok'
+          and coalesce(detail,'') not like '%وده عادي%'" 2>/dev/null | tr -d ' ')
+  if [ "${sf:-0}" != "0" ]; then
+    fail syncfail "$sf جدول فشل في المزامنة — شغّل sync-from-cloud.sh --check"
+  else ok "كل الجداول اتزامنت"; fi
 fi
 
 # ── انحراف السكيما ───────────────────────────────────────────────────
