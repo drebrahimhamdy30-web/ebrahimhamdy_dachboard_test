@@ -118,6 +118,25 @@ Deno.serve(async (req) => {
   const fields = "products(code,name,price(value),publicPrice(value),stock(stockLevelStatus)),pagination(totalPages,totalResults)";
   const pageUrl = (p: number) => `${api}/occ/v2/${site}/products/search?query=:relevance&currentPage=${p}&pageSize=100&lang=ar&fields=${encodeURIComponent(fields)}`;
 
+  /* السعر الصح من صفحة المنتج مش من فهرس البحث ⚠️
+     ────────────────────────────────────────────
+     اتكشف 2026-09-29: فهرس البحث عندهم **بيقدم**. «ليمتلس فورتاليز»
+     كان البحث بيقول publicPrice=57 وصفحة المنتج بتقول 70 (وموقعهم
+     نفسه بيعرض 70).
+     الخصم نفسه (`pharmacyDiscount`) **مابيتغيّرش** — ده الخصم
+     التعاقدي الحقيقي بقرار المالك. اللي اتصلح هو مصدر **السعر** بس.
+     وإحنا أصلًا بنضرب صفحة المنتج لكل صنف، فالإصلاح مجاني — مجرد
+     طلب حقلين زيادة في نفس النداء. */
+  const detUrl = (c: string) => `${api}/occ/v2/${site}/products/${c}?fields=pharmacyDiscount(value),price(value),publicPrice(value)&lang=ar`;
+
+  // نفس حساب السعر/الخصم في كل الأوضاع — لازم يفضل واحد
+  function priceOf(adv: number | null, pub: number | null, net: number | null) {
+    if (adv != null) { const p = (pub ?? net); return p == null ? null : { price: p, disc: clampD(Number(adv)) }; }
+    if (pub != null && pub > 0 && net != null) return { price: pub, disc: clampD(round2((1 - net / pub) * 100)) };
+    if (net != null) return { price: net, disc: 0 };
+    return null;
+  }
+
   /* ── وضع الفحص ────────────────────────────────────────────────
      {lookup:"جزء من الاسم"} بيدوّر على صنف ويرجّع الحقول الخام زي ما
      فارما بعتتها بالظبط، من غير أي حساب ولا كتابة. ده اللي بيفرّق بين
@@ -148,6 +167,46 @@ Deno.serve(async (req) => {
       });
     }
     return jsonRes({ ok: true, mode: "lookup", query: q, total: lj2.pagination?.totalResults ?? null, found });
+  }
+
+  /* ── تحديث مستهدف بالكود ───────────────────────────────────────
+     {refresh_codes:[...]} بياخد أكواد المورّد اللي عندنا ويجيب سعر
+     وخصم كل واحد من صفحة المنتج، من غير أي مرور على صفحات البحث.
+     ده اللي بيستعمله زر «حدّث أسعار دول» في قائمة فارما قبل الطلب:
+     أصناف الطلبية عشرات مش آلاف، فبيخلص في ثواني بدل الجولة الكاملة.
+
+     الكتابة **بالكود مش بالاسم** (`pharma_prices_refresh`): الاسم عند
+     فارما بيختلف حرف عن اللي مخزّن عندنا، والـupsert بالاسم كان
+     هيعمل صف جديد بدل ما يحدّث الموجود. ومابيعملش finalize — ده
+     تحديث نقطة مش جولة، فغياب صنف عن القايمة مش معناه إنه خرج من
+     الكتالوج. */
+  if (Array.isArray(opt.refresh_codes) && opt.refresh_codes.length) {
+    const codes = [...new Set(opt.refresh_codes.map((c: any) => String(c || "").trim()).filter(Boolean))].slice(0, 900);
+    let missed = 0;
+    const rrows = await pool(codes, cDetail, async (c) => {
+      for (let a = 0; a < 2; a++) {
+        try {
+          const r = await fetch(detUrl(c), { headers: H });
+          if (r.ok) {
+            const d = await r.json();
+            const v = priceOf(d?.pharmacyDiscount?.value ?? null, d?.publicPrice?.value ?? null, d?.price?.value ?? null);
+            if (!v) break;                      // الصنف موجود بس من غير سعر — مانلمسوش صفّه
+            return { supplier_code: c, price: v.price, discount_perc: v.disc, available: true };
+          }
+          if (r.status === 404) break;          // خرج من كتالوجهم — مافيش إعادة محاولة
+        } catch { /* نعيد */ }
+      }
+      missed++; return null;
+    });
+    const got = rrows.filter(Boolean) as any[];
+    let updated = 0; let rErr: string | null = null;
+    for (let i = 0; i < got.length; i += 1000) {
+      const { data, error } = await supa.rpc("pharma_prices_refresh", { p_rows: got.slice(i, i + 1000) });
+      if (error) { rErr = error.message; break; }
+      updated += Number(data) || 0;
+    }
+    return jsonRes({ ok: !rErr, mode: "refresh_codes", requested: codes.length, fetched: got.length,
+      updated, missed, seconds: Math.round((Date.now() - t0) / 100) / 10, up_error: rErr });
   }
 
   type Item = { code: string; name: string; pub: number | null; net: number | null };
@@ -202,16 +261,7 @@ Deno.serve(async (req) => {
       updated: matched, failed_pages: failedPages, up_error: cErr });
   }
 
-  /* السعر الصح من صفحة المنتج مش من فهرس البحث ⚠️
-     ────────────────────────────────────────────
-     اتكشف 2026-09-29: فهرس البحث عندهم **بيقدم**. «ليمتلس فورتاليز»
-     كان البحث بيقول publicPrice=57 وصفحة المنتج بتقول 70 (وموقعهم
-     نفسه بيعرض 70).
-     الخصم نفسه (`pharmacyDiscount`) **مابيتغيّرش** — ده الخصم
-     التعاقدي الحقيقي بقرار المالك. اللي اتصلح هو مصدر **السعر** بس.
-     وإحنا أصلًا بنضرب صفحة المنتج لكل صنف، فالإصلاح مجاني — مجرد
-     طلب حقلين زيادة في نفس النداء. */
-  const detUrl = (c: string) => `${api}/occ/v2/${site}/products/${c}?fields=pharmacyDiscount(value),price(value),publicPrice(value)&lang=ar`;
+  // السعر من صفحة المنتج مش من فهرس البحث — السبب مشروح فوق عند detUrl
   let detailFails = 0;
   let staleSearch = 0;   // كام صنف البحث كان غلط فيه
   const rows = await pool(items, cDetail, async (it) => {
@@ -234,15 +284,10 @@ Deno.serve(async (req) => {
 
     /* الخصم زي ما هو: pharmacyDiscount هو الخصم التعاقدي الحقيقي
        (قرار المالك). اللي اتغيّر هو **مصدر السعر** بس — صفحة المنتج
-       بدل فهرس البحث القديم. */
-    const pub = dPub ?? it.pub;
-    const net = dNet ?? it.net;
-    let price: number | null, disc: number;
-    if (adv != null) { price = (pub ?? net); disc = clampD(Number(adv)); }
-    else if (pub != null && pub > 0 && net != null) { price = pub; disc = clampD(round2((1 - net / pub) * 100)); }
-    else if (net != null) { price = net; disc = 0; }
-    else return null;
-    return { item_name: it.name, price, discount_perc: disc, available: true, supplier_code: it.code };
+       بدل فهرس البحث القديم، وبنرجع لفهرس البحث لو الصفحة فشلت. */
+    const v = priceOf(adv, dPub ?? it.pub, dNet ?? it.net);
+    if (!v) return null;
+    return { item_name: it.name, price: v.price, discount_perc: v.disc, available: true, supplier_code: it.code };
   });
   const all = rows.filter(Boolean) as any[];
 
