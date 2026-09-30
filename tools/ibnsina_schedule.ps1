@@ -88,5 +88,5 @@ Register-Phalix $tasks[2] $a2 $t2 'ابن سينا: سحب الأسعار وال
 Write-Host "✓ $($tasks[2]) — يوميًا 6 صباحًا"
 
 Write-Host ''
-Write-Host 'خلاص. تشوفهم في Task Scheduler تحت الاسمين دول.'
+Write-Host 'خلاص. تشوفهم في Task Scheduler تحت التلات أسامي دول.'
 Write-Host 'لتجربة واحدة فورًا:  Start-ScheduledTask -TaskName PhalixIbnSinaAvail'
