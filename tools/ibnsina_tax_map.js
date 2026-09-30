@@ -71,7 +71,7 @@ async function pullInvoices(ctx, state, want, stopWhenNoNew) {
     const l = (await r.json())?.data?.invoicesList || [];
     if (!l.length) break;
     const before = todo.length;
-    for (const inv of l) if (!seen.has(inv.id) && todo.length < want) todo.push(inv.id);
+    for (const inv of l) if (!seen.has(inv.id) && todo.length < want) todo.push({ id: inv.id, date: String(inv.invoiceDate || '') });
     /* الفواتير بتيجي من الأحدث للأقدم. في التشغيل اليومي لو صفحة
        كاملة مفيهاش ولا فاتورة جديدة، اللي بعدها أقدم منها فأكيد
        مقرية — فبنقف بدل ما نلف على 8 صفحات كل يوم على الفاضي. */
@@ -81,7 +81,7 @@ async function pullInvoices(ctx, state, want, stopWhenNoNew) {
   log(`فواتير جديدة: ${todo.length}`);
   for (let i = 0; i < todo.length; i++) {
     try {
-      const r = await fetch(`${API}/financialHistory/v1.0/portal/invoice-details?id=${todo[i]}`, { headers: ctx.H });
+      const r = await fetch(`${API}/financialHistory/v1.0/portal/invoice-details?id=${todo[i].id}`, { headers: ctx.H });
       if (r.ok) {
         for (const it of ((await r.json())?.data?.invoiceProductDto || [])) {
           const code = String(it.productCode || '').trim();
@@ -92,21 +92,27 @@ async function pullInvoices(ctx, state, want, stopWhenNoNew) {
           const rate = tx > 0 ? Math.round((tx / (ph * qty)) * 10000) / 100 : 0;
           const prev = state.items[code] || {};
           const taxed = tx > 0;
-          /* الفواتير بتتقرا من الأحدث للأقدم، فأول قراءة هي الأحدث —
-             ولو الحالة اتغيّرت مع الوقت (زي مستحضرات اتفرضت عليها
-             ضريبة) الأحدث هو الصح، فمابنسمحش للأقدم يدهس عليه. */
-          const keep = prev.taxed != null;
+          /* ⚠️ الأحدث يكسب — **بتاريخ الفاتورة** مش بترتيب القراءة.
+             الحالة بتتغيّر فعلًا: 3 أصناف اتشافوا مرة بضريبة ومرة من
+             غيرها. الاعتماد على «أول قراءة هي الأحدث» كان صح في
+             المسح الأولي بس (بيمشي من الأحدث للأقدم في تشغيلة واحدة)،
+             وبيبقى **غلط** في التشغيل اليومي لأن الفاتورة الجديدة
+             أحدث من كل المخزّن، فكانت هتتجاهل وتفضل الحالة القديمة.
+             التواريخ ISO فالمقارنة النصية بتساوي المقارنة الزمنية. */
+          const when = todo[i].date || '';
+          const newer = !prev.when || when >= prev.when;
           state.items[code] = {
             ...prev,
-            taxed: keep ? prev.taxed : taxed,
-            rate: keep ? prev.rate : (taxed ? rate : 0),
+            taxed: newer ? taxed : prev.taxed,
+            rate:  newer ? (taxed ? rate : 0) : prev.rate,
+            when:  newer ? when : prev.when,
             mixed: prev.taxed != null && prev.taxed !== taxed ? true : (prev.mixed || false),
             name: it.productName || prev.name,
             pub: Number(it.publicPrice) || prev.pub,
             ph, seen: (prev.seen || 0) + 1
           };
         }
-        state.doneInvoices.push(todo[i]);
+        state.doneInvoices.push(todo[i].id);
       }
     } catch { /* نكمّل */ }
     if ((i + 1) % 10 === 0 || i === todo.length - 1) {
