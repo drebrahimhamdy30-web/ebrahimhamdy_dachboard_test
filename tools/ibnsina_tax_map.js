@@ -62,7 +62,7 @@ async function login() {
 }
 
 /* ── 1) الحقيقة من الفواتير ─────────────────────────────────────── */
-async function pullInvoices(ctx, state, want) {
+async function pullInvoices(ctx, state, want, stopWhenNoNew) {
   const seen = new Set(state.doneInvoices);
   const todo = [];
   for (let p = 1; p <= 30 && todo.length < want; p++) {
@@ -70,7 +70,12 @@ async function pullInvoices(ctx, state, want) {
     if (!r.ok) break;
     const l = (await r.json())?.data?.invoicesList || [];
     if (!l.length) break;
+    const before = todo.length;
     for (const inv of l) if (!seen.has(inv.id) && todo.length < want) todo.push(inv.id);
+    /* الفواتير بتيجي من الأحدث للأقدم. في التشغيل اليومي لو صفحة
+       كاملة مفيهاش ولا فاتورة جديدة، اللي بعدها أقدم منها فأكيد
+       مقرية — فبنقف بدل ما نلف على 8 صفحات كل يوم على الفاضي. */
+    if (stopWhenNoNew && todo.length === before) break;
     await sleep(400);
   }
   log(`فواتير جديدة: ${todo.length}`);
@@ -210,6 +215,15 @@ async function push(state) {
   if (has('--push')) { await push(state); return report(state); }
   const ctx = await login();
   const n = num('--n', 0);
+  /* --daily: التشغيل المجدول. بيلقط الفواتير الجديدة بس ويرفعها،
+     من غير --classify لأن التصنيف اتقاس (2026-10-01) وطلع بيحسم 9%
+     بس من الأصناف — نداءات من غير عائد. */
+  if (has('--daily')) {
+    await pullInvoices(ctx, state, num('--n', 200), true);
+    save(state);
+    await push(state);
+    return report(state);
+  }
   if (n) await pullInvoices(ctx, state, n);
   if (n || has('--classify')) await classify(ctx, state);
   save(state);

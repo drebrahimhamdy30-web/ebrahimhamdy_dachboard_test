@@ -7,7 +7,12 @@
 #
 #  بيعمل مهمتين:
 #   • التوفر  — كل ساعة، ~650 صنف، فالكتالوج بيتغطّى في 24 ساعة
+#   • الضريبة — يوميًا 5:45ص، بيلقط الفواتير الجديدة (ثانيتين لو مفيش)
 #   • الأسعار — مرة يوميًا 6 صباحًا، 16 نداء بس (~30 ثانية)
+#
+#  ⚠️ ترتيب الضريبة قبل الأسعار **مقصود**: الفاتورة الجديدة بتحوّل
+#     أصناف من «ضريبة مستنتجة» لـ«مقطوع فيها»، وسحب الأسعار بعدها
+#     بيحسب خصومها صح من أول يوم. لو اتعكس الترتيب الفايدة بتتأخر يوم.
 #
 #  التشغيل مرة واحدة من PowerShell:
 #     .\tools\ibnsina_schedule.ps1
@@ -23,7 +28,7 @@ param([switch]$Remove, [switch]$AsSystem)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $node = (Get-Command node -ErrorAction SilentlyContinue).Source
-$tasks = @('PhalixIbnSinaAvail', 'PhalixIbnSinaPrices')
+$tasks = @('PhalixIbnSinaAvail', 'PhalixIbnSinaTax', 'PhalixIbnSinaPrices')
 
 if ($Remove) {
   foreach ($t in $tasks) {
@@ -66,11 +71,21 @@ $t1 = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(20) `
 Register-Phalix $tasks[0] $a1 $t1 'ابن سينا: فحص توفر ~650 صنف كل ساعة (الكتالوج كله في 24 ساعة)'
 Write-Host "✓ $($tasks[0]) — كل ساعة عند الدقيقة 20"
 
+# ── الضريبة: يوميًا 5:45 صباحًا (قبل الأسعار) ───────────────────
+# بيقرا الفواتير الجديدة بس. كل فاتورة بتحوّل أصنافها من ضريبة
+# مستنتجة (دقة 96.5%) لضريبة مقطوع فيها. لو مفيش فاتورة جديدة
+# بيقف بعد 3 نداءات. من غير --classify — التصنيف اتقاس وطلع
+# بيحسم 9% بس من الأصناف.
+$a3 = New-ScheduledTaskAction -Execute $node -Argument "tools\ibnsina_tax_map.js --daily" -WorkingDirectory $repo
+$t3 = New-ScheduledTaskTrigger -Daily -At 5:45am
+Register-Phalix $tasks[1] $a3 $t3 'ابن سينا: لقط الفواتير الجديدة وتحديث خريطة الضريبة'
+Write-Host "✓ $($tasks[1]) — يوميًا 5:45 صباحًا"
+
 # ── الأسعار: يوميًا 6 صباحًا ────────────────────────────────────
 $a2 = New-ScheduledTaskAction -Execute $node -Argument "tools\ibnsina_pull.js" -WorkingDirectory $repo
 $t2 = New-ScheduledTaskTrigger -Daily -At 6:00am
-Register-Phalix $tasks[1] $a2 $t2 'ابن سينا: سحب الأسعار والخصومات (16 نداء)'
-Write-Host "✓ $($tasks[1]) — يوميًا 6 صباحًا"
+Register-Phalix $tasks[2] $a2 $t2 'ابن سينا: سحب الأسعار والخصومات (16 نداء)'
+Write-Host "✓ $($tasks[2]) — يوميًا 6 صباحًا"
 
 Write-Host ''
 Write-Host 'خلاص. تشوفهم في Task Scheduler تحت الاسمين دول.'
