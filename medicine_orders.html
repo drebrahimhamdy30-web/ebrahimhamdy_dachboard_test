@@ -247,6 +247,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;font-weight:700;cursor:pointer;white-space:nowrap"><input type="checkbox" id="ord-surp-only" onchange="ordPage=1;loadOrders()" style="width:16px;height:16px;accent-color:var(--primary)"> فائض فقط</label>
           <button class="cr-up-btn" style="background:#16a34a" onclick="exportOrders()"><i class="fas fa-file-excel"></i> تصدير Excel</button>
           <button class="cr-up-btn" id="ord-pharma-btn" style="background:#1d4ed8" onclick="phOpenList()"><i class="fas fa-cart-plus"></i> قائمة فارما</button>
+          <button class="cr-up-btn" id="ord-ph-refresh" style="background:#0d9488" onclick="phRefreshPrices()" title="يجيب سعر وخصم وكود أصناف فارما اللي في الفلتر الحالي — لحظيًا من صفحة كل صنف عندهم — وبعدها يعيد حساب الطلبية. المزامنة التلقائية بتلف الكتالوج في ~22 ساعة فالسعر اللي قدامك عمره ساعات"><i class="fas fa-cloud-arrow-down"></i> تحديث فارما</button>
           <button class="cr-up-btn" id="ord-clear" style="display:none;background:#b91c1c" onclick="clearAllSelections()"><i class="fas fa-eraser"></i> مسح تحت الطلب (يوم جديد)</button>
           <button class="cr-up-btn" id="ord-refresh" style="display:none" onclick="refreshOrders()"><i class="fas fa-rotate"></i> تحديث الطلبيات</button>
           <button class="cr-up-btn" id="ord-fit-btn" style="background:var(--surface-3);color:var(--text-primary)" onclick="ordToggleFit()" title="تصغير كل الأعمدة على حجم النص"><i class="fas fa-text-width"></i> محاذاة على النص</button>
@@ -374,7 +375,6 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         <div class="et-note">اضغط <b>نسخ</b> جنب الصنف، وبعدين الصق في خانة <b>«ادخل منتجات»</b> اللي تحت في صفحة فارما (مش خانة البحث اللي فوق) واضغط Enter — الصنف بيتضاف للعربة لو متاح. الصف بيتعلّم ✓ بعد النسخ عشان تعرف وصلت لفين.</div>
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
           <button class="cr-up-btn" style="background:#1d4ed8" onclick="phOpenSite()"><i class="fas fa-up-right-from-square"></i> افتح صفحة فارما</button>
-          <button class="cr-up-btn" id="ph-refresh" style="background:#0d9488" onclick="phRefreshPrices()" title="يجيب سعر وخصم أصناف القايمة دي بالذات من صفحة كل صنف عند فارما، وبعدها يعيد حساب الطلبية — المزامنة التلقائية بتلف الكتالوج كله في ~22 ساعة فالسعر اللي قدامك عمره ساعات"><i class="fas fa-cloud-arrow-down"></i> حدّث أسعار دول من فارما</button>
           <button class="cr-up-btn" style="background:var(--surface-3);color:var(--text-primary)" onclick="phCopyAll()"><i class="fas fa-copy"></i> نسخ كل الأسماء (سطر لكل صنف)</button>
           <button class="cr-up-btn" style="background:var(--surface-3);color:var(--text-primary)" onclick="phResetDone()"><i class="fas fa-rotate-left"></i> تصفير العلامات</button>
           <span id="ph-msg" style="font-size:.78rem;font-weight:700"></span>
@@ -1135,6 +1135,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
        ينفع: ننسخ الاسم زي ما هو **عند المخزن** (مش اسمنا) ونفتح لهم
        الصفحة، والباقي لصق + Enter.  */
     const PH_URL = 'https://shop.pharmaemarket.com/pharma/ar/EGP/my-account/quick-order';
+    const PH_STORE = 'فارما اوفر سيز';   // بالحرف — مش ilike، عشان «نيوفارما» مايتصادش
     const phIsPharma = s => /فارما\s*اوفر|فارما\s*أوفر|overseas/i.test(String(s || ''));
     let PH_ROWS = [];
     const PH_DONE_KEY = 'ph_done_v1';
@@ -1195,7 +1196,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const surpOnly = document.getElementById('ord-surp-only').checked;
       let base = REST + 'purchase_orders_flat?select=itm_code,itm_name,best_item_name,net_required,best_price,best_disc'
         + '&branch=eq.' + encodeURIComponent(ordBranch) + '&net_required=gt.0'
-        + '&best_store=ilike.*فارما*&order=itm_name.asc';
+        + '&best_store=eq.' + encodeURIComponent(PH_STORE) + '&order=itm_name.asc';
       if (co) base += '&company=eq.' + encodeURIComponent(co);
       if (surpOnly) base += '&surplus_other=gt.0';
       if (q) { const e = encodeURIComponent(q); base += '&or=(itm_name.ilike.*' + e + '*,itm_code.eq.' + e + ')'; }
@@ -1266,54 +1267,78 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     }
     function phResetDone() { phSaveDone(new Set()); phRender(); }
 
-    /* تحديث أسعار أصناف القايمة دي بس — لحظيًا من فارما ⚡
-       المزامنة المجدولة بتلف الكتالوج (224 صفحة) على مدار ~22 ساعة،
-       فالسعر اللي قدامك عمره ساعات وإحنا على وشك نطلب بيه. الزر ده
-       بيضرب **صفحة كل صنف في القايمة** بالكود بس (عشرات نداءات مش
-       آلاف) فبيخلص في ثواني.
-       بعد الكتابة لازم نعيد حساب `purchase_orders_flat` — القايمة
-       بتقرا منه مش من الأسعار مباشرةً، وكمان «أرخص مخزن» بيتحدّد
-       فيه، فممكن صنف يخرج من قايمة فارما لو مخزن تاني بقى أرخص.
-       الأصناف اللي مالهاش كود فارما مابتتحدّثش — مفيش حاجة نسأل بيها. */
+    /* تحديث فارما — لحظيًا لأصناف الطلبية اللي مخزنها فارما ⚡
+       ليه موجود: المزامنة المجدولة بتلف الكتالوج (224 صفحة) على مدار
+       ~22 ساعة، فالسعر اللي بنى عليه قرار «أرخص مخزن» عمره ممكن يكون
+       ساعات، وإحنا على وشك نطلب بيه بمئات الألوف. الزر بيضرب **صفحة
+       كل صنف** بالكود (عشرات نداءات مش آلاف) فبيخلص في ثواني.
+
+       بياخد نفس فلتر الشاشة الحالي (الفرع والشركة والبحث…) — مش
+       الكتالوج كله. والأصناف اللي مالهاش كود مورّد بنحاول نجيب كودها
+       بالبحث بالاسم، و**بمطابقة تامة بس**: كود غلط معناه تطلب صنف
+       تاني، فالفاضي أأمن من الغلط (قرار المالك).
+
+       بعد الكتابة لازم نعيد حساب purchase_orders_flat — الشاشة بتقرا
+       منه مش من الأسعار مباشرةً، و«أرخص مخزن» بيتحدّد فيه، فممكن صنف
+       يخرج من قايمة فارما لو مخزن تاني بقى أرخص. */
     async function phRefreshPrices() {
-      const btn = document.getElementById('ph-refresh');
-      const msg = document.getElementById('ph-msg');
+      const btn = document.getElementById('ord-ph-refresh');
       if (!btn || btn.disabled) return;
       // التوكن يتقرا لحظة الضغط مش وقت تحميل الصفحة — ساعة وبيبوظ
       const _t = await Session.bearer();
       const jwt = (_t && _t !== SB_ANON_API) ? _t : null;
-      if (!jwt) { msg.innerHTML = '<span class="msg-err">سجّل الدخول بحساب مشتريات/مدير/أدمن — التحديث محروس بالدور</span>'; return; }
-
-      const withCode = PH_ROWS.filter(r => PH_CODES[r.itm_code] && PH_CODES[r.itm_code].code);
-      const codes = [...new Set(withCode.map(r => PH_CODES[r.itm_code].code))];
-      const noCode = PH_ROWS.length - withCode.length;
-      if (!codes.length) {
-        msg.innerHTML = '<span class="msg-err">مفيش صنف في القايمة له كود فارما — اجلب الأكواد من شاشة الأسعار الأول</span>';
-        return;
-      }
-
-      // صورة الأسعار قبل التحديث عشان نقول بالظبط إيه اللي اتغيّر
-      const before = {};
-      PH_ROWS.forEach(r => { before[r.itm_code] = { p: Number(r.best_price) || 0, d: Number(r.best_disc) || 0 }; });
-      const wasCount = PH_ROWS.length;
+      if (!jwt) { toast('سجّل الدخول بحساب مشتريات/مدير — التحديث محروس بالدور'); return; }
 
       const orig = btn.innerHTML;
       btn.disabled = true;
-      msg.innerHTML = '';
-      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جارٍ جلب ' + codes.length + ' صنف…';
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جارٍ تجميع الأصناف…';
       try {
+        // 1) أصناف فارما في الفلتر الحالي — نفس استعلام «قائمة فارما»
+        const co = document.getElementById('ord-company').value;
+        const q  = document.getElementById('ord-search').value.trim();
+        const surpOnly = document.getElementById('ord-surp-only').checked;
+        let base = REST + 'purchase_orders_flat?select=itm_code,itm_name,best_item_name,best_price,best_disc'
+          + '&branch=eq.' + encodeURIComponent(ordBranch) + '&net_required=gt.0'
+          + '&best_store=eq.' + encodeURIComponent(PH_STORE) + '&order=itm_name.asc';
+        if (co) base += '&company=eq.' + encodeURIComponent(co);
+        if (surpOnly) base += '&surplus_other=gt.0';
+        if (q) { const e = encodeURIComponent(q); base += '&or=(itm_name.ilike.*' + e + '*,itm_code.eq.' + e + ')'; }
+        base += ordExtraFilters();
+        let rows = [];
+        for (let off = 0; ; off += 1000) {
+          const b = await (await fetch(base + '&limit=1000&offset=' + off, { headers: H })).json();
+          rows = rows.concat(b); if (!Array.isArray(b) || b.length < 1000) break;
+        }
+        if (!rows.length) { toast('مفيش أصناف مخزنها فارما في الفلتر الحالي'); btn.innerHTML = orig; btn.disabled = false; return; }
+
+        // صورة قبل التحديث عشان نقول بالظبط إيه اللي اتغيّر
+        const before = {};
+        rows.forEach(r => { before[r.itm_code] = { p: Number(r.best_price) || 0, d: Number(r.best_disc) || 0 }; });
+
+        await phLoadCodes(rows.map(r => r.itm_code));
+        const codes = [], names = [];
+        for (const r of rows) {
+          const pc = PH_CODES[r.itm_code] && PH_CODES[r.itm_code].code;
+          if (pc) codes.push(pc);
+          else names.push(r.best_item_name || r.itm_name || '');
+        }
+        const uCodes = [...new Set(codes)], uNames = [...new Set(names.filter(Boolean))];
+
+        // 2) السحب اللحظي
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جارٍ جلب ' + uCodes.length + ' صنف…';
         const r = await fetch(SB_URL_API + '/functions/v1/pharma_sync', {
           method: 'POST',
           headers: { apikey: SB_ANON_API, Authorization: 'Bearer ' + jwt, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh_codes: codes })
+          body: JSON.stringify({ refresh_codes: uCodes, fill_names: uNames })
         });
         const j = await r.json().catch(() => null);
         if (!j || !j.ok) {
           const e = j && (j.error === 'unauthorized' ? 'مالكش صلاحية' : (j.up_error || j.error));
-          msg.innerHTML = '<span class="msg-err">' + esc(e || 'فشل التحديث من فارما') + '</span>';
+          toast('فشل التحديث — ' + (e || 'خطأ غير معروف'));
           btn.innerHTML = orig; btn.disabled = false; return;
         }
 
+        // 3) إعادة حساب الطلبية عشان الأسعار الجديدة تبان وأرخص مخزن يتحدّد من جديد
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جارٍ إعادة حساب الطلبية…';
         const ro = await fetch(REST + 'rpc/refresh_purchase_orders', {
           method: 'POST',
@@ -1321,25 +1346,33 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           body: '{}'
         });
         if (!ro.ok) {
-          msg.innerHTML = '<span class="msg-err">الأسعار اتحدّثت (' + j.updated + ' صنف) بس إعادة حساب الطلبية فشلت — الأرقام هتتظبط خلال 10 دقايق تلقائيًا</span>';
+          toast('الأسعار اتحدّثت (' + j.updated + ' صنف) بس إعادة الحساب فشلت — الأرقام هتتظبط خلال 10 دقايق');
           btn.innerHTML = orig; btn.disabled = false; return;
         }
 
-        await phOpenList();   // بيعيد قراءة الصفوف بالأسعار الجديدة
+        // 4) قياس الفرق + إعادة تحميل الشاشة
+        let after = [];
+        for (let off = 0; ; off += 1000) {
+          const b = await (await fetch(base + '&limit=1000&offset=' + off, { headers: H })).json();
+          after = after.concat(b); if (!Array.isArray(b) || b.length < 1000) break;
+        }
         let ch = 0;
-        PH_ROWS.forEach(x => {
+        after.forEach(x => {
           const b = before[x.itm_code]; if (!b) return;
           if ((Number(x.best_price) || 0) !== b.p || (Number(x.best_disc) || 0) !== b.d) ch++;
         });
-        const left = wasCount - PH_ROWS.length;
-        document.getElementById('ph-msg').innerHTML = '<span class="msg-ok">اتحدّث ' + j.updated + ' صنف'
-          + ' · اتغيّر سعر/خصم <b>' + ch + '</b>'
-          + (left > 0 ? ' · ' + left + ' خرج من القايمة (مخزن تاني بقى أرخص)' : '')
-          + (j.missed ? ' · ' + j.missed + ' مااتجابش من فارما' : '')
-          + (noCode ? ' · ' + noCode + ' من غير كود' : '')
-          + ' · ' + j.seconds + 'ث</span>';
+        const left = rows.length - after.length;
+
+        ordPage = 1; loadOrders();
+        if (document.getElementById('ph-bg').classList.contains('open')) phOpenList();
+
+        toast('اتحدّث ' + j.updated + ' صنف · اتغيّر سعر/خصم ' + ch
+          + (left > 0 ? ' · ' + left + ' خرج (مخزن تاني أرخص)' : '')
+          + ((j.codes_filled || 0) ? ' · ' + j.codes_filled + ' كود اتظبط' : '')
+          + ((j.codes_unmatched || 0) ? ' · ' + j.codes_unmatched + ' مالقيناهمش' : '')
+          + ' · ' + j.seconds + 'ث');
       } catch (e) {
-        msg.innerHTML = '<span class="msg-err">تعذّر الاتصال</span>';
+        toast('تعذّر الاتصال');
       }
       btn.innerHTML = orig; btn.disabled = false;
     }

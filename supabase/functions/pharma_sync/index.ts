@@ -129,6 +129,21 @@ Deno.serve(async (req) => {
      طلب حقلين زيادة في نفس النداء. */
   const detUrl = (c: string) => `${api}/occ/v2/${site}/products/${c}?fields=pharmacyDiscount(value),price(value),publicPrice(value)&lang=ar`;
 
+  /* تطبيع الاسم للمطابقة التامة بس.
+     مقصود إنه **مايسامحش في الأرقام**: «20 قرص» و«30 قرص» يفضلوا
+     مختلفين، لأن كود غلط = تطلب عبوة تانية. بنوحّد بس اللي مابيغيّرش
+     الصنف: التشكيل، أشكال الألف والياء والتاء المربوطة، والمسافات
+     وعلامات الترقيم. */
+  // بالـ\u مقصود: التشكيل حروف غير مرئية، وكتابتها حرفيًا في الملف
+  // بتتبوّظ بسهولة مع أي محرر أو نقل بين الريبوهين.
+  const norm = (s: string) => String(s || "")
+    .replace(/[ً-ْٰـ]/g, "")                    // تشكيل وتطويل
+    .replace(/[أإآٱ]/g, "ا")               // أ إ آ ٱ → ا
+    .replace(/ى/g, "ي").replace(/ة/g, "ه")      // ى→ي · ة→ه
+    .replace(/ؤ/g, "و").replace(/ئ/g, "ي")      // ؤ→و · ئ→ي
+    .toLowerCase()
+    .replace(/[^0-9a-zء-ي]/g, "");                        // شيل أي حاجة مش حرف ولا رقم
+
   // نفس حساب السعر/الخصم في كل الأوضاع — لازم يفضل واحد
   function priceOf(adv: number | null, pub: number | null, net: number | null) {
     if (adv != null) { const p = (pub ?? net); return p == null ? null : { price: p, disc: clampD(Number(adv)) }; }
@@ -180,8 +195,48 @@ Deno.serve(async (req) => {
      هيعمل صف جديد بدل ما يحدّث الموجود. ومابيعملش finalize — ده
      تحديث نقطة مش جولة، فغياب صنف عن القايمة مش معناه إنه خرج من
      الكتالوج. */
-  if (Array.isArray(opt.refresh_codes) && opt.refresh_codes.length) {
-    const codes = [...new Set(opt.refresh_codes.map((c: any) => String(c || "").trim()).filter(Boolean))].slice(0, 900);
+  if ((Array.isArray(opt.refresh_codes) && opt.refresh_codes.length) ||
+      (Array.isArray(opt.fill_names) && opt.fill_names.length)) {
+    const codes = [...new Set((opt.refresh_codes || []).map((c: any) => String(c || "").trim()).filter(Boolean))].slice(0, 900);
+
+    /* الأصناف اللي مالهاش كود مورّد: ندوّر عليها بالاسم ونقبل **المطابقة
+       التامة بعد التطبيع بس**. الاسم عندنا في الصفوف دي جاي من شيت
+       مرفوع مش من كتالوجهم، فبيختلف — واللي مايطابقش بالظبط نسيبه فاضي
+       ونعدّه، مانخمّنش. كود غلط أخطر من كود ناقص. */
+    const nameList = [...new Set((opt.fill_names || []).map((s: any) => String(s || "").trim()).filter(Boolean))].slice(0, 300);
+    let codesFilled = 0, codesUnmatched = 0; let cErr2: string | null = null;
+    if (nameList.length) {
+      const found = await pool(nameList, cDetail, async (nm) => {
+        /* البحث **بأول كلمة** مش بالاسم الكامل: سيرفرهم بيرجّع 400 على
+           الاسم الطويل (مجرَّب: «اتومافيوتكس شراب 100 مل» → 400، و
+           «اتومافيوتكس» → 200 و4 نتايج فيهم المطلوب). فبندوّر واسع
+           وبنفلتر إحنا بالمطابقة التامة. */
+        const words = nm.split(/\s+/).filter(Boolean);
+        const q = (words[0] && words[0].length >= 4) ? words[0] : words.slice(0, 2).join(" ");
+        if (!q) return null;
+        const u = `${api}/occ/v2/${site}/products/search?query=${encodeURIComponent(q)}&currentPage=0&pageSize=100&lang=ar`
+          + `&fields=${encodeURIComponent("products(code,name)")}`;
+        try {
+          const r = await fetch(u, { headers: H });
+          if (!r.ok) return null;
+          const target = norm(nm);
+          for (const p of ((await r.json())?.products || [])) {
+            if (p.code && norm(stripTags(p.name)) === target) return { item_name: nm, supplier_code: String(p.code) };
+          }
+        } catch { /* */ }
+        return null;
+      });
+      const hits = found.filter(Boolean) as any[];
+      codesUnmatched = nameList.length - hits.length;
+      for (let i = 0; i < hits.length; i += 1000) {
+        const { data, error } = await supa.rpc("pharma_codes_upsert", { p_rows: hits.slice(i, i + 1000) });
+        if (error) { cErr2 = error.message; break; }
+        codesFilled += Number(data) || 0;
+      }
+      // الأكواد اللي لقيناها دلوقتي تتحدّث أسعارها في نفس التشغيلة
+      for (const h of hits) if (!codes.includes(h.supplier_code)) codes.push(h.supplier_code);
+    }
+
     let missed = 0;
     const rrows = await pool(codes, cDetail, async (c) => {
       for (let a = 0; a < 2; a++) {
@@ -205,8 +260,9 @@ Deno.serve(async (req) => {
       if (error) { rErr = error.message; break; }
       updated += Number(data) || 0;
     }
-    return jsonRes({ ok: !rErr, mode: "refresh_codes", requested: codes.length, fetched: got.length,
-      updated, missed, seconds: Math.round((Date.now() - t0) / 100) / 10, up_error: rErr });
+    return jsonRes({ ok: !rErr && !cErr2, mode: "refresh_codes", requested: codes.length, fetched: got.length,
+      updated, missed, codes_filled: codesFilled, codes_unmatched: codesUnmatched,
+      seconds: Math.round((Date.now() - t0) / 100) / 10, up_error: rErr || cErr2 });
   }
 
   type Item = { code: string; name: string; pub: number | null; net: number | null };
