@@ -92,6 +92,23 @@
         </div>
       </div>
 
+
+      <!-- التحويلات بين الفروع -->
+      <div class="os-card">
+        <h3><i class="fas fa-right-left"></i> التحويلات بين الفروع</h3>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.85rem;font-weight:700;margin-bottom:10px">
+          <input type="checkbox" id="trf-enabled" style="width:18px;height:18px">
+          تفعيل الفرع الافتراضي وتنبيه توفّر الصنف
+        </label>
+        <div class="os-msg" style="color:var(--text-muted);margin-bottom:12px;line-height:1.8">
+          لما الموظف يطلب تحويل، الفرع الافتراضي بيتحدد لوحده. ولو الصنف
+          مش متوفر عنده بالكمية المطلوبة، الشاشة بتقوله متوفر في أي فرع.
+          ولو اختار فرع تاني والصنف متوفر في الافتراضي بيظهر تنبيه لازم يأكده.
+          <br><span style="font-size:.74rem">الرصيد من جداول المخزون (آخر مزامنة) مش لحظي من eplus.</span>
+        </div>
+        <div id="trf-rows"><div class="os-msg" style="color:var(--text-muted)">⏳ جاري تحميل الفروع...</div></div>
+      </div>
+
       <!-- الألوان -->
       <div class="os-card">
         <h3><i class="fas fa-palette"></i> ألوان الهوية</h3>
@@ -226,6 +243,7 @@
       document.getElementById('os-main').style.display='block';
       try {
         var d = (await (await fetch(REST+'org_settings?select=*&id=eq.1', { headers: await H() })).json())[0];
+        try { document.getElementById('trf-enabled').checked = !!(d && d.transfer_defaults_enabled); } catch(e){}
         if (!d) return;
         document.getElementById('f-name').value = d.company_name || '';
         document.getElementById('f-tagline').value = d.company_tagline || '';
@@ -266,6 +284,51 @@
       } catch(e){ el.textContent = 'تعذّر الفحص.'; }
     }
 
+
+    /* ═══ التحويلات: الفرع الافتراضي لكل فرع ═══
+       الخريطة متخزّنة على جدول الفروع نفسه (transfer_default_branch_id)
+       مش في صف الإعدادات — عشان كل فرع يحمل إعداده ويفضل مربوط بيه
+       لو اتضاف فرع جديد. المفتاح العام بس في org_settings. */
+    var TRF_BRANCHES = [];
+
+    async function loadTransferSettings(){
+      var box = document.getElementById("trf-rows");
+      try {
+        var rows = await (await fetch(REST + "branches?select=id,name,transfer_default_branch_id&is_active=eq.true&order=sort_order", { headers: await H() })).json();
+        TRF_BRANCHES = Array.isArray(rows) ? rows : [];
+        if (!TRF_BRANCHES.length) { box.innerHTML = '<div class="os-msg">مفيش فروع مفعّلة.</div>'; return; }
+        box.innerHTML = TRF_BRANCHES.map(function(b){
+          var opts = '<option value="">— من غير افتراضي —</option>' + TRF_BRANCHES
+            .filter(function(o){ return o.id !== b.id; })
+            .map(function(o){ return '<option value="' + o.id + '"' + (o.id === b.transfer_default_branch_id ? ' selected' : '') + '>' + o.name + '</option>'; })
+            .join("");
+          return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">'
+               +   '<span style="font-weight:700;min-width:110px">' + b.name + '</span>'
+               +   '<span style="color:var(--text-muted);font-size:.8rem">يطلب افتراضيًا من</span>'
+               +   '<select class="form-select trf-def" data-branch="' + b.id + '" style="width:auto;min-width:160px">' + opts + '</select>'
+               + '</div>';
+        }).join("");
+      } catch(e){ box.innerHTML = '<div class="os-msg" style="color:var(--danger)">تعذّر تحميل الفروع.</div>'; }
+    }
+
+    async function saveTransferSettings(){
+      // المفتاح العام + الفرع الافتراضي لكل فرع (اللي اتغيّر بس)
+      var enabled = document.getElementById("trf-enabled").checked;
+      await fetch(REST + "org_settings?id=eq.1", { method:"PATCH", headers: await HW({ Prefer:"return=minimal" }),
+                   body: JSON.stringify({ transfer_defaults_enabled: enabled }) });
+      var sels = Array.prototype.slice.call(document.querySelectorAll(".trf-def"));
+      for (var i = 0; i < sels.length; i++) {
+        var sel = sels[i];
+        var bid = sel.getAttribute("data-branch");
+        var cur = TRF_BRANCHES.find(function(b){ return b.id === bid; });
+        var val = sel.value || null;
+        if (cur && (cur.transfer_default_branch_id || null) === val) continue;
+        await fetch(REST + "branches?id=eq." + bid, { method:"PATCH", headers: await HW({ Prefer:"return=minimal" }),
+                     body: JSON.stringify({ transfer_default_branch_id: val }) });
+        if (cur) cur.transfer_default_branch_id = val;
+      }
+    }
+
     async function saveSettings(){
       var msg = document.getElementById('save-msg');
       var rec = {
@@ -279,6 +342,7 @@
       };
       if (pendingLogoUrl) rec.logo_url = pendingLogoUrl;
       try {
+        await saveTransferSettings();
         await fetch(REST+'org_settings?id=eq.1', { method:'PATCH', headers:await HW({ Prefer:'return=minimal' }), body: JSON.stringify(rec) });
         // حدّث الكاش + طبّق فورًا
         var cached = {}; try { cached = JSON.parse(localStorage.getItem('orgBrand')||'{}'); } catch(e){}
@@ -289,6 +353,7 @@
 
     load();
     loadBranchAudit();
+    loadTransferSettings();
   </script>
 </body>
 </html>

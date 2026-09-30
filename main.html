@@ -157,9 +157,10 @@
             <label id="branch-label">توجيه إلى فرع</label>
             <div class="field-icon-wrap">
               <i class="fas fa-store field-icon"></i>
-              <select data-branches id="branch" class="form-select">
+              <select data-branches id="branch" class="form-select" onchange="trfConfirmed=false; trfCheck();">
                 <option value="" disabled selected>اختر الفرع...</option>
               </select>
+              <div id="trf-hint" style="display:none;margin-top:8px;"></div>
             </div>
           </div>
 
@@ -237,7 +238,7 @@
               <label>الكمية المطلوبة</label>
               <div class="field-icon-wrap">
                 <i class="fas fa-sort-numeric-up field-icon"></i>
-                <input type="number" id="qty" class="form-input" value="1" min="1">
+                <input type="number" id="qty" class="form-input" value="1" min="1" oninput="trfConfirmed=false; trfCheck();">
               </div>
             </div>
             <div class="field-group" id="order-note-div">
@@ -516,6 +517,132 @@
         }
       } catch(e) { console.log('item lookup failed:', e); }
       finally { loadEl.classList.remove('show'); }
+      trfCheck();
+    }
+
+    /* ═══ التحويلات: الفرع الافتراضي + فحص توفّر الصنف ═══
+       الإعداد من شاشة «إعدادات المؤسسة»: لكل فرع فرع افتراضي بيطلب منه،
+       ومفتاح تفعيل عام. لما الموظف يختار «تحويل» الفرع بيتحدد لوحده،
+       وأول ما يكتب الكود بنفحص رصيد الصنف في **كل الفروع** بنداء واحد
+       (item_branch_stock — migrate_80) ونقوله:
+         • الفرع اللي مختاره رصيده أقل من المطلوب → متوفر في فين
+         • اختار فرع غير الافتراضي والصنف متوفر في الافتراضي → تنبيه
+         • الافتراضي مالوش رصيد كفاية → مفيش تنبيه (مالوش لازمة)
+       التنبيه مابيمنعش الإرسال، بس لازم يضغط «تأكيد».
+       ⚠️ الرصيد من جداول المخزون (آخر مزامنة) مش لحظي من eplus. */
+    let TRF_ON = false;            // الميزة مفعّلة؟
+    let TRF_DEFAULT = '';          // الفرع الافتراضي لفرع المستخدم
+    let TRF_STOCK = null;          // رصيد الصنف في الفروع
+    let TRF_STOCK_CODE = '';       // الكود اللي الرصيد بتاعه
+    let trfWarn = false;           // فيه تنبيه قائم؟
+    let trfConfirmed = false;      // الموظف أكّد؟
+
+    async function loadTransferDefaults() {
+      try {
+        const [oRes, bRes] = await Promise.all([
+          fetch(SB_URL_API + '/rest/v1/org_settings?select=transfer_defaults_enabled&id=eq.1', { headers: await sbH() }),
+          fetch(SB_URL_API + '/rest/v1/branches?select=id,name,transfer_default_branch_id&is_active=eq.true', { headers: await sbH() })
+        ]);
+        const org = (await oRes.json())[0] || {};
+        TRF_ON = org.transfer_defaults_enabled === true;
+        const rows = await bRes.json();
+        if (!Array.isArray(rows)) return;
+        const byId = {}; rows.forEach(b => { byId[b.id] = b.name; });
+        const mine = rows.find(b => Branches.same(b.name, userBranch));
+        TRF_DEFAULT = (mine && byId[mine.transfer_default_branch_id]) || '';
+      } catch (e) { console.log('transfer defaults:', e); TRF_ON = false; }
+    }
+
+    function trfQtyAt(branchName) {
+      const r = (TRF_STOCK || []).find(x => Branches.same(x.branch, branchName));
+      return r ? (Number(r.qty) || 0) : 0;
+    }
+
+    function trfHideHint() {
+      const el = document.getElementById('trf-hint');
+      if (el) { el.style.display = 'none'; el.innerHTML = ''; }
+      trfWarn = false;
+    }
+
+    // بيتنادى من: تغيير الفرع · تغيير الكمية · بعد جلب اسم الصنف
+    async function trfCheck() {
+      if (!TRF_ON || currentType !== 'تحويل') { trfHideHint(); return; }
+      const code = document.getElementById('item_code').value.trim();
+      if (!code) { trfHideHint(); return; }
+      if (TRF_STOCK_CODE !== code) {
+        try {
+          const r = await fetch(SB_URL_API + '/rest/v1/rpc/item_branch_stock', {
+            method: 'POST', headers: await sbH({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ p_code: code })
+          });
+          const d = await r.json();
+          TRF_STOCK = Array.isArray(d) ? d : [];
+          TRF_STOCK_CODE = code;
+          trfConfirmed = false;          // صنف جديد = تأكيد جديد
+        } catch (e) { console.log('item_branch_stock:', e); trfHideHint(); return; }
+      }
+      trfRenderHint();
+    }
+
+    function trfRenderHint() {
+      const el = document.getElementById('trf-hint'); if (!el) return;
+      const sel = document.getElementById('branch').value;
+      const qty = Math.max(1, Number(document.getElementById('qty').value) || 1);
+      if (!sel) { trfHideHint(); return; }
+
+      // الفروع اللي عندها الكمية المطلوبة (غير فرع المستخدم)
+      const okBranches = (TRF_STOCK || [])
+        .filter(x => !Branches.same(x.branch, userBranch) && (Number(x.qty) || 0) >= qty)
+        .sort((a, b) => (Number(b.qty) || 0) - (Number(a.qty) || 0));
+
+      const selQty  = trfQtyAt(sel);
+      const defQty  = TRF_DEFAULT ? trfQtyAt(TRF_DEFAULT) : 0;
+      const selOk   = selQty >= qty;
+      const defOk   = TRF_DEFAULT && defQty >= qty;
+
+      let kind = null, msg = '';
+      if (!selOk) {
+        kind = 'bad';
+        msg = '❌ <b>' + sel + '</b> رصيده <b>' + selQty + '</b> والمطلوب <b>' + qty + '</b>'
+            + (okBranches.length
+                ? '<div style="margin-top:6px">متوفر في: ' + okBranches.map(b =>
+                    '<button type="button" onclick="trfPick(\'' + String(b.branch).replace(/'/g, "\\'") + '\')" '
+                    + 'style="background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:8px;padding:.15rem .5rem;margin-inline-end:5px;cursor:pointer;font-family:inherit;font-weight:700;font-size:.78rem">'
+                    + b.branch + ' (' + (Number(b.qty) || 0) + ')</button>').join('') + '</div>'
+                : '<div style="margin-top:6px">ومفيش فرع تاني عنده الكمية دي.</div>');
+      } else if (TRF_DEFAULT && !Branches.same(sel, TRF_DEFAULT) && defOk) {
+        // اختار فرع غير الافتراضي والصنف متوفر في الافتراضي
+        kind = 'warn';
+        msg = '⚠️ الفرع الافتراضي لطلبك هو <b>' + TRF_DEFAULT + '</b> والصنف متوفر عنده (<b>' + defQty + '</b>)'
+            + '<div style="margin-top:6px"><button type="button" onclick="trfPick(\'' + String(TRF_DEFAULT).replace(/'/g, "\\'") + '\')" '
+            + 'style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:8px;padding:.15rem .5rem;cursor:pointer;font-family:inherit;font-weight:700;font-size:.78rem">'
+            + 'اطلب من ' + TRF_DEFAULT + '</button></div>';
+      }
+
+      if (!kind) { trfHideHint(); return; }
+
+      trfWarn = true;
+      const c = kind === 'bad'
+        ? { bg: '#fef2f2', bd: '#fecaca', fg: '#b91c1c' }
+        : { bg: '#fffbeb', bd: '#fde68a', fg: '#b45309' };
+      el.style.display = '';
+      el.innerHTML =
+        '<div style="background:' + c.bg + ';border:1px solid ' + c.bd + ';color:' + c.fg
+        + ';border-radius:10px;padding:.6rem .7rem;font-size:.82rem;line-height:1.7">' + msg
+        + '<div style="margin-top:8px">'
+        + (trfConfirmed
+            ? '<span style="color:#166534;font-weight:800">✅ تم التأكيد — تقدر ترسل</span>'
+            : '<button type="button" onclick="trfConfirm()" style="background:' + c.fg
+              + ';color:#fff;border:none;border-radius:8px;padding:.35rem .9rem;font-weight:800;cursor:pointer;font-family:inherit">تأكيد وإكمال</button>')
+        + '</div></div>';
+    }
+
+    function trfConfirm() { trfConfirmed = true; trfRenderHint(); }
+
+    function trfPick(branchName) {
+      const sel = document.getElementById('branch');
+      const opt = Array.from(sel.options).find(o => Branches.same(o.value, branchName));
+      if (opt) { sel.value = opt.value; trfConfirmed = false; trfRenderHint(); }
     }
 
     // ===== Lookup: كود العميل =====
@@ -576,6 +703,7 @@
       activeUser = user;
       if (user) {
         userBranch = (Session.branch() || 'المعمورة').trim();
+        loadTransferDefaults();
         initDates();
         addItemRow();
         handleTypeInit();
@@ -729,8 +857,14 @@
 
       } else if (currentType === 'تحويل') {
         branchLabel.textContent = 'طلب تحويل من فرع';
-        branchEl.value = '';
         Array.from(branchEl.options).forEach(opt => { opt.hidden = (opt.value === userBranch); });
+        // الفرع الافتراضي من إعدادات المؤسسة (لو الميزة مفعّلة)
+        const defOpt = TRF_ON && TRF_DEFAULT
+          ? Array.from(branchEl.options).find(o => Branches.same(o.value, TRF_DEFAULT)) : null;
+        branchEl.value = defOpt ? defOpt.value : '';
+        if (defOpt) branchLabel.textContent = 'طلب تحويل من فرع (الافتراضي: ' + TRF_DEFAULT + ')';
+        trfConfirmed = false;
+        trfCheck();
       }
     }
 
@@ -794,6 +928,12 @@
         noteVal = document.getElementById('note_text').value.trim();
       } else {
         noteVal = document.getElementById('order-note').value.trim();
+      }
+
+      if (currentType === 'تحويل' && trfWarn && !trfConfirmed) {
+        alert('⚠️ فيه تنبيه على الطلب ده — اقرأه واضغط «تأكيد وإكمال» تحت قايمة الفرع.');
+        document.getElementById('trf-hint')?.scrollIntoView({ behavior:'smooth', block:'center' });
+        return;
       }
 
       const payload = {
