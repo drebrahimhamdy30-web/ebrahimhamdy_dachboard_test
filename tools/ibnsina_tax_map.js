@@ -49,14 +49,28 @@ const num = (f, d) => { const i = args.indexOf(f); return i >= 0 ? (parseInt(arg
 const load = () => { try { return JSON.parse(fs.readFileSync(OUT, 'utf8')); } catch { return { doneInvoices: [], items: {} }; } };
 const save = s => fs.writeFileSync(OUT, JSON.stringify(s, null, 1));
 
-async function login() {
-  const acc = Object.entries(CFG.accounts || {}).find(([, v]) => v && v.user && v.pass);
-  if (!acc) { console.error('مفيش حساب معبّي في ibnsina.local.json'); process.exit(1); }
+/* الفواتير **مقسومة بالحساب**: كل فرع بيشوف فواتيره هو بس. الفرع
+   اللي بيشتري صنف مالوش وجود في فواتير غيره هو المصدر الوحيد لضريبته
+   بيقين — عشان كده بنمشي على كل الحسابات مش الأول بس.
+   اتأكدنا (2026-10-01) إن أرقام الفواتير مافيهاش تعارض بين الحسابات
+   (صفر تقاطع في عيّنة 69 فاتورة)، فقائمة doneInvoices واحدة تكفي. */
+function allAccounts() {
+  const a = Object.entries(CFG.accounts || {}).filter(([, v]) => v && v.user && v.pass);
+  if (!a.length) { console.error('مفيش حساب معبّي في ibnsina.local.json'); process.exit(1); }
+  return a;
+}
+
+/* بيرجّع null بدل ما يوقف البرنامج — حساب واحد موقوف مايمنعش الباقي.
+   (سيدى بشر محجوب عن الطلب بـ«الرصيد المتاح» بس فواتيره بتتقرا.) */
+async function login(acc) {
   const j = await (await fetch(`${API}/Identity/v1.0/portal/Identity/Login`, {
     method: 'POST', headers: { ...BROWSER, 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: acc[1].user, password: acc[1].pass })
   })).json();
-  if (!j?.data?.token) { console.error('فشل الدخول: ' + (j?.errorMessage || j?.errorList?.[0] || '')); process.exit(1); }
+  if (!j?.data?.token) {
+    log(`  ⚠️ ${acc[0]}: فشل الدخول — ${(j?.errorMessage || j?.errorList?.[0] || '')}`);
+    return null;
+  }
   log(`✓ ${acc[0]} — ${j.data.pharmacyName}`);
   return { user: acc[1].user, H: { ...BROWSER, Authorization: 'Bearer ' + j.data.token, 'Content-Type': 'application/json' } };
 }
@@ -219,19 +233,22 @@ async function push(state) {
   const state = load();
   if (has('--report')) return report(state);
   if (has('--push')) { await push(state); return report(state); }
-  const ctx = await login();
   const n = num('--n', 0);
+  const daily = has('--daily');
   /* --daily: التشغيل المجدول. بيلقط الفواتير الجديدة بس ويرفعها،
      من غير --classify لأن التصنيف اتقاس (2026-10-01) وطلع بيحسم 9%
      بس من الأصناف — نداءات من غير عائد. */
-  if (has('--daily')) {
-    await pullInvoices(ctx, state, num('--n', 200), true);
+  let last = null;
+  for (const acc of allAccounts()) {
+    const ctx = await login(acc);
+    if (!ctx) continue;
+    last = ctx;
+    if (daily)  await pullInvoices(ctx, state, num('--n', 200), true);
+    else if (n) await pullInvoices(ctx, state, n);
     save(state);
-    await push(state);
-    return report(state);
   }
-  if (n) await pullInvoices(ctx, state, n);
-  if (n || has('--classify')) await classify(ctx, state);
+  if (daily) { await push(state); return report(state); }
+  if ((n || has('--classify')) && last) await classify(last, state);
   save(state);
   report(state);
 })();
