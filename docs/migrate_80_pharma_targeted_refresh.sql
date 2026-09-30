@@ -50,5 +50,15 @@ end
 $$;
 
 -- النداء جاي من الـedge function بمفتاح service_role — مش من المتصفح
+--
+-- ⚠️ `revoke from public` **لوحده مش كفاية على السيرفر الذاتي**: فيه
+--    تريجر DDL بيدّي أي دالة جديدة صلاحية تنفيذ **لـanon وauthenticated
+--    مباشرةً**، والـrevoke من PUBLIC مابيشيلش منحة مباشرة لدور معيّن.
+--    اتأكد بالتجربة 2026-09-30: بعد الترحيل على الذاتي، نداء
+--    rpc/pharma_prices_refresh بمفتاح anon رجّع 0 (يعني اشتغل) مش 403.
+--    ومن غير الأسطر دي أي حد بالمفتاح العام يقدر يكتب أسعار فارما.
+--    راجع [[selfhosted-wide-grants]].
 revoke all on function public.pharma_prices_refresh(jsonb) from public;
+revoke all on function public.pharma_prices_refresh(jsonb) from anon;
+revoke all on function public.pharma_prices_refresh(jsonb) from authenticated;
 grant execute on function public.pharma_prices_refresh(jsonb) to service_role;
