@@ -157,10 +157,9 @@
             <label id="branch-label">توجيه إلى فرع</label>
             <div class="field-icon-wrap">
               <i class="fas fa-store field-icon"></i>
-              <select data-branches id="branch" class="form-select" onchange="trfConfirmed=false; trfCheck();">
+              <select data-branches id="branch" class="form-select">
                 <option value="" disabled selected>اختر الفرع...</option>
               </select>
-              <div id="trf-hint" style="display:none;margin-top:8px;"></div>
             </div>
           </div>
 
@@ -238,7 +237,7 @@
               <label>الكمية المطلوبة</label>
               <div class="field-icon-wrap">
                 <i class="fas fa-sort-numeric-up field-icon"></i>
-                <input type="number" id="qty" class="form-input" value="1" min="1" oninput="trfConfirmed=false; trfCheck();">
+                <input type="number" id="qty" class="form-input" value="1" min="1">
               </div>
             </div>
             <div class="field-group" id="order-note-div">
@@ -517,25 +516,21 @@
         }
       } catch(e) { console.log('item lookup failed:', e); }
       finally { loadEl.classList.remove('show'); }
-      trfCheck();
     }
 
-    /* ═══ التحويلات: الفرع الافتراضي + فحص توفّر الصنف ═══
-       الإعداد من شاشة «إعدادات المؤسسة»: لكل فرع فرع افتراضي بيطلب منه،
-       ومفتاح تفعيل عام. لما الموظف يختار «تحويل» الفرع بيتحدد لوحده،
-       وأول ما يكتب الكود بنفحص رصيد الصنف في **كل الفروع** بنداء واحد
-       (item_branch_stock — migrate_80) ونقوله:
-         • الفرع اللي مختاره رصيده أقل من المطلوب → متوفر في فين
-         • اختار فرع غير الافتراضي والصنف متوفر في الافتراضي → تنبيه
-         • الافتراضي مالوش رصيد كفاية → مفيش تنبيه (مالوش لازمة)
-       التنبيه مابيمنعش الإرسال، بس لازم يضغط «تأكيد».
-       ⚠️ الرصيد من جداول المخزون (آخر مزامنة) مش لحظي من eplus. */
+    /* ═══ التحويلات: الفرع الافتراضي + تنبيه التوفّر عند الإرسال ═══
+       الإعداد من «إعدادات المؤسسة»: لكل فرع فرع افتراضي بيطلب منه + مفتاح
+       تفعيل. لما الموظف يختار «تحويل» الفرع بيتحدد لوحده.
+       وعند الضغط على «إرسال» (بعد ما يكون حدّد الكمية) بنجيب رصيد الصنف
+       في **كل الفروع** بنداء واحد (item_branch_stock — migrate_80):
+         • الفرع المحدد رصيده أقل من الكمية → نافذة تعرض البديل المتاح
+         • فرع غير الافتراضي والصنف متوفر في الافتراضي → نافذة تنبيه
+         • الافتراضي مالوش رصيد كافٍ → مفيش تنبيه (مالوش لازمة)
+       النافذة فيها: تغيير الفرع · المتابعة بالفرع الحالي · إلغاء.
+       ⚠️ الرصيد من جداول المخزون (آخر مزامنة) مش لحظي من eplus.
+       ⚠️ نصوص النافذة بالعربية الرسمية — قاعدة رسائل الشاشات. */
     let TRF_ON = false;            // الميزة مفعّلة؟
     let TRF_DEFAULT = '';          // الفرع الافتراضي لفرع المستخدم
-    let TRF_STOCK = null;          // رصيد الصنف في الفروع
-    let TRF_STOCK_CODE = '';       // الكود اللي الرصيد بتاعه
-    let trfWarn = false;           // فيه تنبيه قائم؟
-    let trfConfirmed = false;      // الموظف أكّد؟
 
     async function loadTransferDefaults() {
       try {
@@ -553,99 +548,87 @@
       } catch (e) { console.log('transfer defaults:', e); TRF_ON = false; }
     }
 
-    function trfQtyAt(branchName) {
-      const r = (TRF_STOCK || []).find(x => Branches.same(x.branch, branchName));
-      return r ? (Number(r.qty) || 0) : 0;
-    }
-
-    function trfHideHint() {
-      const el = document.getElementById('trf-hint');
-      if (el) { el.style.display = 'none'; el.innerHTML = ''; }
-      trfWarn = false;
-    }
-
-    // بيتنادى من: تغيير الفرع · تغيير الكمية · بعد جلب اسم الصنف
-    async function trfCheck() {
-      if (!TRF_ON || currentType !== 'تحويل') { trfHideHint(); return; }
+    /* البوابة: بترجّع true يكمّل الإرسال، false يوقف.
+       بتتنادى من submitOrder قبل ما الطلب يتبعت. */
+    async function trfGate() {
+      if (!TRF_ON || currentType !== 'تحويل') return true;
       const code = document.getElementById('item_code').value.trim();
-      if (!code) { trfHideHint(); return; }
-      if (TRF_STOCK_CODE !== code) {
-        try {
-          const r = await fetch(SB_URL_API + '/rest/v1/rpc/item_branch_stock', {
-            method: 'POST', headers: await sbH({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ p_code: code })
-          });
-          const d = await r.json();
-          TRF_STOCK = Array.isArray(d) ? d : [];
-          TRF_STOCK_CODE = code;
-          trfConfirmed = false;          // صنف جديد = تأكيد جديد
-        } catch (e) { console.log('item_branch_stock:', e); trfHideHint(); return; }
-      }
-      trfRenderHint();
-    }
+      const sel  = document.getElementById('branch').value;
+      if (!code || !sel) return true;
+      const qty  = Math.max(1, Number(document.getElementById('qty').value) || 1);
 
-    function trfRenderHint() {
-      const el = document.getElementById('trf-hint'); if (!el) return;
-      const sel = document.getElementById('branch').value;
-      const qty = Math.max(1, Number(document.getElementById('qty').value) || 1);
-      if (!sel) { trfHideHint(); return; }
+      let stock = [];
+      try {
+        const r = await fetch(SB_URL_API + '/rest/v1/rpc/item_branch_stock', {
+          method: 'POST', headers: await sbH({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ p_code: code })
+        });
+        const d = await r.json();
+        stock = Array.isArray(d) ? d : [];
+      } catch (e) { console.log('item_branch_stock:', e); return true; }   // الفحص مايوقفش الشغل
 
-      // الفروع اللي عندها الكمية المطلوبة (غير فرع المستخدم)
-      const okBranches = (TRF_STOCK || [])
-        .filter(x => !Branches.same(x.branch, userBranch) && (Number(x.qty) || 0) >= qty)
+      const qtyAt = n => { const r = stock.find(x => Branches.same(x.branch, n)); return r ? (Number(r.qty) || 0) : 0; };
+      const selQty = qtyAt(sel);
+      const defQty = TRF_DEFAULT ? qtyAt(TRF_DEFAULT) : 0;
+      const others = stock
+        .filter(x => !Branches.same(x.branch, userBranch) && !Branches.same(x.branch, sel) && (Number(x.qty) || 0) >= qty)
         .sort((a, b) => (Number(b.qty) || 0) - (Number(a.qty) || 0));
 
-      const selQty  = trfQtyAt(sel);
-      const defQty  = TRF_DEFAULT ? trfQtyAt(TRF_DEFAULT) : 0;
-      const selOk   = selQty >= qty;
-      const defOk   = TRF_DEFAULT && defQty >= qty;
+      const itemName = document.getElementById('item_name').value.trim();
+      let body = '', suggest = '';
 
-      let kind = null, msg = '', okText = '';
-      if (!selOk) {
-        kind = 'bad';
-        // الزر بيقول الجملة كاملة — الموظف لازم يعرف هو بيأكد على إيه
-        okText = '✔ أكمل وأبعت لـ' + sel + ' برغم إن رصيده ' + selQty;
-        msg = '❌ <b>' + sel + '</b> رصيده <b>' + selQty + '</b> والمطلوب <b>' + qty + '</b>'
-            + (okBranches.length
-                ? '<div style="margin-top:6px">متوفر في: ' + okBranches.map(b =>
-                    '<button type="button" onclick="trfPick(\'' + String(b.branch).replace(/'/g, "\\'") + '\')" '
-                    + 'style="background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:8px;padding:.15rem .5rem;margin-inline-end:5px;cursor:pointer;font-family:inherit;font-weight:700;font-size:.78rem">'
-                    + b.branch + ' (' + (Number(b.qty) || 0) + ')</button>').join('') + '</div>'
-                : '<div style="margin-top:6px">ومفيش فرع تاني عنده الكمية دي.</div>');
-      } else if (TRF_DEFAULT && !Branches.same(sel, TRF_DEFAULT) && defOk) {
-        // اختار فرع غير الافتراضي والصنف متوفر في الافتراضي
-        kind = 'warn';
-        okText = '✔ أكمل وأبعت لـ' + sel + ' مش الافتراضي';
-        msg = '⚠️ الفرع الافتراضي لطلبك هو <b>' + TRF_DEFAULT + '</b> والصنف متوفر عنده (<b>' + defQty + '</b>)'
-            + '<div style="margin-top:6px"><button type="button" onclick="trfPick(\'' + String(TRF_DEFAULT).replace(/'/g, "\\'") + '\')" '
-            + 'style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:8px;padding:.15rem .5rem;cursor:pointer;font-family:inherit;font-weight:700;font-size:.78rem">'
-            + 'اطلب من ' + TRF_DEFAULT + '</button></div>';
+      if (selQty < qty) {
+        suggest = others.length ? others[0].branch : '';
+        body = 'الرصيد المتاح في فرع <b>' + sel + '</b>: <b>' + selQty + '</b> وحدة، وهو أقل من الكمية المطلوبة.'
+             + (others.length
+                 ? '<br>يتوفر المطلوب في: ' + others.map(o => o.branch + ' (' + (Number(o.qty) || 0) + ' وحدة)').join(' · ')
+                 : '<br>ولا يتوفر المطلوب بالكمية المطلوبة في أي فرع آخر.');
+      } else if (TRF_DEFAULT && !Branches.same(sel, TRF_DEFAULT) && defQty >= qty) {
+        suggest = TRF_DEFAULT;
+        body = 'الفرع الافتراضي لطلبات فرعكم هو <b>' + TRF_DEFAULT + '</b>، والصنف متوفر لديه برصيد <b>' + defQty + '</b> وحدة.'
+             + '<br>الفرع المحدد حاليًا: <b>' + sel + '</b>.';
+      } else {
+        return true;   // مفيش ما يستدعي التنبيه
       }
 
-      if (!kind) { trfHideHint(); return; }
-
-      trfWarn = true;
-      const c = kind === 'bad'
-        ? { bg: '#fef2f2', bd: '#fecaca', fg: '#b91c1c' }
-        : { bg: '#fffbeb', bd: '#fde68a', fg: '#b45309' };
-      el.style.display = '';
-      el.innerHTML =
-        '<div style="background:' + c.bg + ';border:1px solid ' + c.bd + ';color:' + c.fg
-        + ';border-radius:10px;padding:.6rem .7rem;font-size:.82rem;line-height:1.7">' + msg
-        + '<div style="margin-top:8px">'
-        + (trfConfirmed
-            ? '<span style="color:#166534;font-weight:800">✅ تم التأكيد — الطلب هيروح لـ' + sel + '</span>'
-            : '<button type="button" onclick="trfConfirm()" style="background:' + c.fg
-              + ';color:#fff;border:none;border-radius:8px;padding:.35rem .9rem;font-weight:800;cursor:pointer;font-family:inherit">' + okText + '</button>')
-        + '</div></div>';
+      return await trfShowNotice({ itemName, code, qty, sel, suggest, body });
     }
 
-    function trfConfirm() { trfConfirmed = true; trfRenderHint(); }
+    // نافذة التنبيه — بترجّع Promise<boolean>
+    function trfShowNotice(o) {
+      return new Promise(resolve => {
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:1rem';
+        const btn = 'border:none;border-radius:10px;padding:.6rem 1rem;font-weight:700;cursor:pointer;font-family:inherit;font-size:.86rem;width:100%';
+        wrap.innerHTML =
+          '<div style="background:var(--surface,#fff);color:var(--text-primary,#0f172a);max-width:460px;width:100%;border-radius:16px;overflow:hidden;direction:rtl;font-family:inherit;box-shadow:0 20px 60px rgba(0,0,0,.35)">'
+          + '<div style="background:#fffbeb;border-bottom:1px solid #fde68a;color:#92400e;padding:.9rem 1.1rem;font-weight:800;font-size:.95rem">'
+          +   'تنبيه قبل إرسال طلب التحويل</div>'
+          + '<div style="padding:1rem 1.1rem;font-size:.88rem;line-height:2">'
+          +   '<div style="color:var(--text-secondary,#475569)">الصنف: <b>' + (o.itemName || '—') + '</b>'
+          +   (o.code ? ' (كود ' + o.code + ')' : '') + '<br>الكمية المطلوبة: <b>' + o.qty + '</b> وحدة</div>'
+          +   '<div style="margin-top:.7rem;padding-top:.7rem;border-top:1px solid var(--border,#e5e7eb)">' + o.body + '</div>'
+          + '</div>'
+          + '<div style="padding:0 1.1rem 1.1rem;display:flex;flex-direction:column;gap:.5rem">'
+          +   (o.suggest ? '<button id="trf-switch" style="' + btn + ';background:#0d9488;color:#fff">تغيير الفرع إلى ' + o.suggest + '</button>' : '')
+          +   '<button id="trf-keep" style="' + btn + ';background:#f1f5f9;color:#0f172a">المتابعة بفرع ' + o.sel + '</button>'
+          +   '<button id="trf-cancel" style="' + btn + ';background:transparent;color:var(--text-muted,#64748b);font-weight:600">إلغاء</button>'
+          + '</div></div>';
+        document.body.appendChild(wrap);
 
-    function trfPick(branchName) {
-      const sel = document.getElementById('branch');
-      const opt = Array.from(sel.options).find(o => Branches.same(o.value, branchName));
-      if (opt) { sel.value = opt.value; trfConfirmed = false; trfRenderHint(); }
+        const done = v => { wrap.remove(); resolve(v); };
+        const sw = wrap.querySelector('#trf-switch');
+        if (sw) sw.onclick = () => {
+          // نبدّل الفرع في القائمة ونكمّل الإرسال عليه
+          const sel = document.getElementById('branch');
+          const opt = Array.from(sel.options).find(x => Branches.same(x.value, o.suggest));
+          if (opt) sel.value = opt.value;
+          done(true);
+        };
+        wrap.querySelector('#trf-keep').onclick   = () => done(true);
+        wrap.querySelector('#trf-cancel').onclick = () => done(false);
+        wrap.onclick = e => { if (e.target === wrap) done(false); };
+      });
     }
 
     // ===== Lookup: كود العميل =====
@@ -866,8 +849,6 @@
           ? Array.from(branchEl.options).find(o => Branches.same(o.value, TRF_DEFAULT)) : null;
         branchEl.value = defOpt ? defOpt.value : '';
         if (defOpt) branchLabel.textContent = 'طلب تحويل من فرع (الافتراضي: ' + TRF_DEFAULT + ')';
-        trfConfirmed = false;
-        trfCheck();
       }
     }
 
@@ -933,9 +914,10 @@
         noteVal = document.getElementById('order-note').value.trim();
       }
 
-      if (currentType === 'تحويل' && trfWarn && !trfConfirmed) {
-        alert('⚠️ فيه تنبيه على الطلب ده — اقرأه واضغط «تأكيد وإكمال» تحت قايمة الفرع.');
-        document.getElementById('trf-hint')?.scrollIntoView({ behavior:'smooth', block:'center' });
+      // تنبيه التحويلات: نافذة يقراها الموظف ويقرر — ولو ألغى مابنبعتش
+      if (!await trfGate()) {
+        btn.disabled = false;
+        btn.innerHTML = "<i class=\"fas fa-paper-plane\"></i> إرسال الطلب";
         return;
       }
 
