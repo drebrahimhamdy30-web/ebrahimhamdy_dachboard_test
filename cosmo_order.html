@@ -153,6 +153,7 @@
           <span><i class="fas fa-filter" style="color:var(--accent);"></i> بحث وفلتر</span>
           <div class="type-toggle">
             <button id="type-cosmo" class="active" onclick="setType('cosmo')">🧴 كوزمو</button>
+            <button id="type-paper" onclick="setType('paper')">📄 ورقيات</button>
             <button id="type-medicine" onclick="setType('medicine')">💊 دوا</button>
           </div>
         </div>
@@ -251,7 +252,12 @@
     var transferDefault= {};      // اسم الفرع → اسم الفرع الافتراضي للتحويل منه
     var transferPending= new Set();// "فرع|كود" → اتطلب تحويل خلاص
     var branchReps     = {};      // اسم الفرع → اسم مستخدم بيتنسبله الطلب
-    var currentType = 'cosmo';          // 'cosmo' = itm_ismedicine 0 | 'medicine' = 1
+    /* التبويب بقى على **تصنيف** الصنف مش على med لوحده: «ورقيات» بقت
+       تصنيف قائم بذاته (شركة «ورقيات») وليها شريحتها في إعدادات المؤسسة،
+       فكانت بتتخلط مع الكوزمو. التصنيف نفسه = item_category في القاعدة. */
+    var currentType = 'cosmo';                                  // cosmo | paper | medicine
+    var TYPE_CAT = { cosmo:'cos', paper:'paper', medicine:'med' };
+    var TYPE_AR  = { cosmo:'الكوزمو', paper:'الورقيات', medicine:'الدوا' };
     /* الفروع كلها من جدول الفروع — مفيش اسم فرع مكتوب في الملف ده.
        بتتملى في initBranches() بعد Branches.ready()، مش وقت تحميل
        السكربت: أول زيارة بكاش فاضي كانت هتدّي قايمة فاضية. */
@@ -356,10 +362,11 @@
     function setType(type){
       if(currentType === type) return;
       currentType = type;
-      document.getElementById('type-cosmo').classList.toggle('active', type==='cosmo');
-      document.getElementById('type-medicine').classList.toggle('active', type==='medicine');
-      document.getElementById('list-title').textContent =
-        type==='cosmo' ? 'قائمة طلبيات الكوزمو' : 'قائمة طلبيات الدوا';
+      ['cosmo','paper','medicine'].forEach(function(t){
+        var b = document.getElementById('type-' + t);
+        if (b) b.classList.toggle('active', type === t);
+      });
+      document.getElementById('list-title').textContent = 'قائمة طلبيات ' + TYPE_AR[type];
       // إعادة ضبط فلتر الشركات وإعادة الحساب
       selectedCompanies = [];
       document.getElementById('company-input').value = '';
@@ -722,13 +729,13 @@ saveQty();
     function calculate(){
       if(!dataLoaded){alert('البيانات لسه بتتحمل');return;}
       var stockMap={};
-      var wantMed = currentType === 'medicine' ? 1 : 0;
+      var wantCat = TYPE_CAT[currentType] || 'cos';
       // stockSummary: صف واحد لكل صنف من الـRPC {c,n,co,u,med,m:{h,q,p},s:{...},b:{...}}
       stockSummary.forEach(function(item){
-        // فلترة النوع: كوزمو (0) أو دوا (1)
+        // فلترة النوع بالتصنيف: كوزمو / ورقيات / دوا — نفس item_category
         var isMed = parseInt(item.med);
         if(isNaN(isMed)) isMed = 0;
-        if(isMed !== wantMed) return;
+        if(catOf(item.co, isMed) !== wantCat) return;
         var code=String(item.c||'').trim();
         if(!code) return;
         // السعر التمثيلي: أول فرع مسجّل فيه الصنف، بترتيب جدول الفروع
@@ -1115,7 +1122,8 @@ saveQty();
 
       XLSX.utils.book_append_sheet(wb, ws, 'الطلبية');
       var brTag = selectedBranches.length===ALL_BR.length ? '' : '_'+selectedBranches.join('_');
-      var fname = (currentType==='medicine'?'medicine':'cosmo') + brTag + '_order_';
+      var fname = (TYPE_CAT[currentType]==='med' ? 'medicine'
+                 : TYPE_CAT[currentType]==='paper' ? 'paper' : 'cosmo') + brTag + '_order_';
       XLSX.writeFile(wb, fname + new Date().toISOString().slice(0,10) + '.xlsx');
     }
   </script>
