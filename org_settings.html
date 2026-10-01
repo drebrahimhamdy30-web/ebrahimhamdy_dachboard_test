@@ -50,6 +50,12 @@
     .os-pv-badge { padding:3px 12px; border-radius:20px; font-weight:800; font-size:0.75rem; }
     .os-pv-th { padding:6px 14px; color:#fff; font-weight:700; font-size:0.78rem; border-radius:6px; }
 
+    .os-tbl { width:100%; border-collapse:collapse; font-size:.8rem; }
+    .os-tbl th { background:var(--surface-3); padding:7px 8px; font-weight:700; color:var(--text-secondary); text-align:center; white-space:nowrap; }
+    .os-tbl td { padding:5px 8px; border-bottom:1px solid var(--surface-3); text-align:center; }
+    .os-tbl select, .os-tbl input[type=number] { padding:5px 7px; border:1.5px solid var(--border); border-radius:7px; font-family:var(--font); font-size:.78rem; background:var(--surface); color:var(--text-primary); outline:none; }
+    .os-tbl select:focus, .os-tbl input:focus { border-color:var(--primary); }
+    .os-tbl select[disabled] { opacity:.45; }
     .os-branch-row { display:grid; grid-template-columns:1fr 1fr auto; gap:8px; margin-bottom:8px; align-items:center; }
     .os-branch-row input { padding:8px 10px; border:1.5px solid var(--border); border-radius:8px; font-family:var(--font); font-size:0.85rem; background:var(--surface); color:var(--text-primary); outline:none; }
     .os-branch-row input:focus { border-color:var(--primary); }
@@ -136,6 +142,34 @@
         <div style="font-size:.74rem;color:var(--text-muted);margin-top:10px">
           التعديل من شاشة <b>«الفروع»</b> في تطبيق التوصيل — دي المصدر الوحيد (جدول branches).
           كانت الفروع بتتحرّر من هنا كمان في مكان تخزين تاني، فالاتنين كانوا بيتفرّعوا.
+        </div>
+      </div>
+
+      <!-- حساب المعدل والفائض — المصدر الوحيد لكل السيستم -->
+      <div class="os-card">
+        <h3><i class="fas fa-calculator"></i> حساب المعدل والفائض</h3>
+        <div style="font-size:.78rem;color:var(--text-secondary);margin-bottom:12px;line-height:1.7">
+          كل مكان في النظام يحتاج معدل استهلاك أو فائض يقرأ من هنا: طلبيات الأدوية، الحد الأدنى للمخزون،
+          المخزون الزائد، وتوزيع البضاعة. القيم المعروضة هي الوضع الحالي، ويمكن تخصيصها لكل فرع على حدة.
+          <br><b>معدل الشراء</b> هو ما يُطلب على أساسه. <b>معدل الفائض</b> هو ما يُحتفظ به قبل اعتبار الباقي فائضًا.
+        </div>
+        <div id="os-calc" style="overflow:auto">جارٍ التحميل…</div>
+
+        <div style="font-weight:800;font-size:.85rem;margin:18px 0 6px">معاملات الشرائح لكل تصنيف</div>
+        <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:8px;line-height:1.7">
+          لكل صنف تُختار أعلى شريحة يتجاوز معدلها الخام حدَّها. الفرع الفارغ يعني القاعدة الافتراضية لكل الفروع،
+          وأي سطر باسم فرع معيّن يَغلب عليها في نفس التصنيف.
+          <br>تصنيف الصنف: <b>ورقيات</b> إذا كانت شركته «ورقيات»، وإلا <b>أدوية</b> إذا كان معلَّمًا دواءً، وإلا <b>كوزمو</b>.
+        </div>
+        <div id="os-tiers" style="overflow:auto"></div>
+        <button class="btn btn-sm" style="background:var(--surface-3);color:var(--text-primary);border:none;padding:6px 12px;border-radius:8px;cursor:pointer;font-weight:700;margin-top:8px" onclick="tierAdd()"><i class="fas fa-plus"></i> إضافة شريحة</button>
+
+        <div style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="calcSave()"><i class="fas fa-save"></i> حفظ وإعادة الحساب</button>
+          <span id="calc-msg" class="os-msg"></span>
+        </div>
+        <div style="font-size:.72rem;color:var(--text-muted);margin-top:8px">
+          الحفظ يعيد حساب المعدلات والطلبيات مباشرةً، وقد يستغرق بضع ثوانٍ.
         </div>
       </div>
 
@@ -351,8 +385,144 @@
       } catch(e){ msg.textContent = 'تعذّر الحفظ'; msg.style.color = 'var(--danger)'; }
     }
 
+    /* ═══ حساب المعدل والفائض — المصدر الوحيد ═══════════════════════
+       جدولين صغيرين بيتحكموا في كل مكان بيحسب معدل أو فائض:
+         branch_calc_settings — لكل (فرع × تصنيف)
+         category_rate_tiers  — معامل الشريحة لكل تصنيف (وفرع اختياريًا)
+       الحفظ بيعيد بناء consumption_flat و purchase_orders_flat فورًا،
+       عشان ما يحصلش إن الإعداد اتغيّر والأرقام لسه قديمة. */
+    const CAT_AR = { med:'أدوية', cos:'كوزمو', paper:'ورقيات' };
+    let CALC = [], TIERS = [], TIERS_DEL = [];
+
+    async function calcLoad(){
+      try {
+        const [a, b] = await Promise.all([
+          fetch(REST+'branch_calc_settings?select=*&order=branch.asc,category.asc', { headers: await H() }).then(r=>r.json()),   // data-ok: جدول إعدادات — صف لكل فرع×تصنيف
+          fetch(REST+'category_rate_tiers?select=*&order=category.asc,rate_min.asc',  { headers: await H() }).then(r=>r.json())    // data-ok: جدول إعدادات — شرائح قليلة
+        ]);
+        CALC  = Array.isArray(a) ? a : [];
+        TIERS = Array.isArray(b) ? b : [];
+        calcRender(); tierRender();
+      } catch(e){ document.getElementById('os-calc').textContent = 'تعذّر تحميل الإعدادات'; }
+    }
+
+    function esc0(s){ return String(s==null?'':s).replace(/[&<>]/g, function(c){ return ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' })[c]; }); }
+    function brOptions(sel, skip){
+      return '<option value=""></option>' + Branches.all()
+        .filter(function(x){ return x.name !== skip; })
+        .map(function(x){ return '<option value="'+escAttr(x.name)+'"'+(x.name===sel?' selected':'')+'>'+esc0(x.name)+'</option>'; }).join('');
+    }
+
+    function calcRender(){
+      if (!CALC.length){ document.getElementById('os-calc').textContent = 'مفيش إعدادات — طبّق migrate_85.'; return; }
+      var h = '<table class="os-tbl"><thead><tr>'
+            + '<th>الفرع</th><th>التصنيف</th><th>مصدر معدل الشراء</th><th>يأخذ من</th>'
+            + '<th>معدل الفائض</th><th>أقل رصيد لاعتبار فائض</th><th>داخل الحسابات</th></tr></thead><tbody>';
+      var lastBr = null;
+      CALC.forEach(function(r, i){
+        var newBr = r.branch !== lastBr; lastBr = r.branch;
+        h += '<tr'+(newBr ? ' style="border-top:2px solid var(--border)"' : '')+'>'
+          +  '<td style="font-weight:'+(newBr?'800':'400')+';color:'+(newBr?'var(--text-primary)':'transparent')+'">'+esc0(r.branch)+'</td>'
+          +  '<td>'+esc0(CAT_AR[r.category] || r.category)+'</td>'
+          +  '<td><select data-i="'+i+'" data-k="rate_source" onchange="calcSet(this)">'
+          +    '<option value="own"'+(r.rate_source==='own'?' selected':'')+'>مبيعات الفرع نفسه</option>'
+          +    '<option value="derived"'+(r.rate_source==='derived'?' selected':'')+'>مشتق من فرع آخر</option></select></td>'
+          +  '<td><select data-i="'+i+'" data-k="source_branch" onchange="calcSet(this)"'+(r.rate_source==='derived'?'':' disabled')+'>'
+          +    brOptions(r.source_branch, r.branch)+'</select></td>'
+          +  '<td><select data-i="'+i+'" data-k="surplus_mode" onchange="calcSet(this)">'
+          +    '<option value="same"'+(r.surplus_mode==='same'?' selected':'')+'>نفس معدل الشراء</option>'
+          +    '<option value="source_full"'+(r.surplus_mode==='source_full'?' selected':'')+'>معدل الفرع المصدر كاملًا</option></select></td>'
+          +  '<td><input type="number" min="0" step="1" style="width:76px" data-i="'+i+'" data-k="min_stock_surplus" value="'+(r.min_stock_surplus==null?2:r.min_stock_surplus)+'" onchange="calcSet(this)"></td>'
+          +  '<td style="text-align:center"><input type="checkbox" data-i="'+i+'" data-k="active"'+(r.active?' checked':'')+' onchange="calcSet(this)"></td>'
+          +  '</tr>';
+      });
+      document.getElementById('os-calc').innerHTML = h + '</tbody></table>';
+    }
+
+    function calcSet(el){
+      var i = +el.dataset.i, k = el.dataset.k;
+      CALC[i][k] = (el.type === 'checkbox') ? el.checked
+                 : (k === 'min_stock_surplus' ? (parseFloat(el.value) || 0) : el.value);
+      CALC[i]._dirty = true;
+      /* «مشتق» من غير مصدر = صف بترفضه القاعدة، فبنفتح/نقفل الخانة مع الاختيار */
+      if (k === 'rate_source') calcRender();
+    }
+
+    function tierRender(){
+      var h = '<table class="os-tbl"><thead><tr>'
+            + '<th>التصنيف</th><th>الفرع (فارغ = الكل)</th><th>المعدل ≥</th><th>الشهور ≥</th><th>× المعامل</th><th></th>'
+            + '</tr></thead><tbody>';
+      TIERS.forEach(function(t, i){
+        h += '<tr>'
+          +  '<td><select data-i="'+i+'" data-k="category" onchange="tierSet(this)">'
+          +    ['med','cos','paper'].map(function(c){ return '<option value="'+c+'"'+(t.category===c?' selected':'')+'>'+CAT_AR[c]+'</option>'; }).join('')
+          +    '</select></td>'
+          +  '<td><select data-i="'+i+'" data-k="branch" onchange="tierSet(this)">'+brOptions(t.branch, null)+'</select></td>'
+          +  '<td><input type="number" step="0.5"  min="0" style="width:76px" data-i="'+i+'" data-k="rate_min"   value="'+(t.rate_min   == null ? 0 : t.rate_min)+'" onchange="tierSet(this)"></td>'
+          +  '<td><input type="number" step="1"    min="0" style="width:68px" data-i="'+i+'" data-k="active_min" value="'+(t.active_min == null ? 0 : t.active_min)+'" onchange="tierSet(this)"></td>'
+          +  '<td><input type="number" step="0.05" min="0" style="width:76px" data-i="'+i+'" data-k="multiply"   value="'+(t.multiply   == null ? 1 : t.multiply)+'" onchange="tierSet(this)"></td>'
+          +  '<td><button class="btn btn-sm" style="background:none;border:none;color:var(--danger);cursor:pointer" onclick="tierDel('+i+')"><i class="fas fa-times"></i></button></td>'
+          +  '</tr>';
+      });
+      document.getElementById('os-tiers').innerHTML = h + '</tbody></table>';
+    }
+
+    function tierSet(el){
+      var i = +el.dataset.i, k = el.dataset.k;
+      TIERS[i][k] = (el.tagName === 'SELECT') ? (el.value || null) : (parseFloat(el.value) || 0);
+      TIERS[i]._dirty = true;
+    }
+    function tierAdd(){ TIERS.push({ category:'cos', branch:null, rate_min:1, active_min:2, multiply:1, _dirty:true }); tierRender(); }
+    function tierDel(i){
+      var t = TIERS[i];
+      if (t && t.id) TIERS_DEL.push(t.id);
+      TIERS.splice(i, 1); tierRender();
+    }
+
+    async function calcSave(){
+      var msg = document.getElementById('calc-msg');
+      msg.style.color = 'var(--text-muted)'; msg.textContent = 'جارٍ الحفظ…';
+      try {
+        var bad = CALC.filter(function(r){ return r.rate_source === 'derived' && !r.source_branch; });
+        if (bad.length){ msg.textContent = 'اختر «يأخذ من» للصفوف المشتقة'; msg.style.color = 'var(--danger)'; return; }
+
+        for (var i = 0; i < CALC.length; i++){
+          var r = CALC[i]; if (!r._dirty) continue;
+          await fetch(REST+'branch_calc_settings?id=eq.'+r.id, { method:'PATCH', headers: await HW({ Prefer:'return=minimal' }),
+            body: JSON.stringify({ rate_source: r.rate_source,
+                                   source_branch: r.rate_source === 'derived' ? r.source_branch : null,
+                                   surplus_mode: r.surplus_mode,
+                                   min_stock_surplus: r.min_stock_surplus,
+                                   active: !!r.active,
+                                   updated_at: new Date().toISOString() }) });
+          r._dirty = false;
+        }
+
+        for (var d = 0; d < TIERS_DEL.length; d++)
+          await fetch(REST+'category_rate_tiers?id=eq.'+TIERS_DEL[d], { method:'DELETE', headers: await H() });
+        TIERS_DEL = [];
+
+        for (var j = 0; j < TIERS.length; j++){
+          var t = TIERS[j]; if (!t._dirty) continue;
+          var body = { category: t.category, branch: t.branch || null, rate_min: t.rate_min,
+                       active_min: t.active_min, multiply: t.multiply, updated_at: new Date().toISOString() };
+          if (t.id) await fetch(REST+'category_rate_tiers?id=eq.'+t.id, { method:'PATCH', headers: await HW({ Prefer:'return=minimal' }), body: JSON.stringify(body) });
+          else      await fetch(REST+'category_rate_tiers',             { method:'POST',  headers: await HW({ Prefer:'return=minimal' }), body: JSON.stringify(body) });
+          t._dirty = false;
+        }
+
+        msg.textContent = 'تم الحفظ — جارٍ إعادة حساب المعدلات…';
+        await fetch(REST+'rpc/refresh_consumption_rates', { method:'POST', headers: await HW(), body:'{}' });
+        msg.textContent = 'جارٍ إعادة بناء الطلبيات…';
+        await fetch(REST+'rpc/refresh_purchase_orders',   { method:'POST', headers: await HW(), body:'{}' });
+        msg.textContent = 'تم الحفظ وإعادة الحساب ✓'; msg.style.color = '#16a34a';
+        await calcLoad();
+      } catch(e){ msg.textContent = 'تعذّر الحفظ'; msg.style.color = 'var(--danger)'; }
+    }
+
     load();
     loadBranchAudit();
+    calcLoad();
     loadTransferSettings();
   </script>
 </body>
