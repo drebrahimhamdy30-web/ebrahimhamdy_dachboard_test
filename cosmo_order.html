@@ -15,14 +15,22 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   <style>
-    .top-panel { display:grid; grid-template-columns:1fr 300px; gap:16px; margin-bottom:20px; align-items:start; }
+    .top-panel { display:grid; grid-template-columns:1fr 300px; gap:16px; margin-bottom:20px; align-items:stretch; }
     @media(max-width:860px){ .top-panel{grid-template-columns:1fr;} }
     .settings-panel,.filter-panel { background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px; }
+    /* كارت القواعد يملا طول الصف، وسويتش الورقيات يلزق تحت */
+    .settings-panel { display:flex;flex-direction:column; }
+    .settings-panel .paper-switch-wrap { margin-top:auto; }
     .panel-title { font-size:0.85rem;font-weight:700;color:var(--text-secondary);margin-bottom:12px;display:flex;align-items:center;gap:6px; }
-    .rules-table { width:100%;border-collapse:collapse; }
+    /* ⚠️ style.css فيه قاعدة عامة `table{min-width:500px}` — جوّه كارت 300px
+       كانت بتخلي الجدول 500px فعمود «× معامل» وزرار المسح يخرجوا بره الكارت
+       ويعملوا سكرول أفقي للصفحة كلها. لازم تتلغي هنا بالتحديد. */
+    .rules-table { width:100%;min-width:0;table-layout:fixed;border-collapse:collapse; }
+    .rules-table col.c-num { width:30%; }
+    .rules-table col.c-del { width:10%; }
     .rules-table th { background:var(--surface-3);padding:6px 8px;font-size:0.72rem;font-weight:700;color:var(--text-secondary);text-align:center;border-bottom:2px solid var(--border); }
     .rules-table td { padding:5px 6px;border-bottom:1px solid var(--surface-3);text-align:center; }
-    .rules-table input { width:58px;text-align:center;padding:4px 6px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font);font-size:0.78rem;outline:none; }
+    .rules-table input { width:100%;box-sizing:border-box;text-align:center;padding:4px 2px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font);font-size:0.78rem;outline:none; }
     .rules-table input:focus { border-color:var(--accent); }
     .btn-del-rule { background:none;border:none;color:var(--danger);cursor:pointer;padding:2px 5px;font-size:0.8rem; }
     .btn-add-rule { display:inline-flex;align-items:center;gap:4px;margin-top:8px;padding:5px 10px;background:var(--surface-3);border:1.5px dashed var(--border);border-radius:var(--radius-sm);font-family:var(--font);font-size:0.75rem;font-weight:600;color:var(--text-secondary);cursor:pointer; }
@@ -33,6 +41,23 @@
     .company-dropdown-wrap { position:relative; }
     .company-trigger { display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;font-size:0.8rem;font-family:var(--font);background:var(--surface);user-select:none; }
     .actions-row { display:flex;gap:8px;margin-top:10px;flex-wrap:wrap; }
+    /* ===== الشريط العلوي المدمج ===== */
+    .cos-filters { display:grid;grid-template-columns:1fr 1.5fr 150px;gap:8px;align-items:center; }
+    @media(max-width:700px){ .cos-filters{grid-template-columns:1fr;} }
+    .cos-filters .form-input,.cos-filters .form-select { height:36px;box-sizing:border-box;font-size:0.8rem; }
+    .cos-row { display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px; }
+    .cos-row .filter-label { margin:0;white-space:nowrap; }
+    /* أزرار بحجم طبيعي على اليسار بدل ما تتمدد على عرض الكارت */
+    .cos-actions { margin-inline-start:auto;display:flex;align-items:center;gap:6px;flex-wrap:wrap; }
+    .cos-btn { height:36px;padding:0 14px;display:inline-flex;align-items:center;gap:6px;font-size:0.8rem;font-weight:700;white-space:nowrap; }
+    .cos-btn-excel { background:#16a34a;color:#fff; }
+    .cos-btn-ghost { background:var(--surface-3);color:var(--text-secondary);border:1.5px solid var(--border); }
+    .cos-btn-ghost:hover { border-color:var(--accent);color:var(--accent-dark); }
+    .cos-btn-danger { background:transparent;color:var(--danger);border:1.5px solid var(--border);padding:0 11px; }
+    .cos-btn-danger:hover { border-color:var(--danger);background:#fee2e2; }
+    .cos-sep { width:1px;height:22px;background:var(--border);margin:0 2px; }
+    /* أسماء الفروع ماتلتفش على سطرين */
+    .branch-toggle button { white-space:nowrap;padding:6px 12px; }
     .order-wrap { overflow:auto; max-height:calc(100vh - 150px); }
     .order-table { width:100%;border-collapse:collapse;min-width:860px; }
     .order-table th { background:var(--primary);color:#fff;padding:9px 8px;font-size:0.7rem;font-weight:700;text-align:center;white-space:nowrap; position:sticky;top:0;z-index:5; }
@@ -121,8 +146,8 @@
           </div>
         </div>
 
-        <!-- بحث + شركات في سطر واحد -->
-        <div class="search-company-row">
+        <!-- سطر واحد: بحث + شركات + حالة -->
+        <div class="cos-filters">
           <div class="field-icon-wrap">
             <i class="fas fa-search field-icon"></i>
             <input type="text" id="search-input" class="form-input" placeholder="اسم أو كود..." oninput="applyFilters()" style="padding-right:34px;">
@@ -134,43 +159,37 @@
             </div>
             <div class="company-suggest" id="company-suggest"></div>
           </div>
+          <select id="status-filter" class="form-select" onchange="applyFilters()" title="حالة الطلب">
+            <option value="all">كل الحالات</option>
+            <option value="pending">لم يُطلب</option>
+            <option value="ordered">تم الطلب</option>
+          </select>
         </div>
 
-        <!-- اختيار الفرع -->
-        <div style="margin-top:10px;">
-          <span class="filter-label">الفرع المطلوب له <small style="font-weight:400;opacity:0.65;">(تقدر تختار فرع أو أكتر)</small></span>
-          <div class="type-toggle branch-toggle" style="display:flex;width:100%;">
-            <button id="branch-all" class="active" onclick="setBranch('all')" style="flex:1;">🏬 كل الفروع</button>
+        <!-- الفروع + الأزرار في سطر واحد -->
+        <div class="cos-row">
+          <span class="filter-label" title="تقدر تختار فرع أو أكتر">الفرع المطلوب له</span>
+          <div class="type-toggle branch-toggle">
+            <button id="branch-all" class="active" onclick="setBranch('all')">🏬 كل الفروع</button>
             <span id="branch-buttons" style="display:contents;"></span>
             <!-- بتتولد من جدول الفروع في initBranches() -->
           </div>
-        </div>
 
-        <div class="filter-grid">
-          <div>
-            <span class="filter-label">الحالة</span>
-            <select id="status-filter" class="form-select" onchange="applyFilters()">
-              <option value="all">الكل</option>
-              <option value="pending">لم يُطلب</option>
-              <option value="ordered">تم الطلب</option>
-            </select>
-          </div>
-          <div style="display:flex;align-items:flex-end;">
-            <button class="btn" style="background:#fee2e2;color:#b91c1c;width:100%;font-size:0.78rem;" onclick="clearOrdered()">
+          <div class="cos-actions">
+            <button class="btn btn-primary cos-btn" onclick="calculate()">
+              <i class="fas fa-calculator"></i> احسب
+            </button>
+            <button class="btn cos-btn cos-btn-excel" onclick="exportExcel()">
+              <i class="fas fa-file-excel"></i> Excel
+            </button>
+            <span class="cos-sep"></span>
+            <button id="btn-toggle-ignored" class="btn cos-btn cos-btn-ghost" onclick="toggleShowIgnored()">
+              <i class="fas fa-eye"></i> <span id="toggle-ignored-label">إظهار المتجاهَل</span>
+            </button>
+            <button class="btn cos-btn cos-btn-danger" onclick="clearOrdered()" title="مسح الطلبيات المسجّلة">
               <i class="fas fa-trash-alt"></i> مسح الطلبيات
             </button>
           </div>
-        </div>
-        <div class="actions-row">
-          <button class="btn btn-primary" style="flex:2;" onclick="calculate()">
-            <i class="fas fa-calculator"></i> احسب
-          </button>
-          <button class="btn" style="background:#16a34a;color:#fff;flex:1;" onclick="exportExcel()">
-            <i class="fas fa-file-excel"></i> Excel
-          </button>
-          <button id="btn-toggle-ignored" class="btn" style="background:var(--surface-3);color:var(--text-secondary);flex:1;font-size:0.78rem;" onclick="toggleShowIgnored()">
-            <i class="fas fa-eye"></i> <span id="toggle-ignored-label">إظهار المتجاهَل</span>
-          </button>
         </div>
       </div>
 
@@ -178,6 +197,7 @@
       <div class="settings-panel">
         <div class="panel-title"><i class="fas fa-sliders-h" style="color:var(--accent);"></i> قواعد الطلب</div>
         <table class="rules-table">
+          <colgroup><col class="c-num"><col class="c-num"><col class="c-num"><col class="c-del"></colgroup>
           <thead><tr><th>معدل >=</th><th>شهور >=</th><th>× معامل</th><th></th></tr></thead>
           <tbody id="rules-body">
             <tr>
@@ -266,7 +286,7 @@
       var host = document.getElementById('branch-buttons');
       if (host) {
         host.innerHTML = BR_KEYS.map(function(k){
-          return '<button id="branch-'+k+'" onclick="setBranch(\''+k+'\')" style="flex:1;">'+BRANCHES[k]+'</button>';
+          return '<button id="branch-'+k+'" onclick="setBranch(\''+k+'\')">'+BRANCHES[k]+'</button>';
         }).join('');
       }
     }
