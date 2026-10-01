@@ -75,6 +75,15 @@
     .order-table td { padding:7px 8px;font-size:0.77rem;border-bottom:1px solid var(--surface-3);text-align:center;vertical-align:middle; }
     .order-table tr:hover td { background:var(--surface-2); }
     .order-table tr.ignored-row td { opacity:0.4; }
+    /* ===== عمود «تحويل بدل شراء» ===== */
+    .order-table tr.transfer-row td { opacity:0.55;background:#f8fafc; }
+    .tr-cell { line-height:1.5; }
+    .tr-rest { font-size:0.67rem;color:var(--text-muted); }
+    .tr-alt { background:#fef9c3;color:#a16207;border-radius:20px;padding:0 6px;font-size:0.62rem;font-weight:700; }
+    .tr-btn { margin-top:3px;padding:2px 10px;border:1.5px solid var(--accent);background:var(--surface);color:var(--accent-dark);
+              border-radius:20px;font-family:var(--font);font-size:0.7rem;font-weight:700;cursor:pointer; }
+    .tr-btn:hover { background:var(--accent);color:#fff; }
+    .tr-done { color:#15803d;font-weight:700;font-size:0.72rem; }
     .order-table tr.ordered-row td { background:#f0fdf4; }
     .multiply-badge { display:inline-block;background:#fef9c3;color:#a16207;border-radius:20px;padding:1px 6px;font-size:0.65rem;font-weight:700; }
     .need-pos { color:var(--success);font-weight:700; }
@@ -231,6 +240,17 @@
        المفلتر، فكان بيقول «متجاهل: 156» وانت مفلتر على شركة نصيبها صفر. */
     var dataLoaded=false, allResults=[], scopedResults=[], filteredResults=[];
     var itemStates = {};
+    /* ===== تحويل بدل شراء =====
+       لما تختار فرع واحد، بدل أعمدة الفروع بيظهر عمود واحد بيقول:
+       الكمية دي موجودة فائض عند فرع كذا — اطلب تحويلها بدل ما تشتريها.
+       كل الأرقام جاية من المصدر الموحّد (migrate_85→88): معدل الفائض
+       `<الفرع>_sur` من get_sales_summary، و`min_stock_surplus`/`active`
+       لكل فرع×تصنيف من branch_calc_settings — نفس معادلة get_purchase_orders
+       بالحرف، عشان الفائض يبقى رقم واحد في كل الشاشات. */
+    var calcSettings   = {};      // "فرع|تصنيف" → {mss, active}
+    var transferDefault= {};      // اسم الفرع → اسم الفرع الافتراضي للتحويل منه
+    var transferPending= new Set();// "فرع|كود" → اتطلب تحويل خلاص
+    var branchReps     = {};      // اسم الفرع → اسم مستخدم بيتنسبله الطلب
     var currentType = 'cosmo';          // 'cosmo' = itm_ismedicine 0 | 'medicine' = 1
     /* الفروع كلها من جدول الفروع — مفيش اسم فرع مكتوب في الملف ده.
        بتتملى في initBranches() بعد Branches.ready()، مش وقت تحميل
@@ -286,9 +306,14 @@
     function saveQty(){ localStorage.setItem('cosmo_qty', JSON.stringify(customQty)); }
 
     // الكمية الفعلية: تحترم الصفر الصريح (مش بترجع للأصلية لو القيمة 0)
-    // الكمية المحسوبة لحظياً من الهدف والرصيد — نفس المنطق الأساسي
+    /* الكمية المحسوبة — بترجّع اللي calculate() طلّعته بالظبط.
+       ⚠️ كانت بتعيد حساب ceil(الهدف − الرصيد) هنا تاني، فأي قاعدة زيادة
+          في calculate() (زي الحد الأدنى: علبة لكل فرع) كانت بتتلغي في
+          العرض — الجدول يعرض 1 والحساب الحقيقي 4. المصدر بقى واحد. */
     function computedQty(item){
-      var q = Math.ceil(item.totalTarget - item.totalStock);
+      var q = (item && item.orderQty != null)
+        ? item.orderQty
+        : Math.ceil((item ? item.totalTarget - item.totalStock : 0));
       return q > 0 ? q : 0;
     }
 
@@ -472,13 +497,53 @@ saveQty();
       } catch(e){ console.error('فشل تحميل ملخّص المخزون', e); return []; }
     }
 
+    /* مراجع التحويل — كلها جداول صغيرة بتتقرا مرة واحدة مع تحميل الشاشة.
+       الفرع الافتراضي مصدره `branches.transfer_default_branch_id` (migrate_80)
+       مش مكتوب في الشاشة، فلو اتغيّر من الإعدادات الشاشة بتمشي وراه. */
+    async function loadTransferRefs(){
+      try {
+        var out = await Promise.all([
+          Session.getAll('branch_calc_settings?select=branch,category,min_stock_surplus,active'),
+          Session.getAll('branches?select=id,name,transfer_default_branch_id&is_active=eq.true'),
+          Session.getAll('order_transfer_pending?select=branch,itm_code'),
+          Session.rpcAll ? Session.rpcAll('get_branch_rep_users', {}) : []
+        ]);
+        calcSettings = {};
+        (out[0]||[]).forEach(function(x){
+          calcSettings[x.branch + '|' + x.category] =
+            { mss: parseFloat(x.min_stock_surplus), active: x.active !== false };
+        });
+        var byId = {}; (out[1]||[]).forEach(function(b){ byId[b.id] = b.name; });
+        transferDefault = {};
+        (out[1]||[]).forEach(function(b){
+          if (b.transfer_default_branch_id && byId[b.transfer_default_branch_id])
+            transferDefault[b.name] = byId[b.transfer_default_branch_id];
+        });
+        transferPending = new Set();
+        (out[2]||[]).forEach(function(p){ transferPending.add(p.branch + '|' + String(p.itm_code)); });
+        var reps = out[3];
+        branchReps = (reps && !Array.isArray(reps)) ? reps : (Array.isArray(reps) && reps[0] ? reps[0] : {});
+      } catch(e){ console.log('loadTransferRefs', e); }
+      return true;
+    }
+
+    /* نفس تصنيف item_category في القاعدة بالحرف: شركة «ورقيات» تغلب على med */
+    function catOf(company, med){
+      if (String(company||'').trim() === 'ورقيات') return 'paper';
+      return (parseInt(med)||0) === 1 ? 'med' : 'cos';
+    }
+    function calcSetOf(branchName, cat){
+      return calcSettings[branchName + '|' + cat] || { mss: 2, active: true };
+    }
+
     async function loadAllData(){
       document.getElementById('result-container').innerHTML='<div class="loading-overlay">⏳ جاري تحميل البيانات...</div>';
       try {
         await loadStates();
         var r = await Promise.all([
           getStockSummary(),
-          getSalesSummary()
+          getSalesSummary(),
+          loadTransferRefs()
         ]);
         stockSummary=Array.isArray(r[0])?r[0]:[];
         salesData   =Array.isArray(r[1])?r[1]:[];
@@ -650,8 +715,8 @@ saveQty();
     }
     function r1(n){ return Math.round(n*10)/10; }
 
-    // أقل إجمالي رصيد مطلوب بعد الطلب (علبة لكل فرع)
-    var MIN_TOTAL = 3;
+    // أقل رصيد للصنف بعد الطلب — علبة لكل فرع مختار (قرار المالك 2026-10-01)
+    var MIN_PER_BRANCH = 1;
 
     // ===== Calculate =====
     function calculate(){
@@ -674,7 +739,8 @@ saveQty();
         }
         stockMap[code]={
           name:item.n||'',company:item.co||'',
-          unit:item.u||'',price:parseFloat(price)||0
+          unit:item.u||'',price:parseFloat(price)||0,
+          med:isMed                      // محتاجينه للتصنيف (فائض كل تصنيف إعداداته)
         };
         BR_KEYS.forEach(function(k){
           stockMap[code][k] = parseFloat((item[BR_LETTER[k]]||{}).q)||0;
@@ -693,7 +759,8 @@ saveQty();
         BR_KEYS.forEach(function(k){
           salesMap[code][k] = { total:parseFloat(row[k+'_total'])||0,
                                 active:parseInt(row[k+'_active'])||0,
-                                av:parseFloat(row[k+'_av'])||0 };
+                                av:parseFloat(row[k+'_av'])||0,
+                                sur:parseFloat(row[k+'_sur'])||0 };   // معدل الفائض
         });
       });
 
@@ -713,12 +780,19 @@ saveQty();
            بدل ما الشاشة تضرب المعدل في معامل من جدول في المتصفح. المعامل
            نفسه موجود في إعدادات المؤسسة لكل تصنيف، والمعروض هنا مشتق من
            النسبة عشان تفضل الشفافية. */
+        var _cat = catOf(s.company, s.med);
         BR_KEYS.forEach(function(k){
           var c    = bc(sale[k]);
           var t    = (sale[k] && sale[k].av) || 0;
           var mul  = c.avg > 0 ? Math.round((t / c.avg) * 100) / 100 : 1;
           var st   = s[k] || 0;
-          brMap[k] = { t:t, stock:st, avg:c.avg, mul:mul,
+          /* الفائض — نفس معادلة get_purchase_orders بالحرف (migrate_87):
+             الفرع المقفول مايدّيش فائض، ولازم رصيده ≥ الحد الأدنى،
+             والفائض = الرصيد − معدل الفائض. */
+          var cs   = calcSetOf(BRANCHES[k], _cat);
+          var sr   = (sale[k] && sale[k].sur) || 0;
+          var sur  = (!cs.active || st < cs.mss) ? 0 : Math.max(0, Math.floor(st - sr));
+          brMap[k] = { t:t, stock:st, avg:c.avg, mul:mul, sur:sur,
                        active:c.activeMonths, need:Math.ceil(Math.max(0, t - st)) };
         });
         var totalTarget=0, totalStock=0, totalAvg=0;
@@ -727,6 +801,13 @@ saveQty();
         });
 
         var orderQty=Math.ceil(totalTarget-totalStock);
+        /* حد أدنى: علبة لكل فرع مختار بعد الطلب — للأصناف اللي بتتباع بس
+           (totalTarget>0). لو اتطبّق على كل حاجة بينفخ الطلبية بأصناف ميتة،
+           وده اللي خلّى نسخة يوليو القديمة تتشال. */
+        if(totalTarget>0){
+          var minTotal = MIN_PER_BRANCH * selectedBranches.length;
+          if(totalStock + orderQty < minTotal) orderQty = Math.ceil(minTotal - totalStock);
+        }
         if(orderQty<=0||totalTarget===0) return;
 
         origQty[code] = orderQty; // حفظ الكمية الأصلية المحسوبة
@@ -738,7 +819,7 @@ saveQty();
         };
         BR_KEYS.forEach(function(k){
           var x = brMap[k];
-          row[k] = { stock:x.stock, avg:r1(x.avg), active:x.active, mul:x.mul, need:x.need };
+          row[k] = { stock:x.stock, avg:r1(x.avg), active:x.active, mul:x.mul, need:x.need, sur:x.sur };
         });
         list.push(row);
       });
@@ -794,6 +875,60 @@ saveQty();
       applyFilters();          // بتنادي renderResults اللي بتحدّث الزرار
     }
 
+    /* ═══ تحويل بدل شراء ═══════════════════════════════════════════
+       بيظهر لما تختار **فرع واحد** بس — ساعتها أعمدة الفروع الأربعة
+       مالهاش لازمة، ومكانها عمود بيقول: الكمية دي عند فرع كذا فائض،
+       اطلب تحويلها. المصدر = الفرع الافتراضي للفرع ده، ولو مالوش فائض
+       بنعرض أكبر فرع فيه فائض ونعلّمه «بديل». */
+    function singleBranch(){ return selectedBranches.length === 1; }
+
+    function transferCell(item){
+      var destName = BRANCHES[selectedBranches[0]];
+      if (transferPending.has(destName + '|' + item.code))
+        return '<td><span class="tr-done"><i class="fas fa-check"></i> اتطلب تحويل</span></td>';
+
+      var need = qtyNum(item);
+      var cands = BR_KEYS.filter(function(k){ return k !== selectedBranches[0] && ((item[k]||{}).sur||0) > 0; })
+                         .map(function(k){ return { name:BRANCHES[k], sur:item[k].sur }; });
+      if (need <= 0 || !cands.length) return '<td><span class="need-neg">—</span></td>';
+
+      var defName = transferDefault[destName], pick = null, isAlt = false;
+      cands.forEach(function(c){ if (c.name === defName) pick = c; });
+      if (!pick) { cands.sort(function(a,b){ return b.sur - a.sur; }); pick = cands[0]; isAlt = true; }
+
+      var q = Math.min(need, pick.sur), rest = need - q;
+      var args = "'" + String(item.code).replace(/'/g, "\\'") + "','"
+               + String(pick.name).replace(/'/g, "\\'") + "'," + q;
+      return '<td class="tr-cell">'
+        + '<div><b class="need-pos">' + q + '</b> من <b>' + pick.name + '</b>'
+        + (isAlt ? ' <span class="tr-alt" title="الفرع الافتراضي (' + (defName || '—') + ') مالوش فائض">بديل</span>' : '')
+        + '</div>'
+        + (rest > 0 ? '<div class="tr-rest">والباقي ' + rest + ' شراء</div>' : '')
+        + '<button class="tr-btn" onclick="requestTransfer(' + args + ')">'
+        + '<i class="fas fa-right-left"></i> حوّل</button></td>';
+    }
+
+    async function requestTransfer(code, srcName, qty){
+      var destName = BRANCHES[selectedBranches[0]];
+      if (transferPending.has(destName + '|' + code)) return;      // مايتطلبش مرتين
+      var item = allResults.filter(function(i){ return i.code === code; })[0];
+      if (!item) return;
+      if (!confirm('طلب تحويل ' + qty + ' من «' + item.name + '»\nمن ' + srcName + ' إلى ' + destName + '؟')) return;
+      try {
+        var out = await sbTaskInsert({ type:'تحويل', user: branchReps[destName] || destName,
+          target_branch: srcName, item_code: code, item: item.name, qty: qty, note:'تحويل للأهمية' });
+        if (!out || !out.ok) throw new Error('الطلب ما اتسجّلش');
+        // علامة إن الصنف اتطلب — بتمنع التكرار وبتخلي الصف باهت
+        await fetch(SB_URL_API + '/rest/v1/order_transfer_pending?on_conflict=branch,itm_code', {
+          method:'POST',
+          headers: await sbH({ 'Content-Type':'application/json', Prefer:'resolution=merge-duplicates,return=minimal' }),
+          body: JSON.stringify({ branch: destName, itm_code: String(code), qty: qty, requested_at: new Date().toISOString() })
+        });
+        transferPending.add(destName + '|' + code);
+        renderResults(filteredResults);
+      } catch(e){ alert('تعذّر إرسال طلب التحويل: ' + (e && e.message ? e.message : e)); }
+    }
+
     // ===== Render =====
     function renderResults(list){
       var container=document.getElementById('result-container');
@@ -832,7 +967,7 @@ saveQty();
                 <th>${brLbl} المعدل الشهري</th>
                 <th>${brLbl} الهدف</th>
                 <th>${brLbl} الرصيد</th>
-                ${brHeadCells('احتياج·رصيد·معدل·×')}
+                ${singleBranch() ? '<th>تحويل بدل شراء</th>' : brHeadCells('احتياج·رصيد·معدل·×')}
               </tr>
             </thead>
             <tbody>
@@ -847,6 +982,9 @@ saveQty();
       pageRows.forEach(function(item){
         var state=itemStates[item.code]||{};
         var rowClass=state.ignored?'ignored-row':state.ordered?'ordered-row':'';
+        // الصف يبهت لو اتطلب له تحويل — علامة إننا مستنيينه
+        if(singleBranch() && transferPending.has(BRANCHES[selectedBranches[0]]+'|'+item.code))
+          rowClass += ' transfer-row';
         var qty=qtyOf(item);
         var qtyAttr=String(qty).replace(/"/g,'&quot;').replace(/</g,'&lt;');
         var isEdited = customQty.hasOwnProperty(item.code) && String(customQty[item.code]) !== String(computedQty(item));
@@ -882,7 +1020,7 @@ saveQty();
           /* بعشري واحد مش مقرّب: الهدف 1.25 كان بيتعرض 1 فالكمية 2 تبان غلط */
           '<td style="color:var(--accent-dark);font-weight:700;">'+r1(item.totalTarget)+'</td>'+
           '<td style="font-weight:600;">'+r1(item.totalStock)+'</td>'+
-          BR_KEYS.map(function(k){ return bc(item[k]); }).join('')+
+          (singleBranch() ? transferCell(item) : BR_KEYS.map(function(k){ return bc(item[k]); }).join(''))+
         '</tr>';
       });
 
