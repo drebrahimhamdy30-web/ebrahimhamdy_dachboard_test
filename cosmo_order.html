@@ -80,8 +80,12 @@
     .tr-cell { line-height:1.5; }
     .tr-rest { font-size:0.67rem;color:var(--text-muted); }
     .tr-alt { background:#fef9c3;color:#a16207;border-radius:20px;padding:0 6px;font-size:0.62rem;font-weight:700; }
-    .tr-btn { margin-top:3px;padding:2px 10px;border:1.5px solid var(--accent);background:var(--surface);color:var(--accent-dark);
-              border-radius:20px;font-family:var(--font);font-size:0.7rem;font-weight:700;cursor:pointer; }
+    .tr-row { display:flex;align-items:center;justify-content:center;gap:5px;margin-top:3px; }
+    .tr-qty { width:52px;text-align:center;padding:2px 4px;border:1.5px solid var(--border);border-radius:var(--radius-sm);
+              font-family:var(--font);font-size:0.75rem;font-weight:700;color:var(--accent-dark);outline:none; }
+    .tr-qty:focus { border-color:var(--accent); }
+    .tr-btn { padding:2px 10px;border:1.5px solid var(--accent);background:var(--surface);color:var(--accent-dark);
+              border-radius:20px;font-family:var(--font);font-size:0.7rem;font-weight:700;cursor:pointer;white-space:nowrap; }
     .tr-btn:hover { background:var(--accent);color:#fff; }
     .tr-done { color:#15803d;font-weight:700;font-size:0.72rem; }
     .order-table tr.ordered-row td { background:#f0fdf4; }
@@ -889,6 +893,20 @@ saveQty();
        بنعرض أكبر فرع فيه فائض ونعلّمه «بديل». */
     function singleBranch(){ return selectedBranches.length === 1; }
 
+    function trSafe(code){ return String(code).replace(/[^A-Za-z0-9_-]/g, '_'); }
+
+    /* تعديل كمية التحويل: مابتزيدش عن الفائض (عشان ما نفضّيش الفرع المصدر)
+       ومابتقلّش عن 1، و«الباقي شراء» بيتحدّث مع كل تعديل. */
+    function trQtyChanged(code, maxSur, need){
+      var el = document.getElementById('tr-q-' + trSafe(code)); if (!el) return;
+      var v = Math.floor(parseFloat(el.value));
+      if (!(v > 0)) v = 1;
+      if (v > maxSur) v = maxSur;
+      el.value = v;
+      var r = document.getElementById('tr-r-' + trSafe(code));
+      if (r) r.textContent = (need - v) > 0 ? ('والباقي ' + (need - v) + ' شراء') : '';
+    }
+
     function transferCell(item){
       var destName = BRANCHES[selectedBranches[0]];
       if (transferPending.has(destName + '|' + item.code))
@@ -896,30 +914,40 @@ saveQty();
 
       var need = qtyNum(item);
       var cands = BR_KEYS.filter(function(k){ return k !== selectedBranches[0] && ((item[k]||{}).sur||0) > 0; })
-                         .map(function(k){ return { name:BRANCHES[k], sur:item[k].sur }; });
+                         .map(function(k){ return { name:BRANCHES[k], sur:item[k].sur, stock:item[k].stock }; });
       if (need <= 0 || !cands.length) return '<td><span class="need-neg">—</span></td>';
 
       var defName = transferDefault[destName], pick = null, isAlt = false;
       cands.forEach(function(c){ if (c.name === defName) pick = c; });
       if (!pick) { cands.sort(function(a,b){ return b.sur - a.sur; }); pick = cands[0]; isAlt = true; }
 
-      var q = Math.min(need, pick.sur), rest = need - q;
-      var args = "'" + String(item.code).replace(/'/g, "\\'") + "','"
-               + String(pick.name).replace(/'/g, "\\'") + "'," + q;
+      var q = Math.min(need, pick.sur), rest = need - q, sid = trSafe(item.code);
+      var cargs = "'" + String(item.code).replace(/'/g, "\\'") + "'";
       return '<td class="tr-cell">'
-        + '<div><b class="need-pos">' + q + '</b> من <b>' + pick.name + '</b>'
+        + '<div>من <b>' + pick.name + '</b>'
         + (isAlt ? ' <span class="tr-alt" title="الفرع الافتراضي (' + (defName || '—') + ') مالوش فائض">بديل</span>' : '')
         + '</div>'
-        + (rest > 0 ? '<div class="tr-rest">والباقي ' + rest + ' شراء</div>' : '')
-        + '<button class="tr-btn" onclick="requestTransfer(' + args + ')">'
-        + '<i class="fas fa-right-left"></i> حوّل</button></td>';
+        + '<div class="tr-rest">رصيده <b class="branch-stock">' + numTxt(pick.stock) + '</b> · فائض <b>' + pick.sur + '</b></div>'
+        + '<div class="tr-row">'
+        +   '<input type="number" class="tr-qty" id="tr-q-' + sid + '" value="' + q + '" min="1" max="' + pick.sur + '"'
+        +     ' title="الكمية المراد تحويلها — أقصى حد الفائض (' + pick.sur + ')"'
+        +     ' onchange="trQtyChanged(' + cargs + ',' + pick.sur + ',' + need + ')">'
+        +   '<button class="tr-btn" onclick="requestTransfer(' + cargs + ",'" + String(pick.name).replace(/'/g, "\\'") + "')" + '">'
+        +   '<i class="fas fa-right-left"></i> حوّل</button>'
+        + '</div>'
+        + '<div class="tr-rest" id="tr-r-' + sid + '">' + (rest > 0 ? 'والباقي ' + rest + ' شراء' : '') + '</div>'
+        + '</td>';
     }
+    function numTxt(n){ var v = Number(n)||0; return Math.round(v*10)/10; }
 
-    async function requestTransfer(code, srcName, qty){
+    async function requestTransfer(code, srcName){
       var destName = BRANCHES[selectedBranches[0]];
       if (transferPending.has(destName + '|' + code)) return;      // مايتطلبش مرتين
       var item = allResults.filter(function(i){ return i.code === code; })[0];
       if (!item) return;
+      var el = document.getElementById('tr-q-' + trSafe(code));
+      var qty = Math.floor(parseFloat(el && el.value));
+      if (!(qty > 0)) { alert('اكتب كمية صحيحة للتحويل'); return; }
       if (!confirm('طلب تحويل ' + qty + ' من «' + item.name + '»\nمن ' + srcName + ' إلى ' + destName + '؟')) return;
       try {
         var out = await sbTaskInsert({ type:'تحويل', user: branchReps[destName] || destName,
