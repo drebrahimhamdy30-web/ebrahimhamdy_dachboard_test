@@ -619,36 +619,46 @@
         BR_KEYS.forEach(function(k){ map[code][k] = branchObj(item[BR_LETTER[k]]); });
       });
 
-      // salesData بقت ملخّص جاهز من الـRPC: {itm_code, mamora_total, mamora_active, ...}
+      /* ⚠️ الشاشة دي كانت بتحسب المعدل بنفسها (إجمالي المبيعات ÷ الشهور
+         النشطة) من غير أي معامل — وده كان **المصدر التالت المختلف**
+         للمعدل في السيستم، فالفرع الجديد كان معدله صفر هنا ومخزونه كله
+         يبان زائد، والفروع الناضجة كانت بتاخد معدل غير اللي الشراء ماشي
+         عليه. بقت تقرا الجاهز من get_sales_summary:
+           <الفرع>_av   معدل الشراء  — للاحتياج والأولوية والعرض
+           <الفرع>_sur  معدل الفائض  — لحساب الزائد والتوزيع
+         الاتنين بيتحسبوا في consumption_flat من إعدادات المؤسسة.
+         _total/_active لسه بيترجّعوا وبنسيبهم للعرض. */
       var salesMap={};
       salesData.forEach(function(row){
         var code=String(row.itm_code||'').trim();
         if(!code) return;
         salesMap[code]={};
-        // get_sales_summary بيرجّع <الكود>_total/_active — الفرع الجديد لسه مالوش
-        // أعمدة في monthly_sales فبيطلع صفر (يعني معدل استهلاكه 0 لحد ما تتضاف)
         BR_KEYS.forEach(function(k){
-          salesMap[code][k] = { total:parseFloat(row[k+'_total'])||0, active:parseInt(row[k+'_active'])||0 };
+          salesMap[code][k] = {
+            avg:    parseFloat(row[k+'_av'])  || 0,
+            savg:   parseFloat(row[k+'_sur']) || 0,
+            active: parseInt(row[k+'_active']) || 0
+          };
         });
       });
-      function branchCalc(bs){
-        var active=(bs&&bs.active)||0, total=(bs&&bs.total)||0;
-        var avg=active>0?total/active:0;
-        return {avg:avg, active:active};
-      }
       Object.keys(map).forEach(function(code){
         var sale=salesMap[code]||{};
         BR_KEYS.forEach(function(br){
-          var c=branchCalc(sale[br]||{});
-          map[code][br].avg=c.avg;
-          map[code][br].active=c.active;
-          map[code][br].daily=c.avg/30;
+          var c=sale[br]||{};
+          map[code][br].avg    = c.avg  || 0;
+          map[code][br].savg   = c.savg || 0;
+          map[code][br].active = c.active || 0;
+          map[code][br].daily  = (c.avg  || 0) / 30;
+          map[code][br].sdaily = (c.savg || 0) / 30;
         });
       });
       return map;
     }
 
     function coverQty(branchObj, days){ return (branchObj.daily||0) * days; }
+    /* التغطية بمعدل **الفائض** — بتستعمل في قرار «إيه الزايد عندي»
+       بس. الاحتياج والأولوية بيفضلوا على معدل الشراء (coverQty). */
+    function coverQtySur(branchObj, days){ return (branchObj.sdaily||0) * days; }
 
     // أولوية الاحتياج للتحويل: أيام التغطية = الرصيد ÷ المعدل اليومي.
     // أقل = أهم (قلة الرصيد + كثرة المعدل). معدل صفر = آخر الأولوية.
@@ -667,10 +677,10 @@
       if(branchObj.stock <= minStock) return 0;
 
       var surplus;
-      if((branchObj.avg||0) === 0){
+      if((branchObj.savg||0) === 0){
         surplus = Math.floor(branchObj.stock - keepAfter);
       } else {
-        surplus = Math.floor(branchObj.stock - coverQty(branchObj, surplusDays));
+        surplus = Math.floor(branchObj.stock - coverQtySur(branchObj, surplusDays));
       }
       if(surplus < minSurplus) return 0;
       return surplus;
@@ -1300,7 +1310,9 @@
         if(itemType==='cos' &&  it.isMedicine) return;
         if(search && !(String(it.name||'').toLowerCase().indexOf(search)>-1 || String(code).toLowerCase().indexOf(search)>-1)) return;
         var avg=0, stock=0, price=0;
-        branches.forEach(function(b){ avg += it[b].avg||0; stock += it[b].stock||0; if(!price && it[b].price) price=it[b].price; });
+        /* الزائد بيتقاس بمعدل الفائض مش معدل الشراء — ده اللي بيمنع
+           إن مخزون الفرع الجديد الافتتاحي كله يبان زائد. */
+        branches.forEach(function(b){ avg += it[b].savg||0; stock += it[b].stock||0; if(!price && it[b].price) price=it[b].price; });
         var required = coverQtyDays(avg, days);   // (المعدل/30) × الأيام
         var excess = stock - required;
         if(excess < minEx || excess <= 0) return;

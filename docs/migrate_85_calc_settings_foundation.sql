@@ -64,8 +64,10 @@ create unique index if not exists category_rate_tiers_key
 
 /* البذرة = الوضع الحالي بالحرف.
    الأدوية: نسخة من demand_tiers زي ما هي.
-   الكوزمو/الورقيات: القاعدة الافتراضية في شاشة الكوزمو
-   (معدل ≥ 1 · شهور ≥ 2 · ×1.2 للكوزمو و×0.75 للورقيات). */
+   الكوزمو: التلات قواعد المكتوبة في cosmo_order.html
+            (≥1 → ×1.25 · ≥5 → ×1.5 · ≥10 → ×2.0).
+   الورقيات: سويتش «معامل الورقيات» في نفس الشاشة بيحوّل **كل**
+            المعاملات لـ0.75، فشريحة واحدة بنفس الحد بتكافئه بالظبط. */
 insert into public.category_rate_tiers (category, branch, rate_min, active_min, multiply)
 select 'med', null, t.rate_min, t.active_min, t.save_factor
   from public.demand_tiers t
@@ -74,8 +76,10 @@ on conflict do nothing;
 
 insert into public.category_rate_tiers (category, branch, rate_min, active_min, multiply)
 select * from (values
-  ('cos',   null::text, 1::numeric, 2, 1.2::numeric),
-  ('paper', null::text, 1::numeric, 2, 0.75::numeric)
+  ('cos',   null::text,  1::numeric, 2, 1.25::numeric),
+  ('cos',   null::text,  5::numeric, 2, 1.5::numeric),
+  ('cos',   null::text, 10::numeric, 2, 2.0::numeric),
+  ('paper', null::text,  1::numeric, 2, 0.75::numeric)
 ) as v(category, branch, rate_min, active_min, multiply)
 where not exists (select 1 from public.category_rate_tiers c where c.category = v.category)
 on conflict do nothing;

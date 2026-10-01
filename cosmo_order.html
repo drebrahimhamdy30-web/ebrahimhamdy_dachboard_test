@@ -195,41 +195,13 @@
         </div>
       </div>
 
-      <!-- شمال: قواعد -->
+      <!-- شمال: قواعد الطلب — عرض فقط، مصدرها إعدادات المؤسسة -->
       <div class="settings-panel">
         <div class="panel-title"><i class="fas fa-sliders-h" style="color:var(--accent);"></i> قواعد الطلب</div>
-        <table class="rules-table">
-          <colgroup><col class="c-num"><col class="c-num"><col class="c-num"><col class="c-del"></colgroup>
-          <thead><tr><th>معدل >=</th><th>شهور >=</th><th>× معامل</th><th></th></tr></thead>
-          <tbody id="rules-body">
-            <tr>
-              <td><input type="number" value="1"    min="0" step="0.5"  class="rule-avg"></td>
-              <td><input type="number" value="2"    min="1" step="1"    class="rule-months"></td>
-              <td><input type="number" value="1.25" min="0" step="0.05" class="rule-multiply"></td>
-              <td><button class="btn-del-rule" onclick="delRule(this)"><i class="fas fa-times"></i></button></td>
-            </tr>
-            <tr>
-              <td><input type="number" value="5"    min="0" step="0.5"  class="rule-avg"></td>
-              <td><input type="number" value="2"    min="1" step="1"    class="rule-months"></td>
-              <td><input type="number" value="1.5"  min="0" step="0.05" class="rule-multiply"></td>
-              <td><button class="btn-del-rule" onclick="delRule(this)"><i class="fas fa-times"></i></button></td>
-            </tr>
-            <tr>
-              <td><input type="number" value="10"   min="0" step="0.5"  class="rule-avg"></td>
-              <td><input type="number" value="2"    min="1" step="1"    class="rule-months"></td>
-              <td><input type="number" value="2.0"  min="0" step="0.05" class="rule-multiply"></td>
-              <td><button class="btn-del-rule" onclick="delRule(this)"><i class="fas fa-times"></i></button></td>
-            </tr>
-          </tbody>
-        </table>
-        <button class="btn-add-rule" onclick="addRule()"><i class="fas fa-plus"></i> قاعدة</button>
-
-        <div class="paper-switch-wrap">
-          <label class="switch">
-            <input type="checkbox" id="paper-switch" onchange="togglePaperMode(this.checked)">
-            <span class="slider"></span>
-          </label>
-          <label for="paper-switch">📄 معامل الورقيات (0.75)</label>
+        <div id="rules-view" style="font-size:.78rem;color:var(--text-secondary)">جارٍ التحميل…</div>
+        <div style="font-size:.72rem;color:var(--text-muted);margin-top:10px;line-height:1.7">
+          القواعد تُدار من <b>إعدادات المؤسسة ← حساب المعدل والفائض</b>، وهي نفسها التي تعتمد عليها
+          شاشات الطلبيات والمخزون. كانت تُكتب هنا في المتصفح ولا تُحفظ، فتختلف من جلسة لأخرى.
         </div>
       </div>
     </div>
@@ -468,6 +440,7 @@ saveQty();
       // الفروع قبل أي رسم أو حساب — كله متعلّق بيها
       if (typeof Branches !== 'undefined' && Branches.ready) await Branches.ready();
       initBranches();
+      loadRulesView();
       loadAllData();
     });
 
@@ -646,35 +619,34 @@ saveQty();
     function getSelectedCompanies(){ return selectedCompanies; }
 
     // ===== Paper mode switch — يغير المعامل فقط =====
-    function togglePaperMode(on){
-      document.querySelectorAll('#rules-body .rule-multiply').forEach(function(inp){
-        if(on){
-          if(!inp.dataset.orig) inp.dataset.orig = inp.value; // حفظ القيمة الأصلية
-          inp.value = 0.75;
-        } else {
-          if(inp.dataset.orig){ inp.value = inp.dataset.orig; delete inp.dataset.orig; }
-        }
-      });
-    }
+    /* سويتش «معامل الورقيات» اتشال: الورقيات بقت تصنيف حقيقي
+       (شركة «ورقيات») وشريحتها في إعدادات المؤسسة، فالمعامل بيتطبّق
+       تلقائيًا على أصنافها من غير ما حد يفتكر يقلب السويتش. */
 
-    // ===== Rules =====
-    function getRules(){
-      var rules=[];
-      document.querySelectorAll('#rules-body tr').forEach(function(row){
-        rules.push({
-          avg:parseFloat(row.querySelector('.rule-avg').value)||0,
-          months:parseFloat(row.querySelector('.rule-months').value)||1,
-          multiply:parseFloat(row.querySelector('.rule-multiply').value)||1
-        });
-      });
-      rules.sort(function(a,b){return b.avg-a.avg||b.months-a.months;});
-      return rules;
-    }
-    function getMultiply(avg,active,rules){
-      for(var i=0;i<rules.length;i++){
-        if(avg>=rules[i].avg&&active>=rules[i].months) return rules[i].multiply;
-      }
-      return 1;
+    /* ═══ قواعد الطلب — عرض فقط ═══════════════════════════════════
+       القواعد اتنقلت لإعدادات المؤسسة (category_rate_tiers) وبقت
+       مطبّقة على السيرفر جوّه get_consumption_rates، فالشاشة بقت
+       بتعرضها بس. قبل كده كانت في جدول في المتصفح **مش محفوظ**،
+       فكل جلسة ممكن تحسب بقواعد مختلفة. */
+    const CAT_AR = { med:'أدوية', cos:'كوزمو', paper:'ورقيات' };
+    async function loadRulesView(){
+      var el = document.getElementById('rules-view');
+      if (!el) return;
+      try {
+        var r = await fetch(SB_URL_API+'/rest/v1/category_rate_tiers?select=category,branch,rate_min,active_min,multiply&order=category.asc,rate_min.asc', { headers: await sbH() });   // data-ok: جدول إعدادات — شرائح قليلة
+        var t = await r.json();
+        if (!Array.isArray(t) || !t.length){ el.textContent = 'لا توجد شرائح مُعرَّفة.'; return; }
+        var by = {};
+        t.forEach(function(x){ (by[x.category] = by[x.category] || []).push(x); });
+        el.innerHTML = Object.keys(by).map(function(c){
+          return '<div style="margin-bottom:8px"><div style="font-weight:800;margin-bottom:3px">'+(CAT_AR[c]||c)+'</div>'
+            + by[c].map(function(x){
+                return '<div style="padding-inline-start:10px">معدل ≥ '+x.rate_min+' · شهور ≥ '+x.active_min
+                     + ' · <b>× '+x.multiply+'</b>'+(x.branch ? ' <span style="color:var(--text-muted)">('+x.branch+' فقط)</span>' : '')+'</div>';
+              }).join('')
+            + '</div>';
+        }).join('');
+      } catch(e){ el.textContent = 'تعذّر تحميل القواعد'; }
     }
     function r1(n){ return Math.round(n*10)/10; }
 
@@ -684,7 +656,6 @@ saveQty();
     // ===== Calculate =====
     function calculate(){
       if(!dataLoaded){alert('البيانات لسه بتتحمل');return;}
-      var rules=getRules();
       var stockMap={};
       var wantMed = currentType === 'medicine' ? 1 : 0;
       // stockSummary: صف واحد لكل صنف من الـRPC {c,n,co,u,med,m:{h,q,p},s:{...},b:{...}}
@@ -721,7 +692,8 @@ saveQty();
         // لحد ما الأعمدة تتضاف، مش خطأ.
         BR_KEYS.forEach(function(k){
           salesMap[code][k] = { total:parseFloat(row[k+'_total'])||0,
-                                active:parseInt(row[k+'_active'])||0 };
+                                active:parseInt(row[k+'_active'])||0,
+                                av:parseFloat(row[k+'_av'])||0 };
         });
       });
 
@@ -737,10 +709,14 @@ saveQty();
         // نفس الحساب بالظبط لكل فرع — كان مكتوب ثلاث مرات بمتغيّرات
         // منفصلة (tM/tN/tB)، فالفرع الرابع كان لازم يتكتب بالإيد.
         var brMap = {};
+        /* ⚠️ الهدف بقى جاي جاهز من السيرفر (<الفرع>_av في get_sales_summary)
+           بدل ما الشاشة تضرب المعدل في معامل من جدول في المتصفح. المعامل
+           نفسه موجود في إعدادات المؤسسة لكل تصنيف، والمعروض هنا مشتق من
+           النسبة عشان تفضل الشفافية. */
         BR_KEYS.forEach(function(k){
           var c    = bc(sale[k]);
-          var mul  = getMultiply(c.avg, c.activeMonths, rules);
-          var t    = c.avg * mul;
+          var t    = (sale[k] && sale[k].av) || 0;
+          var mul  = c.avg > 0 ? Math.round((t / c.avg) * 100) / 100 : 1;
           var st   = s[k] || 0;
           brMap[k] = { t:t, stock:st, avg:c.avg, mul:mul,
                        active:c.activeMonths, need:Math.ceil(Math.max(0, t - st)) };
@@ -958,21 +934,7 @@ saveQty();
       applyFilters();
     }
 
-    // ===== Rules =====
-    function addRule(){
-      var on = document.getElementById('paper-switch') && document.getElementById('paper-switch').checked;
-      var mul = on ? 0.75 : 1.2;
-      var tr=document.createElement('tr');
-      tr.innerHTML='<td><input type="number" value="1" min="0" step="0.5" class="rule-avg"></td>'+
-        '<td><input type="number" value="2" min="1" step="1" class="rule-months"></td>'+
-        '<td><input type="number" value="'+mul+'" min="0" step="0.05" class="rule-multiply"'+(on?' data-orig="1.2"':'')+'></td>'+
-        '<td><button class="btn-del-rule" onclick="delRule(this)"><i class="fas fa-times"></i></button></td>';
-      document.getElementById('rules-body').appendChild(tr);
-    }
-    function delRule(btn){
-      if(document.querySelectorAll('#rules-body tr').length<=1){alert('لازم قاعدة واحدة');return;}
-      btn.closest('tr').remove();
-    }
+
 
     // ===== Export Excel - عمودين =====
     function exportExcel(){
