@@ -27,6 +27,7 @@
     .wl-range-field { display:flex; flex-direction:column; gap:4px; }
     .wl-range-field label { font-size:0.72rem; font-weight:700; color:var(--text-secondary); }
     .wl-range-field input { width:210px; }
+    .wl-range-field select { width:170px; }
     .wl-quick { display:flex; gap:6px; flex-wrap:wrap; margin-right:auto; align-items:center; }
     .quick-btn { padding:6px 13px; border-radius:20px; border:1px solid var(--border); background:var(--surface); color:var(--text-secondary); font-size:0.76rem; cursor:pointer; font-family:var(--font); font-weight:700; transition:all 0.15s; }
     .quick-btn:hover { border-color:var(--accent); color:var(--text-primary); }
@@ -144,6 +145,20 @@
         <div class="wl-range-field">
           <label><i class="fas fa-calendar-check"></i> إلى</label>
           <input type="datetime-local" id="toInput" class="form-input" onchange="onManualRange()">
+        </div>
+        <div class="wl-range-field">
+          <label><i class="fas fa-store"></i> الفرع</label>
+          <select id="branchFilter" class="form-input" onchange="applyFilter()">
+            <option value="">كل الفروع</option>
+          </select>
+        </div>
+        <div class="wl-range-field">
+          <label><i class="fas fa-user-check"></i> مراجعة المحاسب</label>
+          <select id="reviewFilter" class="form-input" onchange="applyFilter()">
+            <option value="">الكل</option>
+            <option value="no">لسه ماتراجعتش</option>
+            <option value="yes">اتراجعت</option>
+          </select>
         </div>
         <div class="wl-quick">
           <button class="quick-btn" data-q="today"  onclick="quickRange('today', this)">النهارده</button>
@@ -299,6 +314,7 @@
           from += page;
         }
         allRows = all;
+        fillBranchFilter();
         await loadShiftRecon();     // مطابقة إغلاقات الشيفت (تعليم غير المطابق أحمر)
         applyFilter();
       } catch (e) {
@@ -514,7 +530,13 @@
     }
 
     /* ===================== الفلترة ===================== */
-    function getFiltered() {
+    /* طبقتين مقصودتين:
+         getFilteredBase = التاريخ + البحث — دي اللي مقارنة ملف باي موب
+           بتشتغل عليها، لأن فلتر الفرع/المراجعة لو دخل فيها كان هيضيّق
+           المقارنة في صمت ويقول إن معاملات الملف «مش موجودة» عندنا.
+         getFiltered     = الأساس + الفرع + حالة المراجعة — دي اللي الجدول
+           والمجاميع بيتبنوا عليها، فالمجاميع بتعكس الفلتر الظاهر. */
+    function getFilteredBase() {
       const search = document.getElementById('searchInput').value.trim().toLowerCase();
       const fromMs = inputToEgyptMs(document.getElementById('fromInput').value);
       const toMs   = inputToEgyptMs(document.getElementById('toInput').value);
@@ -532,6 +554,34 @@
         return true;
       });
     }
+
+    function getFiltered() {
+      const br = document.getElementById('branchFilter').value;
+      const rv = document.getElementById('reviewFilter').value;
+      return getFilteredBase().filter(r => {
+        if (br && storeOf(r) !== br) return false;
+        if (rv === 'no'  && r.acc_reviewed === true)  return false;
+        if (rv === 'yes' && r.acc_reviewed !== true) return false;
+        return true;
+      });
+    }
+
+    /* قايمة الفروع بتتبني من البيانات نفسها (مش من قايمة ثابتة) عشان
+       مانعرضش فرع مالوش معاملات، والترتيب زي باقي الشاشة (STORE_ORDER). */
+    function fillBranchFilter() {
+      const sel = document.getElementById('branchFilter');
+      if (!sel) return;
+      const prev = sel.value;
+      const names = Array.from(new Set(allRows.map(storeOf))).sort((a, b) => {
+        let ia = STORE_ORDER.indexOf(a); if (ia === -1) ia = 999;
+        let ib = STORE_ORDER.indexOf(b); if (ib === -1) ib = 999;
+        return ia - ib || a.localeCompare(b, 'ar');
+      });
+      sel.innerHTML = '<option value="">كل الفروع</option>'
+        + names.map(n => '<option value="' + wlEsc(n) + '">' + wlEsc(n) + '</option>').join('');
+      if (names.indexOf(prev) !== -1) sel.value = prev;   // الفلتر المختار مايضيعش بعد التحديث
+    }
+
     function applyFilter() { render(getFiltered()); }
 
     /* ===================== فلترة الجدول بضغط كارت الماكينة ===================== */
@@ -912,8 +962,9 @@
       const cols = _resolveCols(rows[0]);
       if (!cols.txn) { alert('مش لاقي عمود «رقم المعامله» في الملف — اتأكد إنه تقرير Paymob الصحيح'); return; }
 
-      // المعاملات المعروضة حاليًا (بعد الفلتر الحالي على الصفحة)
-      const filtered = getFiltered();
+      // معاملات المدى والبحث الحاليين — من غير فلتر الفرع/المراجعة عن قصد
+      // (لو ضيّقناها بالفرع هتبان معاملات الملف كأنها «مش موجودة» عندنا)
+      const filtered = getFilteredBase();
       const salesById = new Map();
       filtered.forEach(r => { const k = _cleanId(r.id); if (k) salesById.set(k, r); });
 
