@@ -109,6 +109,7 @@
               <option value="قيد الانتظار" selected>⏳ قيد الانتظار</option>
               <option value="مقابل فاتورة">🧾 مقابل فاتورة</option>
               <option value="رصيد">💰 رصيد</option>
+              <option value="مقفول">🔒 مقفول</option>
               <option value="all">الكل</option>
             </select>
             <button class="btn btn-primary" onclick="loadReturns()"><i class="fas fa-sync-alt"></i> تحديث</button>
@@ -420,10 +421,11 @@
       const cPend = RETURNS.filter(r=>stOf(r)==='قيد الانتظار').length;
       const cInv  = RETURNS.filter(r=>stOf(r)==='مقابل فاتورة').length;
       const cBal  = RETURNS.filter(r=>stOf(r)==='رصيد').length;
+      const cLock = RETURNS.filter(r=>stOf(r)==='مقفول').length;
       const cCust = RETURNS.filter(r=>r.on_contract_bill === false).length;
       document.getElementById('ret-stats').textContent =
         `${RETURNS.length} مرتجع (${RETURNS.length - cCust} على فاتورة تعاقد · ${cCust} عميل تعاقد)`
-        + ` · ⏳ ${cPend} قيد الانتظار · 🧾 ${cInv} مقابل فاتورة · 💰 ${cBal} رصيد`;
+        + ` · ⏳ ${cPend} قيد الانتظار · 🧾 ${cInv} مقابل فاتورة · 💰 ${cBal} رصيد · 🔒 ${cLock} مقفول`;
 
       if (!data.length){ body.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:var(--text-muted)">لا توجد نتائج</td></tr>'; document.getElementById('ret-pager').innerHTML=''; return; }
 
@@ -441,6 +443,7 @@
             <option value="قيد الانتظار" ${st==='قيد الانتظار'?'selected':''}>⏳ قيد الانتظار</option>
             <option value="مقابل فاتورة" ${st==='مقابل فاتورة'?'selected':''}>🧾 مقابل فاتورة</option>
             <option value="رصيد" ${st==='رصيد'?'selected':''}>💰 رصيد</option>
+            <option value="مقفول" ${st==='مقفول'?'selected':''}>🔒 مقفول</option>
           </select>`
           + (st==='مقابل فاتورة' && r.matched_invoice_bill_no
               ? ` <span class="sc-badge-ok" style="margin-inline-start:6px">✓ ${retEsc(r.matched_invoice_bill_no)}</span>` : '');
@@ -559,13 +562,18 @@
 
         if (next === 'قيد الانتظار'){ if (sel) sel.disabled=false; renderReturns(); return; }
 
-        if (next === 'رصيد'){
+        /* «رصيد» و«مقفول» الاتنين صف من غير فاتورة — الفرق في المعنى:
+             رصيد  = المرتجع اتحسب رصيد للعميل (إقرار محاسبي)
+             مقفول = اتقفل إداريًا، لا ربط ولا احتساب رصيد (مرتجع قديم)
+           القيد crm_invoice_required_chk في القاعدة بيمنع «مقابل فاتورة»
+           من غير رقم فاتورة، عشان مايبقاش فيه صف يدّعي ربط مش موجود. */
+        if (next === 'رصيد' || next === 'مقفول'){
           const r1 = await fetch(SB_URL_CI + '/rest/v1/contract_return_matches', { method:'POST',
             headers: await CI_HW(),
             body: JSON.stringify({ return_bill_no: String(returnBillNo), return_branch: branch||null,
-              status:'رصيد', return_value: (row && row.total_value) || 0, matched_by: ciReviewer() }) });
+              status: next, return_value: (row && row.total_value) || 0, matched_by: ciReviewer() }) });
           if (!r1.ok){ alert(sbFailMsg('تعذّر حفظ الحالة', r1.status)); revert(); return; }
-          if (row) row.match_status = 'رصيد';
+          if (row) row.match_status = next;
           if (sel) sel.disabled=false;
           renderReturns(); return;
         }
