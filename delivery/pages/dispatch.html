@@ -69,7 +69,7 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text);heigh
 .att-approve{background:#16a34a;color:white;border:none;border-radius:5px;padding:.2rem .4rem;font-size:.65rem;cursor:pointer;font-family:'Cairo',sans-serif;font-weight:700}
 .att-reject{background:rgba(220,38,38,.3);color:#f87171;border:1px solid rgba(220,38,38,.3);border-radius:5px;padding:.2rem .4rem;font-size:.65rem;cursor:pointer;font-family:'Cairo',sans-serif;font-weight:700}
 /* DRIVER POPUP */
-.driver-popup{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(1.22);transform-origin:center center;width:360px;max-width:94vw;max-height:72vh;overflow-y:auto;background:#1e293b;border-radius:16px;border:1px solid #334155;box-shadow:0 20px 60px rgba(0,0,0,.6);z-index:200;display:none;padding:1.25rem}
+.driver-popup{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(1.06);transform-origin:center center;width:540px;max-width:95vw;max-height:84vh;overflow-y:auto;background:#1e293b;border-radius:16px;border:1px solid #334155;box-shadow:0 20px 60px rgba(0,0,0,.6);z-index:200;display:none;padding:1.25rem}
 .driver-popup.open{display:block}
 .dp-close{position:absolute;top:.75rem;left:.75rem;background:rgba(255,255,255,.1);border:none;color:#94a3b8;width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:.9rem;display:flex;align-items:center;justify-content:center}
 .dp-avatar{width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.2rem;color:white;margin:0 auto .625rem}
@@ -1646,51 +1646,82 @@ async function openDriverPopup(driverId){
     const collOf=o=>((o.collected_amount!=null&&o.collected_amount!=='')?Number(o.collected_amount):null);
     // القيمة المحسوبة: لو الطيار غيّر القيمة والإدارة أقرّتها → قيمة الطيار، غير كده الفاتورة
     const settle=o=>{ const c=collOf(o); return (o.collected_approved&&c!=null)?c:Number(o.total_bill_net||0); };
+    const canEditPay=['cashier','manager','admin','employee'].includes(currentUser?.role);
+    const payLabels={cash:'كاش',visa:'فيزا',transfer:'تحويل',deferred:'آجل',paid:'خالص'};
+    // تأكيدات الكاش المستلم لكل رحلة (سجل مستقل)
+    const settleMap={};
+    { const {data:_sts}=await db.from('trip_cash_settlement').select('trip_id,confirmed_amount,confirmed_by,confirmed_at').in('trip_id',tripIds);
+      (_sts||[]).forEach(s=>settleMap[s.trip_id]=s); }
     const cards=trips.map((t,idx)=>{
       const os=(byTrip[t.id]||[]).filter(Boolean);
       const counted=os.filter(o=>!notCounted(o));
       const when=new Date(t.completed_at||t.created_at).toLocaleString('ar-EG',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
       const tot=counted.reduce((s,o)=>s+settle(o),0);
       const cash=counted.filter(isCash).reduce((s,o)=>s+settle(o),0);
-      const rows=os.length?os.map(o=>{
+      // صفوف الجدول: العميل · الحالة · الفاتورة · قيمة الطيار · الدفع
+      const body=os.length?os.map(o=>{
         const pm=o.payment_method||'cash';
         const skip=notCounted(o);
         const bill=Number(o.total_bill_net||0);
         const coll=collOf(o);
         // "غيّر القيمة" فقط لو حصّل مبلغ حقيقي مختلف — مش صفر (الطلب اللسه ما اتوصلش collected=0 افتراضيًا)
         const changed=coll!=null&&coll>0&&coll!==bill;
-        const pmHtml=`<span style="color:${pm==='cash'?'#15803d':'#b45309'};font-weight:700">${PL[pm]||pm}</span>`;
-        const nameHtml=`<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${o.customer_name||'—'}${o.cust_region?` · ${o.cust_region}`:''}</span>`;
-        // الطيار غيّر القيمة → اعرض قيمته عادي + زر اعتماد للكاشير (لو اعتمدها يتحسب عليها)
+        const appr=!!o.collected_approved;
+        // عمود طريقة الدفع — قابل للتعديل من الكاشير/المدير/الأدمن
+        const payCell = canEditPay
+          ? `<select onchange="event.stopPropagation();popupChangePayment('${o.id}',this.value)" onclick="event.stopPropagation()" style="font-family:'Cairo',sans-serif;font-size:.6rem;font-weight:700;border:1px solid #cbd5e1;border-radius:5px;padding:.08rem .18rem;background:#fff;color:${pm==='cash'?'#15803d':'#b45309'}">`
+            + ['cash','visa','transfer','deferred','paid'].map(m=>`<option value="${m}" ${pm===m?'selected':''}>${payLabels[m]}</option>`).join('')
+            + `</select>`
+          : `<span style="font-weight:700;color:${pm==='cash'?'#15803d':'#b45309'}">${payLabels[pm]||pm}</span>`;
+        // عمود قيمة الطيار — يظهر لو الطيار حصّل قيمة مختلفة عن الفاتورة + زر اعتماد
+        let drvCell;
         if(changed){
-          const appr=!!o.collected_approved;
-          const btn=appr
-            ? `<button onclick="event.stopPropagation();popupApproveCollected('${o.id}',false)" style="border:none;background:#fee2e2;color:#b91c1c;font-weight:700;font-size:.6rem;padding:.12rem .45rem;border-radius:6px;cursor:pointer;white-space:nowrap">↩ تراجع</button>`
-            : `<button onclick="event.stopPropagation();popupApproveCollected('${o.id}',true)" style="border:none;background:#16a34a;color:#fff;font-weight:800;font-size:.6rem;padding:.12rem .45rem;border-radius:6px;cursor:pointer;white-space:nowrap">✓ اعتمد قيمة الطيار</button>`;
-          return `<div style="padding:.24rem 0;border-top:1px dashed #e5e7eb;font-size:.66rem">
-            <div style="display:flex;justify-content:space-between;gap:.4rem;align-items:center">
-              ${nameHtml}
-              <span style="white-space:nowrap;color:#475569">فاتورة <strong>${bill.toLocaleString()}ج</strong> · ${pmHtml}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:.4rem;margin-top:.25rem;background:${appr?'#f0fdf4':'#fffbeb'};border:1px solid ${appr?'#bbf7d0':'#fde68a'};border-radius:6px;padding:.2rem .45rem">
-              <span>قيمة الطيار <strong style="color:${appr?'#15803d':'#b45309'};font-size:.78rem">${coll.toLocaleString()}ج</strong></span>
-              <span style="display:flex;gap:.3rem;align-items:center;white-space:nowrap">${appr?'<span style="color:#15803d;font-weight:800;font-size:.6rem">✅ مُعتمد</span>':''}${btn}</span>
-            </div>
-          </div>`;
+          const btn = canEditPay ? (appr
+            ? `<button onclick="event.stopPropagation();popupApproveCollected('${o.id}',false)" title="تراجع لقيمة الفاتورة" style="border:none;background:#fee2e2;color:#b91c1c;font-weight:800;font-size:.58rem;padding:.06rem .3rem;border-radius:5px;cursor:pointer">↩</button>`
+            : `<button onclick="event.stopPropagation();popupApproveCollected('${o.id}',true)" title="اعتمد قيمة الطيار" style="border:none;background:#16a34a;color:#fff;font-weight:800;font-size:.58rem;padding:.06rem .3rem;border-radius:5px;cursor:pointer">✓</button>`) : '';
+          drvCell=`<span style="color:${appr?'#15803d':'#b45309'};font-weight:800" title="${appr?'معتمدة':'بانتظار اعتماد الكاشير'}">${coll.toLocaleString()}ج</span> ${appr?'<span style="color:#15803d">✅</span>':''}${btn}`;
+        } else {
+          drvCell=`<span style="color:#cbd5e1">—</span>`;
         }
-        const valHtml = skip
-          ? `<span style="color:#dc2626;font-weight:800">${o.status==='failed'?'⚠️ تعذّر':'ملغي'} · لا يُحسب</span>`
-          : `<span style="color:#475569">${bill.toLocaleString()}ج</span>`;
-        const stMini = (!skip && ordStatusLabel(o)) ? `<span style="color:${ordStatusColor(o)};font-weight:800">${ordStatusLabel(o)}</span> · ` : '';
-        return `<div style="display:flex;justify-content:space-between;gap:.4rem;font-size:.66rem;padding:.16rem 0;border-top:1px dashed #e5e7eb;${skip?'opacity:.75':''}">
-          ${nameHtml}
-          <span style="white-space:nowrap;color:#475569">${stMini}${valHtml} · ${pmHtml}</span>
+        const stHtml = skip
+          ? `<span style="color:#dc2626;font-weight:800">${o.status==='failed'?'تعذّر':'ملغي'}</span>`
+          : `<span style="color:${ordStatusColor(o)};font-weight:700">${ordStatusLabel(o)||'—'}</span>`;
+        return `<tr style="border-top:1px dashed #e5e7eb;${skip?'opacity:.65':''}">
+          <td style="padding:.22rem .25rem;max-width:130px;overflow:hidden" title="${(o.customer_name||'').replace(/"/g,'')}${o.cust_region?(' · '+o.cust_region):''}"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${o.customer_name||'—'}</div>${o.cust_region?`<div style="color:#0891b2;font-size:.56rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📍 ${o.cust_region}</div>`:''}</td>
+          <td style="padding:.22rem .25rem;white-space:nowrap">${stHtml}</td>
+          <td style="padding:.22rem .25rem;white-space:nowrap;color:#475569;font-weight:700">${bill.toLocaleString()}ج</td>
+          <td style="padding:.22rem .25rem;white-space:nowrap">${drvCell}</td>
+          <td style="padding:.22rem .25rem;white-space:nowrap;text-align:center">${payCell}</td>
+        </tr>`;
+      }).join(''):'';
+      const table = os.length
+        ? `<table style="width:100%;border-collapse:collapse;font-size:.63rem;color:#334155">
+            <thead><tr style="color:#64748b;text-align:right;font-size:.56rem;border-bottom:1px solid #e2e8f0">
+              <th style="padding:.22rem .25rem;font-weight:800">العميل</th>
+              <th style="padding:.22rem .25rem;font-weight:800">الحالة</th>
+              <th style="padding:.22rem .25rem;font-weight:800">الفاتورة</th>
+              <th style="padding:.22rem .25rem;font-weight:800">قيمة الطيار</th>
+              <th style="padding:.22rem .25rem;font-weight:800;text-align:center">الدفع</th>
+            </tr></thead><tbody>${body}</tbody></table>`
+        : '<div style="font-size:.64rem;color:#94a3b8;padding:.16rem 0">لا توجد تفاصيل طلبات</div>';
+      // صف تأكيد المبلغ الكاش المستلم من الطيار
+      const st=settleMap[t.id];
+      let confirmRow='';
+      if(st){
+        confirmRow=`<div style="display:flex;justify-content:space-between;align-items:center;gap:.4rem;margin-top:.45rem;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:7px;padding:.32rem .55rem;font-size:.66rem">
+          <span style="color:#15803d;font-weight:800">✅ اتأكد استلام ${Number(st.confirmed_amount).toLocaleString()} ج</span>
+          <span style="display:flex;gap:.4rem;align-items:center">${st.confirmed_by?`<span style="color:#64748b;font-size:.56rem">${st.confirmed_by}</span>`:''}${canEditPay?`<button onclick="event.stopPropagation();popupUnconfirmTripCash('${t.id}')" style="border:none;background:#fee2e2;color:#b91c1c;font-weight:800;font-size:.58rem;padding:.1rem .4rem;border-radius:5px;cursor:pointer">↩ تراجع</button>`:''}</span>
         </div>`;
-      }).join(''):'<div style="font-size:.64rem;color:#94a3b8;padding:.16rem 0">لا توجد تفاصيل طلبات</div>';
+      } else if(canEditPay){
+        confirmRow=`<div style="display:flex;justify-content:space-between;align-items:center;gap:.4rem;margin-top:.45rem;background:#fffbeb;border:1px solid #fde68a;border-radius:7px;padding:.32rem .55rem;font-size:.66rem">
+          <span style="color:#b45309;font-weight:800">المطلوب كاش: ${cash.toLocaleString()} ج</span>
+          <button onclick="event.stopPropagation();popupConfirmTripCash('${t.id}','${driverId}',${cash})" style="border:none;background:#16a34a;color:#fff;font-weight:800;font-size:.62rem;padding:.16rem .6rem;border-radius:6px;cursor:pointer">✓ تأكيد استلام المبلغ</button>
+        </div>`;
+      }
       return `<div style="border:2px solid ${stColor[t.status]||'#e2e8f0'};border-radius:8px;margin-bottom:.4rem;background:var(--surface);overflow:hidden">
         <div onclick="var d=document.getElementById('dpd-${idx}');var op=d.style.display!=='none';d.style.display=op?'none':'block';this.querySelector('.dpx').textContent=op?'▾':'▴'" style="cursor:pointer;padding:.4rem .5rem">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:.4rem">
-            <span style="font-weight:800;font-size:.72rem;color:#0f172a">رحلة${idx===0?' · الأحدث':''} <span class="dpx" style="color:#94a3b8">▾</span></span>
+            <span style="font-weight:800;font-size:.72rem;color:#0f172a">رحلة${idx===0?' · الأحدث':''} <span class="dpx" style="color:#94a3b8">${idx===0?'▴':'▾'}</span></span>
             <span style="font-size:.58rem;font-weight:700;color:#fff;background:${stColor[t.status]||'#64748b'};padding:.06rem .45rem;border-radius:10px">${stLabel[t.status]||t.status}</span>
           </div>
           <div style="display:flex;justify-content:space-between;font-size:.63rem;color:#64748b;margin-top:.18rem">
@@ -1698,7 +1729,7 @@ async function openDriverPopup(driverId){
             <span>الإجمالي ${tot.toLocaleString()} · <strong style="color:#15803d">مطلوب ${cash.toLocaleString()} ج</strong></span>
           </div>
         </div>
-        <div id="dpd-${idx}" style="display:none;padding:0 .5rem .4rem">${rows}</div>
+        <div id="dpd-${idx}" style="display:${idx===0?'block':'none'};padding:0 .5rem .4rem">${table}${confirmRow}</div>
       </div>`;
     }).join('');
     tripsEl.innerHTML=cards;
@@ -3664,6 +3695,45 @@ async function popupApproveCollected(orderId, approve){
   showLoading(false);
   showToast(approve?'✓ تم اعتماد قيمة الطيار':'↩ رجع لقيمة الفاتورة');
   if(currentPopupDriverId) openDriverPopup(currentPopupDriverId); // إعادة رسم الكارت بالحساب الجديد
+}
+
+// تغيير طريقة الدفع من كارت الطيار (الكاشير/المدير/الأدمن) — يلغي تأكيد المبلغ للرحلة تلقائيًا (تريجر)
+async function popupChangePayment(orderId, method){
+  showLoading(true);
+  const labels={cash:'كاش',visa:'فيزا',transfer:'تحويل',deferred:'آجل',paid:'خالص'};
+  await db.from('orders').update({payment_method:method,updated_at:new Date().toISOString()}).eq('id',orderId);
+  await addOrderLog(orderId,'order_payment_changed',{payment:method});
+  const o=allOrders.find(x=>x.id===orderId); if(o) o.payment_method=method;
+  showLoading(false);
+  showToast(`✓ طريقة الدفع: ${labels[method]||method}`);
+  if(currentPopupDriverId) openDriverPopup(currentPopupDriverId);
+}
+
+// تأكيد المبلغ الكاش المستلم من الطيار لرحلة (الرقم تلقائي من تجميع الرحلة)
+async function popupConfirmTripCash(tripId, driverId, amount){
+  const who=currentUser?.full_name||currentUser?.username||'—';
+  if(!confirm(`تأكيد استلام ${Number(amount).toLocaleString()} ج كاش من الطيار لهذه الرحلة؟`))return;
+  showLoading(true);
+  const {error}=await db.from('trip_cash_settlement').upsert({
+    trip_id:tripId, driver_id:driverId||null,
+    branch_id:currentUser?.branch_id||null,
+    confirmed_amount:Number(amount)||0,
+    confirmed_by:who, confirmed_at:new Date().toISOString()
+  },{onConflict:'trip_id'});
+  showLoading(false);
+  if(error){ showToast('تعذّر التأكيد: '+(error.message||'')); return; }
+  showToast('✓ تم تأكيد استلام المبلغ');
+  if(currentPopupDriverId) openDriverPopup(currentPopupDriverId);
+}
+
+// تراجع عن تأكيد المبلغ
+async function popupUnconfirmTripCash(tripId){
+  if(!confirm('تراجع عن تأكيد استلام المبلغ لهذه الرحلة؟'))return;
+  showLoading(true);
+  await db.from('trip_cash_settlement').delete().eq('trip_id',tripId);
+  showLoading(false);
+  showToast('↩ تم التراجع عن التأكيد');
+  if(currentPopupDriverId) openDriverPopup(currentPopupDriverId);
 }
 
 // تجيب الطلبات غير المغلقة على الصيدلية وتعرضها في مودال الموافقة
