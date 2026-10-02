@@ -153,6 +153,12 @@
           </select>
         </div>
         <div class="wl-range-field">
+          <label><i class="fas fa-mobile-screen-button"></i> الماكينة</label>
+          <select id="machineFilter" class="form-input" onchange="onMachineFilterChange(this.value)">
+            <option value="">كل الماكينات</option>
+          </select>
+        </div>
+        <div class="wl-range-field">
           <label><i class="fas fa-user-check"></i> مراجعة المحاسب</label>
           <select id="reviewFilter" class="form-input" onchange="applyFilter()">
             <option value="">الكل</option>
@@ -582,7 +588,34 @@
       if (names.indexOf(prev) !== -1) sel.value = prev;   // الفلتر المختار مايضيعش بعد التحديث
     }
 
-    function applyFilter() { render(getFiltered()); }
+    /* قايمة الماكينات بتتبني من البيانات وبتحترم فلتر الفرع — ماكينة
+       مش في الفرع المختار مالهاش لازمة في القايمة. ولو كانت مختارة
+       وبعدين الفرع اتغيّر بنلغيها بدل ما الجدول يطلع فاضي بالغلط.
+       القايمة من allRows مش من المدى عن قصد — عشان مانهزّش الاختيار
+       مع كل تغيير في التاريخ.
+       ⚠️ عن قصد نفس المتغيّر اللي الضغط على كارت الماكينة بيستعمله
+          (selectedMachine) — فلترين للماكينة كانوا هيتعاركوا. */
+    function fillMachineFilter() {
+      const sel = document.getElementById('machineFilter');
+      if (!sel) return;
+      sel.disabled = collectMode;      // في وضع التحصيل الترتيب بالوقت، الفلتر متوقف
+      sel.title = collectMode ? 'فلتر الماكينة متوقف في وضع التحصيل' : '';
+      const br = document.getElementById('branchFilter').value;
+      const names = Array.from(new Set(
+        allRows.filter(r => !br || storeOf(r) === br).map(machineOf)
+      )).sort((a, b) => a.localeCompare(b, 'ar'));
+      sel.innerHTML = '<option value="">كل الماكينات</option>'
+        + names.map(n => '<option value="' + wlEsc(n) + '">' + wlEsc(n) + '</option>').join('');
+      if (selectedMachine && names.indexOf(selectedMachine) !== -1) sel.value = selectedMachine;
+      else { selectedMachine = null; sel.value = ''; }
+    }
+
+    function onMachineFilterChange(v) {
+      selectedMachine = v || null;
+      applyFilter();
+    }
+
+    function applyFilter() { fillMachineFilter(); render(getFiltered()); }
 
     /* ===================== فلترة الجدول بضغط كارت الماكينة ===================== */
     function toggleMachineFilter(m) {
