@@ -97,6 +97,11 @@
             <span id="ret-stats" class="sc-mini"></span>
             <div class="field-icon-wrap" style="min-width:220px;">
               <i class="fas fa-search field-icon"></i>
+              <select id="ret-src" class="form-select" style="width:auto" onchange="renderReturns()">
+                <option value="all">كل المصادر</option>
+                <option value="ci">على فاتورة تعاقد</option>
+                <option value="cust">عميل تعاقد (فاتورة نقدي)</option>
+              </select>
               <input type="text" id="ret-search" class="form-input" placeholder="بحث برقم المرتجع أو العميل..." oninput="retPage=1; renderReturns()" style="padding-right:34px;">
             </div>
             <!-- الافتراضي «قيد الانتظار» — ده اللي لسه محتاج شغل -->
@@ -112,9 +117,9 @@
         <div class="table-wrap">
           <table>
             <thead><tr>
-              <th>رقم المرتجع</th><th>التاريخ</th><th>كود العميل</th><th>اسم العميل</th><th>الفرع</th><th>القيمة</th><th>أصناف</th><th>الفاتورة المقابلة</th><th>إجراء</th>
+              <th>رقم المرتجع</th><th>المصدر</th><th>التاريخ</th><th>كود العميل</th><th>اسم العميل</th><th>الفرع</th><th>القيمة</th><th>أصناف</th><th>الفاتورة المقابلة</th><th>إجراء</th>
             </tr></thead>
-            <tbody id="ret-body"><tr class="loading-row"><td colspan="9">⏳ اضغط التبويب لتحميل المرتجعات...</td></tr></tbody>
+            <tbody id="ret-body"><tr class="loading-row"><td colspan="10">⏳ اضغط التبويب لتحميل المرتجعات...</td></tr></tbody>
           </table>
         </div>
         <div id="ret-pager" style="margin-top:14px"></div>
@@ -369,12 +374,24 @@
       if (!inv && !retsLoaded) loadReturns();
     }
     function retEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    /* التبويب بقى يعرض نوعين (قرار المالك 2026-10-02):
+         • مرتجع على فاتورة تعاقد — السلوك الأصلي
+         • مرتجع لعميل عنده تعاقد لكن على فاتورة نقدي — وده النمط الفعلي:
+           العميل يرجّع على فاتورة قديمة وتتعمل له فاتورة تعاقد بنفس
+           القيمة بعدها بدقايق. دول ماكانوش بيظهروا لا هنا ولا في نافذة
+           الربط، فماكانش ينفع تربطهم حتى يدويًا.
+       الشارة بتفرّق الاتنين — من غيرها تبص على صف ومش عارف داخل ليه. */
+    function retSrcBadge(r){
+      return r.on_contract_bill === false
+        ? '<span class="sc-mini" style="background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:6px;white-space:nowrap" title="المرتجع على فاتورة نقدي، والعميل عنده تعاقد">عميل تعاقد</span>'
+        : '<span class="sc-mini" style="background:#d1fae5;color:#065f46;padding:2px 7px;border-radius:6px;white-space:nowrap" title="المرتجع نفسه على فاتورة تعاقد">فاتورة تعاقد</span>';
+    }
     function retFmtDate(s){ if(!s) return '—'; const d=new Date(s); return d.toLocaleDateString('ar-EG',{timeZone:'Africa/Cairo',day:'numeric',month:'numeric',year:'numeric'})+' '+d.toLocaleTimeString('ar-EG',{timeZone:'Africa/Cairo',hour:'2-digit',minute:'2-digit'}); }
 
     async function loadReturns(){
       retsLoaded = true;
       const body = document.getElementById('ret-body');
-      body.innerHTML = '<tr class="loading-row"><td colspan="9">⏳ جاري جلب المرتجعات...</td></tr>';
+      body.innerHTML = '<tr class="loading-row"><td colspan="10">⏳ جاري جلب المرتجعات...</td></tr>';
       try {
         // كل الفروع (زي تبويب الفواتير اللي بيعرض الكل) — عشان الأدمن وأي حساب يشوف كل المرتجعات
         const r = await fetch(RPC + 'get_contract_returns', { method:'POST', headers: await CI_H(), body: JSON.stringify({ p_branch: '' }) });
@@ -383,7 +400,7 @@
         retPage = 1;
         renderReturns();
       } catch(e){
-        body.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل جلب المرتجعات</td></tr>';
+        body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل جلب المرتجعات</td></tr>';
       }
     }
 
@@ -393,16 +410,22 @@
       const q = document.getElementById('ret-search').value.trim().toLowerCase();
       // الحالة بتيجي من الـRPC؛ لو قديمة من غير الحقل نستنتجها من وجود الفاتورة
       const stOf = r => r.match_status || (r.matched_invoice_bill_no ? 'مقابل فاتورة' : 'قيد الانتظار');
-      let data = RETURNS.filter(r => flt === 'all' || stOf(r) === flt);
+      const src = (document.getElementById('ret-src') || {}).value || 'all';
+      let data = RETURNS.filter(r => flt === 'all' || stOf(r) === flt)
+                        .filter(r => src === 'all'
+                                  || (src === 'ci'   && r.on_contract_bill !== false)
+                                  || (src === 'cust' && r.on_contract_bill === false));
       if (q) data = data.filter(r=> [r.return_bill_no, r.cust_code, r.cust_name].some(v=>String(v||'').toLowerCase().includes(q)));
 
       const cPend = RETURNS.filter(r=>stOf(r)==='قيد الانتظار').length;
       const cInv  = RETURNS.filter(r=>stOf(r)==='مقابل فاتورة').length;
       const cBal  = RETURNS.filter(r=>stOf(r)==='رصيد').length;
+      const cCust = RETURNS.filter(r=>r.on_contract_bill === false).length;
       document.getElementById('ret-stats').textContent =
-        `${RETURNS.length} مرتجع · ⏳ ${cPend} قيد الانتظار · 🧾 ${cInv} مقابل فاتورة · 💰 ${cBal} رصيد`;
+        `${RETURNS.length} مرتجع (${RETURNS.length - cCust} على فاتورة تعاقد · ${cCust} عميل تعاقد)`
+        + ` · ⏳ ${cPend} قيد الانتظار · 🧾 ${cInv} مقابل فاتورة · 💰 ${cBal} رصيد`;
 
-      if (!data.length){ body.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted)">لا توجد نتائج</td></tr>'; document.getElementById('ret-pager').innerHTML=''; return; }
+      if (!data.length){ body.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:var(--text-muted)">لا توجد نتائج</td></tr>'; document.getElementById('ret-pager').innerHTML=''; return; }
 
       const totalPages = Math.max(1, Math.ceil(data.length/RET_PAGE_SIZE));
       if (retPage>totalPages) retPage=totalPages;
@@ -423,6 +446,7 @@
               ? ` <span class="sc-badge-ok" style="margin-inline-start:6px">✓ ${retEsc(r.matched_invoice_bill_no)}</span>` : '');
         return `<tr>
           <td><code>${rb}</code></td>
+          <td>${retSrcBadge(r)}</td>
           <td class="sc-mini">${retFmtDate(r.return_date)}</td>
           <td><code>${retEsc(r.cust_code||'—')}</code></td>
           <td style="font-weight:600">${retEsc(r.cust_name||'—')}</td>
@@ -922,7 +946,7 @@ function getNextSerial(billType) {
           <div style="display:flex;gap:10px;align-items:flex-start">
             <input type="checkbox" ${on ? "checked" : ""} onclick="event.stopPropagation();toggleRetPick('${k.replace(/'/g, "\\'")}')" style="width:18px;height:18px;margin-top:3px">
             <div>
-              <div><b>${retEsc(x.return_bill_no)}</b> ${best ? '<span class="sc-badge-ok">مقترح</span>' : ""} ${x.same_customer ? '<span class="sc-mini">· نفس العميل</span>' : ""}</div>
+              <div><b>${retEsc(x.return_bill_no)}</b> ${retSrcBadge(x)} ${best ? '<span class="sc-badge-ok">مقترح</span>' : ""} ${x.same_customer ? '<span class="sc-mini">· نفس العميل</span>' : ""}</div>
               <div class="sc-mini">${retFmtDate(x.return_date)} · ${retEsc(x.cust_name || "—")}</div>
               <div class="sc-mini" style="margin-top:2px"><span style="font-size:1rem;font-weight:800;color:#dc2626">${x.total_value} ج</span> <span style="margin-inline-start:6px">· ${x.items_count} صنف · فرق ${rpGap(x.hours_diff)}</span></div>
               ${linked}
