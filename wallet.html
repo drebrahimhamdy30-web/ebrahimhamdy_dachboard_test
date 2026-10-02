@@ -190,10 +190,12 @@
               <th>رقم الطلب</th>
               <th>الحالة</th>
               <th id="th-collect">التحصيل</th>
+              <th>مراجعة المحاسب</th>
+              <th>ملاحظة</th>
             </tr>
           </thead>
           <tbody id="table-body">
-            <tr class="loading-row"><td colspan="9">⏳ جاري التحميل...</td></tr>
+            <tr class="loading-row"><td colspan="11">⏳ جاري التحميل...</td></tr>
           </tbody>
         </table>
       </div>
@@ -242,7 +244,7 @@
     const BRANCH_NORMALIZE = Branches.storeMap();
     const STORE_ORDER = Branches.names().map(Branches.storeName);
 
-    const isAdmin = true;                // الصفحة للأدمن فقط (متحكوم فيها من جدول الصلاحيات)
+    let WL_EDIT = false;                 // صلاحية التعديل من page_permissions (بتتحدد بعد checkAuth)
     let allRows = [];
     let activeQuick = 'all';
     let selectedMachine = null;
@@ -257,13 +259,18 @@
     let mismatchRedIds = new Set();
     let shiftReconError = null;   // لو حصل خطأ أثناء الفحص نعرضه بدل الصمت
 
+    /* الدخول من جدول الصلاحيات (page_permissions) مش مكتوب بالإيد — الحارس
+       القديم كان بيقارن الدور بـ'admin' فالمحاسب مكانش بيدخل حتى بعد ما
+       تتدّيله الصلاحية. WL_EDIT بيتحكّم في أي حاجة بتغيّر بيانات
+       (الصرف من كشف البنك · علامة المراجعة · الملاحظة). */
     checkAuth().then(async user => {
       if (!user) return;
-      const role = (Session.role() || '').trim();
-      if (role !== 'admin') {
-        document.querySelector('.card').innerHTML = '<div class="empty-note">🔒 الصفحة دي متاحة للأدمن بس</div>';
+      const c = await Session.can('wallet');
+      if (!c.view) {
+        document.querySelector('.card').innerHTML = '<div class="empty-note">🔒 لا تتوفر لديك صلاحية الاطّلاع على هذه الشاشة</div>';
         return;
       }
+      WL_EDIT = !!c.edit;
       document.getElementById('display-branch').textContent = 'كل الفروع';
       await loadWallet();
     });
@@ -271,7 +278,7 @@
     /* ===================== تحميل البيانات من Supabase ===================== */
     async function loadWallet() {
       const tbody = document.getElementById('table-body');
-      tbody.innerHTML = '<tr class="loading-row"><td colspan="9">⏳ جاري جلب البيانات...</td></tr>';
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="11">⏳ جاري جلب البيانات...</td></tr>';
       try {
         // Supabase بترجّع 1000 صف افتراضياً؛ نجيب على دفعات
         let all = [];
@@ -296,7 +303,7 @@
         applyFilter();
       } catch (e) {
         console.error('wallet load error:', e);
-        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل تحميل البيانات<br><span style="font-size:0.72rem;color:var(--text-muted);">${e.message||e}</span></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--danger);padding:30px;">❌ فشل تحميل البيانات<br><span style="font-size:0.72rem;color:var(--text-muted);">${e.message||e}</span></td></tr>`;
       }
     }
 
@@ -638,7 +645,7 @@
     function render(items) {
       const tbody = document.getElementById('table-body');
       document.getElementById('th-collect').style.display = collectMode ? '' : 'none';
-      const colCount = collectMode ? 9 : 8;
+      const colCount = collectMode ? 11 : 10;
 
       items.sort((a,b) => new Date(b.createdAt||0) - new Date(a.createdAt||0));
 
@@ -783,8 +790,83 @@
           <td class="mono">${r.order_id || '---'}</td>
           <td>${ref ? '<span class="badge badge-refund">🔄 مرتجع</span>' : (done ? (r.bank_settled ? '<span class="badge" style="background:#dbeafe;color:#1e40af;">🏦 محوّل من البنك</span>' : '<span class="badge badge-collected">✅ محصّل</span>') : '<span class="badge badge-pending">⏳ معلّق</span>')}</td>
           ${collectCell}
+          ${reviewCell(r)}
         </tr>`;
       }).join('');
+    }
+
+    /* ═══ مراجعة المحاسب ═══
+       علامة «راجعت المعاملة وهي سليمة» + ملاحظة لكل معاملة.
+       الكتابة عبر دالة محروسة (wallet_set_review — migrate_81) بتاخد اسم
+       المُراجِع من التوكن نفسه، فـ«مين راجع» موثوق ومش من المتصفح.
+       ⚠️ العمود acc_reviewed غير العمود reviewed — ده الأخير بتاع ربط
+          «استيراد جدول الماكينات» ولو استعملناه الحالتين بيختلطوا. */
+    function reviewCell(r) {
+      const id   = String(r.id);
+      const on   = r.acc_reviewed === true;
+      const by   = r.acc_reviewed_by || '';
+      const note = (r.acc_note == null ? '' : String(r.acc_note));
+      const dis  = WL_EDIT ? '' : ' disabled';
+      const chk = '<td style="text-align:center" onclick="event.stopPropagation()">'
+        + '<label style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;cursor:' + (WL_EDIT ? 'pointer' : 'default') + '">'
+        +   '<input type="checkbox" id="rv-' + id + '"' + (on ? ' checked' : '') + dis
+        +   ' onchange="setReview(' + "'" + id + "'" + ', this.checked)" style="width:17px;height:17px">'
+        +   (on && by ? '<span style="font-size:0.62rem;color:var(--text-muted);white-space:nowrap">' + wlEsc(by) + '</span>' : '')
+        + '</label></td>';
+      const nt = '<td onclick="event.stopPropagation()">'
+        + '<input type="text" id="nt-' + id + '" value="' + wlEsc(note) + '"' + dis
+        + ' placeholder="' + (WL_EDIT ? 'ملاحظة…' : '') + '"'
+        + ' onchange="setNote(' + "'" + id + "'" + ', this.value)"'
+        + ' style="width:140px;font-size:0.72rem;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-primary);font-family:inherit">'
+        + '</td>';
+      return chk + nt;
+    }
+
+    function wlEsc(v) {
+      return String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+    }
+
+    // p_reviewed = null → ماتلمسش العلامة · p_note = null → ماتلمسش الملاحظة
+    async function wlReviewCall(id, reviewed, note) {
+      const { data, error } = await db.rpc('wallet_set_review', {
+        p_id: Number(id),
+        p_reviewed: (reviewed === undefined ? null : reviewed),
+        p_note: (note === undefined ? null : note)
+      });
+      if (error) throw error;
+      if (data && data.success === false) throw new Error(data.error || 'تعذّر الحفظ');
+      return data || {};
+    }
+
+    async function setReview(id, checked) {
+      const box = document.getElementById('rv-' + id);
+      if (box) box.disabled = true;
+      try {
+        const d = await wlReviewCall(id, !!checked, undefined);
+        const row = allRows.find(x => String(x.id) === String(id));
+        if (row) {
+          row.acc_reviewed    = d.acc_reviewed;
+          row.acc_reviewed_by = d.acc_reviewed_by;
+          row.acc_reviewed_at = d.acc_reviewed_at;
+        }
+        applyFilter();                      // يعيد الرسم باسم المُراجِع
+      } catch (e) {
+        if (box) { box.checked = !checked; box.disabled = false; }
+        alert('تعذّر حفظ المراجعة: ' + (e.message || e));
+      }
+    }
+
+    async function setNote(id, val) {
+      const el = document.getElementById('nt-' + id);
+      try {
+        const d = await wlReviewCall(id, undefined, String(val || ''));
+        const row = allRows.find(x => String(x.id) === String(id));
+        if (row) row.acc_note = d.acc_note;
+        if (el) { el.style.borderColor = '#16a34a'; setTimeout(() => { el.style.borderColor = ''; }, 1200); }
+      } catch (e) {
+        if (el) el.style.borderColor = 'var(--danger)';
+        alert('تعذّر حفظ الملاحظة: ' + (e.message || e));
+      }
     }
 
     /* ===================== مقارنة ملف Paymob (Excel/CSV) ===================== */
@@ -1131,7 +1213,7 @@
     const _BANK_BR_MAP={'سيدي بشر':'سيدى بشر'};
     // إضافة صافى مبيعات الفرع كصرف «باي موب» في سجل الإغلاقات (pos_manual_transfers) — مع منع التكرار بالخطأ
     async function bankAddExpense(branch, amount, btn){
-      if((Session.role()||'').trim()!=='admin'){ alert('للأدمن فقط'); return; }
+      if(!WL_EDIT){ alert('لا تتوفر لديك صلاحية تعديل هذه الشاشة.'); return; }
       amount=Math.round((+amount||0)*100)/100;
       if(!(amount>0)){ alert('مفيش قيمة صالحة للصرف'); return; }
       const br=_BANK_BR_MAP[branch]||branch;
