@@ -37,6 +37,7 @@
     .search-wrap input { padding-right:34px; }
 
     .exp-quick { display:flex; gap:6px; flex-wrap:wrap; }
+    #branchFilter { min-width:160px; width:auto; }
     .quick-btn { padding:6px 13px; border-radius:20px; border:1px solid var(--border); background:var(--surface); color:var(--text-secondary); font-size:0.76rem; cursor:pointer; font-family:var(--font); font-weight:700; transition:all 0.15s; }
     .quick-btn:hover { border-color:var(--accent); color:var(--text-primary); }
     .quick-btn.active { background:var(--accent); color:var(--primary); border-color:var(--accent); }
@@ -115,6 +116,9 @@
             <i class="fas fa-search"></i>
             <input type="text" id="searchInput" class="form-input" placeholder="بحث بالاسم أو الملاحظات أو رقم المستند..." oninput="renderExpenses()">
           </div>
+          <select id="branchFilter" class="form-select" style="display:none;" onchange="renderExpenses()">
+            <option value="">كل الفروع</option>
+          </select>
           <div class="exp-quick">
             <button class="quick-btn active" data-q="all" onclick="quickRange('all', this)">الكل</button>
             <button class="quick-btn" data-q="today" onclick="quickRange('today', this)">النهارده</button>
@@ -270,10 +274,33 @@
       EXP_SCOPE   = payload && payload.branch ? payload.branch : null;
       allExpenses = (payload && payload.expenses) || [];
       allRules    = (payload && payload.rules)    || [];
+      fillBranchFilter();
       const scopeEl = document.getElementById('exp-scope-tag');
       if (scopeEl) scopeEl.textContent = EXP_SCOPE ? ('مصروفات فرع ' + EXP_SCOPE) : 'كل الفروع';
       renderExpenses();
       renderRules();
+    }
+
+    /* القايمة بتتبني من المصروفات الواصلة — والنطاق نفسه السيرفر بيحدده
+       (get_expenses → exp_scope_branch). فمدير الفرع أصلًا مش بيوصله غير
+       فرعه، والقايمة بتختفي لأن خيار واحد مالوش لازمة. مابنعتمدش على
+       الدور في الواجهة عشان مانكرّرش قاعدة الصلاحية في مكانين. */
+    function fillBranchFilter() {
+      const sel = document.getElementById('branchFilter');
+      if (!sel) return;
+      const prev  = sel.value;
+      const order = (typeof Branches !== 'undefined' && Branches.names) ? Branches.names() : [];
+      const names = Array.from(new Set(
+        allExpenses.map(e => String(e.branch || '').trim()).filter(Boolean)
+      )).sort((a, b) => {
+        let ia = order.indexOf(a); if (ia === -1) ia = 999;
+        let ib = order.indexOf(b); if (ib === -1) ib = 999;
+        return ia - ib || a.localeCompare(b, 'ar');
+      });
+      sel.style.display = names.length > 1 ? '' : 'none';
+      sel.innerHTML = '<option value="">كل الفروع</option>'
+        + names.map(n => '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + '</option>').join('');
+      if (names.indexOf(prev) !== -1) sel.value = prev;   // الاختيار مايضيعش بعد التحديث
     }
 
     /* ===================== تابات ===================== */
@@ -331,9 +358,11 @@
     function renderExpenses() {
       const search      = document.getElementById('searchInput').value.trim().toLowerCase();
       const showHidden  = document.getElementById('showHiddenToggle').checked;
+      const branch      = document.getElementById('branchFilter').value;
       const tbody       = document.getElementById('exp-table-body');
 
       let visible = allExpenses.filter(exp => {
+        if (branch && String(exp.branch || '').trim() !== branch) return false;
         if (!inQuickRange(exp.doc_date)) return false;
         const seen   = !!exp.is_seen;
         const hidden = isAutoHidden(exp);
