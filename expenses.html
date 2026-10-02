@@ -134,6 +134,7 @@
             <thead>
               <tr>
                 <th>التاريخ</th>
+                <th id="th-branch">الفرع</th>
                 <th>القيمة</th>
                 <th>من</th>
                 <th>إلى</th>
@@ -285,6 +286,8 @@
        (get_expenses → exp_scope_branch). فمدير الفرع أصلًا مش بيوصله غير
        فرعه، والقايمة بتختفي لأن خيار واحد مالوش لازمة. مابنعتمدش على
        الدور في الواجهة عشان مانكرّرش قاعدة الصلاحية في مكانين. */
+    let EXP_MULTI_BRANCH = false;   // أكتر من فرع واصل؟ → الفلتر والعمود يبانوا
+
     function fillBranchFilter() {
       const sel = document.getElementById('branchFilter');
       if (!sel) return;
@@ -297,7 +300,8 @@
         let ib = order.indexOf(b); if (ib === -1) ib = 999;
         return ia - ib || a.localeCompare(b, 'ar');
       });
-      sel.style.display = names.length > 1 ? '' : 'none';
+      EXP_MULTI_BRANCH  = names.length > 1;
+      sel.style.display = EXP_MULTI_BRANCH ? '' : 'none';
       sel.innerHTML = '<option value="">كل الفروع</option>'
         + names.map(n => '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + '</option>').join('');
       if (names.indexOf(prev) !== -1) sel.value = prev;   // الاختيار مايضيعش بعد التحديث
@@ -361,6 +365,9 @@
       const branch      = document.getElementById('branchFilter').value;
       const tbody       = document.getElementById('exp-table-body');
 
+      const thBr = document.getElementById('th-branch');
+      if (thBr) thBr.style.display = EXP_MULTI_BRANCH ? '' : 'none';
+
       let visible = allExpenses.filter(exp => {
         if (branch && String(exp.branch || '').trim() !== branch) return false;
         if (!inQuickRange(exp.doc_date)) return false;
@@ -384,7 +391,7 @@
       `;
 
       if (!visible.length) {
-        tbody.innerHTML = `<tr><td colspan="8" class="empty-note"><i class="fas fa-inbox"></i><br>لا توجد مصروفات تطابق الفلتر الحالي</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${EXP_MULTI_BRANCH ? 9 : 8}" class="empty-note"><i class="fas fa-inbox"></i><br>لا توجد مصروفات تطابق الفلتر الحالي</td></tr>`;
         return;
       }
 
@@ -400,8 +407,13 @@
           : `<button class="btn btn-success btn-sm" onclick="markSeen('${exp.doc_code}','${exp.branch}')">
                <i class="fas fa-check"></i> تم
              </button>`;
+        // الفرع مابيظهرش لمدير الفرع — عمود بقيمة واحدة مكرّرة في كل صف
+        const branchCell = EXP_MULTI_BRANCH
+          ? `<td style="font-size:0.78rem;white-space:nowrap;font-weight:700;color:var(--text-secondary);">${escapeHtml(exp.branch || '---')}</td>`
+          : '';
         return `<tr class="${rowClass}">
           <td style="font-size:0.78rem;white-space:nowrap;">${dateStr}</td>
+          ${branchCell}
           <td class="exp-amount">${(parseFloat(exp.value) || 0).toLocaleString('ar-EG', {maximumFractionDigits:2})}</td>
           <td><span class="badge badge-blue">${exp.from_name || '---'}</span></td>
           <td><span class="badge badge-gray">${exp.to_name || '---'}</span></td>
