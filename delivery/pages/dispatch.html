@@ -1634,7 +1634,7 @@ async function openDriverPopup(driverId){
     const oids=[...new Set(tos.map(r=>r.order_id))];
     const ordersById={};
     for(let i=0;i<oids.length;i+=50){
-      const {data:ords}=await db.from('orders').select('id,bill_no,customer_name,total_bill_net,status,cust_region,payment_method,cust_code,collected_amount,collected_approved').in('id',oids.slice(i,i+50));
+      const {data:ords}=await db.from('orders').select('id,bill_no,customer_name,total_bill_net,status,cust_region,payment_method,cust_code,collected_amount,collected_approved,extra_collection').in('id',oids.slice(i,i+50));
       (ords||[]).forEach(o=>ordersById[o.id]=o);
     }
     const byTrip={};
@@ -1645,7 +1645,7 @@ async function openDriverPopup(driverId){
     const notCounted=o=>['failed','cancelled'].includes(o.status); // تعذر/ملغي → يظهر لكن لا يُحسب
     const collOf=o=>((o.collected_amount!=null&&o.collected_amount!=='')?Number(o.collected_amount):null);
     // القيمة المحسوبة: لو الطيار غيّر القيمة والإدارة أقرّتها → قيمة الطيار، غير كده الفاتورة
-    const settle=o=>{ const c=collOf(o); return (o.collected_approved&&c!=null)?c:Number(o.total_bill_net||0); };
+    const settle=o=>{ const c=collOf(o); return (o.collected_approved&&c!=null)?c:(Number(o.total_bill_net||0)+Number(o.extra_collection||0)); };
     const canEditPay=['cashier','manager','admin','employee'].includes(currentUser?.role);
     const payLabels={cash:'كاش',visa:'فيزا',transfer:'تحويل',deferred:'آجل',paid:'خالص'};
     // تأكيدات الكاش المستلم لكل رحلة (سجل مستقل)
@@ -3441,30 +3441,46 @@ if(o.delivered_at){
   const timelineHtml=buildHorizTimeline(stages);
 
   document.getElementById('detailTitle').textContent=`طلب #${o.bill_no||orderId.slice(0,8)}`;
-  document.getElementById('detailBody').innerHTML=`
-    ${timelineHtml}
-    <div class="d-row"><span class="d-lbl">العميل</span><strong class="d-val">${o.customer_name||o.cust_name||'—'}</strong></div>
-    <div class="d-row"><span class="d-lbl">كود العميل</span><span class="d-val">${(o.cust_code&&String(o.cust_code).trim()&&String(o.cust_code)!=='null')?o.cust_code:'—'}</span></div>
-    ${custPhones(o.customer_phone||o.cust_phone)?`<div class="d-row"><span class="d-lbl">الموبايل</span><span class="d-val">${custPhones(o.customer_phone||o.cust_phone)}</span></div>`:''}
-    <div class="d-row"><span class="d-lbl">العنوان</span><span class="d-val">${o.customer_address||o.cust_address||'—'}</span></div>
-    <div class="d-row"><span class="d-lbl">المنطقة</span><span class="d-val">${o.cust_region||'—'}</span></div>
-    <div class="d-row"><span class="d-lbl">المبلغ</span><strong class="d-val">${Number(o.total_bill_net||0).toLocaleString()} ج.م</strong></div>
-    <div class="d-row"><span class="d-lbl">طريقة الدفع</span><span class="d-val">${pmL}</span></div>
-    <div class="d-row"><span class="d-lbl">الحالة</span><span class="d-val">${ordStatusLabel(o)}</span></div>${o.had_failed_attempt?`<div class="d-row"><span class="d-lbl">تنبيه</span><span class="d-val" style="color:#b91c1c;font-weight:800">🔁 اتعذّر توصيله قبل كده — دي محاولة جديدة</span></div>`:''}
-    <div class="d-row"><span class="d-lbl">وقت الطلب الحقيقي</span><span class="d-val" title="من آخر تفعيل، بدون التأجيل والإيقاف، والتحضير محسوب">${fm(realOrderMins(o))}${holdSecs(o)>60?(' · إيقاف '+fm(Math.round(holdSecs(o)/60))):''}</span></div>${o.perf_rating?`<div class="d-row"><span class="d-lbl">أداء الطيار</span><span class="d-val">فعلي ${o.actual_minutes} / متوقع ${o.expected_minutes} د · <strong style="color:${o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.perf_rating}</strong></span></div>`:''}${o.sla_rating?`<div class="d-row"><span class="d-lbl">أداء الفرع</span><span class="d-val">فعلي ${o.sla_actual_minutes} / المسموح ${o.sla_minutes} د · <strong style="color:${o.sla_rating==='ممتاز'?'#16a34a':o.sla_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.sla_rating}</strong></span></div>`:''}
-    <div class="d-row"><span class="d-lbl">الطيار</span><span class="d-val">${o.deliveryman||'—'}</span></div>
-    <div class="d-row"><span class="d-lbl">الموظف</span><span class="d-val">${o.employee_name||'—'}</span></div>
-    <div class="d-row"><span class="d-lbl">الأصناف</span><span class="d-val">${o.count_of_items||0}</span></div>
-    ${billItemsRow(o)}
-    ${o.staff_notes?`<div class="d-row"><span class="d-lbl">ملاحظة الموظف</span><span class="d-val">${o.staff_notes}</span></div>`:''}
-    ${o.driver_notes?`<div class="d-row"><span class="d-lbl">ملاحظة الطيار</span><span class="d-val">${o.driver_notes}</span></div>`:''}
-    ${o.driver_message?`<div class="d-row"><span class="d-lbl">رسالة للطيار</span><span class="d-val" style="color:#1e40af">✉️ ${o.driver_message} ${o.driver_message_seen_at?'· ✓ شافها':'· (لسه ما شافهاش)'}</span></div>`:''}`;
+  // عرض منظّم كجدول (تسمية + قيمة)
+  const _L='padding:.42rem .55rem;color:var(--text-muted);font-weight:700;white-space:nowrap;vertical-align:top;border-bottom:1px solid var(--border);width:34%';
+  const _V='padding:.42rem .55rem;font-weight:700;color:var(--text);border-bottom:1px solid var(--border);word-break:break-word';
+  const _row=(l,v)=>`<tr><td style="${_L}">${l}</td><td style="${_V}">${v}</td></tr>`;
+  const _bill=Number(o.total_bill_net||0), _extra=Number(o.extra_collection||0), _due=_bill+_extra;
+  const _code=(o.cust_code&&String(o.cust_code).trim()&&String(o.cust_code)!=='null')?o.cust_code:'—';
+  let _rows='';
+  _rows+=_row('العميل',`<strong>${o.customer_name||o.cust_name||'—'}</strong>`);
+  _rows+=_row('كود العميل',_code);
+  if(custPhones(o.customer_phone||o.cust_phone)) _rows+=_row('الموبايل',custPhones(o.customer_phone||o.cust_phone));
+  if(o.driver_call_number) _rows+=_row('📞 رقم للاتصال (مُرسل للطيار)',custPhones(o.driver_call_number));
+  _rows+=_row('العنوان',o.customer_address||o.cust_address||'—');
+  _rows+=_row('المنطقة',o.cust_region||'—');
+  _rows+=_row('المبلغ (الفاتورة)',_bill.toLocaleString()+' ج.م');
+  if(_extra>0){
+    _rows+=_row('➕ تحصيل إضافي',`<span style="color:#b45309;font-weight:800">${_extra.toLocaleString()} ج.م</span>${o.extra_collection_note?` <span style="color:var(--text-muted);font-weight:600;font-size:.72rem">— ${o.extra_collection_note}</span>`:''}`);
+    _rows+=_row('الإجمالي المطلوب',`<strong style="color:#15803d;font-size:.92rem">${_due.toLocaleString()} ج.م</strong>`);
+  }
+  _rows+=_row('طريقة الدفع',pmL);
+  _rows+=_row('الحالة',ordStatusLabel(o)+(o.had_failed_attempt?' <span style="color:#b91c1c;font-weight:800">· 🔁 اتعذّر قبل كده</span>':''));
+  _rows+=_row('وقت الطلب الحقيقي',`${fm(realOrderMins(o))}${holdSecs(o)>60?(' · إيقاف '+fm(Math.round(holdSecs(o)/60))):''}`);
+  if(o.perf_rating) _rows+=_row('أداء الطيار',`فعلي ${o.actual_minutes} / متوقع ${o.expected_minutes} د · <strong style="color:${o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.perf_rating}</strong>`);
+  if(o.sla_rating) _rows+=_row('أداء الفرع',`فعلي ${o.sla_actual_minutes} / المسموح ${o.sla_minutes} د · <strong style="color:${o.sla_rating==='ممتاز'?'#16a34a':o.sla_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.sla_rating}</strong>`);
+  _rows+=_row('الطيار',o.deliveryman||'—');
+  _rows+=_row('الموظف',o.employee_name||'—');
+  _rows+=_row('🧾 الأصناف',`${o.count_of_items||0} &nbsp;&nbsp; ${billItemsBtnHtml(o)}`);
+  if(o.staff_notes) _rows+=_row('ملاحظة الموظف',o.staff_notes);
+  if(o.driver_notes) _rows+=_row('ملاحظة الطيار',o.driver_notes);
+  if(o.driver_message) _rows+=_row('رسالة للطيار',`<span style="color:#1e40af">✉️ ${o.driver_message} ${o.driver_message_seen_at?'· ✓ شافها':'· (لسه ما شافهاش)'}</span>`);
+  document.getElementById('detailBody').innerHTML=`${timelineHtml}<table style="width:100%;border-collapse:collapse;font-size:.8rem"><tbody>${_rows}</tbody></table>`;
 
   // Actions based on status
   let footerBtns=`<button class="btn btn-outline" onclick="closeModal('detailModal')">إغلاق</button>`;
   footerBtns+=`<button class="btn btn-outline" onclick="closeModal('detailModal');openLog('${orderId}',null)">📋 سجل</button>`;
   if(o.driver_id && ['assigned','picked'].includes(o.status))
     footerBtns+=`<button class="btn btn-outline" onclick="sendDriverMessage('${orderId}')">✉️ رسالة للطيار</button>`;
+  if(o.driver_id && ['assigned','picked'].includes(o.status))
+    footerBtns+=`<button class="btn btn-outline" onclick="sendDriverCallNumber('${orderId}','${tripId}')">📞 إرسال رقم للطيار</button>`;
+  if(['cashier','manager','admin','employee'].includes(currentUser?.role) && !['completed','cancelled'].includes(o.status))
+    footerBtns+=`<button class="btn btn-outline" onclick="addExtraCollection('${orderId}','${tripId}')">➕ إضافة تحصيل</button>`;
 
   // الطيار خرج بالرحلة؟ → الأدوية معاه، فإعادة التعيين خطر (النقل هو الصح)
   const driverIsOut = tripId ? tripHasPicked(tripId) : false;
@@ -3491,6 +3507,41 @@ if(o.delivered_at){
 
   document.getElementById('detailFooter').innerHTML=footerBtns;
   document.getElementById('detailModal').classList.add('open');
+}
+
+// إرسال رقم بديل للطيار (يظهر كزر اتصال في كارت الطلب عنده)
+async function sendDriverCallNumber(orderId, tripId){
+  const o=allOrders.find(x=>x.id===orderId); if(!o) return;
+  const cur=o.driver_call_number||'';
+  const num=prompt('رقم بديل يروح للطيار كزر اتصال على الطلب #'+(o.bill_no||orderId.slice(0,6))+'\n(اتركه فاضي لحذف الرقم)', cur);
+  if(num===null) return;
+  const v=num.trim().replace(/[^\d+]/g,'');
+  showLoading(true);
+  await db.from('orders').update({driver_call_number:v||null, updated_at:new Date().toISOString()}).eq('id',orderId);
+  await addOrderLog(orderId,'order_edited',{action:'driver_call_number', number:v||'(حذف)'});
+  o.driver_call_number=v||null;
+  showLoading(false);
+  showToast(v?'📞 تم إرسال الرقم للطيار':'تم حذف الرقم');
+  if(tripId&&tripId!=='null') openTripOrderDetail(orderId, tripId); else closeModal('detailModal');
+}
+
+// إضافة/تعديل تحصيل إضافي يتضاف على إجمالي الطلب ويحصّله الطيار وقت التسليم
+async function addExtraCollection(orderId, tripId){
+  const o=allOrders.find(x=>x.id===orderId); if(!o) return;
+  const bill=Number(o.total_bill_net||0);
+  const cur=Number(o.extra_collection||0);
+  const amtS=prompt('تحصيل إضافي يتضاف على إجمالي الطلب (يحصّله الطيار من العميل)\nالفاتورة: '+bill.toLocaleString()+' ج\n\nاكتب المبلغ (0 لإلغاء التحصيل الإضافي):', cur||'');
+  if(amtS===null) return;
+  const amt=Math.max(0, Number(amtS)||0);
+  let note=o.extra_collection_note||'';
+  if(amt>0){ const n=prompt('سبب التحصيل الإضافي (اختياري) — يظهر للطيار:', note); if(n!==null) note=n.trim(); } else note='';
+  showLoading(true);
+  await db.from('orders').update({extra_collection:amt, extra_collection_note:note||null, updated_at:new Date().toISOString()}).eq('id',orderId);
+  await addOrderLog(orderId,'order_edited',{action:'extra_collection', amount:amt, note:note||null});
+  o.extra_collection=amt; o.extra_collection_note=note||null;
+  showLoading(false);
+  showToast(amt>0?('➕ تحصيل إضافي: '+amt.toLocaleString()+' ج — الإجمالي '+(bill+amt).toLocaleString()+' ج'):'تم إلغاء التحصيل الإضافي');
+  if(tripId&&tripId!=='null') openTripOrderDetail(orderId, tripId); else closeModal('detailModal');
 }
 
 // Reassign to another driver

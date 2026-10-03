@@ -1319,12 +1319,12 @@ function buildTimers(o){
 function updateAllTimers(){renderContent();}
 
 // الكاش المحسوب: المبلغ المُدخل يُحسب فقط لو الكاشير أقرّه، وإلا نحسب على قيمة الفاتورة
-function cashOf(o){ return (o.collected_approved===true && o.collected_amount!=null) ? Number(o.collected_amount) : Number(o.total_bill_net||0); }
+function cashOf(o){ return (o.collected_approved===true && o.collected_amount!=null) ? Number(o.collected_amount) : (Number(o.total_bill_net||0)+Number(o.extra_collection||0)); }
 function ratingColor(r){ return r==='ممتاز'?'var(--green)':r==='متأخر'?'var(--red)':'var(--yellow)'; }
 // ملاحظة إقرار الكاشير أسفل المبلغ المحصّل (تظهر فقط لو المبلغ مختلف عن الفاتورة)
 function collectedNote(o){
   if(o.collected_amount==null) return '';
-  const diff=Math.abs(Number(o.collected_amount)-Number(o.total_bill_net||0))>0.01;
+  const diff=Math.abs(Number(o.collected_amount)-(Number(o.total_bill_net||0)+Number(o.extra_collection||0)))>0.01;
   if(!diff) return '';
   return o.collected_approved===true
     ? `<div style="font-size:.66rem;color:#15803d">✓ الكاشير أقرّ المبلغ (يُحسب عليه)</div>`
@@ -1434,7 +1434,8 @@ let actionsBar='';
     const pm=o.payment_method;
     const pmLabel=pm?PAY_LABELS[pm]:'كاش';
     const pmClass=`tag-${pm||'cash'}`;
-    const amount=Number(o.total_bill_net||0);
+    const _xtra=Number(o.extra_collection||0);
+    const amount=Number(o.total_bill_net||0)+_xtra;
 let actions='';
     if(o.status==='assigned')
       actions=`<button class="oa-btn oa-pickup" onclick="pickupOne('${o.id}')">▶️ استلمت</button>`;
@@ -1461,6 +1462,7 @@ let actions='';
           <div style="flex:1;display:flex;gap:.3rem;flex-wrap:wrap">
             ${o.cust_region?`<span class="or-tag tag-region">${o.cust_region}</span>`:''}
             <span class="or-tag ${pmClass}">${pmLabel}</span>
+            ${_xtra>0?`<span class="or-tag" style="background:#fff7ed;color:#b45309;border:1px solid #fed7aa">➕ تحصيل ${_xtra.toLocaleString('ar-EG')} ج</span>`:''}
             ${o.count_of_items?`<span class="or-tag" style="background:var(--gray-light);color:var(--gray)">${o.count_of_items} صنف</span>`:''}
           </div>
           <div style="font-size:1.05rem;font-weight:800;color:#0a3d62;white-space:nowrap">${amount.toLocaleString('ar-EG')} <small style="font-size:.6rem;color:var(--text-muted);font-weight:600">ج.م</small></div>
@@ -1474,9 +1476,10 @@ let actions='';
         ${o.staff_notes?`<div class="or-note note-staff">💼 ${o.staff_notes}</div>`:''}
         ${o.is_gift?`<div class="or-note gift-pulse" style="background:#fef3c7;border:1px solid #fbbf24;color:#92400e;font-weight:800">🎁 ${o.gift_title?('هدية — '+o.gift_title):'هدية للعميل'}<br>الرجاء التأكد من وجود الهدية بداخل الطلب</div>`:''}
         ${o.status==='failed'&&o.postpone_reason?`<div class="or-note note-urgent">⚠️ تعذر: ${o.postpone_reason}</div>`:''}
+        ${_xtra>0?`<div class="or-note" style="background:#fff7ed;border:1px solid #fed7aa;color:#b45309;font-weight:700">➕ تحصيل إضافي: ${_xtra.toLocaleString('ar-EG')} ج — الإجمالي المطلوب ${amount.toLocaleString('ar-EG')} ج${o.extra_collection_note?`<br><span style="font-weight:600;font-size:.72rem">السبب: ${o.extra_collection_note}</span>`:''}</div>`:''}
         <div style="margin-top:.5rem;padding:.45rem .5rem;background:#f1efe8;border-top:1px solid #cfcdc4;border-radius:6px">
           <div style="font-size:.6rem;color:#888780;margin-bottom:.35rem">تفاصيل إضافية</div>
-          <div style="display:flex;flex-wrap:wrap;gap:.4rem;align-items:center">${custPhonesDrv(o.customer_phone||o.cust_phone)}<span style="display:inline-flex">${itemsBtnDrv(o)}</span></div>
+          <div style="display:flex;flex-wrap:wrap;gap:.4rem;align-items:center">${o.driver_call_number?`<a href="tel:${o.driver_call_number}" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:.35rem;color:#1e40af;background:#dbeafe;border:1px solid #bfdbfe;border-radius:8px;padding:.35rem .6rem;font-weight:800;font-size:.8rem;text-decoration:none">📞 رقم من الإدارة: <bdi>${o.driver_call_number}</bdi></a>`:''}${custPhonesDrv(o.customer_phone||o.cust_phone)}<span style="display:inline-flex">${itemsBtnDrv(o)}</span></div>
         </div>
       </div>
     </div>`;
@@ -1594,11 +1597,15 @@ function showBalanceNotice(orders){
 let _dlvBill=0;
 function openDeliver(id){
   const o=Object.values(tripOrders).flat().find(x=>x.id===id);if(!o)return;
-  _dlvBill=Number(o.total_bill_net||0);
-  document.getElementById('dlv-billnote').textContent='قيمة الفاتورة: '+_dlvBill.toLocaleString('ar-EG')+' ج';
+  const _xtra=Number(o.extra_collection||0);
+  const _billOnly=Number(o.total_bill_net||0);
+  _dlvBill=_billOnly+_xtra;
+  document.getElementById('dlv-billnote').textContent = _xtra>0
+    ? ('المطلوب: '+_dlvBill.toLocaleString('ar-EG')+' ج (فاتورة '+_billOnly.toLocaleString('ar-EG')+' + تحصيل إضافي '+_xtra.toLocaleString('ar-EG')+')')
+    : ('قيمة الفاتورة: '+_dlvBill.toLocaleString('ar-EG')+' ج');
   document.getElementById('dlv-id').value=id;
   document.getElementById('dlv-note').value='';
-  document.getElementById('dlv-amt').value=o.collected_amount||o.total_bill_net||'';
+  document.getElementById('dlv-amt').value=o.collected_amount||_dlvBill||'';
   document.querySelectorAll('.pay-opt').forEach(b=>b.className='pay-opt');
   // تحديد طريقة الدفع المسبقة من الصيدلية
   const preselectedPay=o.payment_method||'cash';
