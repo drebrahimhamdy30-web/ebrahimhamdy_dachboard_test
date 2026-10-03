@@ -165,6 +165,12 @@ body{padding:0;overflow:hidden;height:100vh;background:var(--bg);display:flex;fl
     <option value="visa">فيزا</option>
     <option value="transfer">تحويل</option>
     <option value="deferred">آجل</option>
+    <option value="paid">خالص</option>
+  </select>
+
+  <!-- Driver (مندوب) filter -->
+  <select class="date-input" id="driverFilter" onchange="applyFilters()" style="width:140px" title="المندوب (الطيار)">
+    <option value="">كل المندوبين</option>
   </select>
 
   <!-- Performance filter -->
@@ -255,7 +261,7 @@ const STATUS_LABELS={pending:'جاهز',assigned:'على رحلة',picked:'اس�
 // التفرقة داخل «مؤجل»: سبب طيار (غير «أُزيل من الرحلة») = تعذّر توصيل فعلي
 function isFailAttempt(o){ return o && o.status==='postponed' && o.postpone_reason && o.postpone_reason!=='أُزيل من الرحلة'; }
 function stLabel(o){ return isFailAttempt(o) ? 'تعذّر توصيل' : (STATUS_LABELS[o.status]||o.status); }
-const PAY_LABELS={cash:'كاش',visa:'فيزا',transfer:'تحويل',deferred:'آجل'};
+const PAY_LABELS={cash:'كاش',visa:'فيزا',transfer:'تحويل',deferred:'آجل',paid:'خالص'};
 const LATE_MINS=30;
 
 // عرض تفاصيل السجل بشكل مقروء للموظف (يترجم المفاتيح ويخفي الحقول التقنية)
@@ -346,9 +352,21 @@ async function loadAll(){
       (to||[]).forEach(r=>{orderTrip[r.order_id]=r.trip_id;});
     }
     updateCounts();
+    populateDriverFilter();
     applyFilters();
   }catch(e){console.error(e);}
   showLoad(false);
+}
+
+// تعبئة فلتر المندوب (الطيار) من الطلبات المحمّلة — القيمة = معرّف الطيار، والاسم من deliveryman
+function populateDriverFilter(){
+  const sel=document.getElementById('driverFilter'); if(!sel) return;
+  const cur=sel.value;
+  const m=new Map();
+  allOrders.forEach(o=>{ if(o.driver_id && o.deliveryman) m.set(String(o.driver_id), o.deliveryman); });
+  const opts=[...m.entries()].sort((a,b)=>String(a[1]).localeCompare(String(b[1]),'ar'));
+  sel.innerHTML='<option value="">كل المندوبين</option>'+opts.map(([id,nm])=>`<option value="${id}">${nm}</option>`).join('');
+  if(cur && m.has(cur)) sel.value=cur; else if(cur) sel.value='';
 }
 
 function getBillDate(o){
@@ -459,6 +477,7 @@ function applyFilters(){
   const dateTo=document.getElementById('dateTo').value;
   const payF=document.getElementById('payFilter').value;
   const perfF=document.getElementById('perfFilter').value;
+  const drvF=document.getElementById('driverFilter').value;
   const src=searchMode?searchRows:allOrders;
 
   filtered=src.filter(o=>{
@@ -467,6 +486,7 @@ function applyFilters(){
     else if(statusFilter&&o.status!==statusFilter)return false;
     // Performance
     if(perfF&&o.perf_rating!==perfF)return false;
+    if(drvF&&String(o.driver_id||'')!==drvF)return false;
     // Date (يتطبّق في وضع العرض العادي فقط — البحث بيجيب كل التواريخ)
     if(!searchMode){
       const bd=getBillDate(o);
@@ -507,7 +527,7 @@ function renderTable(){
     const late=isLate(o);
     const bd=getBillDate(o);
     const pm=o.payment_method;
-    const pmL=pm?PAY_LABELS[pm]:(o.bill_type||'—');
+    const pmL=pm?(PAY_LABELS[pm]||pm):(o.bill_type||'—');
     const pmC=pm?`pay-${pm}`:'pay-cash';
     const duration=fmDuration(bd, o.delivered_at||o.updated_at);
     const delivDuration=fmDuration(o.picked_at, o.delivered_at);

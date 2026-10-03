@@ -120,6 +120,10 @@ body{padding:0;overflow:hidden;height:100vh;background:var(--bg);display:flex;fl
     <option value="متأخر">متأخر</option>
   </select>
 
+  <select class="date-input" id="driverFilter" onchange="applyFilters()" style="width:140px" title="المندوب (الطيار)">
+    <option value="">كل المندوبين</option>
+  </select>
+
   <button class="btn btn-outline btn-sm" onclick="loadAll()" style="margin-right:auto">↻ تحديث</button>
   <span id="resultCount" style="font-size:.72rem;color:var(--text-muted);white-space:nowrap"></span>
 </div>
@@ -199,8 +203,20 @@ async function init(){
     sel.innerHTML='<option value="">كل الفروع</option>'+(br||[]).map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
     if(currentUser?.branch_id) sel.value=currentUser.branch_id;
   }
+  await populateDrivers();
   await loadAll();
   setInterval(loadAll,120000);
+}
+
+// تعبئة فلتر المندوب (الطيار) — من جدول الطيارين (مقيّد بالفرع لغير الأدمن)
+async function populateDrivers(){
+  const sel=document.getElementById('driverFilter'); if(!sel) return;
+  let q=db.from('drivers').select('id,full_name,branch_id').eq('is_active',true).order('full_name');
+  if(currentUser?.role!=='admin' && currentUser?.branch_id) q=q.eq('branch_id',currentUser.branch_id);
+  const {data}=await q;
+  const cur=sel.value;
+  sel.innerHTML='<option value="">كل المندوبين</option>'+(data||[]).map(d=>`<option value="${d.id}">${d.full_name}</option>`).join('');
+  if(cur) sel.value=cur;
 }
 
 // يبني استعلام الرحلات مع كل الفلاتر على السيرفر (فرع/حالة/تاريخ/بحث/أداء)
@@ -211,6 +227,8 @@ function buildTripsQuery(sel,opts){
   const branchVal=document.getElementById('branchFilter')?.value;
   if(branchVal) q=q.eq('branch_id',branchVal);
   else if(currentUser?.role!=='admin'&&currentUser?.branch_id) q=q.eq('branch_id',currentUser.branch_id);
+  const drvVal=document.getElementById('driverFilter')?.value;
+  if(drvVal) q=q.eq('driver_id',drvVal);
   if(statusFilter) q=q.eq('status',statusFilter);
   const dFrom=document.getElementById('dateFrom').value;
   const dTo=document.getElementById('dateTo').value;
