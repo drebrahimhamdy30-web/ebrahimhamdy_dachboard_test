@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>قائمة الطلب</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+<!--
+  ═══════════════════════════════════════════════════════════════════
+  صفحة المورّد — عامة بطبيعتها
+  ═══════════════════════════════════════════════════════════════════
+  ⚠️ **ممنوع يتحط أي مفتاح أو config.js هنا.** الصفحة دي بيفتحها ناس
+     من بره المؤسسة، فأي مفتاح فيها = مفتاح مسرَّب. الوصول الوحيد عبر
+     Edge Function واحدة (supplier_order) بتوكن في الرابط، وهي اللي
+     عندها صلاحيات القاعدة جوّه السيرفر.
+
+  لو احتاجت الصفحة أي بيانات زيادة، الإضافة تتم **في الدالة** مش
+  بإضافة نداء للقاعدة من هنا.
+  ═══════════════════════════════════════════════════════════════════
+-->
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --txt:#111827; --muted:#6b7280;
+    --line:#e5e7eb; --brand:#0d9488; --brand-d:#0f766e; --ok:#15803d; --err:#b91c1c;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0f172a; --card:#1e293b; --txt:#f1f5f9; --muted:#94a3b8;
+           --line:#334155; --brand:#14b8a6; --brand-d:#0d9488; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:Cairo,system-ui,sans-serif;
+       padding:0 0 96px;-webkit-text-size-adjust:100%}
+  .wrap{max-width:720px;margin:0 auto;padding:0 14px}
+  header{background:var(--brand);color:#fff;padding:16px 14px;position:sticky;top:0;z-index:9}
+  header .w{max-width:720px;margin:0 auto}
+  h1{margin:0;font-size:1.05rem;font-weight:800}
+  .sub{font-size:.8rem;opacity:.92;margin-top:3px}
+  .bar{position:sticky;top:64px;z-index:8;background:var(--bg);padding:10px 0 6px}
+  .srch{width:100%;padding:11px 13px;border:1.5px solid var(--line);border-radius:11px;
+        font-family:inherit;font-size:.92rem;background:var(--card);color:var(--txt);outline:none}
+  .srch:focus{border-color:var(--brand)}
+  .tools{display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap}
+  .tbtn{border:1.5px solid var(--line);background:var(--card);color:var(--txt);border-radius:9px;
+        padding:6px 12px;font-family:inherit;font-size:.78rem;font-weight:700;cursor:pointer}
+  .tbtn:active{transform:scale(.97)}
+  .count{margin-inline-start:auto;font-size:.82rem;font-weight:800;color:var(--muted)}
+  ul{list-style:none;margin:0;padding:0}
+  li{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:8px;
+     display:flex;align-items:center;gap:11px;padding:11px 13px;cursor:pointer}
+  li.on{border-color:var(--brand);background:color-mix(in srgb,var(--brand) 9%,var(--card))}
+  li input{width:22px;height:22px;accent-color:var(--brand);flex:0 0 auto;pointer-events:none}
+  .nm{font-weight:700;font-size:.9rem;line-height:1.45}
+  .mt{font-size:.74rem;color:var(--muted);margin-top:2px}
+  .qty{margin-inline-start:auto;font-weight:800;color:var(--brand-d);white-space:nowrap;font-size:.92rem}
+  .foot{position:fixed;inset-inline:0;bottom:0;background:var(--card);border-top:1px solid var(--line);
+        padding:11px 14px;box-shadow:0 -3px 14px rgba(0,0,0,.08)}
+  .foot .w{max-width:720px;margin:0 auto;display:flex;gap:10px;align-items:center}
+  .send{flex:1;background:var(--brand);color:#fff;border:0;border-radius:11px;padding:13px;
+        font-family:inherit;font-size:.95rem;font-weight:800;cursor:pointer}
+  .send:disabled{opacity:.5;cursor:default}
+  .msg{padding:26px 14px;text-align:center;font-weight:700}
+  .msg.err{color:var(--err)}
+  .done{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:30px 18px;
+        text-align:center;margin-top:20px}
+  .done .big{font-size:2.6rem}
+  .note{width:100%;margin-top:8px;padding:9px 11px;border:1.5px solid var(--line);border-radius:10px;
+        font-family:inherit;font-size:.85rem;background:var(--card);color:var(--txt);outline:none;resize:vertical}
+</style>
+</head>
+<body>
+
+<header><div class="w">
+  <h1 id="h-title">قائمة الطلب</h1>
+  <div class="sub" id="h-sub">جارٍ التحميل…</div>
+</div></header>
+
+<div class="wrap">
+  <div id="body"><div class="msg">جارٍ التحميل…</div></div>
+</div>
+
+<div class="foot" id="foot" style="display:none"><div class="w">
+  <button class="send" id="send" onclick="submitReply()">إرسال المتاح</button>
+  <span id="fmsg" style="font-size:.8rem;font-weight:700"></span>
+</div></div>
+
+<script>
+/* عنوان الدالة — مش سر: نفس عنوان المشروع الظاهر في أي صفحة عامة.
+   المفتاح هو اللي سر، وهو **مش هنا** — الدالة بتشتغل بصلاحياتها جوّه
+   السيرفر. */
+var FN = 'https://rxtjoqulmgkkcohmgzgi.supabase.co/functions/v1/supplier_order';
+
+var TOKEN = new URLSearchParams(location.search).get('t') || '';
+var ITEMS = [], MARK = new Set(), SENT = false;
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
+  return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
+
+function fail(m){
+  document.getElementById('body').innerHTML = '<div class="msg err">'+esc(m)+'</div>';
+  document.getElementById('h-sub').textContent = '';
+  document.getElementById('foot').style.display = 'none';
+}
+
+async function load(){
+  if(!TOKEN){ fail('الرابط ناقص.'); return; }
+  try{
+    var r = await fetch(FN+'?t='+encodeURIComponent(TOKEN));
+    var j = await r.json();
+    if(!r.ok){ fail(j.error || 'تعذّر فتح الرابط.'); return; }
+
+    ITEMS = Array.isArray(j.items) ? j.items : [];
+    SENT  = !!j.submitted;
+    (j.marked||[]).forEach(function(c){ MARK.add(String(c)); });
+
+    document.getElementById('h-title').textContent = j.store || 'قائمة الطلب';
+    document.getElementById('h-sub').textContent   = ITEMS.length + ' صنف';
+
+    if(SENT){ showDone(j.marked ? j.marked.length : 0); return; }
+    render();
+    document.getElementById('foot').style.display = '';
+  }catch(e){ fail('تعذّر الاتصال. تحقق من الإنترنت وحاول مرة أخرى.'); }
+}
+
+function render(){
+  var q = (document.getElementById('q') ? document.getElementById('q').value : '').trim().toLowerCase();
+  var list = ITEMS.filter(function(x){
+    if(!q) return true;
+    return String(x.name||'').toLowerCase().indexOf(q) > -1 || String(x.code||'').indexOf(q) > -1;
+  });
+
+  var html =
+    '<div class="bar">'
+    + '<input class="srch" id="q" placeholder="ابحث باسم الصنف أو الكود…" oninput="render()" value="'+esc(q)+'">'
+    + '<div class="tools">'
+    +   '<button class="tbtn" onclick="markAll(true)">تحديد الكل</button>'
+    +   '<button class="tbtn" onclick="markAll(false)">مسح التحديد</button>'
+    +   '<span class="count" id="cnt"></span>'
+    + '</div></div><ul>';
+
+  html += list.map(function(x){
+    var on = MARK.has(String(x.code));
+    return '<li class="'+(on?'on':'')+'" onclick="toggle(\''+esc(x.code)+'\')">'
+      + '<input type="checkbox" '+(on?'checked':'')+'>'
+      + '<div><div class="nm">'+esc(x.name)+'</div><div class="mt">كود '+esc(x.code)+'</div></div>'
+      + '<span class="qty">'+esc(x.qty)+'</span></li>';
+  }).join('');
+
+  html += '</ul>';
+  if(!list.length) html += '<div class="msg">لا توجد نتائج للبحث.</div>';
+  html += '<textarea class="note" id="note" rows="2" placeholder="ملاحظة للصيدلية (اختياري)"></textarea>';
+
+  var prevNote = document.getElementById('note') ? document.getElementById('note').value : '';
+  document.getElementById('body').innerHTML = html;
+  if(prevNote) document.getElementById('note').value = prevNote;
+  if(q) { var el=document.getElementById('q'); el.focus(); el.setSelectionRange(q.length,q.length); }
+  updCount();
+}
+
+function updCount(){
+  var el = document.getElementById('cnt');
+  if(el) el.textContent = 'متاح ' + MARK.size + ' من ' + ITEMS.length;
+  var s = document.getElementById('send');
+  if(s) s.textContent = MARK.size ? ('إرسال المتاح ('+MARK.size+')') : 'إرسال — لا يوجد متاح';
+}
+
+function toggle(code){
+  code = String(code);
+  if(MARK.has(code)) MARK.delete(code); else MARK.add(code);
+  render();
+}
+function markAll(on){
+  var q = (document.getElementById('q')||{value:''}).value.trim().toLowerCase();
+  ITEMS.forEach(function(x){
+    if(q && String(x.name||'').toLowerCase().indexOf(q)===-1 && String(x.code||'').indexOf(q)===-1) return;
+    if(on) MARK.add(String(x.code)); else MARK.delete(String(x.code));
+  });
+  render();
+}
+
+async function submitReply(){
+  var btn = document.getElementById('send'), fm = document.getElementById('fmsg');
+  if(!MARK.size && !confirm('لم تحدد أي صنف. هل تريد الإرسال كـ«لا يوجد متاح»؟')) return;
+  btn.disabled = true; fm.textContent = 'جارٍ الإرسال…';
+  try{
+    var noteEl = document.getElementById('note');
+    var r = await fetch(FN+'?t='+encodeURIComponent(TOKEN), {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ codes:[...MARK], note: noteEl ? noteEl.value : '' })
+    });
+    var j = await r.json();
+    if(!r.ok){ fm.textContent = j.error || 'تعذّر الإرسال'; btn.disabled = false; return; }
+    showDone(j.saved);
+  }catch(e){ fm.textContent = 'تعذّر الاتصال'; btn.disabled = false; }
+}
+
+function showDone(n){
+  document.getElementById('foot').style.display = 'none';
+  document.getElementById('body').innerHTML =
+    '<div class="done"><div class="big">✅</div>'
+    + '<div style="font-weight:800;margin-top:10px;font-size:1.05rem">تم استلام ردك</div>'
+    + '<div style="color:var(--muted);margin-top:6px">عدد الأصناف المتاحة: <b>'+n+'</b></div>'
+    + '<div style="color:var(--muted);margin-top:14px;font-size:.84rem">يمكنك إغلاق الصفحة. شكرًا لك.</div></div>';
+  document.getElementById('h-sub').textContent = 'تم الإرسال';
+}
+
+load();
+</script>
+</body>
+</html>
