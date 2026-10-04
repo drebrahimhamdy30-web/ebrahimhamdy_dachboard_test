@@ -202,7 +202,7 @@ async function rpc(cfg, fn, body) {
     }
 
     const lastPage = LIMIT_PAGES ? Math.min(LIMIT_PAGES, totalPages) : Math.min(totalPages, MAX_PAGES);
-    let infTaxed = 0, infExempt = 0, fromInv = 0;
+    let infTaxed = 0, exPharma = 0, exSnap = 0, fromInv = 0;
     let buffer = [];
     const flush = async () => {
       while (buffer.length) {
@@ -211,7 +211,8 @@ async function rpc(cfg, fn, body) {
         upserted += Number(res && res.upserted) || 0;
         taxUnknown += Number(res && res.tax_unknown) || 0;
         infTaxed   += Number(res && res.inferred_taxed) || 0;
-        infExempt  += Number(res && res.inferred_exempt) || 0;
+        exPharma   += Number(res && res.exempt_pharma) || 0;
+        exSnap     += Number(res && res.exempt_snapped) || 0;
         fromInv    += Number(res && res.from_invoices) || 0;
         if (buffer.length) await sleep(WRITE_PAUSE_MS);
       }
@@ -246,7 +247,8 @@ async function rpc(cfg, fn, body) {
     });
     log(`\n✅ خلصت في ${secs}ث — اتقرا ${scanned} · اتحدّث ${upserted}`);
     log(`   الضريبة من فواتير حقيقية: ${fromInv}`);
-    log(`   مستنتجة بقاعدة «الخصم المدوّر»: ${taxUnknown} (خاضعة ${infTaxed} · معفاة ${infExempt})`);
+    log(`   مستنتجة بقاعدة «الخصم المدوّر»: ${taxUnknown} (خاضعة ${infTaxed})`);
+    log(`   خصم الأصناف المعفاة: ${exPharma} من فارما · ${exSnap} بالتقريب لأقل شريحة`);
     log(`   ${stale} سعرهم مااتغيّرش من ${STALE_MONTHS} شهر فاتعلّموا «مش متاح»`
       + (unavailable ? ` · و${unavailable} اختفوا من الكتالوج` : ''));
   } catch (e) {
