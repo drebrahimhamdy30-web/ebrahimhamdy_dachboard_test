@@ -136,6 +136,9 @@
     .ord-sel-chk.partial { accent-color:#16a34a; }
     .ord-surp { font-size:0.72rem;color:#15803d;font-weight:700;line-height:1.5; }
     .ord-actbtn { border:none;border-radius:6px;padding:4px 8px;font-family:inherit;font-size:0.7rem;font-weight:700;cursor:pointer;white-space:nowrap; }
+    .ord-send-inp { width:72px;text-align:center;padding:3px 4px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-primary);font-family:inherit;font-size:0.78rem;font-weight:700; }
+    .ord-send-inp.edited { border-color:#b45309;color:#b45309;background:#fffbeb; }
+    .ord-send-inp:disabled { opacity:.5;cursor:not-allowed; }
     .ord-tr { background:#16a34a;color:#fff; }
     .ord-bw { background:var(--surface-3);color:var(--text-primary); }
     /* تحكّم الأعمدة: عرض + ترتيب */
@@ -263,6 +266,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
               <th data-col="sel"><input type="checkbox" id="ord-all" title="تحت الطلب" onclick="ordToggleAll(this)"></th>
               <th data-col="code">الكود</th>
               <th data-col="name" style="text-align:right;">الاسم</th>
+              <th data-col="send" title="الكمية اللي هتتبعت للمورّد — صفر = استبعاد">الكمية المرسلة</th>
               <th data-col="net">صافى المطلوب</th>
               <th data-col="store">المخزن</th>
               <th data-col="sprice">سعر البيع</th>
@@ -275,7 +279,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
               <th data-col="company">الشركة</th>
               <th data-col="arch">أرشفة</th>
             </tr></thead>
-            <tbody id="ord-body"><tr><td colspan="15" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr></tbody>
+            <tbody id="ord-body"><tr><td colspan="16" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr></tbody>
           </table>
         </div>
         <div id="ord-pager"></div>
@@ -441,15 +445,14 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       </div>
       <div class="cr-modal-bd">
         <div class="et-note" style="line-height:1.8">
-          تُجهَّز قائمة أصناف <b>المخزن المحدَّد في الفلتر</b> بنفس شروط البحث الحالية، <b>تراجع الكميات وتعدّلها</b>، ثم يُنشأ الرابط. يفتحه المورّد من أي متصفح
+          يُنشأ الرابط لأصناف <b>المخزن المحدَّد في الفلتر</b> بنفس شروط البحث الحالية، وبالكميات الموجودة في عمود <b>«الكمية المرسلة»</b> في الجدول — الصنف اللي كميته صفر لا يُرسل. يفتحه المورّد من أي متصفح
           ويحدد المتاح لديه، فيصلك الرد هنا. <b>لا يدخل أي صنف إلى «تحت الطلب» إلا بعد ضغطك على «اعتماد».</b>
           <br>الرابط يعرض الكود والاسم والكمية فقط — <b>بدون أسعار أو خصومات</b> — وصلاحيته 7 أيام.
         </div>
         <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <button class="btn btn-primary" onclick="supPrepare()"><i class="fas fa-list-check"></i> تجهيز القائمة للمراجعة</button>
+          <button class="btn btn-primary" onclick="supCreate()"><i class="fas fa-link"></i> إنشاء الرابط</button>
           <span id="sup-msg" style="font-size:.82rem;font-weight:700"></span>
         </div>
-        <div id="sup-draft" style="margin-top:12px"></div>
         <div id="sup-new" style="margin-top:10px"></div>
         <div style="font-weight:800;font-size:.85rem;margin:16px 0 6px">الروابط السابقة</div>
         <div id="sup-list" style="overflow:auto"></div>
@@ -793,8 +796,27 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     /* [اسم الفرع, عمود فائضه في purchase_orders_flat] — من جدول الفروع */
     const brList = () => BR_KEYS.map(k => [BR[k], 'surplus_' + k]);
 
+    /* ═══ الكمية المرسلة للمورّد ═══
+       كمية لكل صنف، الافتراضي = صافي المطلوب، وصفر = استبعاد. دي اللي
+       بتروح في رابط المورّد بدل الرقم المحسوب.
+       بتعيش في الصفحة بس (كود الصنف → كمية): بتضيع مع إعادة الحساب ومع
+       تغيير الفرع وبإعادة تحميل الصفحة — بقرار المالك، مفيش تخزين.
+       السجل الدائم لللي اتبعت فعلًا هو صف الرابط نفسه (supplier_links.items).
+       ⚠️ الصنف اللي ماتعدّلش مالوش صف هنا خالص — عشان لو net_required
+          اتغيّر بعد إعادة حساب، اللي ماتلمسوش ياخد الرقم الجديد مش القديم. */
+    let ORD_SEND = {};
+
+    function ordSendQty(code, dflt, el) {
+      const q = Math.max(0, Math.floor(Number(el.value) || 0));
+      el.value = q;
+      if (q === Number(dflt)) delete ORD_SEND[code]; else ORD_SEND[code] = q;
+      el.classList.toggle('edited', q !== Number(dflt));
+      el.title = (q !== Number(dflt)) ? ('الأصل ' + dflt) : 'الكمية اللي هتتبعت للمورّد — صفر = استبعاد';
+    }
+
     function ordSetBranch(b) {
       ordBranch = b; ordPage = 1;
+      ORD_SEND = {};                 // الأكواد بتخص الفرع — ماتنقلش معاه
       document.querySelectorAll('.ord-br').forEach(x => x.classList.toggle('active', x.dataset.b === b));
       loadOrders();
     }
@@ -835,7 +857,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     }
 
     // ===== تحكّم أعمدة جدول الطلبيات: عرض + ترتيب (محفوظ في المتصفح) =====
-    const ORD_COLS_DEF = ['sel','code','name','net','store','sprice','sdisc','req','surplus','rate','save','stock','company','arch'];
+    const ORD_COLS_DEF = ['sel','code','name','send','net','store','sprice','sdisc','req','surplus','rate','save','stock','company','arch'];
     // خريطة الفرز: عمود العرض → عمود قاعدة البيانات (server-side لكل البيانات مش الصفحة)
     const ORD_SORT_MAP = { code:'itm_code', name:'itm_name', net:'net_required', store:'best_store', sprice:'price', sdisc:'best_disc', req:'required', surplus:'surplus_other', rate:'base_rate', save:'rate', stock:'stock', company:'company' };
     let ordSortCol = 'name', ordSortDir = 'asc';   // الافتراضي: ترتيب أبجدي حسب اسم الصنف
@@ -846,10 +868,21 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     function ordLoadJSON(k, dflt) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? dflt : v; } catch (e) { return dflt; } }
     function ordSaveOrder() { try { localStorage.setItem('ord_col_order_v1', JSON.stringify(ordColOrder)); } catch (e) {} }
     function ordSaveWidth() { try { localStorage.setItem('ord_col_width_v1', JSON.stringify(ordColWidth)); } catch (e) {} }
+    /* أي عمود جديد بيتحط جنب جاره في الترتيب الافتراضي مش في آخر الجدول —
+       اللي عنده ترتيب محفوظ من قبل كان هيلاقي العمود الجديد في الآخر خالص
+       ومايعرفش إنه ظهر أصلًا، وترتيبه اللي ظبّطه يضيع لو رجّعنا الافتراضي. */
     function ordNormalizeOrder() {
       const set = new Set(ORD_COLS_DEF);
       ordColOrder = (ordColOrder || []).filter(k => set.has(k));
-      ORD_COLS_DEF.forEach(k => { if (!ordColOrder.includes(k)) ordColOrder.push(k); });
+      ORD_COLS_DEF.forEach((k, i) => {
+        if (ordColOrder.includes(k)) return;
+        let at = 0;
+        for (let j = i - 1; j >= 0; j--) {                 // أقرب جار شماله موجود
+          const p = ordColOrder.indexOf(ORD_COLS_DEF[j]);
+          if (p >= 0) { at = p + 1; break; }
+        }
+        ordColOrder.splice(at, 0, k);
+      });
     }
     function ordReorderCells(rowEl) {
       const map = {};
@@ -1001,14 +1034,14 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     }
     async function loadOrders() {
       const body = document.getElementById('ord-body');
-      body.innerHTML = '<tr><td colspan="15" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr>';
+      body.innerHTML = '<tr><td colspan="16" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr>';
       try {
         if (ordSelBranch !== ordBranch) await loadOrderSelections();
         const res = await fetch(buildOrdQuery((ordPage - 1) * ORD_SIZE), { headers: { ...H, 'Prefer': 'count=exact' } });
         const rows = await res.json();
         const cr = res.headers.get('content-range');
         ordTotal = cr && cr.includes('/') ? parseInt(cr.split('/')[1]) : rows.length;
-        if (!rows.length) { body.innerHTML = '<tr><td colspan="15" style="padding:24px;color:var(--text-muted);">لا توجد أصناف مطلوبة بهذا الفلتر.</td></tr>'; ordPager(); return; }
+        if (!rows.length) { body.innerHTML = '<tr><td colspan="16" style="padding:24px;color:var(--text-muted);">لا توجد أصناف مطلوبة بهذا الفلتر.</td></tr>'; ordPager(); return; }
         ordById = {};
         body.innerHTML = rows.map(r => {
           ordById[r.id] = r; r._wh = null;
@@ -1028,6 +1061,14 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
             + (selOn ? 'checked ' : '') + (canOrder ? '' : 'disabled ')
             + 'title="' + (partial ? 'جه ناقص — كمّل الكمية' : (canOrder ? 'تحت الطلب' : 'المشتريات فقط')) + '" '
             + 'onchange="ordSelToggle(\'' + cc + '\',this.checked,' + Number(r.stock || 0) + ')">';
+          // الكمية المرسلة: الافتراضي = صافي المطلوب، والمعدّلة بتتلوّن
+          const sendDflt = Number(r.net_required != null ? r.net_required : r.required) || 0;
+          const sendQ    = (ORD_SEND[r.itm_code] != null) ? ORD_SEND[r.itm_code] : sendDflt;
+          const sendEd   = sendQ !== sendDflt;
+          const sendCell = '<input type="number" min="0" step="1" class="ord-send-inp' + (sendEd ? ' edited' : '') + '"'
+            + ' value="' + sendQ + '" ' + (canOrder ? '' : 'disabled ')
+            + 'title="' + (sendEd ? 'الأصل ' + sendDflt : 'الكمية اللي هتتبعت للمورّد — صفر = استبعاد') + '"'
+            + ' onchange="ordSendQty(\'' + cc + '\',' + sendDflt + ',this)">';
           const arch = canOrder ? '<button class="ord-actbtn" style="background:#fee2e2;color:#b91c1c" title="أرشفة الصنف" onclick="archiveItem(' + r.id + ')"><i class="fas fa-box-archive"></i></button>' : '';
           const oneMonth = Number(r.active_months) === 1;
           const exArch = r.ex_archived === true;
@@ -1037,7 +1078,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
             + '<td data-col="sel">' + chk + '</td>'
             + '<td data-col="code" class="cr-code">' + esc(r.itm_code) + '</td>'
             + '<td data-col="name" style="text-align:right;font-weight:600;">' + esc(r.itm_name) + '</td>'
-            + '<td data-col="net" style="font-weight:800;color:#b91c1c">' + (r.net_required != null ? r.net_required : r.required) + '</td>'
+            + '<td data-col="send">' + sendCell + '</td>'
+            + '<td data-col="net" style="font-weight:800;color:#b91c1c">' + sendDflt + '</td>'
             + '<td data-col="store" id="wh-name-' + r.id + '">' + whNameHtml(r.id, chosen) + '</td>'
             + '<td data-col="sprice">' + (r.price == null ? '—' : numv(r.price)) + '</td>'
             + '<td data-col="sdisc" id="wh-disc-' + r.id + '">' + (chosen ? (chosen.disc == null ? 0 : chosen.disc) + '%' : '—') + '</td>'
@@ -1053,7 +1095,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         const allChk = document.getElementById('ord-all'); if (allChk) allChk.checked = rows.every(r => ordSelCodes.has(r.itm_code));
         ordPager();
         ordApplyLayout();
-      } catch (e) { body.innerHTML = '<tr><td colspan="15" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>'; }
+      } catch (e) { body.innerHTML = '<tr><td colspan="16" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>'; }
     }
     async function ordSelToggle(code, on, stock) {
       if (!canOrder) return;   // المشتريات فقط
@@ -1127,7 +1169,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const btn = document.getElementById('ord-refresh'); btn.disabled = true; const old = btn.innerHTML;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جارٍ الحساب…';
       try { const r = await fetch(REST + 'rpc/refresh_purchase_orders', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' });
-        if (!r.ok) throw new Error(await r.text()); ordPage = 1; await loadOrders();
+        if (!r.ok) throw new Error(await r.text());
+        ORD_SEND = {}; ordPage = 1; await loadOrders();   // الأرقام اتغيّرت — التعديلات اليدوية مابتتحملش عليها
       } catch (e) { alert('تعذّرت إعادة حساب الطلبيات: ' + e.message); }
       finally { btn.disabled = false; btn.innerHTML = old; }
     }
@@ -1152,25 +1195,27 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     }
     function supClose() { document.getElementById('sup-bg').classList.remove('open'); }
 
-    /* ── مراجعة القائمة قبل إنشاء الرابط ─────────────────────────
-       الكمية اللي بتروح للمورّد لقطة، مش الرقم المحسوب — عشان كده
-       التعديل هنا آمن ومابيأثرش على الشاشة.
+    /* ── إنشاء الرابط ────────────────────────────────────────────
+       الكمية اللي بتروح للمورّد لقطة من عمود «الكمية المرسلة» في
+       الجدول، مش الرقم المحسوب — فالتعديل مابيأثرش على الشاشة ولا على
+       القاعدة.
 
        ⚠️ `net_required` **محسوب** و`refresh_purchase_orders()` بتعيد
-          بناءه كل 10 دقايق (كرون `refresh_orders_daily`)، فأي تعديل
-          «دائم» عليه لازم جدول تجاوزات زي `order_store_override` —
-          مش تعديل مباشر. التعديل هنا **لمرة واحدة** بقصد. */
-    let SUP_DRAFT = [], SUP_DPAGE = 1;
-    const SUP_PER = 50;
+          بناء الجدول كل 10 دقايق (كرون `refresh_orders_daily`)، فأي
+          تعديل «دائم» عليه لازم جدول تجاوزات — مش تعديل مباشر.
 
-    async function supPrepare() {
+       ⚠️ الرابط بياخد أصناف المخزن المحدد كلها (مش الصفحة المعروضة)،
+          فبنجيبها من السيرفر تاني وناخد تعديلات ORD_SEND فوقها. الصنف
+          اللي ماتعدّلش بياخد رقمه الحالي من السيرفر مش لقطة قديمة. */
+
+    async function supCreate() {
       const store = document.getElementById('ord-wh').value;
-      const msg = document.getElementById('sup-msg');
+      const msg   = document.getElementById('sup-msg');
       document.getElementById('sup-new').innerHTML = '';
       if (!store) { msg.innerHTML = '<span class="msg-err">اختر المخزن من فلتر «كل المخازن» أولًا.</span>'; return; }
-      msg.innerHTML = 'جارٍ التجهيز…';
+      msg.innerHTML = 'جارٍ إنشاء الرابط…';
       try {
-        let base = REST + 'purchase_orders_flat?select=itm_code,itm_name,best_item_name,net_required'
+        let base = REST + 'purchase_orders_flat?select=itm_code,itm_name,best_item_name,net_required,required'
           + '&branch=eq.' + encodeURIComponent(ordBranch) + '&net_required=gt.0'
           + '&best_store=eq.' + encodeURIComponent(store) + '&order=itm_name.asc';
         const co = document.getElementById('ord-company').value;
@@ -1187,96 +1232,26 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         if (!all.length) { msg.innerHTML = '<span class="msg-err">لا توجد أصناف بهذا الفلتر.</span>'; return; }
 
         /* اسم المخزن هو اللي بيروح للمورّد — هو بيدوّر باسمه هو */
-        SUP_DRAFT = all.map(x => ({
-          code: x.itm_code,
-          name: (x.best_item_name || x.itm_name),
-          qty: Number(x.net_required) || 0,
-          orig: Number(x.net_required) || 0
-        }));
-        SUP_DPAGE = 1; msg.innerHTML = '';
-        supDraftRender();
-      } catch (e) { msg.innerHTML = '<span class="msg-err">' + sbFailMsg('تعذّر جلب الأصناف') + '</span>'; }
-    }
+        const items = all.map(x => {
+          const dflt = Number(x.net_required != null ? x.net_required : x.required) || 0;
+          const qty  = (ORD_SEND[x.itm_code] != null) ? ORD_SEND[x.itm_code] : dflt;
+          return { code: x.itm_code, name: (x.best_item_name || x.itm_name), qty: qty };
+        }).filter(x => x.qty > 0);
 
-    function supDraftRender() {
-      const box = document.getElementById('sup-draft');
-      const kept = SUP_DRAFT.filter(x => x.qty > 0);
-      const edited = SUP_DRAFT.filter(x => x.qty !== x.orig).length;
-      const pages = Math.max(1, Math.ceil(SUP_DRAFT.length / SUP_PER));
-      if (SUP_DPAGE > pages) SUP_DPAGE = pages;
-      const slice = SUP_DRAFT.slice((SUP_DPAGE - 1) * SUP_PER, SUP_DPAGE * SUP_PER);
+        if (!items.length) { msg.innerHTML = '<span class="msg-err">كل الأصناف كميتها صفر — مفيش حاجة تتبعت.</span>'; return; }
 
-      let h = '<div class="et-note" style="margin-bottom:6px">'
-        + 'راجع الكميات قبل الإرسال. ضع <b>صفر</b> لاستبعاد صنف. '
-        + '<b>' + kept.length + '</b> صنف سيُرسل'
-        + (edited ? ' · <span style="color:#b45309">' + edited + ' مُعدَّل</span>' : '')
-        + '</div>'
-        + '<div style="max-height:320px;overflow:auto"><table class="cr-table">'
-        + '<thead><tr><th>الكود</th><th style="text-align:right">اسم الصنف لدى المخزن</th><th>الكمية</th></tr></thead><tbody>';
-
-      h += slice.map(x => {
-        const i = SUP_DRAFT.indexOf(x);
-        const off = x.qty <= 0;
-        return '<tr' + (off ? ' style="opacity:.45"' : '') + '>'
-          + '<td>' + esc(x.code) + '</td>'
-          + '<td style="text-align:right">' + esc(x.name) + '</td>'
-          + '<td><input type="number" min="0" step="1" style="width:74px;text-align:center" '
-          +   'value="' + x.qty + '" onchange="supQty(' + i + ',this.value)"'
-          +   (x.qty !== x.orig ? ' title="الأصل ' + x.orig + '" style="width:74px;text-align:center;border-color:#b45309"' : '')
-          + '></td></tr>';
-      }).join('');
-
-      h += '</tbody></table></div>';
-
-      if (pages > 1) {
-        h += '<div style="display:flex;gap:6px;align-items:center;justify-content:center;margin-top:8px;font-size:.78rem">'
-          + '<button class="tbtn-sup" onclick="supDPage(1)">«</button>'
-          + '<button class="tbtn-sup" onclick="supDPage(' + (SUP_DPAGE - 1) + ')">‹</button>'
-          + '<span style="font-weight:700">صفحة ' + SUP_DPAGE + ' من ' + pages + '</span>'
-          + '<button class="tbtn-sup" onclick="supDPage(' + (SUP_DPAGE + 1) + ')">›</button>'
-          + '<button class="tbtn-sup" onclick="supDPage(' + pages + ')">»</button></div>';
-      }
-
-      h += '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
-        + '<button class="btn btn-primary" onclick="supConfirm()"' + (kept.length ? '' : ' disabled')
-        + '><i class="fas fa-link"></i> تأكيد وإنشاء الرابط (' + kept.length + ')</button>'
-        + '<button class="btn btn-sm" style="background:var(--surface-3);color:var(--text-primary);border:none;padding:7px 13px;border-radius:8px;cursor:pointer;font-weight:700" onclick="supReset()">إرجاع الكميات الأصلية</button>'
-        + '</div>';
-
-      box.innerHTML = h;
-    }
-
-    function supDPage(p) {
-      const pages = Math.max(1, Math.ceil(SUP_DRAFT.length / SUP_PER));
-      SUP_DPAGE = Math.min(pages, Math.max(1, p));
-      supDraftRender();
-      document.getElementById('sup-draft').scrollIntoView({ block: 'nearest' });
-    }
-    function supQty(i, v) {
-      if (!SUP_DRAFT[i]) return;
-      SUP_DRAFT[i].qty = Math.max(0, Math.floor(Number(v) || 0));
-      supDraftRender();
-    }
-    function supReset() { SUP_DRAFT.forEach(x => { x.qty = x.orig; }); supDraftRender(); }
-
-    async function supConfirm() {
-      const store = document.getElementById('ord-wh').value;
-      const msg = document.getElementById('sup-msg');
-      const items = SUP_DRAFT.filter(x => x.qty > 0).map(x => ({ code: x.code, name: x.name, qty: x.qty }));
-      if (!items.length) { msg.innerHTML = '<span class="msg-err">لا توجد أصناف بكمية أكبر من صفر.</span>'; return; }
-      msg.innerHTML = 'جارٍ إنشاء الرابط…';
-      try {
         const r = await fetch(REST + 'rpc/supplier_link_create', {
           method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
           body: JSON.stringify({ p_branch: ordBranch, p_store: store, p_items: items, p_days: 7 }) });
         if (!r.ok) throw new Error(await r.text());
         const out = await r.json();
 
+        const edited = items.filter(x => ORD_SEND[x.code] != null).length;
         const url = SUP_PAGE + '?t=' + out.token;
-        document.getElementById('sup-draft').innerHTML = '';
-        SUP_DRAFT = [];
         document.getElementById('sup-new').innerHTML =
-          '<div class="et-note" style="margin-bottom:6px">الرابط جاهز — <b>' + items.length + '</b> صنف · صالح 7 أيام.'
+          '<div class="et-note" style="margin-bottom:6px">الرابط جاهز — <b>' + items.length + '</b> صنف'
+          + (edited ? ' · <span style="color:#b45309">' + edited + ' بكمية معدَّلة</span>' : '')
+          + ' · صالح 7 أيام.'
           + ' <span style="color:var(--danger)">انسخه الآن، فلن يظهر مرة أخرى.</span></div>'
           + '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
           + '<input id="sup-url" class="form-select" style="flex:1;min-width:240px;font-size:.75rem" readonly value="' + esc(url) + '">'
