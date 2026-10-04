@@ -98,6 +98,7 @@
           <button class="sp-up-btn" id="sp-open-up" style="display:none;" onclick="openUpload()"><i class="fas fa-file-arrow-up"></i> رفع شيت مخزن</button>
           <button class="sp-up-btn" id="sp-pharma-codes" style="display:none;background:#1d4ed8;color:#fff;" onclick="syncPharmaCodes()" title="يجيب كود الصنف عند فارما (اللي بيتلزق في خانة الطلب عندهم) من غير ما يلمس الأسعار"><i class="fas fa-barcode"></i> جلب أكواد فارما</button>
           <button class="sp-up-btn" id="sp-pharma-state" style="display:none;" onclick="phStateOpen()" title="نبضات مزامنة فارما على مدار اليوم — بتغطي الكتالوج كل ~22 ساعة"><i class="fas fa-heart-pulse"></i> حالة فارما</button>
+          <button class="sp-up-btn" id="sp-isp-real" style="display:none;background:#0f766e;color:#fff;" onclick="ispRealOpen()" title="رفع تصدير فواتير ابن سينا من eplus — سعر الفاتورة الفعلي بيغلب على سعر البورتال للأصناف المعفاة"><i class="fas fa-file-invoice-dollar"></i> أسعار ابن سينا من الفواتير</button>
           <button class="sp-up-btn" id="sp-isp-state" style="display:none;" onclick="ispStateOpen()" title="مزامنة ابن سينا — التوفر كل ساعة والأسعار يوميًا، من سكربت على جهاز محلي"><i class="fas fa-heart-pulse"></i> حالة ابن سينا</button>
         </div>
       </div>
@@ -245,6 +246,34 @@
   </div>
 
   <!-- modal حالة مزامنة ابن سينا -->
+  <!-- أسعار ابن سينا الحقيقية من فواتير eplus -->
+  <div class="sp-modal-bg" id="ispr-bg" onclick="if(event.target===this)ispRealClose()">
+    <div class="sp-modal" style="max-width:640px">
+      <div class="sp-modal-hd">
+        <div style="font-weight:800;font-size:0.9rem;">أسعار ابن سينا من الفواتير</div>
+        <button class="sp-close" onclick="ispRealClose()">✕</button>
+      </div>
+      <div class="sp-modal-bd">
+        <div style="font-size:.8rem;color:var(--text-secondary);line-height:1.85">
+          بورتال ابن سينا يعطي سعرًا <b>غير صحيح للأصناف المعفاة من الضريبة</b> — أقل من المدفوع فعليًا،
+          فيظهر المخزن أرخص مما هو. رفع تصدير فواتير المورّد من eplus يجعل <b>سعر الفاتورة هو المرجع</b>.
+          <br>تُؤخذ <b>نسبة الخصم</b> (شراء ÷ بيع) لا السعر نفسه، حتى تبقى صحيحة إذا تغيّر سعر الجمهور.
+          <br><span style="color:var(--text-muted)">التصدير من eplus: الموردين ← فواتير المورّد ← ابن سينا ← Excel.</span>
+        </div>
+        <div id="ispr-have" style="margin-top:10px;font-size:.82rem;font-weight:700;color:var(--text-muted)"></div>
+        <div class="sp-field" style="margin-top:12px">
+          <label>ملف التصدير (xlsx)</label>
+          <input type="file" id="ispr-file" accept=".xlsx,.xls" class="form-select" onchange="ispRealParse()">
+        </div>
+        <div id="ispr-msg" style="margin-top:10px"></div>
+        <div id="ispr-prev" style="margin-top:10px"></div>
+        <div style="margin-top:14px">
+          <button class="btn btn-primary" id="ispr-apply" style="display:none" onclick="ispRealApply()"><i class="fas fa-save"></i> حفظ الأسعار</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="sp-modal-bg" id="isps-bg" onclick="if(event.target===this)ispStateClose()">
     <div class="sp-modal" style="max-width:820px">
       <div class="sp-modal-hd">
@@ -835,6 +864,7 @@
         document.getElementById('sp-pharma-codes').style.display = 'inline-flex';
         document.getElementById('sp-pharma-state').style.display = 'inline-flex';
         document.getElementById('sp-isp-state').style.display = 'inline-flex';
+        document.getElementById('sp-isp-real').style.display = 'inline-flex';
       }
     })();
 
@@ -937,6 +967,127 @@
        اللي بيبان هو إن النبضات وقفت، فاللوحة دي هي جرس الإنذار.
        مفيش جدول حالة زي pharma_sync_state — السجل نفسه هو الحالة. */
     function ispStateClose() { document.getElementById('isps-bg').classList.remove('open'); }
+    /* ═══════ أسعار ابن سينا الحقيقية من فواتير eplus ═══════════════
+       بورتال ابن سينا بيدّي سعر **غلط للأصناف المعفاة من الضريبة** —
+       دايمًا أقل من المدفوع، فابن سينا يبان أرخص مما هو. اتأكد
+       (2026-10-04) بمقارنة فاتورة بفاتورة: السطور اللي عليها ضريبة
+       سعرها = سعر البورتال × 1.14 بالمليم، واللي ضريبتها صفر غلط.
+       وعلى 99 صنف: تكلفتنا مظبوطة في 12 بس وبنقلّلها في 77.
+
+       الحل: تصدير فواتير المورّد من eplus هو مصدر السعر. بناخد منه
+       **شريحة الخصم** (شراء ÷ بيع) مش السعر نفسه، عشان لو سعر الجمهور
+       اتغيّر الشريحة تفضل صح وتتطبّق على السعر الجديد.
+
+       التصدير من eplus: شاشة الموردين ← فواتير المورّد ← ابن سينا ←
+       تصدير Excel. الأعمدة المطلوبة: الكود · س.شراء · س.البيع. */
+    let ISPR = [];
+
+    function ispRealOpen() {
+      document.getElementById('ispr-file').value = '';
+      document.getElementById('ispr-msg').innerHTML = '';
+      document.getElementById('ispr-prev').innerHTML = '';
+      document.getElementById('ispr-apply').style.display = 'none';
+      ISPR = [];
+      document.getElementById('ispr-bg').classList.add('open');
+      ispRealStatus();
+    }
+    function ispRealClose() { document.getElementById('ispr-bg').classList.remove('open'); }
+
+    async function ispRealStatus() {
+      try {
+        const r = await fetch(SB_URL_API + "/rest/v1/" + 'ibnsina_real_price?select=code&limit=1', {
+          headers: await sbH({ Prefer: 'count=exact', Range: '0-0' }) });   // data-ok: عدّاد بس
+        const cr = r.headers.get('content-range') || '';
+        const n = cr.split('/')[1] || '0';
+        document.getElementById('ispr-have').textContent =
+          n === '0' ? 'لا توجد أسعار محفوظة بعد.' : ('المحفوظ حاليًا: ' + n + ' صنف');
+      } catch (e) {}
+    }
+
+    /* قراءة تصدير eplus: تقرير مُقسَّم بفواتير، صف الصنف فيه الكود في
+       عمود 17 والكمية في 11 وس.شراء في 5 وس.البيع في 3 (الترتيب من
+       اليمين لليسار في التقرير). بنتسامح لو الأعمدة اتزحزحت بالبحث
+       عن صف ترويسة فيه «س.شراء». */
+    function ispRealParse() {
+      const file = document.getElementById('ispr-file').files[0];
+      const msg = document.getElementById('ispr-msg');
+      const prev = document.getElementById('ispr-prev');
+      msg.innerHTML = ''; prev.innerHTML = '';
+      document.getElementById('ispr-apply').style.display = 'none';
+      ISPR = [];
+      if (!file) return;
+
+      const rd = new FileReader();
+      rd.onload = ev => {
+        try {
+          const wb = XLSX.read(ev.target.result, { type: 'array' });
+          const aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],
+                        { header: 1, blankrows: false, defval: '' });
+          if (!aoa.length) { msg.innerHTML = '<span class="sp-msg-err">الملف فارغ.</span>'; return; }
+
+          /* نلاقي مواضع الأعمدة من أول صف ترويسة */
+          let iCode = 17, iQty = 11, iBuy = 5, iSell = 3, found = false;
+          for (const r of aoa.slice(0, 40)) {
+            const s = r.map(x => String(x).trim());
+            const c = s.indexOf('الكود'), b = s.indexOf('س.شراء'), v = s.indexOf('س.البيع');
+            if (c > -1 && b > -1 && v > -1) { iCode = c; iBuy = b; iSell = v; found = true; break; }
+          }
+
+          const num = x => { const n = Number(String(x).replace(/,/g, '')); return Number.isFinite(n) ? n : null; };
+          const map = {};
+          for (const r of aoa) {
+            const s = r.map(x => String(x).trim());
+            const code = s[iCode], buy = num(s[iBuy]), sell = num(s[iSell]);
+            if (!/^\d+$/.test(code) || buy === null || sell === null || buy <= 0 || sell <= 0) continue;
+            map[code] = { code: code, buy: Math.round(buy * 100) / 100, sell: Math.round(sell * 100) / 100 };
+          }
+          ISPR = Object.values(map);
+
+          if (!ISPR.length) {
+            msg.innerHTML = '<span class="sp-msg-err">لم يتم العثور على صفوف أصناف. تأكد أن الملف هو تصدير فواتير المورّد من eplus.</span>';
+            return;
+          }
+
+          const tiers = {};
+          ISPR.forEach(x => { const d = Math.round((1 - x.buy / x.sell) * 100); tiers[d] = (tiers[d] || 0) + 1; });
+          const top = Object.entries(tiers).sort((a, b) => b[1] - a[1]).slice(0, 7);
+
+          msg.innerHTML = '<span class="sp-msg-ok">تمت القراءة: <b>' + ISPR.length + '</b> صنف'
+                        + (found ? '' : ' <span style="color:var(--text-muted)">(بالأعمدة الافتراضية)</span>') + '</span>';
+          prev.innerHTML = '<div class="sp-field" style="margin-bottom:5px">شرائح الخصم في الملف:</div>'
+            + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+            + top.map(t => '<span style="background:var(--surface-3);padding:4px 10px;border-radius:8px;font-size:.78rem;font-weight:700">'
+                + t[0] + '% · ' + t[1] + ' صنف</span>').join('') + '</div>';
+          document.getElementById('ispr-apply').style.display = '';
+        } catch (err) {
+          msg.innerHTML = '<span class="sp-msg-err">تعذّرت قراءة الملف: ' + String(err.message) + '</span>';
+        }
+      };
+      rd.readAsArrayBuffer(file);
+    }
+
+    async function ispRealApply() {
+      if (!ISPR.length) return;
+      const btn = document.getElementById('ispr-apply'), msg = document.getElementById('ispr-msg');
+      const old = btn.innerHTML; btn.disabled = true; btn.innerHTML = 'جارٍ الحفظ…';
+      try {
+        let saved = 0;
+        for (let i = 0; i < ISPR.length; i += 400) {
+          const r = await fetch(SB_URL_API + "/rest/v1/" + 'rpc/ibnsina_real_price_upsert', {
+            method: 'POST', headers: await sbH({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ p_rows: ISPR.slice(i, i + 400) }) });
+          if (!r.ok) throw new Error(await r.text());
+          saved += (await r.json()).saved || 0;
+          btn.innerHTML = 'جارٍ الحفظ… ' + saved;
+        }
+        msg.innerHTML = '<span class="sp-msg-ok">تم حفظ <b>' + saved + '</b> صنف. '
+                      + 'ستُطبَّق على الأسعار مع أول مزامنة لابن سينا (يوميًا 6 صباحًا).</span>';
+        await ispRealStatus();
+      } catch (e) {
+        msg.innerHTML = '<span class="sp-msg-err">' + (typeof sbFailMsg === 'function' ? sbFailMsg('تعذّر الحفظ') : 'تعذّر الحفظ') + '</span>';
+      } finally { btn.disabled = false; btn.innerHTML = old; }
+    }
+
     async function ispStateOpen() {
       document.getElementById('isps-bg').classList.add('open');
       const body = document.getElementById('isps-body');
