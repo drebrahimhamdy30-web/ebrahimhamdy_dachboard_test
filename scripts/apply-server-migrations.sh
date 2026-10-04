@@ -11,6 +11,11 @@
 #     ./apply-server-migrations.sh -n     # تجربة: يقول هيشغّل إيه
 #     ./apply-server-migrations.sh        # التطبيق (بيسأل قبلها)
 #
+#  ولو عايز ملفات بعينها بس (مش اللستة الافتراضية كلها)، سمّيها:
+#     ./apply-server-migrations.sh migrate_89_close_anon_tables migrate_90_…
+#  ده بيفيد لما السيرفر يكون مستلحق لحد نقطة ومحتاج الجديد بس —
+#  إعادة تشغيل اللستة كلها على قاعدة شغّالة مخاطرة بلا داعي.
+#
 #  ⚠️ خد نسخة احتياطية الأول:  ./server-backup.sh
 # ═══════════════════════════════════════════════════════════════════
 set -euo pipefail
@@ -40,16 +45,25 @@ migrate_25_kpi_dashboard
 migrate_26_min_stock_alerts
 integration_branch_stores
 migrate_27_server_catchup
+migrate_89_close_anon_tables
+migrate_90_close_anon_functions
+migrate_91_admin_only_settings_write
+migrate_92_close_calc_settings_anon
+migrate_93_supplier_links
+migrate_94_ibnsina_exempt_discount
 "
 
+PICKED=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -n|--dry-run) DRY=1 ;;
-    -h|--help)    sed -n '2,18p' "$0"; exit 0 ;;
-    *) echo "خيار مش معروف: $1" >&2; exit 2 ;;
+    -h|--help)    sed -n '2,23p' "$0"; exit 0 ;;
+    -*) echo "خيار مش معروف: $1" >&2; exit 2 ;;
+    *) PICKED="$PICKED $1" ;;
   esac
   shift
 done
+[ -z "$PICKED" ] || FILES="$PICKED"
 
 if [ -t 1 ]; then B=$'\033[1m'; G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; N=$'\033[0m'
 else B=''; G=''; Y=''; R=''; N=''; fi
