@@ -27,6 +27,8 @@
     .cr-field label { font-size:0.72rem;font-weight:700;color:var(--text-secondary);margin-bottom:3px;display:block; }
     .cr-meta { font-size:0.72rem;color:var(--text-muted);margin-bottom:8px; }
     .cr-table { width:100%;border-collapse:collapse;min-width:680px; }
+    .tbtn-sup { border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);
+                border-radius:7px;padding:3px 9px;font-family:var(--font);font-size:.76rem;font-weight:700;cursor:pointer; }
     .cr-wrap { overflow:auto; max-height:calc(100vh - 300px); }
     .cr-table th { background:var(--primary);color:#fff;padding:9px 8px;font-size:0.72rem;font-weight:700;text-align:center;white-space:nowrap;position:sticky;top:0;z-index:5; }
     .cr-table td { padding:7px 8px;font-size:0.8rem;border-bottom:1px solid var(--surface-3);text-align:center; }
@@ -246,7 +248,6 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
             <input type="number" id="ord-req-v" class="form-input" style="max-width:66px" placeholder="—" oninput="ordDebounce()"></span>
           <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;font-weight:700;cursor:pointer;white-space:nowrap"><input type="checkbox" id="ord-surp-only" onchange="ordPage=1;loadOrders()" style="width:16px;height:16px;accent-color:var(--primary)"> فائض فقط</label>
           <button class="cr-up-btn" style="background:#16a34a" onclick="exportOrders()"><i class="fas fa-file-excel"></i> تصدير Excel</button>
-          <button class="cr-up-btn" id="ord-imp-btn" style="background:#7c3aed" onclick="openImp()"><i class="fas fa-file-import"></i> استيراد تعليم المورّد</button>
           <button class="cr-up-btn" id="ord-sup-btn" style="background:#0ea5e9" onclick="supOpen()"><i class="fas fa-link"></i> رابط المورّد</button>
           <button class="cr-up-btn" id="ord-pharma-btn" style="background:#1d4ed8" onclick="phOpenList()"><i class="fas fa-cart-plus"></i> قائمة فارما</button>
           <button class="cr-up-btn" id="ord-ph-refresh" style="background:#0d9488" onclick="phRefreshPrices()" title="يجيب سعر وخصم وكود أصناف فارما اللي في الفلتر الحالي — لحظيًا من صفحة كل صنف عندهم — وبعدها يعيد حساب الطلبية. المزامنة التلقائية بتلف الكتالوج في ~22 ساعة فالسعر اللي قدامك عمره ساعات"><i class="fas fa-cloud-arrow-down"></i> تحديث فارما</button>
@@ -440,14 +441,15 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       </div>
       <div class="cr-modal-bd">
         <div class="et-note" style="line-height:1.8">
-          يُنشأ رابط لأصناف <b>المخزن المحدَّد في الفلتر</b> بنفس شروط البحث الحالية. يفتحه المورّد من أي متصفح
+          تُجهَّز قائمة أصناف <b>المخزن المحدَّد في الفلتر</b> بنفس شروط البحث الحالية، <b>تراجع الكميات وتعدّلها</b>، ثم يُنشأ الرابط. يفتحه المورّد من أي متصفح
           ويحدد المتاح لديه، فيصلك الرد هنا. <b>لا يدخل أي صنف إلى «تحت الطلب» إلا بعد ضغطك على «اعتماد».</b>
           <br>الرابط يعرض الكود والاسم والكمية فقط — <b>بدون أسعار أو خصومات</b> — وصلاحيته 7 أيام.
         </div>
         <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <button class="btn btn-primary" onclick="supCreate()"><i class="fas fa-plus"></i> إنشاء رابط للمخزن المحدَّد</button>
+          <button class="btn btn-primary" onclick="supPrepare()"><i class="fas fa-list-check"></i> تجهيز القائمة للمراجعة</button>
           <span id="sup-msg" style="font-size:.82rem;font-weight:700"></span>
         </div>
+        <div id="sup-draft" style="margin-top:12px"></div>
         <div id="sup-new" style="margin-top:10px"></div>
         <div style="font-weight:800;font-size:.85rem;margin:16px 0 6px">الروابط السابقة</div>
         <div id="sup-list" style="overflow:auto"></div>
@@ -455,35 +457,6 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     </div>
   </div>
 
-  <!-- استيراد تعليم المورّد على ملف الطلبية -->
-  <div class="cr-modal-bg" id="imp-bg" onclick="if(event.target===this)closeImp()">
-    <div class="cr-modal" style="max-width:720px">
-      <div class="cr-modal-hd">
-        <div style="font-weight:800;font-size:0.9rem;"><i class="fas fa-file-import"></i> استيراد تعليم المورّد</div>
-        <button class="cr-close" onclick="closeImp()">✕</button>
-      </div>
-      <div class="cr-modal-bd">
-        <div class="et-note" style="line-height:1.8">
-          ارفع ملف الطلبية بعد أن يعلّم المورّد عمود <b>«متاح»</b>. الأصناف المعلَّمة تُضاف مباشرةً إلى <b>«تحت الطلب»</b>.
-          <br>تُقبل أي علامة في الخانة (✓ · نعم · متاح · 1 · أي نص)، وتُعتبر غير متاحة إذا كانت فارغة أو مكتوبًا فيها
-          <b>لا</b> أو <b>غير متاح</b> أو <b>0</b>.
-        </div>
-        <div class="cr-field" style="margin-top:12px">
-          <label>ملف الطلبية (xlsx / csv)</label>
-          <input type="file" id="imp-file" accept=".xlsx,.xls,.csv" class="form-select" onchange="impAnalyze()">
-        </div>
-        <label style="display:flex;align-items:center;gap:7px;font-size:0.82rem;font-weight:700;cursor:pointer;margin-top:10px">
-          <input type="checkbox" id="imp-remove" style="width:16px;height:16px;accent-color:var(--primary)">
-          إزالة الأصناف غير المعلَّمة <span style="font-weight:400;color:var(--text-muted)">(الموجودة في هذا الملف فقط)</span>
-        </label>
-        <div id="imp-msg" style="margin-top:10px"></div>
-        <div id="imp-prev" style="margin-top:10px"></div>
-      </div>
-      <div class="cr-modal-ft">
-        <button class="btn btn-primary" id="imp-apply" style="display:none" onclick="impApply()"><i class="fas fa-check"></i> تطبيق على «تحت الطلب»</button>
-      </div>
-    </div>
-  </div>
 
   <div class="cr-modal-bg" id="mu-bg" onclick="if(event.target===this)closeMonthUp()">
     <div class="cr-modal" style="max-width:820px">
@@ -1179,14 +1152,24 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     }
     function supClose() { document.getElementById('sup-bg').classList.remove('open'); }
 
-    /* إنشاء رابط لأصناف المخزن المختار في الفلتر */
-    async function supCreate() {
+    /* ── مراجعة القائمة قبل إنشاء الرابط ─────────────────────────
+       الكمية اللي بتروح للمورّد لقطة، مش الرقم المحسوب — عشان كده
+       التعديل هنا آمن ومابيأثرش على الشاشة.
+
+       ⚠️ `net_required` **محسوب** و`refresh_purchase_orders()` بتعيد
+          بناءه كل 10 دقايق (كرون `refresh_orders_daily`)، فأي تعديل
+          «دائم» عليه لازم جدول تجاوزات زي `order_store_override` —
+          مش تعديل مباشر. التعديل هنا **لمرة واحدة** بقصد. */
+    let SUP_DRAFT = [], SUP_DPAGE = 1;
+    const SUP_PER = 50;
+
+    async function supPrepare() {
       const store = document.getElementById('ord-wh').value;
       const msg = document.getElementById('sup-msg');
+      document.getElementById('sup-new').innerHTML = '';
       if (!store) { msg.innerHTML = '<span class="msg-err">اختر المخزن من فلتر «كل المخازن» أولًا.</span>'; return; }
       msg.innerHTML = 'جارٍ التجهيز…';
       try {
-        /* نفس فلاتر الشاشة — المورّد يشوف اللي إحنا شايفينه بالظبط */
         let base = REST + 'purchase_orders_flat?select=itm_code,itm_name,best_item_name,net_required'
           + '&branch=eq.' + encodeURIComponent(ordBranch) + '&net_required=gt.0'
           + '&best_store=eq.' + encodeURIComponent(store) + '&order=itm_name.asc';
@@ -1203,9 +1186,86 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         }
         if (!all.length) { msg.innerHTML = '<span class="msg-err">لا توجد أصناف بهذا الفلتر.</span>'; return; }
 
-        /* كود + اسم + كمية وبس — مفيش أسعار ولا خصومات */
-        const items = all.map(x => ({ code: x.itm_code, name: (x.best_item_name || x.itm_name), qty: x.net_required }));
+        /* اسم المخزن هو اللي بيروح للمورّد — هو بيدوّر باسمه هو */
+        SUP_DRAFT = all.map(x => ({
+          code: x.itm_code,
+          name: (x.best_item_name || x.itm_name),
+          qty: Number(x.net_required) || 0,
+          orig: Number(x.net_required) || 0
+        }));
+        SUP_DPAGE = 1; msg.innerHTML = '';
+        supDraftRender();
+      } catch (e) { msg.innerHTML = '<span class="msg-err">' + sbFailMsg('تعذّر جلب الأصناف') + '</span>'; }
+    }
 
+    function supDraftRender() {
+      const box = document.getElementById('sup-draft');
+      const kept = SUP_DRAFT.filter(x => x.qty > 0);
+      const edited = SUP_DRAFT.filter(x => x.qty !== x.orig).length;
+      const pages = Math.max(1, Math.ceil(SUP_DRAFT.length / SUP_PER));
+      if (SUP_DPAGE > pages) SUP_DPAGE = pages;
+      const slice = SUP_DRAFT.slice((SUP_DPAGE - 1) * SUP_PER, SUP_DPAGE * SUP_PER);
+
+      let h = '<div class="et-note" style="margin-bottom:6px">'
+        + 'راجع الكميات قبل الإرسال. ضع <b>صفر</b> لاستبعاد صنف. '
+        + '<b>' + kept.length + '</b> صنف سيُرسل'
+        + (edited ? ' · <span style="color:#b45309">' + edited + ' مُعدَّل</span>' : '')
+        + '</div>'
+        + '<div style="max-height:320px;overflow:auto"><table class="cr-table">'
+        + '<thead><tr><th>الكود</th><th style="text-align:right">اسم الصنف لدى المخزن</th><th>الكمية</th></tr></thead><tbody>';
+
+      h += slice.map(x => {
+        const i = SUP_DRAFT.indexOf(x);
+        const off = x.qty <= 0;
+        return '<tr' + (off ? ' style="opacity:.45"' : '') + '>'
+          + '<td>' + esc(x.code) + '</td>'
+          + '<td style="text-align:right">' + esc(x.name) + '</td>'
+          + '<td><input type="number" min="0" step="1" style="width:74px;text-align:center" '
+          +   'value="' + x.qty + '" onchange="supQty(' + i + ',this.value)"'
+          +   (x.qty !== x.orig ? ' title="الأصل ' + x.orig + '" style="width:74px;text-align:center;border-color:#b45309"' : '')
+          + '></td></tr>';
+      }).join('');
+
+      h += '</tbody></table></div>';
+
+      if (pages > 1) {
+        h += '<div style="display:flex;gap:6px;align-items:center;justify-content:center;margin-top:8px;font-size:.78rem">'
+          + '<button class="tbtn-sup" onclick="supDPage(1)">«</button>'
+          + '<button class="tbtn-sup" onclick="supDPage(' + (SUP_DPAGE - 1) + ')">‹</button>'
+          + '<span style="font-weight:700">صفحة ' + SUP_DPAGE + ' من ' + pages + '</span>'
+          + '<button class="tbtn-sup" onclick="supDPage(' + (SUP_DPAGE + 1) + ')">›</button>'
+          + '<button class="tbtn-sup" onclick="supDPage(' + pages + ')">»</button></div>';
+      }
+
+      h += '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+        + '<button class="btn btn-primary" onclick="supConfirm()"' + (kept.length ? '' : ' disabled')
+        + '><i class="fas fa-link"></i> تأكيد وإنشاء الرابط (' + kept.length + ')</button>'
+        + '<button class="btn btn-sm" style="background:var(--surface-3);color:var(--text-primary);border:none;padding:7px 13px;border-radius:8px;cursor:pointer;font-weight:700" onclick="supReset()">إرجاع الكميات الأصلية</button>'
+        + '</div>';
+
+      box.innerHTML = h;
+    }
+
+    function supDPage(p) {
+      const pages = Math.max(1, Math.ceil(SUP_DRAFT.length / SUP_PER));
+      SUP_DPAGE = Math.min(pages, Math.max(1, p));
+      supDraftRender();
+      document.getElementById('sup-draft').scrollIntoView({ block: 'nearest' });
+    }
+    function supQty(i, v) {
+      if (!SUP_DRAFT[i]) return;
+      SUP_DRAFT[i].qty = Math.max(0, Math.floor(Number(v) || 0));
+      supDraftRender();
+    }
+    function supReset() { SUP_DRAFT.forEach(x => { x.qty = x.orig; }); supDraftRender(); }
+
+    async function supConfirm() {
+      const store = document.getElementById('ord-wh').value;
+      const msg = document.getElementById('sup-msg');
+      const items = SUP_DRAFT.filter(x => x.qty > 0).map(x => ({ code: x.code, name: x.name, qty: x.qty }));
+      if (!items.length) { msg.innerHTML = '<span class="msg-err">لا توجد أصناف بكمية أكبر من صفر.</span>'; return; }
+      msg.innerHTML = 'جارٍ إنشاء الرابط…';
+      try {
         const r = await fetch(REST + 'rpc/supplier_link_create', {
           method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
           body: JSON.stringify({ p_branch: ordBranch, p_store: store, p_items: items, p_days: 7 }) });
@@ -1213,6 +1273,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         const out = await r.json();
 
         const url = SUP_PAGE + '?t=' + out.token;
+        document.getElementById('sup-draft').innerHTML = '';
+        SUP_DRAFT = [];
         document.getElementById('sup-new').innerHTML =
           '<div class="et-note" style="margin-bottom:6px">الرابط جاهز — <b>' + items.length + '</b> صنف · صالح 7 أيام.'
           + ' <span style="color:var(--danger)">انسخه الآن، فلن يظهر مرة أخرى.</span></div>'
@@ -1295,159 +1357,6 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       } catch (e) { document.getElementById('sup-msg').innerHTML = '<span class="msg-err">' + sbFailMsg('تعذّر الإلغاء') + '</span>'; }
     }
 
-    /* ═══════ استيراد تعليم المورّد على ملف الطلبية ═══════════════
-       المورّد بياخد ملف التصدير ويعلّم عمود «متاح» على اللي عنده،
-       وبنرجّعه هنا فالأصناف المعلَّمة تدخل «تحت الطلب» على طول.
-
-       ⚠️ العلامة نص حر مش checkbox — النسخة المجانية من SheetJS
-          مابتكتبش form controls ولا data validation. فبنقرا بتسامح:
-          أي خانة فيها حاجة = متاح، **إلا** كلمات النفي الصريحة.
-          السبب: «X» بيستعملها ناس بمعنى «عندي» وناس بمعنى «مش عندي»،
-          فبنعتبر الفاضي والنفي الصريح بس «مش متاح» ونعرض معاينة
-          بالأعداد قبل التطبيق عشان الغلط يبان قبل ما يتكتب. */
-    const IMP_NO = ['لا','لأ','لا يوجد','غير متاح','مش متاح','مفيش','0','no','n','false','-','—'];
-    let IMP = null;   // { branch, marked:[{code,name}], unmarked:[codes], unknown:int }
-
-    function openImp() {
-      if (!canOrder) { alert('هذه العملية متاحة لحساب المشتريات فقط.'); return; }
-      IMP = null;
-      document.getElementById('imp-file').value = '';
-      document.getElementById('imp-msg').innerHTML = '';
-      document.getElementById('imp-prev').innerHTML = '';
-      document.getElementById('imp-apply').style.display = 'none';
-      document.getElementById('imp-remove').checked = false;
-      document.getElementById('imp-bg').classList.add('open');
-    }
-    function closeImp() { document.getElementById('imp-bg').classList.remove('open'); }
-
-    function impAnalyze() {
-      const file = document.getElementById('imp-file').files[0];
-      const msg  = document.getElementById('imp-msg');
-      const prev = document.getElementById('imp-prev');
-      const btn  = document.getElementById('imp-apply');
-      msg.innerHTML = ''; prev.innerHTML = ''; btn.style.display = 'none'; IMP = null;
-      if (!file) return;
-
-      const rd = new FileReader();
-      rd.onload = ev => {
-        try {
-          const wb  = XLSX.read(ev.target.result, { type:'array' });
-          const ws  = wb.Sheets[wb.SheetNames[0]];
-          const aoa = XLSX.utils.sheet_to_json(ws, { header:1, blankrows:false, defval:'' });
-          if (!aoa.length) { msg.innerHTML = '<span class="msg-err">الملف فارغ.</span>'; return; }
-
-          /* صف العناوين: أول صف فيه «كود» — الملف المصدَّر عناوينه في أول صف،
-             بس بنتسامح لو حد زوّد صف عنوان فوق. */
-          let h = -1;
-          for (let i = 0; i < Math.min(aoa.length, 8); i++) {
-            if ((aoa[i] || []).some(c => /كود|code/i.test(String(c)))) { h = i; break; }
-          }
-          if (h < 0) { msg.innerHTML = '<span class="msg-err">لم يتم العثور على عمود «الكود» في الملف.</span>'; return; }
-
-          const hdr  = (aoa[h] || []).map(c => String(c).trim());
-          const find = re => hdr.findIndex(c => re.test(c));
-          const cCode = find(/كود|code/i);
-          const cMark = find(/متاح|تعليم|avail/i);
-          const cBr   = find(/^الفرع$/);
-          const cName = find(/الاسم عندنا|اسم الصنف/);
-          if (cMark < 0) { msg.innerHTML = '<span class="msg-err">لم يتم العثور على عمود «متاح». صدِّر الملف من هذه الشاشة ثم اطلب من المورّد التعليم فيه.</span>'; return; }
-
-          const body = aoa.slice(h + 1).filter(r => String(r[cCode] || '').trim() !== '');
-          if (!body.length) { msg.innerHTML = '<span class="msg-err">لا توجد صفوف بيانات.</span>'; return; }
-
-          /* فرع الملف — لو مختلف عن الفرع المفتوح بنوقف، لأن «تحت الطلب»
-             مرتبط بالفرع والكتابة على الفرع الغلط صعب تتراجع. */
-          let fileBranch = '';
-          if (cBr >= 0) {
-            const vals = [...new Set(body.map(r => String(r[cBr] || '').trim()).filter(Boolean))];
-            fileBranch = vals.length === 1 ? vals[0] : '';
-            if (vals.length > 1) { msg.innerHTML = '<span class="msg-err">الملف يحتوي أكثر من فرع — استورد ملف فرع واحد.</span>'; return; }
-            if (fileBranch && fileBranch !== ordBranch) {
-              msg.innerHTML = '<span class="msg-err">هذا الملف خاص بفرع <b>' + esc(fileBranch) + '</b> والفرع المفتوح <b>' + esc(ordBranch) + '</b>. بدّل الفرع ثم أعد الاستيراد.</span>';
-              return;
-            }
-          }
-
-          const marked = [], unmarked = [];
-          body.forEach(r => {
-            const code = String(r[cCode] || '').trim();
-            const mark = String(r[cMark] == null ? '' : r[cMark]).trim();
-            const name = cName >= 0 ? String(r[cName] || '').trim() : '';
-            const no   = mark === '' || IMP_NO.indexOf(mark.toLowerCase()) >= 0;
-            if (no) unmarked.push(code); else marked.push({ code, name });
-          });
-
-          IMP = { branch: fileBranch || ordBranch, marked, unmarked };
-
-          if (!marked.length) {
-            msg.innerHTML = '<span class="msg-err">لم يُعلَّم أي صنف في عمود «متاح».</span>';
-            return;
-          }
-          msg.innerHTML = '<span class="msg-ok">الملف مقروء: <b>' + body.length + '</b> صنف · '
-                        + 'معلَّم <b>' + marked.length + '</b> · غير معلَّم <b>' + unmarked.length + '</b>'
-                        + (fileBranch ? ' · الفرع <b>' + esc(fileBranch) + '</b>' : '') + '</span>';
-
-          const show = marked.slice(0, 12);
-          prev.innerHTML = '<div class="et-note" style="margin-bottom:5px">أول ' + show.length + ' صنف معلَّم:</div>'
-            + '<table class="cr-table"><thead><tr><th>الكود</th><th style="text-align:right">الصنف</th></tr></thead><tbody>'
-            + show.map(x => '<tr><td>' + esc(x.code) + '</td><td style="text-align:right">' + esc(x.name) + '</td></tr>').join('')
-            + '</tbody></table>'
-            + (marked.length > show.length ? '<div class="et-note">… و' + (marked.length - show.length) + ' غيرهم</div>' : '');
-          btn.style.display = '';
-        } catch (err) {
-          msg.innerHTML = '<span class="msg-err">تعذّرت قراءة الملف: ' + esc(err.message) + '</span>';
-        }
-      };
-      rd.readAsArrayBuffer(file);
-    }
-
-    async function impApply() {
-      if (!IMP || !IMP.marked.length) return;
-      if (!canOrder) { alert('هذه العملية متاحة لحساب المشتريات فقط.'); return; }
-      const btn = document.getElementById('imp-apply');
-      const msg = document.getElementById('imp-msg');
-      const alsoRemove = document.getElementById('imp-remove').checked;
-      const old = btn.innerHTML; btn.disabled = true; btn.innerHTML = 'جارٍ التطبيق…';
-      try {
-        /* الرصيد وقت الطلب بيتاخد من الصف المعروض لو الصنف لسه في الشاشة،
-           وإلا null — زي ما ordSelToggle بتعمل بالظبط. */
-        const stockOf = {};
-        Object.values(ordById).forEach(r => { stockOf[r.itm_code] = Number(r.stock || 0); });
-
-        const payload = IMP.marked.map(x => ({
-          branch: ordBranch, itm_code: x.code,
-          stock_at_order: (stockOf[x.code] == null ? null : stockOf[x.code])
-        }));
-        for (let i = 0; i < payload.length; i += 500) {
-          const r = await fetch(REST + 'order_selections?on_conflict=branch,itm_code', {
-            method:'POST',
-            headers:{ ...H, 'Content-Type':'application/json', 'Prefer':'resolution=merge-duplicates,return=minimal' },
-            body: JSON.stringify(payload.slice(i, i + 500)) });
-          if (!r.ok) throw new Error(await r.text());
-        }
-
-        let removed = 0;
-        if (alsoRemove && IMP.unmarked.length) {
-          for (let i = 0; i < IMP.unmarked.length; i += 300) {
-            const part = IMP.unmarked.slice(i, i + 300)
-              .map(c => '"' + String(c).replace(/"/g, '') + '"').join(',');
-            const r = await fetch(REST + 'order_selections?branch=eq.' + encodeURIComponent(ordBranch)
-              + '&itm_code=in.(' + encodeURIComponent(part) + ')',
-              { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });
-            if (!r.ok) throw new Error(await r.text());
-          }
-          removed = IMP.unmarked.length;
-        }
-
-        msg.innerHTML = '<span class="msg-ok">تم: أُضيف <b>' + payload.length + '</b> صنف إلى «تحت الطلب»'
-                      + (removed ? ' · أُزيل <b>' + removed + '</b> غير معلَّم' : '') + '</span>';
-        closeImp();
-        ordPage = 1; await loadOrders();
-      } catch (e) {
-        msg.innerHTML = '<span class="msg-err">تعذّر التطبيق: ' + esc(e.message) + '</span>';
-      } finally { btn.disabled = false; btn.innerHTML = old; }
-    }
-
     async function exportOrders() {
       const w = document.getElementById('ord-wh').value;
       const co = document.getElementById('ord-company').value;
@@ -1468,14 +1377,12 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         }
       } catch (e) { alert('تعذّر جلب البيانات للتصدير'); return; }
       if (!all.length) { alert('لا توجد أصناف للتصدير (بصافي مطلوب > 0 ولها مخزن) بهذا الفلتر.'); return; }
-      /* عمود «الفرع» بيخلّي الاستيراد يتأكد إن الملف راجع لنفس الفرع،
-         وعمود «متاح» فاضي عشان المورّد يعلّم فيه ويرجّعه.
-         ⚠️ مفيش checkbox حقيقي: النسخة المجانية من SheetJS مابتكتبش
-            form controls ولا data validation. عمود نصي بيتقرا بتسامح
-            بيأدي نفس الغرض وبيشتغل على الموبايل وجوجل شيتس كمان. */
-      const rows = all.map(x => ({ 'الفرع': ordBranch, 'المخزن': x.best_store, 'الكود': x.itm_code, 'اسم الصنف لدى المخزن': (x.best_item_name || x.itm_name), 'الاسم عندنا': x.itm_name, 'العدد': x.net_required, 'سعر البيع': x.best_price, 'الخصم %': x.best_disc, 'متاح': '' }));
+      /* عمود «الفرع» للتوضيح. عمود «متاح» اتشال مع مسار الاستيراد —
+         التعليم بقى على «رابط المورّد» بـcheckbox حقيقي، والإكسل بقى
+         للعرض والأرشفة. */
+      const rows = all.map(x => ({ 'الفرع': ordBranch, 'المخزن': x.best_store, 'الكود': x.itm_code, 'اسم الصنف لدى المخزن': (x.best_item_name || x.itm_name), 'الاسم عندنا': x.itm_name, 'العدد': x.net_required, 'سعر البيع': x.best_price, 'الخصم %': x.best_disc }));
       const ws = XLSX.utils.json_to_sheet(rows);
-      ws['!cols'] = [{wch:12},{wch:16},{wch:9},{wch:40},{wch:34},{wch:7},{wch:10},{wch:9},{wch:10}];
+      ws['!cols'] = [{wch:12},{wch:16},{wch:9},{wch:40},{wch:34},{wch:7},{wch:10},{wch:9}];
       const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'طلبية');
       XLSX.writeFile(wb, 'طلبية_' + ordBranch + (w ? '_' + w : '') + '.xlsx');
     }
