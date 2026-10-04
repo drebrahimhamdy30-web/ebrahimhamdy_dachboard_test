@@ -168,7 +168,7 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
   <button id="tabBtn-incentives" onclick="switchTab('incentives')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">حوافز الطيارين</button>
   <button id="tabBtn-jard" onclick="switchTab('jard')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تقارير الجرد</button>
   <button id="tabBtn-prep" onclick="switchTab('prep')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تحضير الطلبات</button>
-  <!-- تبويبات المبيعات — مخفية لحد ما نتأكد إن المستخدم مسموح له (أدمن، أو فرعه مفتوح في sales_analysis_access) -->
+  <!-- تبويبات المبيعات — الظهور من شاشة الصلاحيات زي باقي التبويبات؛ الشريط بيختفي لو كلها ممنوعة -->
   <span id="saTabsBar" style="display:none;gap:.5rem;border-right:1px solid var(--border);padding-right:.5rem;margin-right:.25rem">
     <button id="tabBtn-sa_overview" onclick="switchTab('sa_overview')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">نظرة عامة المبيعات</button>
     <button id="tabBtn-sa_emp" onclick="switchTab('sa_emp')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">أداء الموظفين</button>
@@ -417,13 +417,6 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
 
 <!-- ========== TAB: نظرة عامة المبيعات ========== -->
 <div id="tab-sa_overview" class="sa-scope" style="display:none">
-
-  <!-- لوحة الأدمن: فتح/غلق تبويبات المبيعات لكل فرع -->
-  <div id="saAccessPanel" style="display:none;background:var(--surface-3);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:14px">
-    <div style="font-weight:800;font-size:.88rem;margin-bottom:6px"><i class="fas fa-user-lock"></i> صلاحيات تبويبات المبيعات لمديري الفروع</div>
-    <div style="font-size:.75rem;color:var(--text-secondary);margin-bottom:10px">حدّد الفروع اللي مديرها يقدر يفتح تبويبات المبيعات — كل مدير يشوف فرعه فقط. الأدمن يشوف كل الفروع دائمًا.</div>
-    <div id="saAccessBoxes" style="display:flex;gap:18px;flex-wrap:wrap"></div>
-  </div>
 
   <div id="saWrap_overview" style="overflow-x:auto"></div>
 </div><!-- /tab-sa_overview -->
@@ -1980,8 +1973,8 @@ function exportJardCSV() {
    • التحميل كسول: التاب بيتحمّل أول ما تفتحه بس — من غير كده كل تغيير
      في فلتر تقارير التوصيل كان هيضرب 8 نداءات مبيعات على الفاضي.
 
-   الصلاحية زي ما كانت بالظبط: الأدمن يشوف كل الفروع + لوحة التحكم،
-   وغير الأدمن لازم فرعه يكون في sales_analysis_access ويتقفل عليه. */
+   الصلاحية من شاشة الصلاحيات بس (app_page_tabs + tab_permissions) زي
+   باقي التبويبات. الأدمن يشوف كل الفروع، وغيره يتقفل على فرعه. */
 
 const SA_TABS = ['sa_overview', 'sa_emp', 'sa_price', 'sa_disc'];
 let SA_ALLOWED = false;        // المستخدم مسموح له يشوف تبويبات المبيعات
@@ -2012,12 +2005,6 @@ const saPriceReview       = (f, t, s) => _saRpc('sales_price_review',   _saArgs(
 const saDiscountBills     = (f, t, s) => _saRpc('sales_discount_bills', _saArgs(f, t, s));
 async function saActiveDays(f, t, s)      { return (await _saRpc('sales_active_days',    _saArgs(f, t, s)))[0] || { active_days: 0 }; }
 async function saDelActiveDays(f, t, s)   { return (await _saRpc('delivery_active_days', _saArgs(f, t, s)))[0] || { active_days: 0 }; }
-
-async function saAccessList() {
-  const { data, error } = await db.from('sales_analysis_access').select('store_name').order('store_name');
-  if (error) { console.error('sales_analysis_access', error); return []; }
-  return (data || []).map(r => r.store_name);
-}
 
 /* ── الفلاتر ───────────────────────────────────────────────────── */
 // نفس تحويل الشاشة القديمة بالظبط: بداية اليوم محليًا → ISO، والنهاية
@@ -2070,53 +2057,37 @@ function saSpin(id) {
 }
 
 /* ── الصلاحية ──────────────────────────────────────────────────── */
-async function initSalesTabs() {
+/* تبويبات المبيعات بقت زي باقي التبويبات: شاشة الصلاحيات هي المرجع
+   الوحيد، وguardTabs بيخفي الممنوع.
+   قبل كده كان فوقها بوابة تانية بالفرع (جدول sales_analysis_access):
+   تفتح التبويب من شاشة الصلاحيات ومايفتحش، من غير أي رسالة تقول ليه.
+   حصل فعلًا مع «مشرف الجرد» (فرعه المعمورة = مخزن «الصيدلية» واللي
+   مكانش مسجّل في الجدول) — الشاشة فتحتله فاضية تمامًا 2026-10-04.
+
+   ⚠️ اللي فضل من البوابة القديمة هو **قفل البيانات على الفرع**:
+      غير الأدمن لازم يكون له مخزن معروف. لو فاضي بنمنعه، لأن
+      SA_SCOPED_STORE فاضي معناه saStore() ترجّع null = كل الفروع —
+      يعني حساب بلا فرع كان هيشوف مبيعات الفروع كلها. */
+async function initSalesTabs(deniedTabs) {
   try {
-    if (RIS_ADMIN) {
-      SA_ALLOWED = true;
-      saShowTabs();
-      buildSaAccessPanel();
-      return;
-    }
-    // غير الأدمن: لازم فرعه يكون مفتوح — والشاشة تتقفل على فرعه
-    const myStore = Branches.storeName(Session.branch() || '');
-    const allowed = await saAccessList();
-    if (myStore && allowed.indexOf(myStore) >= 0) {
+    const denied = (deniedTabs instanceof Set) ? deniedTabs : new Set();
+    if (SA_TABS.every(t => denied.has(t))) return;   // كلها ممنوعة → الشريط مالوش لازمة
+
+    if (!RIS_ADMIN) {
+      const myStore = Branches.storeName(Session.branch() || '');
+      if (!myStore) { console.warn('تبويبات المبيعات اتقفلت: مخزن المستخدم غير معروف'); return; }
       SA_SCOPED_STORE = myStore;
-      SA_ALLOWED = true;
-      saShowTabs();
     }
+    SA_ALLOWED = true;
+    saShowTabs();
+    // guardTabs ممكن يكون ضغط تبويب مبيعات والشريط لسه مخفي، فالتحميل
+    // وقتها خرج من أول سطر (SA_ALLOWED=false) — نحمّله دلوقتي
+    if (SA_TABS.indexOf(currentTab) >= 0) loadSalesTab(currentTab);
   } catch (e) { console.error('initSalesTabs', e); }
 }
 function saShowTabs() {
   const bar = document.getElementById('saTabsBar');
   if (bar) bar.style.display = 'inline-flex';
-}
-
-async function buildSaAccessPanel() {
-  const panel = document.getElementById('saAccessPanel');
-  const boxes = document.getElementById('saAccessBoxes');
-  if (!panel || !boxes) return;
-  panel.style.display = 'block';
-  boxes.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-  const allowed = await saAccessList();
-  const list = Branches.names().map(n => ({ store: Branches.storeName(n), label: n }));
-  boxes.innerHTML = list.map((b, i) => `
-    <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-weight:700;font-size:.85rem">
-      <input type="checkbox" id="saAcc-${i}" data-store="${saEsc(b.store)}" ${allowed.indexOf(b.store) >= 0 ? 'checked' : ''} onchange="toggleSaAccess(${i},this.checked)">
-      ${saEsc(b.label)}
-    </label>`).join('');
-}
-async function toggleSaAccess(i, on) {
-  const cb = document.getElementById('saAcc-' + i);
-  if (!cb) return;
-  const store = cb.getAttribute('data-store');
-  cb.disabled = true;
-  const { error } = on
-    ? await db.from('sales_analysis_access').upsert({ store_name: store })
-    : await db.from('sales_analysis_access').delete().eq('store_name', store);
-  cb.disabled = false;
-  if (error) { console.error('toggleSaAccess', error); alert('تعذّر حفظ الصلاحية'); cb.checked = !on; }
 }
 
 /* ── التحميل الكسول ────────────────────────────────────────────── */
@@ -2510,11 +2481,15 @@ async function saDoDiscReviewed(store, bill) {
 
 // Init: جهّز فلتر الفروع ثم حمّل تقرير اليوم
 initBranchFilter().then(setToday);
-// صلاحية تبويبات المبيعات — بعد ما الفروع توصل من الشبكة عشان تحويل
-// اسم الفرع لاسم المخزن (eplus) يبقى على أحدث قايمة مش على الكاش
-Branches.ready().then(initSalesTabs);
+// صلاحيات التبويبات: guardTabs بيخفي الممنوع وبيرجّع مجموعة الممنوعين،
+// وinitSalesTabs بياخدها عشان يقرر يظهر شريط المبيعات من عدمه.
+// Branches.ready() لازم الأول: تحويل اسم الفرع لاسم المخزن (eplus) يبقى
+// على أحدث قايمة مش على الكاش.
+Promise.all([
+  Branches.ready(),
+  Session.guardTabs('reports').catch(e => { console.error('guardTabs', e); return new Set(); })
+]).then(([, denied]) => initSalesTabs(denied))
+  .catch(e => console.error('initSalesTabs', e));
 </script>
-<!-- صلاحيات التبويبات: بيخفي التبويبات الممنوعة على دور المستخدم (من شاشة الصلاحيات) -->
-<script>try { Session.guardTabs('reports'); } catch (e) { console.error('guardTabs', e); }</script>
 </body>
 </html>
