@@ -799,19 +799,55 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     /* ═══ الكمية المرسلة للمورّد ═══
        كمية لكل صنف، الافتراضي = صافي المطلوب، وصفر = استبعاد. دي اللي
        بتروح في رابط المورّد بدل الرقم المحسوب.
-       بتعيش في الصفحة بس (كود الصنف → كمية): بتضيع مع إعادة الحساب ومع
-       تغيير الفرع وبإعادة تحميل الصفحة — بقرار المالك، مفيش تخزين.
-       السجل الدائم لللي اتبعت فعلًا هو صف الرابط نفسه (supplier_links.items).
-       ⚠️ الصنف اللي ماتعدّلش مالوش صف هنا خالص — عشان لو net_required
-          اتغيّر بعد إعادة حساب، اللي ماتلمسوش ياخد الرقم الجديد مش القديم. */
+
+       **محفوظة على السيرفر** في `order_send_qty` بمفتاح (الفرع، الكود).
+       كانت في الذاكرة بمفتاح الكود لوحده، فكانت بتتمسح مع تبديل الفرع
+       (وده كان لازم، وإلا صنف بنفس الكود في فرع تاني كان ياخد كمية
+       الفرع الأول) ومع إعادة الحساب ومع تحديث الصفحة. ومن غير حفظ
+       ماكانش ينفع رابط واحد ياخد كل الفروع أصلًا.
+
+       `ORD_SEND` هنا = كميات **الفرع المعروض** بس، بتتحمّل مع تبديل
+       الفرع. إنشاء الرابط بيقرا الجدول كامل لكل الفروع.
+       ⚠️ الصنف اللي ماتعدّلش مالوش صف خالص — عشان لو net_required
+          اتغيّر بعد إعادة حساب، اللي ماتلمسوش ياخد الرقم الجديد مش القديم.
+          فالرجوع للأصل = حذف الصف، مش حفظ الرقم المحسوب. */
     let ORD_SEND = {};
 
-    function ordSendQty(code, dflt, el) {
+    async function loadOrdSendQty() {
+      try {
+        let all = [], off = 0;
+        for (;;) {
+          const b = await (await fetch(REST + 'order_send_qty?select=itm_code,qty&branch=eq.'
+            + encodeURIComponent(ordBranch) + '&limit=1000&offset=' + off, { headers: H })).json();
+          all = all.concat(b || []); if (!Array.isArray(b) || b.length < 1000) break; off += 1000;
+        }
+        ORD_SEND = {}; all.forEach(x => { ORD_SEND[x.itm_code] = Number(x.qty); });
+      } catch (e) { ORD_SEND = {}; }
+    }
+
+    async function ordSendQty(code, dflt, el) {
       const q = Math.max(0, Math.floor(Number(el.value) || 0));
       el.value = q;
-      if (q === Number(dflt)) delete ORD_SEND[code]; else ORD_SEND[code] = q;
-      el.classList.toggle('edited', q !== Number(dflt));
-      el.title = (q !== Number(dflt)) ? ('الأصل ' + dflt) : 'الكمية اللي هتتبعت للمورّد — صفر = استبعاد';
+      const back = (q === Number(dflt));
+      if (back) delete ORD_SEND[code]; else ORD_SEND[code] = q;
+      el.classList.toggle('edited', !back);
+      el.title = back ? 'الكمية اللي هتتبعت للمورّد — صفر = استبعاد' : ('الأصل ' + dflt);
+      try {
+        if (back) {
+          await fetch(REST + 'order_send_qty?branch=eq.' + encodeURIComponent(ordBranch)
+            + '&itm_code=eq.' + encodeURIComponent(code),
+            { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });
+        } else {
+          await fetch(REST + 'order_send_qty?on_conflict=branch,itm_code', {
+            method:'POST', headers:{ ...H, 'Content-Type':'application/json',
+              'Prefer':'resolution=merge-duplicates,return=minimal' },
+            body: JSON.stringify({ branch: ordBranch, itm_code: code, qty: q, updated_at: new Date().toISOString() }) });
+        }
+      } catch (e) {
+        el.classList.add('edited');
+        el.title = 'لم يتم حفظ هذه الكمية على الخادم';
+        alert('تعذّر حفظ الكمية: ' + e.message);
+      }
     }
 
     /* Tab بين خانات «الكمية المرسلة» بينزل للخانة اللي تحتها — إدخال
@@ -841,7 +877,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
 
     function ordSetBranch(b) {
       ordBranch = b; ordPage = 1;
-      ORD_SEND = {};                 // الأكواد بتخص الفرع — ماتنقلش معاه
+      /* الكميات مابتتمسحش — محفوظة لكل فرع، و loadOrderSelections
+         بتحمّل كميات الفرع الجديد */
       document.querySelectorAll('.ord-br').forEach(x => x.classList.toggle('active', x.dataset.b === b));
       loadOrders();
     }
@@ -1055,6 +1092,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         const tp = await (await fetch(REST + 'order_transfer_pending?select=itm_code&branch=eq.' + encodeURIComponent(ordBranch) + '&requested_at=gte.' + cutoff, { headers: H })).json();
         ordTransferPending = new Set((tp || []).map(x => x.itm_code));
       } catch (e) { ordTransferPending = new Set(); }
+      await loadOrdSendQty();
       ordSelBranch = ordBranch;
     }
     async function loadOrders() {
@@ -1153,15 +1191,16 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       } catch (e) { alert('تعذّر الحفظ: ' + e.message); }
     }
     async function clearAllSelections() {
-      if (!confirm('بدء يوم جديد؟\nهيتمسح كل «تحت الطلب» + ارتباطات المخازن اليدوية، والأصناف تتوزّع على المخزن الأرخص تلقائيًّا.')) return;
+      if (!confirm('بدء يوم جديد؟\nهيتمسح كل «تحت الطلب» + الكميات المعدَّلة + ارتباطات المخازن اليدوية، والأصناف تتوزّع على المخزن الأرخص تلقائيًّا.')) return;
       const btn = document.getElementById('ord-clear'); if (btn) btn.disabled = true;
       try {
         await fetch(REST + 'order_selections?itm_code=neq.__none__', { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });
+        await fetch(REST + 'order_send_qty?itm_code=neq.__none__', { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });   // الكميات المعدَّلة
         await fetch(REST + 'order_store_override?itm_code=neq.__none__', { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });   // مسح ارتباطات المخازن
         await fetch(REST + 'order_transfer_pending?itm_code=neq.__none__', { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });   // مسح إخفاء التحويلات المعلّقة
         await fetch(REST + 'rpc/refresh_purchase_orders', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' });   // إعادة التوزيع الطبيعي
-        ordSelCodes = new Set(); ordSelStock = {}; ordTransferPending = new Set(); ordSelBranch = null; ordPage = 1; await loadOrders();
-        toast('تم بدء يوم جديد — اتمسح تحت الطلب وارتباطات المخازن ✓');
+        ordSelCodes = new Set(); ordSelStock = {}; ordTransferPending = new Set(); ORD_SEND = {}; ordSelBranch = null; ordPage = 1; await loadOrders();
+        toast('تم بدء يوم جديد — اتمسح تحت الطلب والكميات وارتباطات المخازن ✓');
       } catch (e) { alert('تعذّر المسح: ' + e.message); }
       finally { if (btn) btn.disabled = false; }
     }
@@ -1196,7 +1235,9 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جارٍ الحساب…';
       try { const r = await fetch(REST + 'rpc/refresh_purchase_orders', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' });
         if (!r.ok) throw new Error(await r.text());
-        ORD_SEND = {}; ordPage = 1; await loadOrders();   // الأرقام اتغيّرت — التعديلات اليدوية مابتتحملش عليها
+        /* الكميات المعدَّلة بتفضل — دي قرارات شراء مقصودة، والرجوع
+           للأصل بيتعمل بحذف الصف من الشاشة مش بإعادة الحساب */
+        ordPage = 1; await loadOrders();
       } catch (e) { alert('تعذّرت إعادة حساب الطلبيات: ' + e.message); }
       finally { btn.disabled = false; btn.innerHTML = old; }
     }
@@ -1222,17 +1263,20 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     function supClose() { document.getElementById('sup-bg').classList.remove('open'); }
 
     /* ── إنشاء الرابط ────────────────────────────────────────────
-       الكمية اللي بتروح للمورّد لقطة من عمود «الكمية المرسلة» في
-       الجدول، مش الرقم المحسوب — فالتعديل مابيأثرش على الشاشة ولا على
-       القاعدة.
+       رابط واحد لكل الفروع: المورّد بيلاقي **تبويب لكل فرع** ويعلّم
+       المتاح في كل تبويب لوحده، عشان يقدر يقول «متاح للمعمورة ومش
+       متاح لسان ستيفانو» لما كميته محدودة.
+
+       الكمية = `order_send_qty` لو المشتريات عدّلتها، وإلا صافي
+       المطلوب المحسوب. بنقرا الجدول كامل لكل الفروع مرة واحدة.
 
        ⚠️ `net_required` **محسوب** و`refresh_purchase_orders()` بتعيد
-          بناء الجدول كل 10 دقايق (كرون `refresh_orders_daily`)، فأي
-          تعديل «دائم» عليه لازم جدول تجاوزات — مش تعديل مباشر.
+          بناء الجدول كل 10 دقايق (كرون `refresh_orders_daily`) —
+          فالكميات المعدَّلة بتتخزّن في جدولها مش عليه.
 
-       ⚠️ الرابط بياخد أصناف المخزن المحدد كلها (مش الصفحة المعروضة)،
-          فبنجيبها من السيرفر تاني وناخد تعديلات ORD_SEND فوقها. الصنف
-          اللي ماتعدّلش بياخد رقمه الحالي من السيرفر مش لقطة قديمة. */
+       ⚠️ الرابط بياخد أصناف المخزن كلها (مش الصفحة المعروضة)، فبنجيبها
+          من السيرفر تاني. وفلتر «تحت الطلب» **مابينطبقش** عليه لأنه
+          مربوط بأكواد الفرع المعروض بس — وبنقول ده في الشاشة. */
 
     async function supCreate() {
       const store = document.getElementById('ord-wh').value;
@@ -1241,14 +1285,19 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       if (!store) { msg.innerHTML = '<span class="msg-err">اختر المخزن من فلتر «كل المخازن» أولًا.</span>'; return; }
       msg.innerHTML = 'جارٍ إنشاء الرابط…';
       try {
-        let base = REST + 'purchase_orders_flat?select=itm_code,itm_name,best_item_name,net_required,required'
-          + '&branch=eq.' + encodeURIComponent(ordBranch) + '&net_required=gt.0'
-          + '&best_store=eq.' + encodeURIComponent(store) + '&order=itm_name.asc';
+        /* كل الفروع — مفيش فلتر branch */
+        let base = REST + 'purchase_orders_flat?select=branch,itm_code,itm_name,best_item_name,net_required,required'
+          + '&net_required=gt.0&best_store=eq.' + encodeURIComponent(store)
+          + '&order=itm_name.asc';
         const co = document.getElementById('ord-company').value;
         const q  = document.getElementById('ord-search').value.trim();
         if (co) base += '&company=eq.' + encodeURIComponent(co);
         if (q) { const e = encodeURIComponent(q); base += '&or=(itm_name.ilike.*' + e + '*,itm_code.eq.' + e + ')'; }
-        base += ordExtraFilters();
+        /* الفلاتر العددية بس — بلا فلتر «تحت الطلب» (أكواد فرع واحد) */
+        const sOp = document.getElementById('ord-stock-op').value, sV = document.getElementById('ord-stock-v').value.trim();
+        const rOp = document.getElementById('ord-req-op').value,   rV = document.getElementById('ord-req-v').value.trim();
+        if (sV !== '' && !isNaN(Number(sV))) base += '&stock=' + sOp + '.' + Number(sV);
+        if (rV !== '' && !isNaN(Number(rV))) base += '&required=' + rOp + '.' + Number(rV);
 
         let all = [], off = 0;
         for (;;) {
@@ -1257,27 +1306,51 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         }
         if (!all.length) { msg.innerHTML = '<span class="msg-err">لا توجد أصناف بهذا الفلتر.</span>'; return; }
 
+        /* الكميات المعدَّلة لكل الفروع — مفتاح (فرع ⇢ كود) */
+        const SQ = {};
+        let sq = [], soff = 0;
+        for (;;) {
+          const b = await (await fetch(REST + 'order_send_qty?select=branch,itm_code,qty&limit=1000&offset=' + soff, { headers: H })).json();
+          sq = sq.concat(b || []); if (!Array.isArray(b) || b.length < 1000) break; soff += 1000;
+        }
+        sq.forEach(x => { (SQ[x.branch] = SQ[x.branch] || {})[x.itm_code] = Number(x.qty); });
+
+        /* ترتيب الفروع زي شريط الفروع في الشاشة — المورّد يشوف نفس الترتيب */
+        const brOrder = BR_KEYS.map(k => BR[k]);
+        const rank = b => { const i = brOrder.indexOf(b); return i === -1 ? 99 : i; };
+
         /* اسم المخزن هو اللي بيروح للمورّد — هو بيدوّر باسمه هو */
         const items = all.map(x => {
           const dflt = Number(x.net_required != null ? x.net_required : x.required) || 0;
-          const qty  = (ORD_SEND[x.itm_code] != null) ? ORD_SEND[x.itm_code] : dflt;
-          return { code: x.itm_code, name: (x.best_item_name || x.itm_name), qty: qty };
-        }).filter(x => x.qty > 0);
+          const ed   = SQ[x.branch] && SQ[x.branch][x.itm_code];
+          return { branch: x.branch, code: x.itm_code,
+                   name: (x.best_item_name || x.itm_name),
+                   qty: (ed != null ? ed : dflt), _ed: ed != null };
+        }).filter(x => x.qty > 0)
+          .sort((a, b) => rank(a.branch) - rank(b.branch) || String(a.name).localeCompare(b.name, 'ar'));
 
         if (!items.length) { msg.innerHTML = '<span class="msg-err">كل الأصناف كميتها صفر — مفيش حاجة تتبعت.</span>'; return; }
 
+        const edited = items.filter(x => x._ed).length;
+        const perBr = {};
+        items.forEach(x => { perBr[x.branch] = (perBr[x.branch] || 0) + 1; });
+        const payload = items.map(x => ({ branch: x.branch, code: x.code, name: x.name, qty: x.qty }));
+
         const r = await fetch(REST + 'rpc/supplier_link_create', {
           method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ p_branch: ordBranch, p_store: store, p_items: items, p_days: 7 }) });
+          body: JSON.stringify({ p_branch: null, p_store: store, p_items: payload, p_days: 7 }) });
         if (!r.ok) throw new Error(await r.text());
         const out = await r.json();
 
-        const edited = items.filter(x => ORD_SEND[x.code] != null).length;
+        const under = document.getElementById('ord-under').value;
         const url = SUP_PAGE + '?t=' + out.token;
         document.getElementById('sup-new').innerHTML =
-          '<div class="et-note" style="margin-bottom:6px">الرابط جاهز — <b>' + items.length + '</b> صنف'
+          '<div class="et-note" style="margin-bottom:6px">الرابط جاهز — <b>' + items.length + '</b> صنف في '
+          + Object.keys(perBr).length + ' فرع'
+          + ' <span style="color:var(--text-muted)">(' + Object.keys(perBr).map(b => esc(b) + ' ' + perBr[b]).join(' · ') + ')</span>'
           + (edited ? ' · <span style="color:#b45309">' + edited + ' بكمية معدَّلة</span>' : '')
           + ' · صالح 7 أيام.'
+          + (under !== '' ? ' <span style="color:#b45309">فلتر «تحت الطلب» لم يُطبَّق على الرابط.</span>' : '')
           + ' <span style="color:var(--danger)">انسخه الآن، فلن يظهر مرة أخرى.</span></div>'
           + '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
           + '<input id="sup-url" class="form-select" style="flex:1;min-width:240px;font-size:.75rem" readonly value="' + esc(url) + '">'
@@ -1301,17 +1374,23 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const box = document.getElementById('sup-list');
       box.innerHTML = '<div class="et-note">جارٍ التحميل…</div>';
       try {
-        const r = await fetch(REST + 'supplier_links?select=id,store,items,reply,note,created_at,expires_at,'
-          + 'opened_at,submitted_at,applied_at,revoked&branch=eq.' + encodeURIComponent(ordBranch)
-          + '&order=created_at.desc&limit=30', { headers: H });   // data-ok: آخر 30 رابط للفرع
+        /* بلا فلتر فرع — الرابط بقى بياخد كل الفروع، وفرعه جوّه items */
+        const r = await fetch(REST + 'supplier_links?select=id,branch,store,items,reply,note,created_at,expires_at,'
+          + 'opened_at,submitted_at,applied_at,revoked'
+          + '&order=created_at.desc&limit=30', { headers: H });   // data-ok: آخر 30 رابط
         SUP_ROWS = await r.json();
         if (!Array.isArray(SUP_ROWS) || !SUP_ROWS.length) { box.innerHTML = '<div class="et-note">لا توجد روابط بعد.</div>'; return; }
 
-        box.innerHTML = '<table class="cr-table"><thead><tr><th>المخزن</th><th>الأصناف</th><th>الحالة</th>'
+        box.innerHTML = '<table class="cr-table"><thead><tr><th>المخزن</th><th>الفروع</th><th>الأصناف</th><th>الحالة</th>'
           + '<th>المتاح</th><th>إجراء</th></tr></thead><tbody>'
           + SUP_ROWS.map((x, i) => {
-              const n = Array.isArray(x.items) ? x.items.length : 0;
+              const its = Array.isArray(x.items) ? x.items : [];
+              const n = its.length;
               const m = Array.isArray(x.reply) ? x.reply.length : null;
+              /* الرابط القديم فرعه في العمود، والجديد جوّه كل صنف */
+              const brs = x.branch ? [x.branch]
+                : [...new Set(its.map(y => y && y.branch).filter(Boolean))];
+              const brCell = brs.length > 1 ? brs.length + ' فروع' : (brs[0] || '—');
               const expired = new Date(x.expires_at) < new Date();
               let st = '<span style="color:var(--text-muted)">في انتظار الرد</span>';
               if (x.revoked)          st = '<span style="color:var(--danger)">ملغي</span>';
@@ -1326,9 +1405,11 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
               else if (!x.submitted_at && !x.revoked && !expired)
                 act = '<button class="ord-actbtn" style="background:#fee2e2;color:#b91c1c" onclick="supRevoke(' + i + ')">إلغاء</button>';
 
-              return '<tr><td>' + esc(x.store) + '</td><td>' + n + '</td><td>' + st + '</td>'
+              return '<tr><td>' + esc(x.store) + '</td>'
+                + '<td title="' + esc(brs.join(' · ')) + '">' + esc(brCell) + '</td>'
+                + '<td>' + n + '</td><td>' + st + '</td>'
                 + '<td>' + (m == null ? '—' : '<b>' + m + '</b>') + '</td><td>' + act + '</td></tr>'
-                + (x.note ? '<tr><td colspan="5" style="text-align:right;font-size:.72rem;color:var(--text-muted)">ملاحظة المورّد: ' + esc(x.note) + '</td></tr>' : '');
+                + (x.note ? '<tr><td colspan="6" style="text-align:right;font-size:.72rem;color:var(--text-muted)">ملاحظة المورّد: ' + esc(x.note) + '</td></tr>' : '');
             }).join('') + '</tbody></table>';
       } catch (e) { box.innerHTML = '<div class="msg-err">' + sbFailMsg('تعذّر تحميل الروابط') + '</div>'; }
     }
@@ -1336,7 +1417,9 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     async function supApply(i) {
       const x = SUP_ROWS[i]; if (!x) return;
       const m = Array.isArray(x.reply) ? x.reply.length : 0;
-      if (!confirm('اعتماد ' + m + ' صنف وإضافتها إلى «تحت الطلب»؟')) return;
+      /* الرد سطر لكل (فرع، كود) — فالعدد ده سطور مش أصناف فريدة */
+      const nb = new Set((x.reply || []).map(e => (e && typeof e === 'object') ? e.b : x.branch)).size;
+      if (!confirm('اعتماد ' + m + ' سطر' + (nb > 1 ? ' في ' + nb + ' فروع' : '') + ' وإضافتها إلى «تحت الطلب»؟')) return;
       const msg = document.getElementById('sup-msg'); msg.innerHTML = 'جارٍ الاعتماد…';
       try {
         const r = await fetch(REST + 'rpc/supplier_link_apply', { method:'POST',
