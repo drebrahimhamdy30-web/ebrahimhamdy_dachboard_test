@@ -254,6 +254,10 @@
                 <input type="number" id="over-min" value="1" min="0" step="1" style="width:auto;min-width:90px" oninput="renderOverstock()">
               </div>
               <div class="mini-field auto">
+                <span class="filter-label">أيام الاحتياج <span class="help-ic">؟<span class="tip">الفرع يُعتبر محتاجًا لو رصيده أقل من استهلاكه خلال هذه المدة. وهي نفسها أساس الكمية المقترحة للتحويل.</span></span></span>
+                <input type="number" id="over-need-days" value="30" min="1" step="1" style="width:auto;min-width:100px" oninput="renderOverstock()">
+              </div>
+              <div class="mini-field auto">
                 <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;font-weight:600;cursor:pointer;margin-top:20px;white-space:nowrap">
                   <input type="checkbox" id="over-showex" onchange="renderOverstock()"> إظهار المستثناة <span id="over-ex-count" style="color:var(--text-muted)"></span>
                 </label>
@@ -391,6 +395,7 @@
         keepAfter: document.getElementById('keep-after').value,
         surplusDays: document.getElementById('surplus-days').value,
         needDays: document.getElementById('need-days').value,
+        overNeedDays: (document.getElementById('over-need-days')||{}).value,
         minSurplus: document.getElementById('min-surplus').value,
         missingMinStock: document.getElementById('missing-min-stock').value,
         missingMinAvg: document.getElementById('missing-min-avg').value,
@@ -416,6 +421,7 @@
         if(s.keepAfter!=null)   document.getElementById('keep-after').value=s.keepAfter;
         if(s.surplusDays!=null) document.getElementById('surplus-days').value=s.surplusDays;
         if(s.needDays!=null)    document.getElementById('need-days').value=s.needDays;
+        if(s.overNeedDays!=null && document.getElementById('over-need-days')) document.getElementById('over-need-days').value=s.overNeedDays;
         if(s.minSurplus!=null)  document.getElementById('min-surplus').value=s.minSurplus;
         if(s.missingMinStock!=null) document.getElementById('missing-min-stock').value=s.missingMinStock;
         if(s.missingMinAvg!=null)   document.getElementById('missing-min-avg').value=s.missingMinAvg;
@@ -1316,7 +1322,10 @@
         var required = coverQtyDays(avg, days);   // (المعدل/30) × الأيام
         var excess = stock - required;
         if(excess < minEx || excess <= 0) return;
-        rows.push({code:code, name:it.name, avg:avg, required:required, stock:stock, excess:excess, price:price, exVal:excess*price});
+        rows.push({code:code, name:it.name, avg:avg, required:required, stock:stock, excess:excess,
+                   price:price, exVal:excess*price,
+                   srcCode: (scope==='all' ? null : scope),
+                   dests: (scope==='all' ? [] : overDestsFor(it, scope, excess))});
       });
       var showEx = document.getElementById('over-showex') && document.getElementById('over-showex').checked;
       rows.forEach(function(r){ r.excluded = overExcl.has(String(r.code)); });
@@ -1326,6 +1335,96 @@
       overResults = rows;
       renderOverstockTable();
     }
+
+    /* ── التحويل من تبويب «مخزون زائد» ───────────────────────────
+       المصدر = الفرع المختار في «النطاق». في وضع «كل الفروع» الزيادة
+       مجمّعة من كل الفروع فمفيش مصدر واضح — الزرار بيتقفل وقتها.
+       الاحتياج = (المعدل الشهري ÷ 30) × أيام الاحتياج − رصيد الفرع،
+       نفس تعريف تبويب التحويل بالظبط.
+       والكمية المقترحة = الأقل بين احتياج الوجهة وفائض المصدر، ومسموح
+       تعديلها بس **مش فوق الفائض** — لأن اللي فوقه بياخد من رصيد
+       المصدر اللي هو محتاجه. */
+    function ovEsc(v){
+      return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                                 .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function overNeedDays(){
+      return parseFloat((document.getElementById('over-need-days')||{}).value) || 30;
+    }
+    function overNeedOf(branchObj){
+      // coverQty هي نفسها اللي تبويب التحويل بيستعملها — تعريف واحد
+      // للاحتياج في الشاشة كلها، عشان مايتفارقش رقمين لنفس المعنى.
+      var q = Math.ceil(coverQty(branchObj, overNeedDays()) - (branchObj.stock||0));
+      return q > 0 ? q : 0;
+    }
+    var overDest = {};   // كود الصنف → كود فرع الوجهة
+    var overQty  = {};   // كود الصنف → الكمية بعد تعديل المستخدم
+
+    function overDestsFor(it, srcCode, excess){
+      return BR_KEYS.filter(function(b){ return b !== srcCode; })
+        .map(function(b){
+          var need = overNeedOf(it[b]);
+          return { code:b, name:BRANCHES[b], need:need, stock:(it[b].stock||0),
+                   qty: Math.min(need, excess) };
+        })
+        .filter(function(d){ return d.need > 0; })
+        .sort(function(a,b){ return b.need - a.need; });
+    }
+    function onOverDestChange(code, sel){
+      overDest[code] = sel.value;
+      delete overQty[code];        // الكمية ترجع للمقترح بتاع الوجهة الجديدة
+      renderOverstockTable();
+    }
+    function onOverQtyChange(code, inp, max){
+      var v = Math.floor(parseFloat(inp.value) || 0);
+      if(v > max) v = max;         // الحد الأقصى = الفائض، مهما كتب
+      if(v < 1)   v = 1;
+      inp.value = v;
+      overQty[code] = v;
+    }
+
+    async function sendOverTransfer(code){
+      var row = (overResults||[]).find(function(x){ return String(x.code)===String(code); });
+      if(!row || !row.dests || !row.dests.length) return;
+      var destCode = overDest[code] || row.dests[0].code;
+      var dest = row.dests.find(function(d){ return d.code===destCode; }) || row.dests[0];
+      var qty  = overQty[code] != null ? overQty[code] : dest.qty;
+      if(!(qty > 0)){ alert('الكمية لازم تكون أكبر من صفر'); return; }
+      if(qty > row.excess){ alert('الكمية أكبر من الرصيد الزائد المتاح'); return; }
+
+      var srcName = BRANCHES[row.srcCode], destName = dest.name;
+      if(!confirm('تحويل ' + qty + ' من «' + (row.name||code) + '»\nمن ' + srcName + ' إلى ' + destName + '؟')) return;
+
+      var btn = document.getElementById('ovtr-' + code);
+      if(btn){ btn.disabled = true; btn.textContent = '... جاري الإرسال'; }
+      await ensureBranchReps();
+      /* نفس مسار تبويب «ناقص من فرع»: المهمة بتروح للفرع **المصدر**
+         باسم مندوب الفرع **الطالب**. */
+      var out = await sbTaskInsert({
+        type:'تحويل',
+        user:(branchReps && branchReps[destName]) || destName,
+        target_branch: srcName,
+        item_code: String(code),
+        item: row.name,
+        qty: qty,
+        note: 'تحويل مخزون زائد'
+      });
+      if(out && out.ok){
+        try{
+          await fetch(SB_URL_API+'/rest/v1/order_transfer_pending?on_conflict=branch,itm_code',{
+            method:'POST',
+            headers:await sbH({'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=minimal'}),
+            body:JSON.stringify({ branch:destName, itm_code:String(code), qty:qty, requested_at:new Date().toISOString() })
+          });
+        }catch(e){}
+        overSent[String(code)] = destName + ' · ' + qty;
+        renderOverstockTable();
+      } else {
+        if(btn){ btn.disabled = false; btn.textContent = '↪ تحويل'; }
+        alert('فشل إرسال طلب التحويل — حاول تاني');
+      }
+    }
+    var overSent = {};   // كود الصنف → «الفرع · الكمية» بعد الإرسال
 
     function renderOverstockTable(){
       var cont = document.getElementById('result-container');
@@ -1350,7 +1449,8 @@
       html += '<div class="res-wrap"><table class="res-table" style="min-width:920px"><thead><tr>'+
         '<th style="text-align:right">الصنف</th><th>كود الصنف</th><th>معدل الاستهلاك (شهري)</th>'+
         '<th>كمية التوفير المطلوبة</th><th>إجمالي الرصيد</th><th>الرصيد الزائد</th>'+
-        '<th>سعر البيع</th><th>قيمة الزائد</th><th>إجراء</th></tr></thead><tbody>';
+        '<th>سعر البيع</th><th>قيمة الزائد</th>'+
+        '<th>تحويل إلى</th><th>الكمية</th><th>إجراء</th></tr></thead><tbody>';
       pageRows.forEach(function(r){
         html += '<tr'+(r.excluded?' style="opacity:.55"':'')+'>'+
           '<td class="name-cell" style="text-align:right"><b>'+(r.name||'—')+'</b>'+(r.excluded?' <span style="font-size:0.68rem;color:var(--text-muted)">(مستثنى)</span>':'')+'</td>'+
@@ -1361,7 +1461,12 @@
           '<td style="font-weight:800;color:var(--danger)">'+Math.round(r.excess)+'</td>'+
           '<td>'+r1(r.price)+'</td>'+
           '<td style="font-weight:700;color:var(--accent-dark)">'+Math.round(r.exVal).toLocaleString('en-US')+'</td>'+
-          '<td style="text-align:center">'+(r.excluded
+          overTransferCells(r)+
+          '<td style="text-align:center;white-space:nowrap">'+
+          ((r.srcCode && r.dests.length && !overSent[String(r.code)] && !r.excluded)
+            ? '<button id="ovtr-'+r.code+'" onclick="sendOverTransfer(\''+String(r.code).replace(/'/g,"\\'")+'\')" style="border:none;background:var(--primary,#0d9488);color:#fff;border-radius:7px;padding:3px 11px;font-family:Cairo,sans-serif;font-size:0.72rem;font-weight:700;cursor:pointer;margin-inline-end:5px">↪ تحويل</button>'
+            : '')+
+          (r.excluded
             ? '<button onclick="unexcludeItem(\''+r.code+'\')" style="border:1px solid var(--border);background:var(--surface);color:var(--accent-dark);border-radius:7px;padding:2px 10px;font-family:inherit;font-size:0.72rem;font-weight:700;cursor:pointer">إلغاء الاستثناء</button>'
             : '<button onclick="excludeItem(\''+r.code+'\')" style="border:none;background:#fee2e2;color:#b91c1c;border-radius:7px;padding:2px 10px;font-family:inherit;font-size:0.72rem;font-weight:700;cursor:pointer">استثناء</button>')+
           '</td>'+
@@ -1377,6 +1482,34 @@
       }
       cont.innerHTML = html;
     }
+    /* خليتي التحويل. حالات ثلاثة، وكل واحدة بتقول سببها بدل ما تسيب
+       المستخدم يحزر ليه الزرار مش شغّال. */
+    function overTransferCells(r){
+      var sent = overSent[String(r.code)];
+      if(sent){
+        return '<td colspan="2" style="color:var(--warning,#f59e0b);font-weight:700;font-size:0.74rem">⏳ اتطلب تحويله — '+ovEsc(sent)+'</td>';
+      }
+      if(!r.srcCode){
+        return '<td colspan="2" style="color:var(--text-muted);font-size:0.72rem">اختار فرعًا في «النطاق» عشان تحوّل منه</td>';
+      }
+      if(!r.dests.length){
+        return '<td colspan="2" style="color:var(--text-muted);font-size:0.72rem">مفيش فرع محتاج الصنف ده</td>';
+      }
+      var cc   = String(r.code).replace(/'/g, "\\'");
+      var selC = overDest[r.code] || r.dests[0].code;
+      var dest = r.dests.find(function(d){ return d.code===selC; }) || r.dests[0];
+      var qty  = overQty[r.code] != null ? overQty[r.code] : dest.qty;
+      var opts = r.dests.map(function(d){
+        return '<option value="'+d.code+'"'+(d.code===dest.code?' selected':'')+'>'+ovEsc(d.name)+' (محتاج '+d.need+')</option>';
+      }).join('');
+      return '<td><select onchange="onOverDestChange(\''+cc+'\',this)" style="font-family:Cairo,sans-serif;font-size:0.74rem;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-primary);max-width:170px">'+opts+'</select></td>'+
+             '<td><input type="number" id="ovq-'+r.code+'" value="'+qty+'" min="1" max="'+r.excess+'" step="1"'+
+             ' title="الأقصى '+Math.round(r.excess)+' (الرصيد الزائد)"'+
+             ' onchange="onOverQtyChange(\''+cc+'\',this,'+r.excess+')"'+
+             ' style="width:70px;text-align:center;font-family:Cairo,sans-serif;font-size:0.76rem;padding:3px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-primary)">'+
+             '<div style="font-size:0.64rem;color:var(--text-muted);margin-top:2px">أقصى '+Math.round(r.excess)+'</div></td>';
+    }
+
     function goOverPage(p){ overPage=p; renderOverstockTable(); document.getElementById('result-container').scrollIntoView({behavior:'smooth',block:'start'}); }
 
     // ===================================================================
