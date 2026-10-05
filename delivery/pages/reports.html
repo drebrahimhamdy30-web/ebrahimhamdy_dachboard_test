@@ -975,6 +975,7 @@ async function loadIncentivesTab(from, to) {
   const el = document.getElementById('incBody');
   if (!from || !to) { el.innerHTML = '<div class="empty-state"><p>اختر الفترة</p></div>'; return; }
   if (!incSettingsMap) await loadIncentiveSettings();
+  await ensureDriverPerf(from, to);   // أرقام الطيارين لازم تكون لنفس الفترة والفرع
 
   // فرع كل طيار — عشان نحترم تفعيل الحوافز لكل فرع ونوزّع إجمالي حافز كل فرع على طياريه هو
   const { data: drvBr } = await db.from('drivers').select('id,branch_id');
@@ -1569,7 +1570,19 @@ const BD_MIN_ORDERS = 20;   // حد أدنى للطلبات لحساب النت�
 const BD_MIN_HOURS  = 8;    // حد أدنى لساعات الحضور
 let BD_W = { oph: 0.50, tph: 0.25, kph: 0.20, late: 0.05 };   // كسور (المجموع=1)؛ تُحمّل من dispatch_settings
 let driverPerfRows = [];
+let driverPerfKey  = null;   // بصمة (من|إلى|الفرع) اللي driverPerfRows اتحسبت عليها
 let driverPerfSort = { col: 'score', dir: -1 };   // افتراضي: الأعلى نتيجة
+
+/* تبويب الحوافز بيستهلك driverPerfRows اللي بيملاها تبويب «تقارير الطيارين».
+   لما الفترة بتتغيّر الصفحة بتحدّث **التبويب المفتوح بس** (mainLoaded.clear
+   في loadReport)، فلو فتحت الحوافز على طول كانت الأرقام بتفضل من الفترة
+   اللي قبلها — إجمالي الحافز من الفترة الجديدة والطيارين من القديمة، يعني
+   فلوس بتتوزّع غلط. الدالة دي بتضمن إن الأرقام بتاعة نفس الفترة والفرع. */
+async function ensureDriverPerf(from, to) {
+  const key = [from || '', to || '', effectiveBranch() || ''].join('|');
+  if (driverPerfKey === key && driverPerfRows.length) return;
+  await loadDriverPerfTab(from, to);
+}
 
 // يحمّل أوزان النتيجة من إعدادات التوزيع (score_w_*). لو فرع محدّد يستخدم أوزانه،
 // وإلا يستخدم أول فرع؛ ويطبّع القيم لكسور مجموعها 1.
@@ -1639,6 +1652,8 @@ async function loadDriverPerfTab(from, to) {
       pct: r.rated ? Math.round(r['متأخر'] / r.rated * 100) : 0
     };
   });
+
+  driverPerfKey = [from || '', to || '', branchId || ''].join('|');
 
   // النتيجة المركّبة (أفضل الطيارين): تطبيع نسبةً لأفضل طيار مؤهّل + قلة التأخير
   await loadScoreWeights();   // الأوزان من إعدادات التوزيع
