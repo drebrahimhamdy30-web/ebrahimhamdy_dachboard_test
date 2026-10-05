@@ -1450,7 +1450,8 @@
         '<th class="name-cell">الصنف</th><th>كود الصنف</th><th>معدل الاستهلاك (شهري)</th>'+
         '<th>كمية التوفير المطلوبة</th><th>إجمالي الرصيد</th><th>الرصيد الزائد</th>'+
         '<th>سعر البيع</th><th>قيمة الزائد</th>'+
-        '<th>تحويل إلى</th><th>الكمية</th><th>إجراء</th></tr></thead><tbody>';
+        '<th style="width:165px">تحويل إلى</th><th style="width:110px">الكمية</th>'+
+        '<th style="width:150px">إجراء</th></tr></thead><tbody>';
       pageRows.forEach(function(r){
         html += '<tr'+(r.excluded?' style="opacity:.55"':'')+'>'+
           '<td class="name-cell"><b>'+(r.name||'—')+'</b>'+(r.excluded?' <span style="font-size:0.68rem;color:var(--text-muted)">(مستثنى)</span>':'')+'</td>'+
@@ -1462,7 +1463,7 @@
           '<td>'+r1(r.price)+'</td>'+
           '<td style="font-weight:700;color:var(--accent-dark)">'+Math.round(r.exVal).toLocaleString('en-US')+'</td>'+
           overTransferCells(r)+
-          '<td style="text-align:center;white-space:nowrap">'+
+          '<td style="text-align:center;white-space:nowrap;width:150px">'+
           ((r.srcCode && r.dests.length && !overSent[String(r.code)] && !r.excluded)
             ? '<button id="ovtr-'+r.code+'" onclick="sendOverTransfer(\''+String(r.code).replace(/'/g,"\\'")+'\')" style="border:none;background:var(--primary,#0d9488);color:#fff;border-radius:7px;padding:3px 11px;font-family:Cairo,sans-serif;font-size:0.72rem;font-weight:700;cursor:pointer;margin-inline-end:5px">↪ تحويل</button>'
             : '')+
@@ -1484,30 +1485,41 @@
     }
     /* خليتي التحويل. حالات ثلاثة، وكل واحدة بتقول سببها بدل ما تسيب
        المستخدم يحزر ليه الزرار مش شغّال. */
+    /* الخليتين دايمًا خليتين — **ممنوع colspan** هنا. لما كانت الحالات
+       الفاضية بتدمج الخليتين، حدود الأعمدة كانت بتتغيّر من صف لصف
+       والجدول يبان مكسّر. والسبب الطويل اتحوّل لـtooltip بدل ما يتكرر
+       مكتوبًا في كل صف ويشد العين عن الأرقام. */
+    function overQuiet(reason){
+      return '<td style="color:var(--text-muted)" title="'+ovEsc(reason)+'">—</td>'+
+             '<td style="color:var(--text-muted)">—</td>';
+    }
     function overTransferCells(r){
       var sent = overSent[String(r.code)];
       if(sent){
-        return '<td colspan="2" style="color:var(--warning,#f59e0b);font-weight:700;font-size:0.74rem">⏳ اتطلب تحويله — '+ovEsc(sent)+'</td>';
+        var p = String(sent).split(' · ');
+        return '<td style="color:var(--warning,#f59e0b);font-weight:700;font-size:0.73rem;white-space:nowrap">⏳ '+ovEsc(p[0]||'')+'</td>'+
+               '<td style="color:var(--warning,#f59e0b);font-weight:700">'+ovEsc(p[1]||'')+'</td>';
       }
-      if(!r.srcCode){
-        return '<td colspan="2" style="color:var(--text-muted);font-size:0.72rem">اختار فرعًا في «النطاق» عشان تحوّل منه</td>';
-      }
-      if(!r.dests.length){
-        return '<td colspan="2" style="color:var(--text-muted);font-size:0.72rem">مفيش فرع محتاج الصنف ده</td>';
-      }
+      if(!r.srcCode)      return overQuiet('اختار فرعًا في «النطاق» عشان تحوّل منه');
+      if(!r.dests.length) return overQuiet('مفيش فرع محتاج الصنف ده بأيام الاحتياج الحالية');
+
       var cc   = String(r.code).replace(/'/g, "\\'");
       var selC = overDest[r.code] || r.dests[0].code;
       var dest = r.dests.find(function(d){ return d.code===selC; }) || r.dests[0];
       var qty  = overQty[r.code] != null ? overQty[r.code] : dest.qty;
+      var mx   = Math.round(r.excess);
       var opts = r.dests.map(function(d){
-        return '<option value="'+d.code+'"'+(d.code===dest.code?' selected':'')+'>'+ovEsc(d.name)+' (محتاج '+d.need+')</option>';
+        return '<option value="'+d.code+'"'+(d.code===dest.code?' selected':'')+'>'+ovEsc(d.name)+' · '+d.need+'</option>';
       }).join('');
-      return '<td><select onchange="onOverDestChange(\''+cc+'\',this)" style="font-family:Cairo,sans-serif;font-size:0.74rem;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-primary);max-width:170px">'+opts+'</select></td>'+
-             '<td><input type="number" id="ovq-'+r.code+'" value="'+qty+'" min="1" max="'+r.excess+'" step="1"'+
-             ' title="الأقصى '+Math.round(r.excess)+' (الرصيد الزائد)"'+
+      return '<td><select onchange="onOverDestChange(\''+cc+'\',this)" title="الفرع المحتاج · الكمية اللي محتاجها"'+
+             ' style="font-family:Cairo,sans-serif;font-size:0.73rem;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-primary);width:150px;max-width:150px">'+opts+'</select></td>'+
+             /* الكمية والأقصى على سطر واحد — «56 / 71» — عشان ارتفاع
+                الصفوف يفضل واحد ومايبقاش فيه صف أطول من جيرانه. */
+             '<td style="white-space:nowrap"><input type="number" id="ovq-'+r.code+'" value="'+qty+'" min="1" max="'+r.excess+'" step="1"'+
+             ' title="الأقصى '+mx+' — الرصيد الزائد في '+ovEsc(BRANCHES[r.srcCode]||'')+'"'+
              ' onchange="onOverQtyChange(\''+cc+'\',this,'+r.excess+')"'+
-             ' style="width:70px;text-align:center;font-family:Cairo,sans-serif;font-size:0.76rem;padding:3px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-primary)">'+
-             '<div style="font-size:0.64rem;color:var(--text-muted);margin-top:2px">أقصى '+Math.round(r.excess)+'</div></td>';
+             ' style="width:58px;text-align:center;font-family:Cairo,sans-serif;font-size:0.76rem;padding:3px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-primary)">'+
+             '<span style="font-size:0.68rem;color:var(--text-muted);margin-inline-start:4px">/ '+mx+'</span></td>';
     }
 
     function goOverPage(p){ overPage=p; renderOverstockTable(); document.getElementById('result-container').scrollIntoView({behavior:'smooth',block:'start'}); }
