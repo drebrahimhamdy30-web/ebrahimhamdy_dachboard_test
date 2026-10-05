@@ -18,6 +18,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
      • التوكن مخزّن **مهشّر** (sha256) — بنهشّر الجاي ونقارن
      • صلاحية بالتاريخ + علم إلغاء
      • حد أقصى 300 فتحة لكل رابط (سبام)
+     • الإرسال **مرة واحدة** — بعده أي POST بيترفض بـ409
      • بيرجّع **فرع + كود + اسم + كمية** بس — مفيش أسعار ولا خصومات
        ولا مخازن تانية
      • الرد بينزل `reply` ومابيدخلش «تحت الطلب» غير لما حد عندنا
@@ -26,7 +27,8 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
    ── الرابط متعدّد الفروع ─────────────────────────────────────────
    الطلبية بقت سطر لكل (فرع، كود)، والمورّد بيعلّم في تبويب كل فرع
    لوحده — عشان يقدر يقول «متاح للمعمورة ومش متاح لسان ستيفانو» لما
-   كميته محدودة.
+   كميته محدودة. وزر الإرسال في **آخر تبويب بس** وبيبعت الطلبية
+   كلها مرة واحدة.
 
    ⚠️ **شكلين لازم يفضلوا شغّالين** — فيه روابط مبعوتة قبل التعديل:
      items:  [{branch,code,name,qty}] الجديد · [{code,name,qty}] القديم
@@ -82,7 +84,7 @@ Deno.serve(async (req) => {
   const hash = await sha256Hex(token);
   const { data: row, error } = await db
     .from("supplier_links")
-    .select("id,branch,store,items,reply,note,expires_at,open_count,submitted_at,revoked")
+    .select("id,branch,store,items,reply,note,expires_at,open_count,submitted_at,applied_at,revoked")
     .eq("token_hash", hash)
     .maybeSingle();
 
@@ -128,6 +130,12 @@ Deno.serve(async (req) => {
   }
 
   if (req.method === "POST") {
+    /* الإرسال **مرة واحدة**. قبل كده السيرفر ماكانش بيمنع إرسال تاني
+       خالص — اللي بيقفل كان الصفحة بس، يعني اللي عنده الرابط يقدر
+       يغيّر الرد بعد ما نضغط «اعتماد» ونتصرّف عليه. */
+    if (row.applied_at) return res({ error: "تم اعتماد ردك بالفعل. للتعديل تواصل مع الصيدلية." }, 409);
+    if (row.submitted_at) return res({ error: "تم إرسال هذا الرابط بالفعل." }, 409);
+
     let body: { lines?: unknown; codes?: unknown; note?: unknown };
     try { body = await req.json(); } catch { return res({ error: "بيانات غير صالحة" }, 400); }
 

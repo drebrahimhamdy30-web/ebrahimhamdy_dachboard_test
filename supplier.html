@@ -81,6 +81,15 @@
   .done .big{font-size:2.6rem}
   .note{width:100%;margin-top:8px;padding:9px 11px;border:1.5px solid var(--line);border-radius:10px;
         font-family:inherit;font-size:.85rem;background:var(--card);color:var(--txt);outline:none;resize:vertical}
+  .rev{background:var(--card);border:1.5px solid var(--brand);border-radius:12px;padding:12px 13px;margin-top:12px}
+  .rev-h{font-weight:800;font-size:.88rem;color:var(--brand-d);margin-bottom:8px}
+  .rev-r{display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:.85rem;font-weight:700;
+         border-top:1px solid var(--line)}
+  .rev-r:first-of-type{border-top:0}
+  .rev-r.zero b{color:var(--err)}
+  .rev-n{font-size:.76rem;color:var(--muted);margin-top:8px;font-weight:700}
+  .hint{background:var(--card);border:1px dashed var(--brand);border-radius:11px;padding:9px 12px;
+        font-size:.8rem;font-weight:700;color:var(--brand-d);margin-bottom:8px}
 </style>
 </head>
 <body>
@@ -95,6 +104,7 @@
 </div>
 
 <div class="foot" id="foot" style="display:none"><div class="w">
+  <button class="send" id="next" onclick="nextTab()" style="display:none">الفرع التالي ›</button>
   <button class="send" id="send" onclick="submitReply()">إرسال المتاح</button>
   <span id="fmsg" style="font-size:.8rem;font-weight:700"></span>
 </div></div>
@@ -173,8 +183,13 @@ function render(){
         + esc(b) + '<span class="n">'+mk+'/'+tot+'</span></button>';
     }).join('') + '</div>';
 
+  var hint = BRANCHES.length > 1
+    ? '<div class="hint">الطلب مقسوم على ' + BRANCHES.length + ' فروع. علّم المتاح في كل فرع،'
+      + ' وزر الإرسال في <b>آخر فرع</b> وبيبعت الطلبية كلها مرة واحدة.</div>'
+    : '';
+
   var html =
-    '<div class="bar">' + tabs
+    '<div class="bar">' + tabs + hint
     + '<input class="srch" id="q" placeholder="ابحث باسم الصنف أو الكود…" oninput="render()" value="'+esc(q)+'">'
     + '<div class="tools">'
     +   '<button class="tbtn" onclick="markAll(true)">تحديد الكل</button>'
@@ -192,10 +207,27 @@ function render(){
 
   html += '</ul>';
   if(!list.length) html += '<div class="msg">'+(q ? 'لا توجد نتائج للبحث.' : 'لا توجد أصناف لهذا الفرع.')+'</div>';
+
+  /* في آخر تبويب بنعرض مراجعة لكل الفروع قبل الإرسال — عشان المخزن
+     يفهم إن الزر بيبعت الطلبية كلها مش الفرع اللي هو واقف فيه */
+  if(BRANCHES.length > 1 && isLastTab()){
+    html += '<div class="rev"><div class="rev-h">مراجعة قبل الإرسال — الطلبية كلها</div>'
+      + BRANCHES.map(function(b){
+          var tot = ITEMS.filter(function(x){ return x.branch === b; }).length;
+          var mk  = markedIn(b);
+          return '<div class="rev-r'+(mk?'':' zero')+'"><span>'+esc(b)+'</span>'
+            + '<b>'+mk+' من '+tot+'</b></div>';
+        }).join('')
+      + '<div class="rev-n">الإرسال مرة واحدة للطلبية كلها — راجع كل فرع قبله.</div></div>';
+  }
+
   html += '<textarea class="note" id="note" rows="2" placeholder="ملاحظة للصيدلية (اختياري)">'+esc(NOTE)+'</textarea>';
 
   document.getElementById('body').innerHTML = html;
   if(q) { var el=document.getElementById('q'); el.focus(); el.setSelectionRange(q.length,q.length); }
+  /* شريط التبويبات بيتزحلق أفقيًا، فالتبويب النشط ممكن يبقى نصّه بره */
+  var at = document.querySelector('.tab.act');
+  if(at && at.scrollIntoView) at.scrollIntoView({ block:'nearest', inline:'center' });
   updCount();
 }
 
@@ -207,14 +239,33 @@ function keepNote(){
 
 function goTab(b){ keepNote(); TAB = b; render(); window.scrollTo(0,0); }
 
+/* زر الإرسال بيظهر في **آخر تبويب بس** — منعًا للخبطة: المورّد كان
+   ممكن يضغط إرسال وهو في أول فرع فيتبعت كل حاجة ناقصة ويتقفل الرابط.
+   في التبويبات اللي قبله بيلاقي «الفرع التالي ›» بدل الإرسال. */
+function isLastTab(){ return BRANCHES.indexOf(TAB) === BRANCHES.length - 1; }
+
+function nextTab(){
+  var i = BRANCHES.indexOf(TAB);
+  if(i > -1 && i < BRANCHES.length - 1) goTab(BRANCHES[i + 1]);
+}
+
 function updCount(){
   var mine = tabItems();
+  var multi = BRANCHES.length > 1;
   var el = document.getElementById('cnt');
-  if(el) el.textContent = BRANCHES.length > 1
+  if(el) el.textContent = multi
     ? ('متاح ' + markedIn(TAB) + ' من ' + mine.length + ' في ' + TAB)
     : ('متاح ' + MARK.size + ' من ' + ITEMS.length);
-  var s = document.getElementById('send');
-  if(s) s.textContent = MARK.size ? ('إرسال المتاح ('+MARK.size+')') : 'إرسال — لا يوجد متاح';
+
+  var s = document.getElementById('send'), nx = document.getElementById('next');
+  var last = isLastTab();
+  if(nx) nx.style.display = (multi && !last) ? '' : 'none';
+  if(nx && multi && !last) nx.textContent = 'الفرع التالي: ' + BRANCHES[BRANCHES.indexOf(TAB) + 1] + ' ›';
+  if(s){
+    s.style.display = (multi && !last) ? 'none' : '';
+    s.textContent = !MARK.size ? 'إرسال — لا يوجد متاح'
+      : (multi ? ('إرسال كل الفروع ('+MARK.size+')') : ('إرسال المتاح ('+MARK.size+')'));
+  }
 }
 
 function toggle(code){
@@ -240,11 +291,12 @@ async function submitReply(){
   var btn = document.getElementById('send'), fm = document.getElementById('fmsg');
   if(!MARK.size && !confirm('لم تحدد أي صنف. هل تريد الإرسال كـ«لا يوجد متاح»؟')) return;
 
-  /* تنبيه لو فرع كامل ماتعلّم فيه حاجة — غالبًا نسي التبويب */
+  /* تنبيه لو فرع كامل ماتعلّم فيه حاجة — غالبًا نسي التبويب.
+     والإرسال مرة واحدة ومابيتكررش، فالتأكيد هنا آخر فرصة. */
   if(MARK.size && BRANCHES.length > 1){
     var empty = BRANCHES.filter(function(b){ return markedIn(b) === 0; });
     if(empty.length && !confirm('لم تحدد أي صنف في: ' + empty.join(' · ')
-        + '\nهل تريد الإرسال؟')) return;
+        + '\n\nالإرسال للطلبية كلها ومرة واحدة فقط. هل تريد الإرسال؟')) return;
   }
 
   btn.disabled = true; fm.textContent = 'جارٍ الإرسال…';
