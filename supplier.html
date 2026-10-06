@@ -65,9 +65,14 @@
      display:flex;align-items:center;gap:11px;padding:11px 13px;cursor:pointer}
   li.on{border-color:var(--brand);background:color-mix(in srgb,var(--brand) 9%,var(--card))}
   li input{width:22px;height:22px;accent-color:var(--brand);flex:0 0 auto;pointer-events:none}
+  .inf{min-width:0;flex:1 1 auto}
   .nm{font-weight:700;font-size:.9rem;line-height:1.45}
   .mt{font-size:.74rem;color:var(--muted);margin-top:2px}
-  .qty{margin-inline-start:auto;font-weight:800;color:var(--brand-d);white-space:nowrap;font-size:.92rem}
+  .mt b{color:var(--txt)}
+  .pr{font-size:.74rem;color:var(--muted);margin-top:1px}
+  .pr b{color:var(--brand-d)}
+  .qty{margin-inline-start:auto;font-weight:800;color:var(--brand-d);white-space:nowrap;font-size:.92rem;
+       flex:0 0 auto;align-self:flex-start;padding-top:2px}
   .foot{position:fixed;inset-inline:0;bottom:0;background:var(--card);border-top:1px solid var(--line);
         padding:11px 14px;box-shadow:0 -3px 14px rgba(0,0,0,.08)}
   .foot .w{max-width:720px;margin:0 auto;display:flex;gap:10px;align-items:center}
@@ -160,6 +165,21 @@ async function load(){
 }
 
 function tabItems(){ return ITEMS.filter(function(x){ return x.branch === TAB; }); }
+
+/* كود فارما متخزّن 18 خانة بأصفار بادئة (000000000000002457) وبورتالهم
+   بيقبل المقصوص — نفس اللي شاشة الطلبيات بتنسخه بالظبط. وابن سينا 6
+   خانات بلا أصفار فمابيتأثرش. الكامل بيفضل في الـtitle. */
+function shortCode(c){ return String(c||'').replace(/^0+/, '') || String(c||''); }
+
+/* البحث بيلاقي بالاسم وبكودنا **وبكود المورّد نفسه** — هو بيدوّر
+   بكوده هو مش بكودنا */
+function hit(x, q){
+  if(!q) return true;
+  return String(x.name||'').toLowerCase().indexOf(q) > -1
+      || String(x.code||'').indexOf(q) > -1
+      || String(x.scode||'').toLowerCase().indexOf(q) > -1
+      || shortCode(x.scode).toLowerCase().indexOf(q) > -1;
+}
 function markedIn(b){
   var n = 0;
   ITEMS.forEach(function(x){ if(x.branch === b && MARK.has(K(x.branch, x.code))) n++; });
@@ -169,10 +189,7 @@ function markedIn(b){
 function render(){
   var q = (document.getElementById('q') ? document.getElementById('q').value : '').trim().toLowerCase();
   var mine = tabItems();
-  var list = mine.filter(function(x){
-    if(!q) return true;
-    return String(x.name||'').toLowerCase().indexOf(q) > -1 || String(x.code||'').indexOf(q) > -1;
-  });
+  var list = mine.filter(function(x){ return hit(x, q); });
 
   /* تبويب واحد = مفيش شريط تبويبات */
   var tabs = BRANCHES.length < 2 ? '' :
@@ -199,9 +216,19 @@ function render(){
 
   html += list.map(function(x){
     var on = MARK.has(K(x.branch, x.code));
+    /* كود المورّد موجود عند فارما وابن سينا بس — غيرهم بيتخفي خالص
+       بدل ما نعرض خانة فاضية */
+    var meta = (x.scode ? 'كودك: <b title="'+esc(x.scode)+'">'+esc(shortCode(x.scode))+'</b> · ' : '')
+             + 'كود ' + esc(x.code);
+    var pr = '';
+    if(x.price != null){
+      pr = '<div class="pr">سعر البيع '+esc(x.price)
+         + (x.disc != null ? ' · خصم <b>'+esc(x.disc)+'%</b>' : '') + '</div>';
+    }
     return '<li class="'+(on?'on':'')+'" onclick="toggle(\''+esc(x.code).replace(/'/g,"\\'")+'\')">'
       + '<input type="checkbox" '+(on?'checked':'')+'>'
-      + '<div><div class="nm">'+esc(x.name)+'</div><div class="mt">كود '+esc(x.code)+'</div></div>'
+      + '<div class="inf"><div class="nm">'+esc(x.name)+'</div>'
+      + '<div class="mt">'+meta+'</div>'+pr+'</div>'
       + '<span class="qty">'+esc(x.qty)+'</span></li>';
   }).join('');
 
@@ -279,7 +306,7 @@ function markAll(on){
   keepNote();
   var q = (document.getElementById('q')||{value:''}).value.trim().toLowerCase();
   tabItems().forEach(function(x){
-    if(q && String(x.name||'').toLowerCase().indexOf(q)===-1 && String(x.code||'').indexOf(q)===-1) return;
+    if(!hit(x, q)) return;
     var k = K(x.branch, x.code);
     if(on) MARK.add(k); else MARK.delete(k);
   });

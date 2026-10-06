@@ -19,8 +19,10 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
      • صلاحية بالتاريخ + علم إلغاء
      • حد أقصى 300 فتحة لكل رابط (سبام)
      • الإرسال **مرة واحدة** — بعده أي POST بيترفض بـ409
-     • بيرجّع **فرع + كود + اسم + كمية** بس — مفيش أسعار ولا خصومات
-       ولا مخازن تانية
+     • بيرجّع **فرع + كود + اسم + كمية + سعره وخصمه وكوده هو** —
+       ودول بتوع المورّد نفسه وهو عارفهم، مش تسريب. اللي **مابيخرجش
+       أبدًا**: أسعار المخازن التانية · تكلفتنا · مخزوننا · فروع
+       مش في الطلبية دي
      • الرد بينزل `reply` ومابيدخلش «تحت الطلب» غير لما حد عندنا
        يضغط اعتماد (supplier_link_apply)
 
@@ -31,8 +33,9 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
    كلها مرة واحدة.
 
    ⚠️ **شكلين لازم يفضلوا شغّالين** — فيه روابط مبعوتة قبل التعديل:
-     items:  [{branch,code,name,qty}] الجديد · [{code,name,qty}] القديم
-             (الفرع ساعتها من عمود `branch` في الصف)
+     items:  [{branch,code,name,qty,price,disc,scode}] الجديد ·
+             [{code,name,qty}] القديم (الفرع من عمود `branch`،
+             والسعر والخصم والكود مش موجودين فمايتعرضوش)
      reply:  [{b,c}] الجديد · ["كود",…] القديم
    والـPOST بيقبل `lines` الجديدة و`codes` القديمة (لو متصفّح المورّد
    مكرّش نسخة قديمة من الصفحة) — الكود القديم بيتفسّر «متاح في كل
@@ -50,7 +53,10 @@ const CORS = {
 };
 const MAX_OPENS = 300;
 
-type Item = { branch?: string; code: string; name?: string; qty?: number };
+type Item = {
+  branch?: string; code: string; name?: string; qty?: number;
+  price?: number; disc?: number; scode?: string;   // سعره وخصمه وكوده هو
+};
 type Line = { b: string; c: string };
 
 function res(b: unknown, s = 200) {
@@ -101,6 +107,9 @@ Deno.serve(async (req) => {
     code: String(x.code),
     name: x.name,
     qty: x.qty,
+    price: x.price,                 // سعر البيع عند المورّد
+    disc: x.disc,                   // خصمه
+    scode: x.scode,                 // كوده هو — فارما وابن سينا بس
   })).filter((x) => x.code && x.branch);
 
   if (req.method === "GET") {
@@ -122,7 +131,7 @@ Deno.serve(async (req) => {
 
     return res({
       store: row.store,
-      items,                                  // [{branch,code,name,qty}]
+      items,                                  // [{branch,code,name,qty,price,disc,scode}]
       submitted: !!row.submitted_at,
       marked,                                 // [{b,c}]
       note: row.note || "",
