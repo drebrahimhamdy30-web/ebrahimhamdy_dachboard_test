@@ -497,6 +497,13 @@
             </div>
             <button class="btn btn-primary" onclick="loadStaleReport()"><i class="fas fa-search"></i> بحث</button>
             <button class="btn btn-secondary" onclick="exportStaleReportToExcel()"><i class="fas fa-file-excel"></i> تصدير إكسل</button>
+            <div style="flex:1;min-width:190px;max-width:280px;">
+              <label class="modal-label" style="margin-bottom:4px;">بحث في النتائج</label>
+              <input type="text" id="stale-search-input" class="form-input"
+                placeholder="بالكود أو الاسم..."
+                oninput="onStaleSearch()"
+                style="width:100%;box-sizing:border-box;">
+            </div>
           </div>
           <div id="stale-summary" style="font-size:0.82rem;color:var(--text-muted);margin-bottom:10px;"></div>
           <div class="table-wrap">
@@ -2114,6 +2121,64 @@
     let currentStaleData = [];
     let staleCurrentPage  = 1;
     const STALE_PAGE_SIZE = 20;
+    let staleSearch = '', staleFrom = '', staleTo = '', staleSearchTimer = null;
+
+    /* تطبيع عربي: الهمزات والتاء المربوطة والألف المقصورة والتشكيل
+       والتطويل والأرقام العربية. من غيره البحث بـ«لبوسه» مايلاقيش
+       «لبوسة»، والصيدلي بيكتب الاتنين. */
+    function staleNorm(v){
+      return String(v == null ? '' : v)
+        .toLowerCase()
+        .replace(/[\u064B-\u065F\u0640\u0670]/g, '')
+        .replace(/[\u0623\u0625\u0622\u0671]/g, '\u0627')
+        .replace(/\u0649/g, '\u064A')
+        .replace(/\u0626/g, '\u064A')
+        .replace(/\u0624/g, '\u0648')
+        .replace(/\u0629/g, '\u0647')
+        .replace(/[\u0660-\u0669]/g, function(d){ return d.charCodeAt(0) - 0x0660; })
+        .replace(/[\u06F0-\u06F9]/g, function(d){ return d.charCodeAt(0) - 0x06F0; })
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    /* ⚠️ دالة مش متغيّر: currentStaleData بيتشال منه الصنف بعد جرده
+       (في مكانين)، فأي نسخة مفلترة محفوظة كانت هتفضل عارضة صنف
+       اتجرد خلاص. الحساب عند الرسم بيخلّيها متّسقة دايمًا. */
+    function staleRows(){
+      if (!staleSearch) return currentStaleData;
+      const q = staleNorm(staleSearch);
+      if (!q) return currentStaleData;
+      return currentStaleData.filter(function(it){
+        return staleNorm(it.code).indexOf(q) >= 0
+            || staleNorm(it.itm_name_ar).indexOf(q) >= 0
+            || staleNorm(it.itm_name_en).indexOf(q) >= 0;
+      });
+    }
+
+    /* debounce بسيط — الفلترة محلية بس القايمة توصل آلاف صنف */
+    function onStaleSearch(){
+      clearTimeout(staleSearchTimer);
+      staleSearchTimer = setTimeout(function(){
+        const el = document.getElementById('stale-search-input');
+        staleSearch = el ? el.value : '';
+        staleCurrentPage = 1;   // أي تغيير في البحث يرجّع لأول صفحة
+        renderStaleTable();
+      }, 260);
+    }
+
+    /* العدد المعروض = نتيجة الفلتر، ومعاه الإجمالي الكلي عشان
+       المستخدم يفضل شايف إن فيه أصناف تانية ورا الفلتر. */
+    function renderStaleSummary(){
+      const summary = document.getElementById('stale-summary');
+      if (!summary) return;
+      const shown = staleRows().length, total = currentStaleData.length;
+      const range = (staleFrom && staleTo)
+        ? ' — مفيش ليها جرد في الفترة من ' + staleFrom + ' إلى ' + staleTo + ' (أو لم تُجرد أبدًا)'
+        : '';
+      summary.textContent = (shown === total)
+        ? '📦 عدد الأصناف: ' + total + range
+        : '🔍 ظهر ' + shown + ' من ' + total + ' صنف' + range;
+    }
 
     function openStaleReport() { showScreen('reports'); showReport('stale'); }
     function closeStaleReport() { /* inline */ }
@@ -2144,6 +2209,11 @@
       body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري البحث...</td></tr>';
       summary.textContent = '';
       staleCurrentPage = 1;
+      staleFrom = dFrom; staleTo = dTo;
+      // تحميل جديد = بحث جديد، عشان ما تظهرش نتيجة مفلترة بفلتر منسي
+      staleSearch = '';
+      const _si = document.getElementById('stale-search-input');
+      if (_si) _si.value = '';
 
       try {
         const items = await fetchStaleItemsRange(userBranch, dFrom, dTo);
@@ -2154,7 +2224,7 @@
           _systemQty: null
         }));
 
-        summary.textContent = `📦 عدد الأصناف: ${currentStaleData.length} — مفيش ليها جرد في الفترة من ${dFrom} إلى ${dTo} (أو لم تُجرد أبدًا)`;
+        renderStaleSummary();
 
         if (!currentStaleData.length) {
           body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--success,#16a34a);padding:20px;">✅ كل الأصناف اتجردت خلال المدة المحددة</td></tr>';
@@ -2169,7 +2239,7 @@
     }
 
     function updateStalePagination() {
-      const totalPages = Math.max(1, Math.ceil(currentStaleData.length / STALE_PAGE_SIZE));
+      const totalPages = Math.max(1, Math.ceil(staleRows().length / STALE_PAGE_SIZE));
       if (staleCurrentPage > totalPages) staleCurrentPage = totalPages;
       document.getElementById('stale-page-info').textContent = `${staleCurrentPage} / ${totalPages}`;
       document.getElementById('stale-btn-prev').disabled = staleCurrentPage <= 1;
@@ -2177,15 +2247,26 @@
     }
 
     function changeStalePage(dir) {
-      const totalPages = Math.max(1, Math.ceil(currentStaleData.length / STALE_PAGE_SIZE));
+      const totalPages = Math.max(1, Math.ceil(staleRows().length / STALE_PAGE_SIZE));
       staleCurrentPage = Math.min(Math.max(1, staleCurrentPage + dir), totalPages);
       renderStaleTable();
     }
 
     function renderStaleTable() {
       const body  = document.getElementById('stale-report-body');
+      const rows  = staleRows();
       const start = (staleCurrentPage - 1) * STALE_PAGE_SIZE;
-      const pageItems = currentStaleData.slice(start, start + STALE_PAGE_SIZE);
+      const pageItems = rows.slice(start, start + STALE_PAGE_SIZE);
+
+      renderStaleSummary();
+      if (!rows.length) {
+        // نفرّق «الفلتر مالقاش» عن «كل حاجة اتجردت» — مش نفس الرسالة
+        body.innerHTML = currentStaleData.length
+          ? '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">مفيش صنف مطابق للبحث</td></tr>'
+          : '<tr><td colspan="6" style="text-align:center;color:var(--success,#16a34a);padding:20px;">✅ كل الأصناف اتجردت خلال المدة المحددة</td></tr>';
+        updateStalePagination();
+        return;
+      }
 
       body.innerHTML = '';
       let lastCategoryKey = null;
@@ -2406,9 +2487,11 @@
         alert('⚠️ مكتبة التصدير لسه بتتحمّل، جرب تاني بعد ثانية');
         return;
       }
-      if (!currentStaleData.length) { alert('لا توجد بيانات للتصدير'); return; }
+      // التصدير يطلّع اللي المستخدم شايفه بعد الفلتر — مش القايمة كلها
+      const data = staleRows();
+      if (!data.length) { alert('لا توجد بيانات للتصدير'); return; }
 
-      const rows = currentStaleData.map(item => ({
+      const rows = data.map(item => ({
         'الكود': item.code || '---',
         'الاسم عربي': item.itm_name_ar || '---',
         'الاسم إنجليزي': item.itm_name_en || '---',
