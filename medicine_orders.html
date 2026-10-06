@@ -129,6 +129,7 @@
     .ord-req { font-weight:800;color:#b45309;font-size:0.9rem; }
     /* صنف نشط شهر واحد فقط = معدل غير موثوق → السطر كله أحمر للتنبيه */
     #tab-orders tr.ord-onemonth td { color:#dc2626 !important; }
+    #tab-orders tr.ord-unconfirmed td { color:#b45309 !important; }
     /* صنف كان في الأرشيف ورجع = السطر كله أخضر (يغلب الأحمر عند التعارض) */
     #tab-orders tr.ord-exarchived td { color:#15803d !important; }
     /* «تحت الطلب»: أزرق = لسه ماجاش/جه غلط، أخضر = جه ناقص (كمّل الكمية) */
@@ -891,7 +892,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const surpOnly = document.getElementById('ord-surp-only').checked;
       // أعمدة الفائض بتتبني من الفروع — كانت تلاتة مكتوبة بالإيد
       const surpCols = BR_KEYS.map(k => 'surplus_' + k).join(',');
-      let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,net_required,' + surpCols + ',surplus_other,best_store,best_price,best_disc,best_item_name,active_months,ex_archived'
+      let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,net_required,' + surpCols + ',surplus_other,best_store,best_price,best_disc,best_item_name,active_months,sale_bills,ex_archived'
         + '&branch=eq.' + encodeURIComponent(ordBranch)
         + '&order=' + ((ordSortCol && ORD_SORT_MAP[ordSortCol]) ? (ORD_SORT_MAP[ordSortCol] + '.' + ordSortDir + '.nullslast') : 'required.desc,itm_name.asc')
         + '&limit=' + ORD_SIZE + '&offset=' + offset;
@@ -1133,10 +1134,21 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
             + 'title="' + (sendEd ? 'الأصل ' + sendDflt : 'الكمية اللي هتتبعت للمورّد — صفر = استبعاد') + '"'
             + ' onchange="ordSendQty(\'' + cc + '\',' + sendDflt + ',this)">';
           const arch = canOrder ? '<button class="ord-actbtn" style="background:#fee2e2;color:#b91c1c" title="أرشفة الصنف" onclick="archiveItem(' + r.id + ')"><i class="fas fa-box-archive"></i></button>' : '';
+          /* «نشط شهر واحد» لوحده مؤشر ضعيف — بيصطاد أصناف ماشية فعلًا.
+             الحكم من الفواتير: فاتورة واحدة = شاذ (والمعدل اتنزّل لـ1 في
+             القاعدة)، أكتر من فاتورة = صنف شغّال مايتلمسش، ومفيش فواتير
+             = مابنعرفش (مبيعاته أقدم من نافذة الفواتير المتاحة). */
           const oneMonth = Number(r.active_months) === 1;
+          const bills = (r.sale_bills == null) ? null : Number(r.sale_bills);
+          const odd     = oneMonth && bills === 1;
+          const unknown = oneMonth && !bills;
           const exArch = r.ex_archived === true;
-          const rowCls = [exArch ? 'ord-exarchived' : '', oneMonth ? 'ord-onemonth' : ''].filter(Boolean).join(' ');
-          const rowTtl = exArch ? 'كان في الأرشيف — رجع بعد إلغاء الأرشفة' : (oneMonth ? 'نشط شهر واحد فقط — المعدل غير موثوق، راجع قبل الطلب' : '');
+          const rowCls = [exArch ? 'ord-exarchived' : '',
+                          odd ? 'ord-onemonth' : (unknown ? 'ord-unconfirmed' : '')].filter(Boolean).join(' ');
+          const rowTtl = exArch ? 'كان في الأرشيف — رجع بعد إلغاء الأرشفة'
+            : odd     ? 'شاذ — الكمية اتباعت على فاتورة واحدة، فالمعدل اتنزّل إلى 1'
+            : unknown ? 'نشط شهر واحد — ومفيش فواتير بيع متاحة للتأكيد، راجع قبل الطلب'
+            : (oneMonth ? 'نشط شهر واحد لكن اتباع على ' + bills + ' فواتير — صنف شغّال' : '');
           return '<tr id="ord-row-' + r.id + '"' + (rowCls ? ' class="' + rowCls + '"' : '') + (rowTtl ? ' title="' + rowTtl + '"' : '') + '>'
             + '<td data-col="sel">' + chk + '</td>'
             + '<td data-col="code" class="cr-code">' + esc(r.itm_code) + '</td>'
