@@ -855,15 +855,13 @@
       var rows=[];
       if(currentTab==='prices'){
         base.forEach(function(it){
-          var prices=[];
-          BR_KEYS.forEach(function(br){
-            if(it[br].has && it[br].price>0) prices.push(it[br].price);
-          });
           var anyStock = BR_KEYS.some(function(k){ return (it[k].stock||0) > 0; });
           if(!anyStock) return;
-          var uniq=[...new Set(prices)];
+          var uniq=[...new Set(branchPrices(it))];
           if(uniq.length>1) rows.push(it);
         });
+        // أكبر فرق سعر أولاً — ده اللي يستاهل تصرّف، فلازم يكون في أول صفحة
+        rows.sort(function(a,b){ return priceGap(b) - priceGap(a); });
       } else if(currentTab==='transfer'){
         var target=document.getElementById('target-branch').value;
         var others=BR_KEYS.filter(function(b){return b!==target;});
@@ -897,6 +895,19 @@
     function medBadge(it){
       return it.isMedicine ? '<span class="badge-med">دواء</span>' : '<span class="badge-cos">تجميل</span>';
     }
+    /* أسعار الفروع اللي الصنف متسجّل فيها بسعر > 0.
+       كان نفس اللوب متكرر في الفلترة والعرض والتصدير — لو واحد منهم
+       اتغيّر كان الترتيب هيختلف عن الفرق المعروض. */
+    function branchPrices(it){
+      var ps=[];
+      BR_KEYS.forEach(function(br){ if(it[br].has && it[br].price>0) ps.push(it[br].price); });
+      return ps;
+    }
+    function priceGap(it){
+      var ps=branchPrices(it);
+      return ps.length>1 ? (Math.max.apply(null,ps)-Math.min.apply(null,ps)) : 0;
+    }
+
     function priceCell(b, isHigh, isLow){
       if(!b.has) return '<td class="zero-stock">—</td>';
       var cls = isHigh?'price-high':(isLow?'price-low':'');
@@ -938,8 +949,7 @@
         html+='<tr><th class="name-cell">الصنف</th>'+
           brHeadCells()+'<th>الفرق</th></tr></thead><tbody>';
         pageItems.forEach(function(it){
-          var ps=[];
-          BR_KEYS.forEach(function(br){ if(it[br].has&&it[br].price>0) ps.push(it[br].price); });
+          var ps=branchPrices(it);
           var maxP=Math.max.apply(null,ps), minP=Math.min.apply(null,ps);
           html+='<tr><td class="name-cell"><div style="font-weight:600;">'+it.name+' '+medBadge(it)+'</div>'+
             '<div style="font-size:0.65rem;color:var(--text-muted);">'+it.code+' · '+it.company+'</div></td>'+
@@ -1932,9 +1942,7 @@
           .concat(BR_KEYS.map(function(k){ return 'سعر '+BRANCHES[k]; }))
           .concat(['الفرق'])];
         filteredResults.forEach(function(it){
-          var ps=[];
-          BR_KEYS.forEach(function(br){ if(it[br].has&&it[br].price>0) ps.push(it[br].price); });
-          var diff=r1(Math.max.apply(null,ps)-Math.min.apply(null,ps));
+          var diff=r1(priceGap(it));
           wsData.push([it.code,it.name,it.company,it.isMedicine?'دواء':'تجميل']
             .concat(BR_KEYS.map(function(k){ return it[k].has?it[k].price:''; }))
             .concat([diff]));
