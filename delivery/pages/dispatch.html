@@ -272,6 +272,27 @@ body.dark .order-card.prepped{background:#0f3d2e}
 .modal-close{background:none;border:none;cursor:pointer;font-size:1.1rem;color:var(--text-muted);padding:.2rem}
 .modal-body{padding:1.25rem}
 .modal-footer{padding:.875rem 1.25rem;border-top:1px solid var(--border);display:flex;gap:.5rem;justify-content:flex-end;position:sticky;bottom:0;background:var(--surface)}
+/* تصميم كارت تفاصيل الطلب: ملخّص + أزرار فوق + باقي التفاصيل بسهم */
+.od-summary{background:linear-gradient(180deg,#f8fafc,#f1f5f9);border:1px solid var(--border);border-radius:12px;padding:.7rem .8rem;margin-bottom:.75rem}
+body.dark .od-summary{background:#0f172a;border-color:#334155}
+.od-sum-top{display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem}
+.od-sum-name{font-weight:800;font-size:1.02rem}
+.od-sum-badge{font-size:.6rem;font-weight:800;color:#fff;padding:.14rem .5rem;border-radius:10px;white-space:nowrap}
+.od-sum-due{margin-top:.45rem;display:flex;align-items:baseline;gap:.35rem}
+.od-sum-due b{font-size:1.4rem;font-weight:800;color:var(--green)}
+.od-sum-due small{font-size:.68rem;color:var(--text-muted);font-weight:700}
+.od-sum-brk{font-size:.64rem;color:#b45309;font-weight:700;margin-top:.15rem}
+.od-sum-phones{margin-top:.5rem;display:flex;flex-wrap:wrap;gap:.3rem}
+.od-acts-lbl{font-size:.63rem;font-weight:800;color:var(--text-muted);margin:.2rem 0 .4rem}
+.od-acts{display:grid;grid-template-columns:repeat(3,1fr);gap:.4rem;margin-bottom:.3rem}
+.od-acts .btn{width:100%;text-align:center;padding:.5rem .3rem;font-size:.73rem}
+.od-more{margin-top:.8rem;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.od-more-head{display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.6rem .8rem;cursor:pointer;background:#f8fafc;user-select:none;font-size:.82rem;font-weight:800}
+body.dark .od-more-head{background:#0f172a}
+.od-chev{transition:transform .2s;color:var(--text-muted)}
+.od-more.open .od-chev{transform:rotate(180deg)}
+.od-more-body{display:none;padding:.3rem .8rem .6rem}
+.od-more.open .od-more-body{display:block}
 .form-group{margin-bottom:.875rem}
 .form-group label{display:block;font-size:.78rem;font-weight:600;margin-bottom:.35rem}
 .form-control{width:100%;height:38px;padding:0 .75rem;border:1.5px solid var(--border);border-radius:8px;font-family:'Cairo',sans-serif;font-size:.82rem;outline:none;background:var(--surface)}
@@ -3326,6 +3347,7 @@ function openDetail(id){
     ${o.postpone_reason?`<div class="d-row"><span class="d-lbl">سبب التأجيل</span><span class="d-val">${o.postpone_reason}</span></div>`:''}
     ${o.cancelled_reason?`<div class="d-row"><span class="d-lbl">سبب الإلغاء</span><span class="d-val" style="color:var(--red)">${o.cancelled_reason}</span></div>`:''}
     ${o.notes?`<div class="d-row"><span class="d-lbl">ملاحظات</span><span class="d-val">${o.notes}</span></div>`:''}`;
+  document.getElementById('detailFooter').style.display='';
   document.getElementById('detailFooter').innerHTML=`
     <button class="btn btn-outline" onclick="closeModal('detailModal')">إغلاق</button>
     <button class="btn btn-outline" onclick="closeModal('detailModal');openLog('${id}',null)">📋 السجل</button>
@@ -3470,7 +3492,17 @@ if(o.delivered_at){
   if(o.staff_notes) _rows+=_row('ملاحظة الموظف',o.staff_notes);
   if(o.driver_notes) _rows+=_row('ملاحظة الطيار',o.driver_notes);
   if(o.driver_message) _rows+=_row('رسالة للطيار',`<span style="color:#1e40af">✉️ ${o.driver_message} ${o.driver_message_seen_at?'· ✓ شافها':'· (لسه ما شافهاش)'}</span>`);
-  document.getElementById('detailBody').innerHTML=`${timelineHtml}<table style="width:100%;border-collapse:collapse;font-size:.8rem"><tbody>${_rows}</tbody></table>`;
+  const _tableHtml=`<table style="width:100%;border-collapse:collapse;font-size:.8rem"><tbody>${_rows}</tbody></table>`;
+  // ملخّص سريع دائم الظهور (اسم + حالة + المطلوب + أرقام الاتصال)
+  const _stColor = (o.status==='delivered'||o.status==='completed') ? '#16a34a' : o.status==='failed' ? '#dc2626' : o.status==='picked' ? '#0891b2' : o.status==='assigned' ? '#ea580c' : o.status==='postponed' ? '#7c3aed' : '#16a34a';
+  const _phonesSum = custPhones(o.customer_phone||o.cust_phone)||'';
+  const _summaryHtml = `<div class="od-summary">
+    <div class="od-sum-top"><span class="od-sum-name">${o.customer_name||o.cust_name||'—'}</span><span class="od-sum-badge" style="background:${_stColor}">${ordStatusLabel(o)}</span></div>
+    <div class="od-sum-due"><small>المطلوب</small> <b>${_due.toLocaleString()}</b> <small>ج.م · ${pmL}</small></div>
+    ${_extra>0?`<div class="od-sum-brk">فاتورة ${_bill.toLocaleString()} + تحصيل إضافي ${_extra.toLocaleString()} = ${_due.toLocaleString()} ج</div>`:''}
+    ${o.had_failed_attempt?`<div class="od-sum-brk" style="color:#b91c1c">🔁 اتعذّر توصيله قبل كده — محاولة جديدة</div>`:''}
+    ${_phonesSum?`<div class="od-sum-phones">${_phonesSum}</div>`:''}
+  </div>`;
 
   // Actions based on status
   let footerBtns=`<button class="btn btn-outline" onclick="closeModal('detailModal')">إغلاق</button>`;
@@ -3505,7 +3537,16 @@ if(o.delivered_at){
     footerBtns+=`<button class="btn btn-red" onclick="closeModal('detailModal');openCancelByCustomer('${orderId}')">العميل ألغى</button>`;
   }
 
-  document.getElementById('detailFooter').innerHTML=footerBtns;
+  // باقي التفاصيل بسهم يوسّع (مقفول افتراضيًا) — الجدول + خريطة الطلب
+  const _moreHtml = `<div class="od-more" id="odMore">
+    <div class="od-more-head" onclick="document.getElementById('odMore').classList.toggle('open')"><span>📋 باقي تفاصيل الطلب</span><span class="od-chev">▾</span></div>
+    <div class="od-more-body">${_tableHtml}${timelineHtml?('<div class="od-acts-lbl" style="margin-top:.7rem">🗺️ خريطة الطلب</div>'+timelineHtml):''}</div>
+  </div>`;
+  // الأزرار كلها فوق + الملخّص، والباقي تحت السهم
+  document.getElementById('detailBody').innerHTML = _summaryHtml
+    + `<div class="od-acts-lbl">الإجراءات</div><div class="od-acts">${footerBtns}</div>`
+    + _moreHtml;
+  const _ft=document.getElementById('detailFooter'); _ft.innerHTML=''; _ft.style.display='none';
   document.getElementById('detailModal').classList.add('open');
 }
 
