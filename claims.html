@@ -277,6 +277,13 @@
       else renderClaims();
     }
 
+    /* حالة الفاتورة في eplus — أي قيمة غير «مكتملة» = محفوظة.
+       الفاضي = صف قديم قبل ما العمود يتكتب، فمش ناقص. */
+    function isIncompletePos(it){
+      const v = String((it && it.pos_status) || '').trim().toLowerCase();
+      if (!v || v === 'null') return false;
+      return !(v === 'completed' || v === 'complete' || v === 'مكتمل' || v === 'مكتملة' || v === 'مكتمله');
+    }
     function extractQaid(name) {
       if (!name) return { name: '', qaid: '' };
       const match = name.match(/(\d+)/);
@@ -457,6 +464,12 @@
       tbody.innerHTML = items.map(item => {
         const { name, qaid } = extractQaid(item.cust_name_ar || '');
         const amount   = calcAmount(item.total_bill, item.payment_type);
+        /* تحذير قبل ما الفاتورة تدخل مطالبة: «محفوظة» في eplus يعني
+           الكاشير حفظها وماكمّلهاش، فمالهاش أصناف ومش بيعة تمّت.
+           بتظهر هنا بقرار المالك عشان المحاسب يقرّر — مش بتتشال. */
+        const posWarn = isIncompletePos(item)
+          ? ' <span title="الفاتورة محفوظة في eplus ولم تُستكمل — لا توجد لها أصناف" style="font-size:0.68rem;background:#ffedd5;color:#9a3412;padding:2px 7px;border-radius:20px;white-space:nowrap;">🟠 محفوظة</span>'
+          : '';
         const payType  = (item.payment_type && item.payment_type !== 'null') ? item.payment_type : '3/4';
         const isChecked = !excludedIds.has(String(item.id));
 
@@ -478,7 +491,7 @@
               <span class="editable-cell" onclick="editQaid('${item.id}', this, '${qaid}')">${qaid || '---'}</span>
             </td>
             <td style="font-weight:600;">
-              <span class="editable-cell" onclick="editName('${item.id}', this, '${(item.cust_name_ar || '').replace(/'/g, "&#39;")}')">${name || item.cust_name_ar || '---'}</span>
+              <span class="editable-cell" onclick="editName('${item.id}', this, '${(item.cust_name_ar || '').replace(/'/g, "&#39;")}')">${name || item.cust_name_ar || '---'}</span>${posWarn}
             </td>
             <td>
               <span class="editable-cell" onclick="editNotes('${item.id}', this, '')">—</span>

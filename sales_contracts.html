@@ -55,6 +55,7 @@
             <option value="لنا فاتورة">لنا فاتورة 📄</option>
             <option value="ملغاة">ملغاة ❌</option>
             <option value="مدموجة">🔗 مدموجة</option>
+            <option value="__incomplete__">🟠 محفوظة (غير مكتملة)</option>
           </select>
           <button class="btn btn-primary" onclick="openAddModal()">
             <i class="fas fa-plus"></i> إضافة فاتورة
@@ -374,6 +375,14 @@
       document.getElementById('tab-btn-returns').classList.toggle('active', !inv);
       if (!inv && !retsLoaded) loadReturns();
     }
+    /* حالة الفاتورة في eplus. أي قيمة غير «مكتملة» = محفوظة/غير مكتملة.
+       القيم الفاضية بتخص الصفوف القديمة اللي اتسجّلت قبل ما العمود
+       يتكتب، فمتُعتبرش ناقصة. */
+    function isIncompletePos(it){
+      const v = String((it && it.pos_status) || '').trim().toLowerCase();
+      if (!v || v === 'null') return false;
+      return !(v === 'completed' || v === 'complete' || v === 'مكتمل' || v === 'مكتملة' || v === 'مكتمله');
+    }
     function retEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
     /* التبويب بقى يعرض نوعين (قرار المالك 2026-10-02):
          • مرتجع على فاتورة تعاقد — السلوك الأصلي
@@ -637,7 +646,11 @@
         const noPayment = !item.payment_type || item.payment_type === 'null' || item.payment_type === '';
 
         let stateMatch = true;
-        if (stateVal === 'default') {
+        /* فلتر مستقل عن bill_state — ده بُعد تاني (حالة eplus مش حالة
+           المحاسب)، فمينفعش يتلخبط مع منطق «قيد المتابعة». */
+        if (stateVal === '__incomplete__') {
+          stateMatch = isIncompletePos(item);
+        } else if (stateVal === 'default') {
           if (state === '') {
             stateMatch = true;
           } else if (state === 'فاتورة') {
@@ -729,12 +742,19 @@ function getNextSerial(billType) {
         const mergedBadge = (state === 'مدموجة' && item.merged_into)
           ? `<span style="font-size:0.7rem;background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:20px;">🔗 في ${item.merged_into}</span>`
           : '';
+        /* الفاتورة «المحفوظة» في eplus (bill_status = Pending) مش بيعة
+           مكتملة — الكاشير حفظها وماكمّلهاش، وعشان كده **مالهاش بنود**
+           في المبيعات أصلًا. بتدخل عندنا بقرار المالك عشان المحاسب
+           يقرّر، فلازم تبان مميّزة مش شكلها زي أي فاتورة. */
+        const posBadge = isIncompletePos(item)
+          ? `<span title="الفاتورة محفوظة في eplus ولم تُستكمل — لا توجد لها أصناف" style="font-size:0.7rem;background:#ffedd5;color:#9a3412;padding:2px 8px;border-radius:20px;">🟠 محفوظة</span>`
+          : '';
 
         return `
           <tr>
             <td>
               <code style="font-size:0.82rem;color:var(--text-secondary);">${item.bill_no || '---'}</code>
-              ${claimBadge}${serialBadge}${mergedBadge}
+              ${claimBadge}${serialBadge}${mergedBadge}${posBadge}
             </td>
             <td style="font-size:0.75rem;line-height:1.4;">
               ${dateStr}<br>
