@@ -268,6 +268,20 @@ async function _sbRpc(fn, body) {
     return Array.isArray(rows) ? rows : [];
   } catch (e) { console.error(fn + ' error:', e); return []; }
 }
+/* تصنيف العميل — get_customer_rating بترجّع jsonb (صف واحد) مش مصفوفة،
+   و_sbRpc بيرجّع [] لأي ناتج مش مصفوفة، فمحتاجة قارئ لوحدها. */
+async function sbCustomerRating(code) {
+  try {
+    const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_customer_rating`, {
+      method: 'POST', headers: await sbH(),
+      body: JSON.stringify({ p_cust_code: String(code == null ? '' : code).trim() })
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return (j && typeof j === 'object' && !Array.isArray(j)) ? j : null;
+  } catch (e) { console.error('sbCustomerRating error:', e); return null; }
+}
+
 function sbSalesSummary(from, to, store)      { return _sbRpc('sales_summary',     { p_from: from||null, p_to: to||null, p_store: store||null }); }
 function sbSalesTopItems(from, to, store, lim){ return _sbRpc('sales_top_items',   { p_from: from||null, p_to: to||null, p_store: store||null, p_limit: lim||50 }); }
 function sbSalesByEmployee(from, to, store)   { return _sbRpc('sales_by_employee', { p_from: from||null, p_to: to||null, p_store: store||null }); }

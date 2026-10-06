@@ -88,6 +88,73 @@
     .suggest-item:hover { background: var(--surface-2); }
     .suggest-item .si-code { font-size: 0.75rem; color: var(--text-muted); font-family: monospace; }
 
+    /* كارت تصنيف العميل */
+    .rate-card {
+      margin-top: 18px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--bg-card, var(--bg));
+    }
+    .rate-head {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      padding: 10px 14px;
+      background: var(--bg-hover, rgba(0,0,0,.03));
+      border-bottom: 1px solid var(--border);
+      font-size: .85rem; font-weight: 700; color: var(--text-secondary);
+    }
+    .rate-head .rate-note {
+      font-weight: 400; font-size: .72rem; color: var(--text-muted);
+    }
+    .rate-body { padding: 14px; }
+    .rate-badge {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 7px 14px; border-radius: 999px;
+      font-size: .95rem; font-weight: 800; color: #fff;
+      margin-bottom: 4px;
+    }
+    .rate-sub { font-size: .78rem; color: var(--text-muted); margin: 8px 0 14px; line-height: 1.7; }
+    .rate-stats {
+      display: grid; gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    }
+    .rate-stat {
+      border: 1px solid var(--border); border-radius: 9px; padding: 9px 11px;
+    }
+    .rate-stat .rs-lbl { font-size: .7rem; color: var(--text-muted); display: block; margin-bottom: 3px; }
+    .rate-stat .rs-val { font-size: 1.02rem; font-weight: 800; }
+    .rate-flags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+    .rate-flag {
+      font-size: .72rem; font-weight: 700; padding: 4px 10px; border-radius: 999px;
+      background: rgba(234,179,8,.16); color: #a16207; border: 1px solid rgba(234,179,8,.35);
+    }
+    .rate-foot { margin-top: 12px; font-size: .7rem; color: var(--text-muted); line-height: 1.8; }
+    .rate-code {
+      font-family: ui-monospace, monospace; font-size: .8rem; font-weight: 800;
+      padding: 3px 8px; border-radius: 6px; letter-spacing: 1px;
+      background: rgba(255,255,255,.22);
+    }
+    .rate-scores { display: flex; gap: 16px; flex-wrap: wrap; margin: 12px 0 2px; }
+    .rate-score { font-size: .72rem; color: var(--text-muted); }
+    .rate-score b { display: block; color: var(--text-secondary); margin-bottom: 4px; font-size: .7rem; }
+    .dots { display: inline-flex; gap: 3px; }
+    .dots i {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: var(--border); display: inline-block;
+    }
+    .dots i.on { background: var(--primary); }
+    .rate-flag.pos {
+      background: rgba(13,148,136,.14); color: #0f766e; border-color: rgba(13,148,136,.35);
+    }
+    .rate-alert {
+      display: flex; align-items: flex-start; gap: 8px;
+      margin: 12px 0 0; padding: 9px 12px; border-radius: 9px;
+      font-size: .78rem; font-weight: 600; line-height: 1.7;
+      background: rgba(220,38,38,.1); color: #b91c1c;
+      border: 1px solid rgba(220,38,38,.3);
+    }
+    :root[data-theme="dark"] .rate-alert { color: #fca5a5; }
+
     .cust-detail-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
@@ -252,7 +319,7 @@
   <script src="branches.js?v=20260904d"></script>
   <script src="pages.js?v=20260904d"></script>
   <script src="brand.js?v=20260904c"></script>
-  <script src="api.js?v=20260926dl"></script>
+  <script src="api.js?v=20261006cr"></script>
   <script>
     // ===== بيانات المستخدم =====
     let allCustomers = [];
@@ -544,6 +611,195 @@
           <button class="btn btn-success" id="saveBtn" onclick="saveCustomer(event)">
             <i class="fas fa-save"></i> حفظ التعديلات
           </button>
+        </div>
+        <div class="rate-card">
+          <div class="rate-head">
+            <i class="fas fa-chart-pie"></i> تصنيف العميل
+            <span class="rate-note">حداثة الشراء × تكراره × قيمته، مع إيقاع العميل واتجاهه</span>
+          </div>
+          <div class="rate-body" id="ratingBody">
+            <span style="color:var(--text-muted);font-size:.8rem;">جاري حساب التصنيف...</span>
+          </div>
+        </div>`;
+
+      loadCustRating(c.cust_code);
+    }
+
+    /* ===== تصنيف العميل =====
+       الحساب كله على السيرفر (customer_rating_flat + get_customer_rating)،
+       والشاشة بتجيب صف واحد للعميل المختار — مفيش أي سحب لمبيعات
+       في المتصفح. */
+    /* ===== تصنيف العميل: RFM + إيقاعه + اتجاهه =====
+       الحساب كله على السيرفر (customer_rating_flat + get_customer_rating)
+       والشاشة بتجيب صف واحد للعميل المختار.
+
+       الربحية اتشالت بقرار المالك: مفيش عمود تكلفة في القاعدة، وخصومات
+       الموردين كبديل فيها قيم تالفة وأصناف كتير غير ممثّلة، فالرقم كان
+       بيوهم بدقة مش موجودة. */
+    const SEG_COLOR = {
+      champion: '#b8860b', loyal: '#0d9488', cant_lose: '#dc2626',
+      at_risk: '#ea580c', potential: '#2563eb', new: '#7c3aed',
+      promising: '#0891b2', about_to_sleep: '#ca8a04', hibernating: '#64748b',
+      lost: '#475569', contract: '#475569', none: '#94a3b8'
+    };
+    const SEG_ICON = {
+      champion: 'fa-crown', loyal: 'fa-heart', cant_lose: 'fa-hand-holding-heart',
+      at_risk: 'fa-triangle-exclamation', potential: 'fa-arrow-trend-up',
+      new: 'fa-seedling', promising: 'fa-star-half-stroke', about_to_sleep: 'fa-hourglass-half',
+      hibernating: 'fa-moon', lost: 'fa-user-slash', contract: 'fa-file-signature',
+      none: 'fa-circle-minus'
+    };
+    const SEG_HINT = {
+      champion:       'من أفضل العملاء: شراء حديث ومتكرر وبقيمة عالية. أولوية في الحفاظ عليه.',
+      loyal:          'عميل مستمر بقيمة جيدة — عموده الفقري للمبيعات المتكررة.',
+      cant_lose:      'كان من أعلى العملاء قيمةً وتوقّف. التواصل معه أولوية قصوى.',
+      at_risk:        'كان بيشتري بانتظام وغاب فترة طويلة — يُفضّل التواصل معه.',
+      potential:      'شراؤه حديث وقيمته واعدة — بعض الاهتمام يحوّله لعميل منتظم.',
+      new:            'أول شراء له حديثًا. الفترة لا تكفي للتقييم؛ المتابعة الآن تحدّد مساره.',
+      promising:      'شراؤه حديث لكن قيمته وتكراره محدودان حتى الآن.',
+      about_to_sleep: 'شراؤه بدأ يتباعد — على وشك الانسحاب إن لم يُتابَع.',
+      hibernating:    'شراؤه قديم وقيمته محدودة.',
+      lost:           'لم يعُد منذ فترة طويلة وقيمته محدودة.',
+      contract:       'عملاء التعاقد مستبعدون من التصنيف بقرار الإدارة.',
+      none:           'لا توجد مبيعات مسجّلة لهذا العميل في الفترة المتاحة.'
+    };
+    const FLAG_TXT = {
+      late:           'متأخر عن إيقاعه',
+      declining:      'مبيعاته في انخفاض',
+      stopped:        'توقّف هذا الشهر',
+      regular:        'إيقاع منتظم',
+      high_returns:   'نسبة مرتجع مرتفعة',
+      mixed_contract: 'له فواتير تعاقد'
+    };
+    const TREND_TXT = {
+      up:      ['في ارتفاع',  'fa-arrow-up',    'var(--success)'],
+      flat:    ['مستقر',      'fa-arrow-right', 'var(--text-secondary)'],
+      down:    ['في انخفاض',  'fa-arrow-down',  'var(--danger)'],
+      stopped: ['توقّف',       'fa-stop',        'var(--danger)'],
+      start:   ['بداية شراء', 'fa-play',        'var(--success)'],
+      na:      ['---',        'fa-minus',       'var(--text-muted)']
+    };
+
+    function fmtJ(n) {
+      const v = Number(n);
+      if (!isFinite(v)) return '---';
+      return Math.round(v).toLocaleString('en-US');
+    }
+
+    /* «منذ 3 يوم» غلط. التمييز العربي: واحد/اثنان/3-10 جمع/11+ مفرد منصوب.
+       والكسور (كل 3.9 يوم) تفضل «يوم» لأن معدودها مش عدد صحيح. */
+    function yawm(n) {
+      const v = Number(n);
+      if (!isFinite(v)) return '---';
+      if (!Number.isInteger(v))  return v + ' يوم';
+      if (v === 1)               return 'يوم واحد';
+      if (v === 2)               return 'يومين';
+      if (v >= 3 && v <= 10)     return v + ' أيام';
+      return v + ' يومًا';
+    }
+
+    // التواريخ من السيرفر ISO؛ نعرضها يوم/شهر/سنة من غير new Date()
+    // عشان ما نقعش في إزاحة المنطقة الزمنية على تاريخ مجرّد.
+    function fmtD(v) {
+      const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+      return m ? m[3] + '/' + m[2] + '/' + m[1] : '---';
+    }
+
+    function dots(score) {
+      let h = '<span class="dots">';
+      for (let k = 1; k <= 5; k++) h += '<i class="' + (k <= score ? 'on' : '') + '"></i>';
+      return h + '</span>';
+    }
+
+    async function loadCustRating(code) {
+      const box = document.getElementById('ratingBody');
+      if (!box) return;
+      const d = await sbCustomerRating(code);
+      // الشاشة ممكن تكون اتغيّرت (المستخدم اختار عميل تاني) وإحنا بنجيب
+      const cur = document.getElementById('ratingBody');
+      if (!cur || cur !== box) return;
+      if (!d) {
+        box.innerHTML = '<span style="color:var(--danger);font-size:.8rem;">' +
+          'تعذّر تحميل التصنيف. يُرجى المحاولة مرة أخرى.</span>';
+        return;
+      }
+      box.innerHTML = ratingHtml(d);
+    }
+
+    function ratingHtml(d) {
+      const seg   = d.seg || 'none';
+      const color = SEG_COLOR[seg] || SEG_COLOR.none;
+      const icon  = SEG_ICON[seg]  || SEG_ICON.none;
+      const hint  = SEG_HINT[seg]  || '';
+
+      const badge = `<div class="rate-badge" style="background:${color}">
+          <i class="fas ${icon}"></i> ${d.seg_label || 'غير مصنّف'}
+          ${d.rfm ? `<span class="rate-code">${d.rfm}</span>` : ''}
+        </div>`;
+
+      if (seg === 'none') return badge + `<div class="rate-sub">${hint}</div>`;
+
+      /* الأول على الإطلاق قيمته 0.0 فكان بيطلع «من أعلى 0%» — نقرّبها لأعلى
+         وبحد أدنى 1. و<bdi> عشان علامة % ما تقفزش لشمال الرقم في RTL. */
+      const topN = (d.value_top_pct != null && seg !== 'contract')
+        ? Math.max(1, Math.ceil(Number(d.value_top_pct))) : null;
+      const topTxt = topN ? ` — من أعلى <bdi>${topN}%</bdi> من العملاء قيمةً` : '';
+
+      // تنبيه التأخير: ده اللي الحدود الثابتة (آخر شراء ≤ 30 يوم) مابتشوفهوش
+      const alert = (Number(d.late_x) >= 2 && d.avg_gap && seg !== 'contract')
+        ? `<div class="rate-alert"><i class="fas fa-bell"></i><span>
+             متأخر عن موعده: يشتري كل <b>${yawm(d.avg_gap)}</b> تقريبًا،
+             وغائب منذ <b>${yawm(d.days_since)}</b>
+             (<bdi>${d.late_x}</bdi> ضعف إيقاعه)${d.expected_next
+               ? `، وموعده المتوقّع كان ${fmtD(d.expected_next)}` : ''}.
+           </span></div>` : '';
+
+      const scores = (d.r_score != null) ? `
+        <div class="rate-scores">
+          <div class="rate-score"><b>حداثة الشراء</b>${dots(d.r_score)}</div>
+          <div class="rate-score"><b>تكرار الشراء</b>${dots(d.f_score)}</div>
+          <div class="rate-score"><b>قيمة الشراء</b>${dots(d.m_score)}</div>
+        </div>` : '';
+
+      const tr = TREND_TXT[d.trend] || TREND_TXT.na;
+      const stats = [
+        ['صافي المبيعات',  fmtJ(d.net) + ' ج'],
+        ['عدد الفواتير',   fmtJ(d.bills)],
+        ['متوسط الفاتورة', fmtJ(d.avg_ticket) + ' ج'],
+        ['آخر شراء',       (d.days_since != null
+                             ? (d.days_since === 0 ? 'اليوم' : 'منذ ' + yawm(d.days_since))
+                             : '---')],
+        ['إيقاع الشراء',   (d.avg_gap ? 'كل ' + yawm(d.avg_gap) : 'غير محدد بعد')],
+        ['الموعد المتوقّع', fmtD(d.expected_next)],
+        ['اتجاه آخر شهر',  `<span style="color:${tr[2]}"><i class="fas ${tr[1]}"></i> ${tr[0]}</span>`],
+        ['ترتيبه بالقيمة', (d.value_rank && d.rated_customers
+                             ? fmtJ(d.value_rank) + ' من ' + fmtJ(d.rated_customers) : '---')],
+        ['أسابيع شرى فيها', fmtJ(d.active_weeks)]
+      ];
+      if (Number(d.returns_val) > 0)
+        stats.push(['المرتجعات', fmtJ(d.returns_val) + ' ج (' + (d.ret_pct || 0) + '%)']);
+      if (Number(d.contract_bills) > 0)
+        stats.push(['فواتير تعاقد', fmtJ(d.contract_bills)]);
+
+      const flags = (d.flags || []).map(f => {
+        const pos = (f === 'regular');
+        return `<span class="rate-flag${pos ? ' pos' : ''}"><i class="fas ${
+          pos ? 'fa-circle-check' : 'fa-circle-exclamation'}"></i> ${FLAG_TXT[f] || f}</span>`;
+      }).join('');
+
+      return badge + `
+        <div class="rate-sub">${hint}${topTxt}</div>
+        ${alert}${scores}
+        <div class="rate-stats">
+          ${stats.map(([l, v]) => `<div class="rate-stat">
+              <span class="rs-lbl">${l}</span><span class="rs-val">${v}</span></div>`).join('')}
+        </div>
+        ${flags ? `<div class="rate-flags">${flags}</div>` : ''}
+        <div class="rate-foot">
+          التصنيف بأسلوب RFM: حداثة الشراء × تكراره × قيمته، بدرجات محسوبة من
+          توزيع عملاء الصيدلية نفسها. و«الموعد المتوقّع» من إيقاع هذا العميل
+          تحديدًا، لا من مدة ثابتة للجميع.
+          ${d.asof ? `آخر بيانات مبيعات: ${fmtD(d.asof)}.` : ''}
         </div>`;
     }
 
