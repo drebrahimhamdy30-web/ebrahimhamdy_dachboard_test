@@ -291,8 +291,15 @@ body.dark .od-summary{background:#0f172a;border-color:#334155}
 body.dark .od-more-head{background:#0f172a}
 .od-chev{transition:transform .2s;color:var(--text-muted)}
 .od-more.open .od-chev{transform:rotate(180deg)}
-.od-more-body{display:none;padding:.3rem .8rem .6rem}
+.od-more-body{display:none;padding:.5rem .8rem .6rem}
 .od-more.open .od-more-body{display:block}
+.od-det2{display:grid;grid-template-columns:1fr 1fr;gap:.45rem .9rem}
+.od-cell{border-bottom:1px solid var(--border);padding:.3rem 0 .4rem}
+.od-cell.od-full{grid-column:1 / -1}
+.od-cl{font-size:.63rem;color:var(--text-muted);font-weight:700;margin-bottom:.1rem}
+.od-cv{font-weight:700;font-size:.84rem;word-break:break-word}
+.od-items-wrap{margin-top:.7rem;background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:.45rem .65rem}
+body.dark .od-items-wrap{background:#0f172a}
 .form-group{margin-bottom:.875rem}
 .form-group label{display:block;font-size:.78rem;font-weight:600;margin-bottom:.35rem}
 .form-control{width:100%;height:38px;padding:0 .75rem;border:1.5px solid var(--border);border-radius:8px;font-family:'Cairo',sans-serif;font-size:.82rem;outline:none;background:var(--surface)}
@@ -3286,6 +3293,36 @@ async function openItemsModal(billNo,branchId,oid,cc){
   }
 }
 
+// فتح/قفل «عرض تفاصيل الطلب» + تحميل الأصناف كسول أول مرة
+function toggleOrderMore(oid, billNo, branchId){
+  const m=document.getElementById('odMore'); if(!m) return;
+  const willOpen=!m.classList.contains('open');
+  m.classList.toggle('open');
+  if(willOpen && !m.dataset.itemsLoaded){ m.dataset.itemsLoaded='1'; loadInlineItems(oid, billNo, branchId); }
+}
+
+// تحميل أصناف الطلب داخل كارت التفاصيل (نفس مصدر نافذة الأصناف + نفس الكاش)
+async function loadInlineItems(oid, billNo, branchId){
+  const el=document.getElementById('odItems'); if(!el) return;
+  if(billItemsCache[oid]){ el.innerHTML=renderBillItems(billItemsCache[oid]); return; }
+  if(!billNo||billNo==='null'){ el.innerHTML='<div style="color:#64748b;font-size:.78rem;text-align:center;padding:.5rem">لا يوجد رقم فاتورة لعرض الأصناف</div>'; return; }
+  el.innerHTML='<div style="color:#64748b;font-size:.78rem;text-align:center;padding:.6rem">⏳ جاري جلب الأصناف...</div>';
+  try{
+    const r=await fetch(SALES_ITEMS_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch_id:branchId||'',bill_no:String(billNo)})});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data=await r.json();
+    const root=Array.isArray(data)?(data[0]||{}):(data||{});
+    const bills=(root&&root.Data)||[];
+    const bill=bills.find(b=>String(b.bill_no)===String(billNo))||bills[0]||{};
+    const raw=(bill&&bill.Items)||[];
+    const items=raw.map(it=>({name:(it.itm_name_ar||it.itm_name_en||'').toString().trim(),qty:it.itm_qty,unit:it.unit_name||'',price:it.unit_price}));
+    billItemsCache[oid]=items;
+    el.innerHTML=renderBillItems(items);
+  }catch(e){
+    el.innerHTML='<div style="color:#b91c1c;font-size:.78rem;text-align:center;padding:.5rem">❌ تعذّر جلب الأصناف</div>';
+  }
+}
+
 function billItemsBtnHtml(o){
   const bn=(o.bill_no!=null?String(o.bill_no):'').replace(/['"\\]/g,'');
   const bid=(o.branch_id!=null?String(o.branch_id):'').replace(/['"\\]/g,'');
@@ -3463,36 +3500,33 @@ if(o.delivered_at){
   const timelineHtml=buildHorizTimeline(stages);
 
   document.getElementById('detailTitle').textContent=`طلب #${o.bill_no||orderId.slice(0,8)}`;
-  // عرض منظّم كجدول (تسمية + قيمة)
-  const _L='padding:.42rem .55rem;color:var(--text-muted);font-weight:700;white-space:nowrap;vertical-align:top;border-bottom:1px solid var(--border);width:34%';
-  const _V='padding:.42rem .55rem;font-weight:700;color:var(--text);border-bottom:1px solid var(--border);word-break:break-word';
-  const _row=(l,v)=>`<tr><td style="${_L}">${l}</td><td style="${_V}">${v}</td></tr>`;
+  // تفاصيل الطلب في عمودين (2 جنب بعض) عشان ما يطولش
+  const _cell=(l,v,full)=>`<div class="od-cell${full?' od-full':''}"><div class="od-cl">${l}</div><div class="od-cv">${v}</div></div>`;
   const _bill=Number(o.total_bill_net||0), _extra=Number(o.extra_collection||0), _due=_bill+_extra;
   const _code=(o.cust_code&&String(o.cust_code).trim()&&String(o.cust_code)!=='null')?o.cust_code:'—';
-  let _rows='';
-  _rows+=_row('العميل',`<strong>${o.customer_name||o.cust_name||'—'}</strong>`);
-  _rows+=_row('كود العميل',_code);
-  if(custPhones(o.customer_phone||o.cust_phone)) _rows+=_row('الموبايل',custPhones(o.customer_phone||o.cust_phone));
-  if(o.driver_call_number) _rows+=_row('📞 رقم للاتصال (مُرسل للطيار)',custPhones(o.driver_call_number));
-  _rows+=_row('العنوان',o.customer_address||o.cust_address||'—');
-  _rows+=_row('المنطقة',o.cust_region||'—');
-  _rows+=_row('المبلغ (الفاتورة)',_bill.toLocaleString()+' ج.م');
+  let _cells='';
+  _cells+=_cell('كود العميل',_code);
+  _cells+=_cell('المنطقة',o.cust_region||'—');
+  _cells+=_cell('العنوان',o.customer_address||o.cust_address||'—',true);
+  if(o.driver_call_number) _cells+=_cell('📞 رقم للاتصال (مُرسل للطيار)',custPhones(o.driver_call_number),true);
+  _cells+=_cell('المبلغ (الفاتورة)',_bill.toLocaleString()+' ج.م');
+  _cells+=_cell('طريقة الدفع',pmL);
   if(_extra>0){
-    _rows+=_row('➕ تحصيل إضافي',`<span style="color:#b45309;font-weight:800">${_extra.toLocaleString()} ج.م</span>${o.extra_collection_note?` <span style="color:var(--text-muted);font-weight:600;font-size:.72rem">— ${o.extra_collection_note}</span>`:''}`);
-    _rows+=_row('الإجمالي المطلوب',`<strong style="color:#15803d;font-size:.92rem">${_due.toLocaleString()} ج.م</strong>`);
+    _cells+=_cell('➕ تحصيل إضافي',`<span style="color:#b45309;font-weight:800">${_extra.toLocaleString()} ج</span>${o.extra_collection_note?` <span style="color:var(--text-muted);font-weight:600;font-size:.72rem">— ${o.extra_collection_note}</span>`:''}`,true);
+    _cells+=_cell('الإجمالي المطلوب',`<strong style="color:#15803d">${_due.toLocaleString()} ج.م</strong>`);
   }
-  _rows+=_row('طريقة الدفع',pmL);
-  _rows+=_row('الحالة',ordStatusLabel(o)+(o.had_failed_attempt?' <span style="color:#b91c1c;font-weight:800">· 🔁 اتعذّر قبل كده</span>':''));
-  _rows+=_row('وقت الطلب الحقيقي',`${fm(realOrderMins(o))}${holdSecs(o)>60?(' · إيقاف '+fm(Math.round(holdSecs(o)/60))):''}`);
-  if(o.perf_rating) _rows+=_row('أداء الطيار',`فعلي ${o.actual_minutes} / متوقع ${o.expected_minutes} د · <strong style="color:${o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.perf_rating}</strong>`);
-  if(o.sla_rating) _rows+=_row('أداء الفرع',`فعلي ${o.sla_actual_minutes} / المسموح ${o.sla_minutes} د · <strong style="color:${o.sla_rating==='ممتاز'?'#16a34a':o.sla_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.sla_rating}</strong>`);
-  _rows+=_row('الطيار',o.deliveryman||'—');
-  _rows+=_row('الموظف',o.employee_name||'—');
-  _rows+=_row('🧾 الأصناف',`${o.count_of_items||0} &nbsp;&nbsp; ${billItemsBtnHtml(o)}`);
-  if(o.staff_notes) _rows+=_row('ملاحظة الموظف',o.staff_notes);
-  if(o.driver_notes) _rows+=_row('ملاحظة الطيار',o.driver_notes);
-  if(o.driver_message) _rows+=_row('رسالة للطيار',`<span style="color:#1e40af">✉️ ${o.driver_message} ${o.driver_message_seen_at?'· ✓ شافها':'· (لسه ما شافهاش)'}</span>`);
-  const _tableHtml=`<table style="width:100%;border-collapse:collapse;font-size:.8rem"><tbody>${_rows}</tbody></table>`;
+  _cells+=_cell('الحالة',ordStatusLabel(o)+(o.had_failed_attempt?' <span style="color:#b91c1c;font-weight:800">· 🔁 اتعذّر قبل كده</span>':''));
+  _cells+=_cell('وقت الطلب الحقيقي',`${fm(realOrderMins(o))}${holdSecs(o)>60?(' · إيقاف '+fm(Math.round(holdSecs(o)/60))):''}`);
+  if(o.perf_rating) _cells+=_cell('أداء الطيار',`${o.actual_minutes}/${o.expected_minutes} د · <strong style="color:${o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.perf_rating}</strong>`);
+  if(o.sla_rating) _cells+=_cell('أداء الفرع',`${o.sla_actual_minutes}/${o.sla_minutes} د · <strong style="color:${o.sla_rating==='ممتاز'?'#16a34a':o.sla_rating==='متأخر'?'#dc2626':'#ca8a04'}">${o.sla_rating}</strong>`);
+  _cells+=_cell('الطيار',o.deliveryman||'—');
+  _cells+=_cell('الموظف',o.employee_name||'—');
+  if(o.staff_notes) _cells+=_cell('ملاحظة الموظف',o.staff_notes,true);
+  if(o.driver_notes) _cells+=_cell('ملاحظة الطيار',o.driver_notes,true);
+  if(o.driver_message) _cells+=_cell('رسالة للطيار',`<span style="color:#1e40af">✉️ ${o.driver_message} ${o.driver_message_seen_at?'· ✓ شافها':'· (لسه ما شافهاش)'}</span>`,true);
+  const _detGrid=`<div class="od-det2">${_cells}</div>`;
+  const _bnEsc=(o.bill_no!=null?String(o.bill_no):'').replace(/['"\\]/g,'');
+  const _bidEsc=(o.branch_id!=null?String(o.branch_id):'').replace(/['"\\]/g,'');
   // ملخّص سريع دائم الظهور (اسم + حالة + المطلوب + أرقام الاتصال)
   const _stColor = (o.status==='delivered'||o.status==='completed') ? '#16a34a' : o.status==='failed' ? '#dc2626' : o.status==='picked' ? '#0891b2' : o.status==='assigned' ? '#ea580c' : o.status==='postponed' ? '#7c3aed' : '#16a34a';
   const _phonesSum = custPhones(o.customer_phone||o.cust_phone)||'';
@@ -3539,8 +3573,10 @@ if(o.delivered_at){
 
   // باقي التفاصيل بسهم يوسّع (مقفول افتراضيًا) — الجدول + خريطة الطلب
   const _moreHtml = `<div class="od-more" id="odMore">
-    <div class="od-more-head" onclick="document.getElementById('odMore').classList.toggle('open')"><span>📋 باقي تفاصيل الطلب</span><span class="od-chev">▾</span></div>
-    <div class="od-more-body">${_tableHtml}${timelineHtml?('<div class="od-acts-lbl" style="margin-top:.7rem">🗺️ خريطة الطلب</div>'+timelineHtml):''}</div>
+    <div class="od-more-head" onclick="toggleOrderMore('${orderId}','${_bnEsc}','${_bidEsc}')"><span>📋 عرض تفاصيل الطلب</span><span class="od-chev">▾</span></div>
+    <div class="od-more-body">${_detGrid}
+      <div class="od-items-wrap"><div id="odItems"></div></div>
+      ${timelineHtml?('<div class="od-acts-lbl" style="margin-top:.7rem">🗺️ خريطة الطلب</div>'+timelineHtml):''}</div>
   </div>`;
   // الأزرار كلها فوق + الملخّص، والباقي تحت السهم
   document.getElementById('detailBody').innerHTML = _summaryHtml
