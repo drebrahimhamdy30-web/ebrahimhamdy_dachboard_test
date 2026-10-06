@@ -284,9 +284,23 @@ grant execute on function public.refresh_customer_ratings() to service_role;
 revoke all on table public.customer_rating_flat from anon;
 grant select on table public.customer_rating_flat to authenticated;
 
-/* تحديث مجدول كل ساعة (الدقيقة 50) */
-select cron.unschedule('refresh_customer_ratings_hourly')
- where exists (select 1 from cron.job where jobname = 'refresh_customer_ratings_hourly');
-select cron.schedule('refresh_customer_ratings_hourly', '50 * * * *',
-                     'select public.refresh_customer_ratings();');
+/* تحديث مجدول كل ساعة (الدقيقة 50).
+   جوّه IF عشان pg_cron موجود على السحابة ومش مضمون على السيرفر الذاتي،
+   و ON_ERROR_STOP في سكربت الترحيل كان هيوقف الملف كله في آخر سطر. */
+do $$
+begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    if exists (select 1 from cron.job where jobname = 'refresh_customer_ratings_hourly') then
+      perform cron.unschedule('refresh_customer_ratings_hourly');
+    end if;
+    perform cron.schedule('refresh_customer_ratings_hourly', '50 * * * *',
+                          'select public.refresh_customer_ratings();');
+  else
+    raise notice 'pg_cron مش متاح — التصنيف هيتحسب مرة دلوقتي ومحتاج جدولة بديلة للتحديث';
+  end if;
+end $$;
+
 select public.refresh_customer_ratings();
+
+/* PostgREST لازم يعيد قراءة السكيما وإلا الدالة الجديدة ترجّع PGRST202 */
+notify pgrst, 'reload schema';
