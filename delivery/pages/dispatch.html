@@ -427,6 +427,7 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
     <button class="ftab" id="prepToggle" onclick="togglePrepMode()" title="تفعيل/إيقاف وضع التحضير للفرع" style="font-weight:700">🧪 وضع التحضير: موقوف</button>
     <button class="ftab" onclick="setFilter('unclosed',this)" style="border-color:#fecaca;color:#b91c1c">🔴 طلبات لم تُغلق على B Connect</button>
     <button class="ftab" onclick="openHardTripsModal()" title="رحلات المناطق الصعبة النهاردة" style="border-color:#fed7aa;color:#c2410c;font-weight:700">🧭 المناطق الصعبة</button>
+    <button class="ftab" onclick="openRegionPrices()" title="الحد الأدنى للطلب وخدمة التوصيل لكل منطقة" style="border-color:#bae6fd;color:#0369a1;font-weight:700">🚚 تكلفة توصيل المناطق</button>
     <button class="ftab" onclick="openAddOrder()" style="background:var(--green-light);color:#15803d;border-color:#bbf7d0;font-weight:700">➕ إضافة طلب</button>
     <button class="ftab" onclick="openTransferTrack()" title="التحويلات الجارية: مين طالع بيها ووصلت ولا لأ" style="background:#e0f2fe;color:#0369a1;border-color:#bae6fd;font-weight:700">🔄 تتبع التحويلات</button>
     <button class="ftab" id="errBadge" onclick="showErrors()" title="سجل الأخطاء" style="display:none;background:#fee2e2;color:#b91c1c;border-color:#fecaca;font-weight:800"></button>
@@ -670,6 +671,16 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
 </div>
 
 <!-- Modal: Detail -->
+<!-- نافذة أسعار المناطق (الحد الأدنى + خدمة التوصيل + رسم أقل من الحد) -->
+<div class="modal-overlay" id="regionPricesModal">
+  <div class="modal" style="max-width:min(560px,96vw)">
+    <div class="modal-header"><span class="modal-title">🚚 تكلفة توصيل المناطق</span><button class="modal-close" onclick="closeModal('regionPricesModal')">✕</button></div>
+    <div class="modal-body">
+      <input type="text" id="rpSearch" class="form-control" placeholder="🔍 اكتب اسم المنطقة للبحث..." oninput="renderRegionPrices()" style="margin-bottom:.6rem">
+      <div id="rpList"></div>
+    </div>
+  </div>
+</div>
 <div class="modal-overlay" id="detailModal">
   <div class="modal" style="max-width:min(640px,96vw)">
     <div class="modal-header"><span class="modal-title" id="detailTitle">تفاصيل الطلب</span><button class="modal-close" onclick="closeModal('detailModal')">✕</button></div>
@@ -854,6 +865,7 @@ let unclosedFlags=[]; // طلبات مكتملة على Phalix لكن لم تُ�
 let unclosedLoading=false; // بيتحمّل دلوقتي؟ (عشان مانعرضش «لا توجد» قبل ما يخلص)
 let currentPopupDriverId=null;
 let knownRegions=new Set();
+let regionInfo={}; // name → {min, fee, below} حسب فرع العرض الحالي (لأسعار المناطق + تنبيه الحد الأدنى)
 let selectedOrders=new Set(),currentFilter='all',filterDriver=null;
 let currentUser=getCurrentUser();
 if(!currentUser) window.location.href='../auth.html';
@@ -1012,7 +1024,7 @@ async function loadAll(){
     let driversQ=db.from('drivers').select('*,branches!drivers_branch_id_fkey(name)').eq('is_active',true).order('full_name');
     let tripsQ=db.from('trips').select('*').in('status',['active','pending_complete']).order('created_at',{ascending:false});
     let actQ=db.from('orders').select('*').in('status',['pending','postponed','assigned','picked']).order('created_at',{ascending:false});
-    let regQ=db.from('regions').select('name').eq('is_active',true);
+    let regQ=db.from('regions').select('name,branch_id,min_order_amount,delivery_fee,below_min_fee').eq('is_active',true);
     let dsQ=branchId?db.from('dispatch_settings').select('*').eq('branch_id',branchId):null;
     if(branchId){ driversQ=driversQ.eq('branch_id',branchId); tripsQ=tripsQ.eq('branch_id',branchId); actQ=actQ.eq('branch_id',branchId); }
     const [dR,tR,actR,regRes,dsRes]=await Promise.all([
@@ -1020,7 +1032,10 @@ async function loadAll(){
       loadAttendanceData(), loadHardLoad(), loadTripCounts()
     ]);
     allDrivers=dR.data||[]; activeTrips=tR.data||[];
-    knownRegions=new Set((regRes.data||[]).map(r=>r.name));
+    const _regRows=regRes.data||[];
+    knownRegions=new Set(_regRows.map(r=>r.name));
+    regionInfo={};
+    _regRows.forEach(r=>{ if(!branchId || r.branch_id===branchId) regionInfo[r.name]={min:Number(r.min_order_amount||0),fee:Number(r.delivery_fee||0),below:Number(r.below_min_fee||0)}; });
     if(branchId) dispatchSettings=dsRes.data?.[0]||null;
 
     // التبعية: أوردرات الرحلات النشطة ثم الطلبات المرتبطة بيها
@@ -2181,7 +2196,7 @@ function renderOrders(){
       ${(o.cust_code&&String(o.cust_code).trim()&&String(o.cust_code)!=='null')?`<div style="font-size:.62rem;color:#475569;font-weight:700;margin-bottom:.2rem">🆔 كود العميل: ${o.cust_code}</div>`:''}
       ${(billActive||codeActive)?`<div style="font-size:.62rem;color:#64748b;font-weight:600;margin-bottom:.2rem">🕒 ${orderDT(o)}</div>`:''}
       <div class="oc-address">📍 ${o.customer_address||o.cust_address||'—'}</div>
-      ${o.cust_region?`<span class="oc-region" style="${!knownRegions.has(o.cust_region)?'background:#fee2e2;color:#b91c1c;border:1px solid #fecaca':''}">${o.cust_region}${!knownRegions.has(o.cust_region)?' ⚠️':''}</span>`:''}
+      ${o.cust_region?`<span class="oc-region" style="${!knownRegions.has(o.cust_region)?'background:#fee2e2;color:#b91c1c;border:1px solid #fecaca':''}">${o.cust_region}${!knownRegions.has(o.cust_region)?' ⚠️':''}</span>`:''}${belowMinInfo(o)?`<span class="oc-region" style="background:#fffbeb;color:#b45309;border:1px solid #fde68a" title="إجمالي الطلب أقل من الحد الأدنى للمنطقة — راجع تكلفة التوصيل">⚠️ أقل من الحد</span>`:''}
       ${o.is_gift?`<div class="gift-pulse" style="font-size:.64rem;background:#fef3c7;color:#92400e;border:1px solid #fbbf24;padding:.18rem .45rem;border-radius:5px;margin:.28rem 0;font-weight:800">🎁 ${o.gift_title?('هدية — '+o.gift_title):'هدية للعميل'} · تأكد من وجودها بالطلب</div>`:''}
       <div class="oc-bottom">
         <span class="oc-amount">${Number(o.total_bill_net||0).toLocaleString()} ج</span>
@@ -3323,6 +3338,38 @@ async function loadInlineItems(oid, billNo, branchId){
   }
 }
 
+// ===== تكلفة توصيل المناطق (بحث) =====
+function belowMinInfo(o){
+  // يرجّع {min,fee,below} لو الطلب تحت الحد الأدنى لمنطقته، وإلا null
+  const r=regionInfo[o&&o.cust_region]; if(!r) return null;
+  const bill=Number(o.total_bill_net||0);
+  if(r.min>0 && bill>0 && bill<r.min && !['cancelled','completed','delivered'].includes(o.status)) return r;
+  return null;
+}
+function openRegionPrices(){
+  const s=document.getElementById('rpSearch'); if(s) s.value='';
+  renderRegionPrices();
+  document.getElementById('regionPricesModal').classList.add('open');
+}
+function renderRegionPrices(){
+  const q=(document.getElementById('rpSearch').value||'').trim();
+  const names=Object.keys(regionInfo).sort((a,b)=>a.localeCompare(b,'ar'));
+  const filtered=q?names.filter(n=>n.includes(q)):names;
+  const el=document.getElementById('rpList');
+  if(!filtered.length){ el.innerHTML='<div style="color:#64748b;font-size:.8rem;text-align:center;padding:1rem">'+(Object.keys(regionInfo).length?'لا توجد مناطق مطابقة':'لا توجد مناطق لهذا الفرع')+'</div>'; return; }
+  el.innerHTML=filtered.map(n=>{
+    const r=regionInfo[n];
+    return `<div style="border:1px solid var(--border);border-radius:10px;padding:.55rem .7rem;margin-bottom:.45rem">
+      <div style="font-weight:800;font-size:.85rem;margin-bottom:.4rem">📍 ${n}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.4rem">
+        <div><div style="color:var(--text-muted);font-weight:700;font-size:.6rem;margin-bottom:.1rem">الحد الأدنى للطلب</div><div style="font-weight:800;font-size:.82rem">${r.min?r.min.toLocaleString()+' ج':'—'}</div></div>
+        <div><div style="color:var(--text-muted);font-weight:700;font-size:.6rem;margin-bottom:.1rem">خدمة التوصيل</div><div style="font-weight:800;font-size:.82rem;color:#0369a1">${r.fee?r.fee.toLocaleString()+' ج':'مجاني'}</div></div>
+        <div><div style="color:var(--text-muted);font-weight:700;font-size:.6rem;margin-bottom:.1rem">رسم أقل من الحد</div><div style="font-weight:800;font-size:.82rem;color:#b45309">${r.below?r.below.toLocaleString()+' ج':'—'}</div></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
 function billItemsBtnHtml(o){
   const bn=(o.bill_no!=null?String(o.bill_no):'').replace(/['"\\]/g,'');
   const bid=(o.branch_id!=null?String(o.branch_id):'').replace(/['"\\]/g,'');
@@ -3579,7 +3626,10 @@ if(o.delivered_at){
       ${timelineHtml?('<div class="od-acts-lbl" style="margin-top:.7rem">🗺️ خريطة الطلب</div>'+timelineHtml):''}</div>
   </div>`;
   // الأزرار كلها فوق + الملخّص، والباقي تحت السهم
+  const _bm=belowMinInfo(o);
+  const _belowBanner = _bm ? `<div style="background:#fffbeb;border:1px solid #fde68a;color:#b45309;border-radius:10px;padding:.5rem .7rem;margin-bottom:.7rem;font-size:.76rem;font-weight:700;line-height:1.6">⚠️ الطلب (${_bill.toLocaleString()} ج) أقل من الحد الأدنى لمنطقة «${o.cust_region}» (${_bm.min.toLocaleString()} ج).${_bm.below>0?` المقترح إضافة تحصيل <strong>${_bm.below.toLocaleString()} ج</strong> عبر زر «➕ إضافة تحصيل».`:''}</div>` : '';
   document.getElementById('detailBody').innerHTML = _summaryHtml
+    + _belowBanner
     + `<div class="od-acts-lbl">الإجراءات</div><div class="od-acts">${footerBtns}</div>`
     + _moreHtml;
   const _ft=document.getElementById('detailFooter'); _ft.innerHTML=''; _ft.style.display='none';
