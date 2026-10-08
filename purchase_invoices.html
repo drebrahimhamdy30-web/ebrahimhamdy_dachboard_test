@@ -78,6 +78,16 @@
     .profit>div{ background:#ecfdf5; padding:11px; text-align:center; } .profit .k{ font-size:.7rem; color:#065f46; margin-bottom:3px; } .profit .v{ font-size:1rem; font-weight:800; color:#047857; }
     .soon{ text-align:center; padding:50px 20px; color:var(--text-muted); }
     .soon .ic{ font-size:2.4rem; margin-bottom:10px; }
+    /* تبويبات فرعية داخل المراجعة */
+    .subtabs{ display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; }
+    .subtab{ padding:7px 15px; font-family:var(--font); font-weight:700; font-size:.82rem; color:var(--text-secondary); background:var(--surface-3); border:1.5px solid var(--border); border-radius:20px; cursor:pointer; }
+    .subtab.active{ background:var(--pur-teal); color:#fff; border-color:var(--pur-teal); }
+    .subpanel{ display:none; } .subpanel.active{ display:block; }
+    .sec-lbl{ font-size:.95rem; font-weight:800; margin:18px 0 6px; display:flex; align-items:center; gap:8px; }
+    .sec-lbl i{ font-size:.85rem; } .sec-lbl.red{ color:#dc2626; } .sec-lbl.amber{ color:#b45309; }
+    .count-badge{ font-size:.72rem; background:var(--surface-3); color:var(--text-secondary); padding:1px 10px; border-radius:20px; font-weight:800; }
+    .note{ color:var(--text-muted); font-size:.78rem; margin-bottom:10px; }
+    .warn-box{ background:#fffbeb; border:1.5px solid #fde68a; color:#92400e; border-radius:var(--radius-md); padding:10px 14px; font-size:.8rem; font-weight:700; margin-bottom:14px; display:flex; align-items:center; gap:8px; }
   </style>
 </head>
 <body>
@@ -123,29 +133,77 @@
 
     <!-- تبويب المراجعة -->
     <div class="panel" id="panel-review">
-      <div class="sh-head">
-        <div class="sh-title"><i class="fas fa-triangle-exclamation"></i> تنبيه الصلاحية والمرتجعات</div>
-        <button class="btn-p" onclick="loadReview()"><i class="fas fa-sync-alt"></i> تحديث</button>
+      <div class="subtabs">
+        <button class="subtab active" data-sub="match" onclick="subTab('match')"><i class="fas fa-clipboard-check"></i> مطابقة أمر التوريد</button>
+        <button class="subtab" data-sub="expiry" onclick="subTab('expiry')"><i class="fas fa-triangle-exclamation"></i> تنبيه الصلاحية</button>
       </div>
-      <div class="filters">
-        <div class="fld"><label>الفرع</label><select class="inp" id="rBranch" onchange="loadReview()"></select></div>
-        <div class="fld"><label>المورّد</label><select class="inp" id="rVendor" onchange="loadReview()"><option value="">كل الموردين</option></select></div>
-        <div class="fld"><label>من تاريخ الفاتورة</label><input class="inp" type="date" id="rFrom" onchange="loadReview()"></div>
-        <div class="fld"><label>إلى تاريخ</label><input class="inp" type="date" id="rTo" onchange="loadReview()"></div>
-        <div class="fld"><label>حد الصلاحية</label><select class="inp" id="rMonths" onchange="loadReview()">
-          <option value="3">أقل من 3 شهور</option><option value="6" selected>أقل من 6 شهور</option><option value="12">أقل من سنة</option></select></div>
+
+      <!-- (1) مطابقة أمر التوريد -->
+      <div class="subpanel active" id="sub-match">
+        <div class="sh-head">
+          <div class="sh-title"><i class="fas fa-clipboard-check"></i> مطابقة أمر التوريد بالفاتورة</div>
+          <button class="btn-p" onclick="loadMatch()"><i class="fas fa-sync-alt"></i> تحديث</button>
+        </div>
+        <div class="filters">
+          <div class="fld"><label>الفرع</label><select class="inp" id="mBranch" onchange="loadMatch()"></select></div>
+          <div class="fld"><label>المورّد</label><select class="inp" id="mVendor" onchange="loadMatch()"><option value="">كل الموردين</option></select></div>
+          <div class="fld"><label>من تاريخ الفاتورة</label><input class="inp" type="date" id="mFrom" onchange="loadMatch()"></div>
+          <div class="fld"><label>إلى تاريخ</label><input class="inp" type="date" id="mTo" onchange="loadMatch()"></div>
+        </div>
+        <div class="note">
+          بنقارن فاتورة الشراء اللي وصلت بأمر التوريد <b>المعتمد</b> من المورّد (اللي بيعلّم على المتاح في اللينك ويرجّعه) — لكل فرع على حدة. (افتراضي: فواتير آخر يوم.)
+        </div>
+        <div class="warn-box" id="matchWarn" style="display:none"></div>
+
+        <div class="sec-lbl red"><i class="fas fa-circle-arrow-down"></i> دخل مش طالب <span class="count-badge" id="recvCount">0</span></div>
+        <div class="note">أصناف وصلت في الفاتورة ومش موجودة في المعتمد — شوف المعدل والرصيد والصلاحية وقرّر لو هترجّعها.</div>
+        <div class="card" style="padding:0;overflow-x:auto">
+          <table class="pv">
+            <thead><tr>
+              <th>الصنف</th><th>الفرع</th><th>المورّد</th><th>الموظف</th><th>تاريخ الفاتورة</th><th>الكمية</th><th>سعر الشراء</th><th>الصلاحية</th><th>الرصيد</th><th>المعدل/شهر</th>
+            </tr></thead>
+            <tbody id="recvRows"><tr><td colspan="10" class="loading">جارِ التحميل…</td></tr></tbody>
+          </table>
+        </div>
+
+        <div class="sec-lbl amber"><i class="fas fa-circle-arrow-up"></i> طلبته وموصلش <span class="count-badge" id="missCount">0</span></div>
+        <div class="note">أصناف معتمدة في أمر التوريد وماجتش في الفاتورة لنفس الفرع.</div>
+        <div class="card" style="padding:0;overflow-x:auto">
+          <table class="pv">
+            <thead><tr>
+              <th>الصنف</th><th>الفرع</th><th>الكود عندنا</th><th>الكمية المطلوبة</th>
+            </tr></thead>
+            <tbody id="missRows"><tr><td colspan="4" class="loading">جارِ التحميل…</td></tr></tbody>
+          </table>
+        </div>
       </div>
-      <div class="note" style="margin-bottom:10px;color:var(--text-muted);font-size:.78rem">
-        الأصناف اللي صلاحيتها قريبة — جاية من مين، مين أدخلها، ورصيدها ومعدلها عشان تقرر ترجّعها للمورّد ولا لأ.
-        المنتهية أو أقل من شهرين بالأحمر. (افتراضي: فواتير آخر يوم.)
-      </div>
-      <div class="card" style="padding:0;overflow-x:auto">
-        <table class="pv">
-          <thead><tr>
-            <th>الصنف</th><th>الفرع</th><th>المورّد</th><th>الموظف</th><th>تاريخ الفاتورة</th><th>الكمية</th><th>سعر الشراء</th><th>الصلاحية</th><th>باقي</th><th>الرصيد</th><th>المعدل/شهر</th>
-          </tr></thead>
-          <tbody id="revRows"><tr><td colspan="11" class="loading">اختار الفلتر واضغط تحديث…</td></tr></tbody>
-        </table>
+
+      <!-- (2) تنبيه الصلاحية -->
+      <div class="subpanel" id="sub-expiry">
+        <div class="sh-head">
+          <div class="sh-title"><i class="fas fa-triangle-exclamation"></i> تنبيه الصلاحية والمرتجعات</div>
+          <button class="btn-p" onclick="loadReview()"><i class="fas fa-sync-alt"></i> تحديث</button>
+        </div>
+        <div class="filters">
+          <div class="fld"><label>الفرع</label><select class="inp" id="rBranch" onchange="loadReview()"></select></div>
+          <div class="fld"><label>المورّد</label><select class="inp" id="rVendor" onchange="loadReview()"><option value="">كل الموردين</option></select></div>
+          <div class="fld"><label>من تاريخ الفاتورة</label><input class="inp" type="date" id="rFrom" onchange="loadReview()"></div>
+          <div class="fld"><label>إلى تاريخ</label><input class="inp" type="date" id="rTo" onchange="loadReview()"></div>
+          <div class="fld"><label>حد الصلاحية</label><select class="inp" id="rMonths" onchange="loadReview()">
+            <option value="3">أقل من 3 شهور</option><option value="6" selected>أقل من 6 شهور</option><option value="12">أقل من سنة</option></select></div>
+        </div>
+        <div class="note">
+          الأصناف اللي صلاحيتها قريبة — جاية من مين، مين أدخلها، ورصيدها ومعدلها عشان تقرر ترجّعها للمورّد ولا لأ.
+          المنتهية أو أقل من شهرين بالأحمر. (افتراضي: فواتير آخر يوم.)
+        </div>
+        <div class="card" style="padding:0;overflow-x:auto">
+          <table class="pv">
+            <thead><tr>
+              <th>الصنف</th><th>الفرع</th><th>المورّد</th><th>الموظف</th><th>تاريخ الفاتورة</th><th>الكمية</th><th>سعر الشراء</th><th>الصلاحية</th><th>باقي</th><th>الرصيد</th><th>المعدل/شهر</th>
+            </tr></thead>
+            <tbody id="revRows"><tr><td colspan="11" class="loading">اختار الفلتر واضغط تحديث…</td></tr></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
@@ -194,15 +252,87 @@
     }
 
     function localToday(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
+
+    let expiryReady=false;
+    function subTab(s){
+      document.querySelectorAll('.subtab').forEach(b=>b.classList.toggle('active', b.dataset.sub===s));
+      document.querySelectorAll('.subpanel').forEach(p=>p.classList.remove('active'));
+      document.getElementById('sub-'+s).classList.add('active');
+      if(s==='expiry' && !expiryReady){ expiryReady=true; loadReview(); }
+    }
+
     async function initReview(){
-      const sel=document.getElementById('rBranch');
-      sel.innerHTML = '<option value="">كل الفروع</option>' + Object.keys(BR).map(c=>`<option value="${c}">${BR[c]}</option>`).join('');
-      document.getElementById('rFrom').value = localToday();
-      document.getElementById('rTo').value = localToday();
+      const t = localToday();
+      const brOpts = '<option value="">كل الفروع</option>' + Object.keys(BR).map(c=>`<option value="${c}">${BR[c]}</option>`).join('');
+      document.getElementById('mBranch').innerHTML = brOpts;
+      document.getElementById('rBranch').innerHTML = brOpts;
+      document.getElementById('mFrom').value = t; document.getElementById('mTo').value = t;
+      document.getElementById('rFrom').value = t; document.getElementById('rTo').value = t;
       const names = await rpc('get_purchase_vendor_names', { p_branch: null });
       const list = Array.isArray(names)?names:[];
-      document.getElementById('rVendor').innerHTML = '<option value="">كل الموردين</option>' + list.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
-      loadReview();
+      const vOpts = '<option value="">كل الموردين</option>' + list.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+      document.getElementById('mVendor').innerHTML = vOpts;
+      document.getElementById('rVendor').innerHTML = vOpts;
+      loadMatch(); // التبويب الافتراضي = المطابقة
+    }
+
+    // ═══ مطابقة أمر التوريد ═══
+    function matchFilters(){ return {
+      p_branch: document.getElementById('mBranch').value||null,
+      p_vendor: document.getElementById('mVendor').value||null,
+      p_from: document.getElementById('mFrom').value||null,
+      p_to: document.getElementById('mTo').value||null
+    }; }
+    async function loadMatch(){
+      document.getElementById('recvRows').innerHTML='<tr><td colspan="10" class="loading">جارِ التحميل…</td></tr>';
+      document.getElementById('missRows').innerHTML='<tr><td colspan="4" class="loading">جارِ التحميل…</td></tr>';
+      const res = await rpc('get_purchase_order_review', matchFilters());
+      const d = Array.isArray(res)?res[0]:res;
+      renderMatch(d||{});
+    }
+    function renderMatch(d){
+      const recv = Array.isArray(d.received_not_ordered)?d.received_not_ordered:[];
+      const miss = Array.isArray(d.ordered_not_received)?d.ordered_not_received:[];
+      const noOrder = Number(d.invoices_without_order)||0;
+      document.getElementById('recvCount').textContent = f0(recv.length);
+      document.getElementById('missCount').textContent = f0(miss.length);
+      const warn = document.getElementById('matchWarn');
+      if(noOrder>0){ warn.style.display='flex'; warn.innerHTML = `<i class="fas fa-triangle-exclamation"></i> ${f0(noOrder)} فاتورة في الفترة دي ملهاش أمر توريد معتمد (المورّد اشتغل من غير لينك) — مش داخلة في المقارنة.`; }
+      else warn.style.display='none';
+      const rt=document.getElementById('recvRows');
+      if(!recv.length){ rt.innerHTML='<tr><td colspan="10" class="empty">كل اللي وصل مطابق للمعتمد ✓</td></tr>'; }
+      else rt.innerHTML = recv.map(r=>{
+        const ml=r.months_left; let cls='';
+        if(ml!=null){ if(ml<=0) cls='background:#fee2e2'; else if(ml<=2) cls='background:#fef2f2'; else if(ml<=6) cls='background:#fffbeb'; }
+        const name = r.itm_name ? `<span style="font-weight:700">${esc(r.itm_name)}</span> <span style="color:var(--text-muted);font-size:.7rem">#${r.itm_id}</span>`
+                                : `<span style="color:var(--text-muted)">صنف #${r.itm_id}</span>`;
+        const expTxt = r.exp_date ? new Date(r.exp_date).toLocaleDateString('ar-EG',{day:'2-digit',month:'2-digit',year:'numeric'}) : '—';
+        const mlTxt = ml==null?'':(ml<=0?' <b style="color:#dc2626">(منتهية)</b>':` <span style="color:var(--text-muted);font-size:.7rem">(${ml} ش)</span>`);
+        return `<tr style="${cls}">
+          <td>${name}</td>
+          <td><span class="brtag">${BR[r.branch]||r.branch}</span></td>
+          <td class="ven">${esc(r.ven_name_ar||'—')}</td>
+          <td>${esc(r.entered_by||'—')}</td>
+          <td>${dateOnly(r.ven_bill_date)}</td>
+          <td class="num">${Number(r.qnty)||0}</td>
+          <td class="num">${f2(r.itm_pur_price)}</td>
+          <td>${expTxt}${mlTxt}</td>
+          <td class="num">${r.stock==null?'—':f0(r.stock)}</td>
+          <td class="num">${r.rate==null?'—':f2(r.rate)}</td>
+        </tr>`;
+      }).join('');
+      const mt=document.getElementById('missRows');
+      if(!miss.length){ mt.innerHTML='<tr><td colspan="4" class="empty">كل المعتمد وصل ✓</td></tr>'; }
+      else mt.innerHTML = miss.map(r=>{
+        const name = r.itm_name ? `<span style="font-weight:700">${esc(r.itm_name)}</span>`
+                                : `<span style="color:var(--text-muted)">صنف #${esc(r.itm_id)}</span>`;
+        return `<tr>
+          <td>${name}</td>
+          <td><span class="brtag">${BR[r.branch]||r.br_ar||'—'}</span></td>
+          <td class="num">${esc(r.itm_id||'—')}</td>
+          <td class="num">${r.qty_ordered!=null?esc(r.qty_ordered):'—'}</td>
+        </tr>`;
+      }).join('');
     }
     function reviewFilters(){ return {
       p_branch: document.getElementById('rBranch').value||null,
