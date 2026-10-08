@@ -123,11 +123,29 @@
 
     <!-- تبويب المراجعة -->
     <div class="panel" id="panel-review">
-      <div class="soon">
-        <div class="ic">🔍</div>
-        <div style="font-size:1.1rem;font-weight:800;color:var(--text-secondary);margin-bottom:8px">مراجعة المشتريات</div>
-        <div>مقارنة الوارد الفعلي بأوامر الشراء المعتمدة: «طلبناه وموصلش» و«دخل مش طالبينه».</div>
-        <div style="margin-top:8px;font-size:.82rem">قريبًا — محتاج تحديد مكان أوامر الشراء المعتمدة.</div>
+      <div class="sh-head">
+        <div class="sh-title"><i class="fas fa-triangle-exclamation"></i> تنبيه الصلاحية والمرتجعات</div>
+        <button class="btn-p" onclick="loadReview()"><i class="fas fa-sync-alt"></i> تحديث</button>
+      </div>
+      <div class="filters">
+        <div class="fld"><label>الفرع</label><select class="inp" id="rBranch" onchange="loadReview()"></select></div>
+        <div class="fld"><label>المورّد</label><select class="inp" id="rVendor" onchange="loadReview()"><option value="">كل الموردين</option></select></div>
+        <div class="fld"><label>من تاريخ الفاتورة</label><input class="inp" type="date" id="rFrom" onchange="loadReview()"></div>
+        <div class="fld"><label>إلى تاريخ</label><input class="inp" type="date" id="rTo" onchange="loadReview()"></div>
+        <div class="fld"><label>حد الصلاحية</label><select class="inp" id="rMonths" onchange="loadReview()">
+          <option value="3">أقل من 3 شهور</option><option value="6" selected>أقل من 6 شهور</option><option value="12">أقل من سنة</option></select></div>
+      </div>
+      <div class="note" style="margin-bottom:10px;color:var(--text-muted);font-size:.78rem">
+        الأصناف اللي صلاحيتها قريبة — جاية من مين، مين أدخلها، ورصيدها ومعدلها عشان تقرر ترجّعها للمورّد ولا لأ.
+        المنتهية أو أقل من شهرين بالأحمر. (افتراضي: فواتير آخر يوم.)
+      </div>
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table class="pv">
+          <thead><tr>
+            <th>الصنف</th><th>الفرع</th><th>المورّد</th><th>الموظف</th><th>تاريخ الفاتورة</th><th>الكمية</th><th>سعر الشراء</th><th>الصلاحية</th><th>باقي</th><th>الرصيد</th><th>المعدل/شهر</th>
+          </tr></thead>
+          <tbody id="revRows"><tr><td colspan="11" class="loading">اختار الفلتر واضغط تحديث…</td></tr></tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -167,10 +185,61 @@
       }catch(e){ return null; }
     }
 
+    let reviewReady=false;
     function switchTab(t){
       document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active', b.dataset.tab===t));
       document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
       document.getElementById('panel-'+t).classList.add('active');
+      if(t==='review' && !reviewReady){ reviewReady=true; initReview(); }
+    }
+
+    function localToday(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
+    async function initReview(){
+      const sel=document.getElementById('rBranch');
+      sel.innerHTML = '<option value="">كل الفروع</option>' + Object.keys(BR).map(c=>`<option value="${c}">${BR[c]}</option>`).join('');
+      document.getElementById('rFrom').value = localToday();
+      document.getElementById('rTo').value = localToday();
+      const names = await rpc('get_purchase_vendor_names', { p_branch: null });
+      const list = Array.isArray(names)?names:[];
+      document.getElementById('rVendor').innerHTML = '<option value="">كل الموردين</option>' + list.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+      loadReview();
+    }
+    function reviewFilters(){ return {
+      p_branch: document.getElementById('rBranch').value||null,
+      p_vendor: document.getElementById('rVendor').value||null,
+      p_from: document.getElementById('rFrom').value||null,
+      p_to: document.getElementById('rTo').value||null,
+      p_months: Number(document.getElementById('rMonths').value)||6
+    }; }
+    async function loadReview(){
+      const tb=document.getElementById('revRows'); tb.innerHTML='<tr><td colspan="11" class="loading">جارِ التحميل…</td></tr>';
+      const res = await rpc('get_purchase_expiry_review', reviewFilters());
+      renderReview(Array.isArray(res)?res:[]);
+    }
+    function renderReview(rows){
+      const tb=document.getElementById('revRows');
+      if(!rows.length){ tb.innerHTML='<tr><td colspan="11" class="empty">لا أصناف قريبة الصلاحية بالفلتر الحالي</td></tr>'; return; }
+      tb.innerHTML = rows.map(r=>{
+        const ml=r.months_left; let cls='';
+        if(ml!=null){ if(ml<=0) cls='background:#fee2e2'; else if(ml<=2) cls='background:#fef2f2'; else if(ml<=6) cls='background:#fffbeb'; }
+        const name = r.itm_name ? `<span style="font-weight:700">${esc(r.itm_name)}</span> <span style="color:var(--text-muted);font-size:.7rem">#${r.itm_id}</span>`
+                                : `<span style="color:var(--text-muted)">صنف #${r.itm_id}</span>`;
+        const expTxt = r.exp_date ? new Date(r.exp_date).toLocaleDateString('ar-EG',{day:'2-digit',month:'2-digit',year:'numeric'}) : '—';
+        const mlTxt = ml==null?'—':(ml<=0?'<b style="color:#dc2626">منتهية</b>':ml+' ش');
+        return `<tr style="${cls}">
+          <td>${name}</td>
+          <td><span class="brtag">${BR[r.branch]||r.branch}</span></td>
+          <td class="ven">${esc(r.ven_name_ar||'—')}</td>
+          <td>${esc(r.entered_by||'—')}</td>
+          <td>${dateOnly(r.ven_bill_date)}</td>
+          <td class="num">${Number(r.qnty)||0}</td>
+          <td class="num">${f2(r.itm_pur_price)}</td>
+          <td>${expTxt}</td>
+          <td class="num">${mlTxt}</td>
+          <td class="num">${r.stock==null?'—':f0(r.stock)}</td>
+          <td class="num">${r.rate==null?'—':f2(r.rate)}</td>
+        </tr>`;
+      }).join('');
     }
 
     function filters(){
