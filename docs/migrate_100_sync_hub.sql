@@ -184,7 +184,7 @@ grant execute on function public.sync_set_branch(text,text,boolean) to authentic
 
 -- ═══════════════════════ تسجيل الشاشة ═══════════════════════
 INSERT INTO app_pages (key, file, title, section, sort_order, is_active)
-VALUES ('sync_hub','sync_hub.html','مركز المزامنة','المشتريات',300,true)
+VALUES ('sync_hub','sync_hub.html','مركز المزامنة','الإدارة والنظام',952,true)
 ON CONFLICT (key) DO UPDATE SET file=excluded.file, title=excluded.title, section=excluded.section, sort_order=excluded.sort_order, is_active=true;
 
 INSERT INTO page_permissions (page, role, can_view, can_edit, page_key, sort_order)
