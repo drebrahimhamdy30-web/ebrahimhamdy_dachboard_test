@@ -119,23 +119,30 @@ insert into public.sync_branch_state (job_id,branch,enabled) values
 on conflict (job_id,branch) do nothing;
 
 -- ═══════════════════════ دالة إثراء الأسماء ═══════════════════════
+-- إثراء الأسماء: المصدر الأساسي مخزون المعمورة (الكود موحّد لكل الفروع)، والباقي احتياطي.
+-- الأصناف اللي مش في أي مصدر عندنا بتفضل بلا اسم لحد ما تتزامن من الـAPI (مؤجّل).
 create or replace function public.enrich_purchase_item_names()
 returns integer language plpgsql security definer set search_path=public as $$
 declare total integer := 0; n integer;
 begin
   begin
     update public.purchase_invoice_items pi set itm_name = s.itm_name_ar
-    from public.sales_items s where pi.itm_name is null and s.itm_code = pi.itm_id::text and s.itm_name_ar is not null and s.itm_name_ar<>'';
+    from public.stock_mamora s where pi.itm_name is null and s.itm_code = pi.itm_id::text and coalesce(s.itm_name_ar,'')<>'';
+    get diagnostics n = row_count; total := total + n;
+  exception when others then null; end;
+  begin
+    update public.purchase_invoice_items pi set itm_name = s.itm_name_ar
+    from public.branch_stock s where pi.itm_name is null and s.itm_code = pi.itm_id::text and coalesce(s.itm_name_ar,'')<>'';
+    get diagnostics n = row_count; total := total + n;
+  exception when others then null; end;
+  begin
+    update public.purchase_invoice_items pi set itm_name = s.itm_name_ar
+    from public.sales_items s where pi.itm_name is null and s.itm_code = pi.itm_id::text and coalesce(s.itm_name_ar,'')<>'';
     get diagnostics n = row_count; total := total + n;
   exception when others then null; end;
   begin
     update public.purchase_invoice_items pi set itm_name = m.itm_name
-    from public.monthly_sales m where pi.itm_name is null and m.itm_code = pi.itm_id::text and m.itm_name is not null and m.itm_name<>'';
-    get diagnostics n = row_count; total := total + n;
-  exception when others then null; end;
-  begin
-    update public.purchase_invoice_items pi set itm_name = b.itm_name_ar
-    from public.branch_stock b where pi.itm_name is null and b.itm_code = pi.itm_id::text and b.itm_name_ar is not null and b.itm_name_ar<>'';
+    from public.monthly_sales m where pi.itm_name is null and m.itm_code = pi.itm_id::text and coalesce(m.itm_name,'')<>'';
     get diagnostics n = row_count; total := total + n;
   exception when others then null; end;
   return total;
