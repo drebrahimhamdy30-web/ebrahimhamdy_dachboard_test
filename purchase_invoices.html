@@ -294,18 +294,22 @@
       const recv = Array.isArray(d.received_not_ordered)?d.received_not_ordered:[];
       const miss = Array.isArray(d.ordered_not_received)?d.ordered_not_received:[];
       const noOrder = Number(d.invoices_without_order)||0;
+      const uncoded = Number(d.uncoded_lines)||0;
       document.getElementById('recvCount').textContent = f0(recv.length);
       document.getElementById('missCount').textContent = f0(miss.length);
       const warn = document.getElementById('matchWarn');
-      if(noOrder>0){ warn.style.display='flex'; warn.innerHTML = `<i class="fas fa-triangle-exclamation"></i> ${f0(noOrder)} فاتورة في الفترة دي ملهاش أمر توريد معتمد (المورّد اشتغل من غير لينك) — مش داخلة في المقارنة.`; }
+      const ws=[];
+      if(noOrder>0) ws.push(`${f0(noOrder)} فاتورة بلا أمر توريد معتمد (مش داخلة المقارنة)`);
+      if(uncoded>0) ws.push(`${f0(uncoded)} بند لسه بلا كود — محتاج شيت المشتريات (مش داخل المطابقة)`);
+      if(ws.length){ warn.style.display='flex'; warn.innerHTML = `<i class="fas fa-triangle-exclamation"></i> ` + ws.join(' · '); }
       else warn.style.display='none';
       const rt=document.getElementById('recvRows');
       if(!recv.length){ rt.innerHTML='<tr><td colspan="10" class="empty">كل اللي وصل مطابق للمعتمد ✓</td></tr>'; }
       else rt.innerHTML = recv.map(r=>{
         const ml=r.months_left; let cls='';
         if(ml!=null){ if(ml<=0) cls='background:#fee2e2'; else if(ml<=2) cls='background:#fef2f2'; else if(ml<=6) cls='background:#fffbeb'; }
-        const name = r.itm_name ? `<span style="font-weight:700">${esc(r.itm_name)}</span> <span style="color:var(--text-muted);font-size:.7rem">#${r.itm_id}</span>`
-                                : `<span style="color:var(--text-muted)">صنف #${r.itm_id}</span>`;
+        const name = r.itm_name ? `<span style="font-weight:700">${esc(r.itm_name)}</span> <span style="color:var(--text-muted);font-size:.7rem">#${esc(r.itm_code)}</span>`
+                                : `<span style="color:var(--text-muted)">كود ${esc(r.itm_code)}</span>`;
         const expTxt = r.exp_date ? new Date(r.exp_date).toLocaleDateString('ar-EG',{day:'2-digit',month:'2-digit',year:'numeric'}) : '—';
         const mlTxt = ml==null?'':(ml<=0?' <b style="color:#dc2626">(منتهية)</b>':` <span style="color:var(--text-muted);font-size:.7rem">(${ml} ش)</span>`);
         return `<tr style="${cls}">
@@ -325,11 +329,11 @@
       if(!miss.length){ mt.innerHTML='<tr><td colspan="4" class="empty">كل المعتمد وصل ✓</td></tr>'; }
       else mt.innerHTML = miss.map(r=>{
         const name = r.itm_name ? `<span style="font-weight:700">${esc(r.itm_name)}</span>`
-                                : `<span style="color:var(--text-muted)">صنف #${esc(r.itm_id)}</span>`;
+                                : `<span style="color:var(--text-muted)">كود ${esc(r.itm_code)}</span>`;
         return `<tr>
           <td>${name}</td>
           <td><span class="brtag">${BR[r.branch]||r.br_ar||'—'}</span></td>
-          <td class="num">${esc(r.itm_id||'—')}</td>
+          <td class="num">${esc(r.itm_code||'—')}</td>
           <td class="num">${r.qty_ordered!=null?esc(r.qty_ordered):'—'}</td>
         </tr>`;
       }).join('');
@@ -352,8 +356,8 @@
       tb.innerHTML = rows.map(r=>{
         const ml=r.months_left; let cls='';
         if(ml!=null){ if(ml<=0) cls='background:#fee2e2'; else if(ml<=2) cls='background:#fef2f2'; else if(ml<=6) cls='background:#fffbeb'; }
-        const name = r.itm_name ? `<span style="font-weight:700">${esc(r.itm_name)}</span> <span style="color:var(--text-muted);font-size:.7rem">#${r.itm_id}</span>`
-                                : `<span style="color:var(--text-muted)">صنف #${r.itm_id}</span>`;
+        const name = r.itm_name ? `<span style="font-weight:700">${esc(r.itm_name)}</span> <span style="color:var(--text-muted);font-size:.7rem">#${esc(r.itm_code)}</span>`
+                                : `<span style="color:var(--text-muted)">كود ${esc(r.itm_code)}</span>`;
         const expTxt = r.exp_date ? new Date(r.exp_date).toLocaleDateString('ar-EG',{day:'2-digit',month:'2-digit',year:'numeric'}) : '—';
         const mlTxt = ml==null?'—':(ml<=0?'<b style="color:#dc2626">منتهية</b>':ml+' ش');
         return `<tr style="${cls}">
@@ -466,8 +470,8 @@
         const qty=Number(it.qnty)||0, pur=Number(it.itm_pur_price)||0, sell=Number(it.itm_sell)||0;
         const lt=qty*pur; sumPur+=lt; sumSell+=qty*sell;
         const mrg = pur>0 ? Math.round((sell-pur)/pur*100) : 0;
-        const name = it.itm_name ? `<span style="font-weight:700">${esc(it.itm_name)}</span> <span style="color:var(--text-muted);font-size:.7rem">#${it.itm_id}</span>`
-                                 : `<span style="color:var(--text-muted)">صنف #${it.itm_id}</span> <span class="enc">(الاسم غير متوفر)</span>`;
+        const name = it.itm_name ? `<span style="font-weight:700">${esc(it.itm_name)}</span> <span style="color:var(--text-muted);font-size:.7rem">#${esc(it.itm_code||it.itm_id)}</span>`
+                                 : `<span style="color:var(--text-muted)">صنف #${it.itm_id}</span> <span class="enc">(غير مكوّد — محتاج شيت)</span>`;
         const exp = it.exp_date ? new Date(it.exp_date).toLocaleDateString('ar-EG',{month:'2-digit',year:'numeric'}) : '—';
         return `<tr><td class="num">${i+1}</td><td>${name}</td><td class="num">${qty}</td><td class="num">${Number(it.bonus)||0}</td>
           <td class="num">${f2(pur)}</td><td class="num sell">${f2(sell)}</td><td class="num">${f2(lt)}</td>
