@@ -8,6 +8,7 @@
   <script>try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_dark")==="1"?"dark":"light");document.documentElement.setAttribute("data-theme",_t==="dark"?"dark":"light");}catch(e){}</script>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
     :root{ --pur-teal:#0d9488; --pur-teal-d:#0f766e; }
     .container{ max-width:none !important; }
@@ -88,6 +89,9 @@
     .count-badge{ font-size:.72rem; background:var(--surface-3); color:var(--text-secondary); padding:1px 10px; border-radius:20px; font-weight:800; }
     .note{ color:var(--text-muted); font-size:.78rem; margin-bottom:10px; }
     .warn-box{ background:#fffbeb; border:1.5px solid #fde68a; color:#92400e; border-radius:var(--radius-md); padding:10px 14px; font-size:.8rem; font-weight:700; margin-bottom:14px; display:flex; align-items:center; gap:8px; }
+    .btn-imp{ background:var(--pur-teal-d); color:#fff; border:none; border-radius:var(--radius-md); padding:8px 14px; font-family:var(--font); font-weight:700; font-size:.8rem; cursor:pointer; }
+    #toast{ position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:#0f172a; color:#fff; padding:12px 22px; border-radius:10px; font-size:.85rem; font-weight:700; opacity:0; transition:.3s; z-index:999; pointer-events:none; max-width:92vw; text-align:center; }
+    #toast.show{ opacity:1; }
   </style>
 </head>
 <body>
@@ -102,7 +106,11 @@
     <div class="panel active" id="panel-invoices">
       <div class="sh-head">
         <div class="sh-title"><i class="fas fa-file-invoice-dollar"></i> فواتير الشراء</div>
-        <button class="btn-p" onclick="load(1)"><i class="fas fa-sync-alt"></i> تحديث</button>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn-imp" id="btnImport" style="display:none" onclick="document.getElementById('xlsxFile').click()" title="رفع تصدير «مشتريات تفصيلي» لتحديث أكواد وأسماء الأصناف"><i class="fas fa-file-import"></i> استيراد شيت المشتريات</button>
+          <input type="file" id="xlsxFile" accept=".xlsx" style="display:none" onchange="importSheet(this.files[0]); this.value=''">
+          <button class="btn-p" onclick="load(1)"><i class="fas fa-sync-alt"></i> تحديث</button>
+        </div>
       </div>
       <div class="filters">
         <div class="fld"><label>الفرع</label><select class="inp" id="fBranch" onchange="onVendorScope();load(1)"></select></div>
@@ -212,6 +220,7 @@
   <div class="ov" id="ov" onclick="if(event.target===this)closeModal()">
     <div class="modal" id="modal"></div>
   </div>
+  <div id="toast"></div>
 
   <script src="config.js?v=20260904c"></script>
   <script src="session.js?v=20260926dl"></script>
@@ -517,9 +526,62 @@
       sel.innerHTML = '<option value="">كل الفروع</option>' + Object.keys(BR).map(c=>`<option value="${c}">${BR[c]}</option>`).join('');
     }
 
+    // ═══ استيراد شيت المشتريات (تحديث الكود والاسم بس) ═══
+    const SHEET_BRMAP = { 'ابراهيم حمدي 2':'san','ابراهيم حمدى 2':'san','السيوف':'seyouf','الصيدلية':'mamora','ابراهيم حمدي 3':'bishr','ابراهيم حمدى 3':'bishr' };
+    function toast(msg, ms){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._t); if(ms!==0){ t._t=setTimeout(()=>t.classList.remove('show'), ms||3000); } }
+    async function rpcAuth(fn, body){
+      const tok = (typeof Session!=='undefined' && Session.bearer) ? await Session.bearer() : SB_ANON_API;
+      const r = await fetch(SB_URL_API + '/rest/v1/rpc/' + fn, {
+        method:'POST', headers:{ 'Content-Type':'application/json', apikey: SB_ANON_API, Authorization:'Bearer ' + tok },
+        body: JSON.stringify(body||{})
+      });
+      if(!r.ok) throw new Error((await r.text()) || ('HTTP '+r.status));
+      const t = await r.text(); return t ? JSON.parse(t) : null;
+    }
+    async function importSheet(file){
+      if(!file) return;
+      try{
+        toast('بقرا الملف…', 0);
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type:'array' });
+        const A = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header:1, raw:true, defval:null });
+        const recs=[]; let branch=null, curPth=null, stores={};
+        for(let i=0;i<A.length;i++){
+          const row=A[i]||[];
+          const s1=(row[0]==null?'':String(row[0])).trim();
+          const s2=(row[1]==null?'':String(row[1])).trim();
+          if((s2==='موردين'||s2==='أفراد') && SHEET_BRMAP[s1]){ branch=SHEET_BRMAP[s1]; stores[s1]=1; continue; }
+          if(s1==='ملاحظات'){ curPth=row[23]; continue; }
+          const code=row[17], name=(row[16]==null?'':String(row[16])).trim();
+          if(branch && curPth!=null && code!=null && name!=='' && (typeof code==='number' || /^\d+$/.test(String(code).trim()))){
+            recs.push({ branch, pth_id:Math.trunc(Number(curPth)), code:String(Math.trunc(Number(code))), name, qty:Number(row[11])||0, pur:Number(row[5])||0 });
+          }
+        }
+        if(!recs.length){ toast('مفيش بنود صالحة — اتأكد إن الملف «مشتريات تفصيلي»', 5000); return; }
+        toast(`بيرفع ${f0(recs.length)} بند من [${Object.keys(stores).join(', ')}]…`, 0);
+        await rpcAuth('purchase_stage_clear');
+        const CH=2000;
+        for(let i=0;i<recs.length;i+=CH){ await rpcAuth('purchase_stage_add', { p_rows: recs.slice(i,i+CH) }); }
+        const res = await rpcAuth('purchase_map_build');
+        const d = Array.isArray(res)?res[0]:res;
+        toast(`تم ✓ اتكوّد/اتحدّث ${f0(d&&d.mapped)} صنف، واتطبّق على ${f0(d&&d.applied)} بند.`, 7000);
+        load(curPage);
+      }catch(e){
+        const msg = String((e&&e.message)||e);
+        toast((msg.includes('42501')||msg.includes('مصرّح')) ? 'غير مصرّح: محتاج صلاحية «تعديل» على شاشة المشتريات' : ('فشل الاستيراد: '+msg), 7000);
+      }
+    }
+    async function initImportBtn(){
+      try{
+        const p = (typeof Session!=='undefined' && Session.can) ? await Session.can('purchase_invoices.html') : { edit:true };
+        if(p && p.edit) document.getElementById('btnImport').style.display='inline-flex';
+      }catch(e){}
+    }
+
     (typeof checkAuth==='function'?checkAuth():Promise.resolve(1)).then(async u=>{
       if(!u && typeof checkAuth==='function') return;
       initBranches();
+      initImportBtn();
       await onVendorScope();
       await load(1);
     }).catch(async()=>{ initBranches(); await load(1); });
