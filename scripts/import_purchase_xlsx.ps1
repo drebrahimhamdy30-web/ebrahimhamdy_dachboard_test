@@ -11,6 +11,7 @@
 
 param(
   [Parameter(Mandatory=$true)][string]$Path,
+  [int]$Days = 0,   # لو >0: يعالج ملفات .xlsx المعدّلة آخر Days يوم بس (للتشغيل الدوري). 0=الكل.
   [string]$ConfigPath = "$env:USERPROFILE\.phalix\sync_engine.json"
 )
 $ErrorActionPreference='Stop'
@@ -54,7 +55,12 @@ function Parse-Xlsx([string]$file){
 }
 
 # اجمع الملفات
-$files = if(Test-Path $Path -PathType Container){ Get-ChildItem $Path -Filter *.xlsx | Select-Object -Expand FullName } else { ,$Path }
+if(Test-Path $Path -PathType Container){
+  $gc = Get-ChildItem $Path -Filter *.xlsx
+  if($Days -gt 0){ $gc = $gc | Where-Object { $_.LastWriteTime -ge (Get-Date).AddDays(-$Days) } }
+  $files = $gc | Select-Object -Expand FullName
+} else { $files = ,$Path }
+if(-not $files){ Write-Host "مفيش ملفات مطابقة."; exit 0 }
 $all=@()
 foreach($f in $files){ $all += Parse-Xlsx $f }
 if($all.Count -eq 0){ Write-Host "مفيش بنود."; exit 0 }
