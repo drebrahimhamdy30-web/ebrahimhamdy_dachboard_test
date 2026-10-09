@@ -88,6 +88,8 @@ begin
     from (select distinct order_id, br_ar, code from ord_reply) orr
     where not exists (select 1 from recv rc where rc.order_id=orr.order_id and rc.br_ar=orr.br_ar and rc.code=orr.code)
       and (p_branch is null or p_branch='' or orr.br_ar = (select ar from br where code=p_branch))
+      and exists (select 1 from br where br.ar=orr.br_ar)          -- تجاهل إدخالات الرد الفاضية (فرع غير معروف)
+      and nullif(trim(orr.code),'') is not null                    -- وتجاهل اللي كودها فاضي
     limit 1000
   ) r;
 
