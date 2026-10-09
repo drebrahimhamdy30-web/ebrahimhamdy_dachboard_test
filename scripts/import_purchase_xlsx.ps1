@@ -31,25 +31,30 @@ $H = @{ apikey=$key; Authorization="Bearer $key"; 'Content-Type'='application/js
 function Parse-Xlsx([string]$file){
   $x = New-Object -ComObject Excel.Application; $x.Visible=$false; $x.DisplayAlerts=$false
   try {
-    $wb = $x.Workbooks.Open($file); $ws = $wb.Sheets.Item(1)
-    $rc = $ws.UsedRange.Rows.Count
-    $store = "$($ws.Cells.Item(2,1).Value2)".Trim()
-    $branch = $BRMAP[$store]
-    if(-not $branch){ Write-Warning "مخزن غير معروف: '$store' في $file — اتخطّى"; return @() }
-    $recs=@(); $curPth=$null
-    for($r=1;$r -le $rc;$r++){
-      $c1=$ws.Cells.Item($r,1).Value2
-      if("$c1".Trim() -eq 'ملاحظات'){ $curPth=$ws.Cells.Item($r,24).Value2; continue }
-      $code=$ws.Cells.Item($r,18).Value2; $name=$ws.Cells.Item($r,17).Value2
-      if($code -ne $null -and $name -ne $null -and ("$name".Trim() -ne '') -and ($code -is [double] -or "$code" -match '^\d+$') -and $curPth -ne $null){
-        $recs += [pscustomobject]@{
-          branch=$branch; pth_id=[int64]$curPth; code="$([int64]$code)"; name=("$name".Trim())
-          qty=[double]$ws.Cells.Item($r,12).Value2; pur=[double]$ws.Cells.Item($r,6).Value2
-        }
+    $wb = $x.Workbooks.Open($file,[Type]::Missing,$true)   # read-only
+    $ws = $wb.Sheets.Item(1)
+    $arr = $ws.UsedRange.Value2                            # المدى كله في نداء واحد (سريع)
+    $wb.Close($false)
+    $rows = $arr.GetLength(0); $cols = $arr.GetLength(1)
+    $recs = New-Object System.Collections.Generic.List[object]
+    $branch=$null; $curPth=$null; $stores=@{}
+    for($r=1;$r -le $rows;$r++){
+      $s1 = "$($arr.GetValue($r,1))".Trim()
+      $s2 = if($cols -ge 2){ "$($arr.GetValue($r,2))".Trim() } else { '' }
+      # سطر قسم فرع: c2=موردين/أفراد و c1 اسم مخزن معروف
+      if(($s2 -eq 'موردين' -or $s2 -eq 'أفراد') -and $BRMAP.ContainsKey($s1)){ $branch=$BRMAP[$s1]; $stores[$s1]=$branch; continue }
+      if($s1 -eq 'ملاحظات'){ $curPth = $arr.GetValue($r,24); continue }
+      $code = if($cols -ge 18){ $arr.GetValue($r,18) } else { $null }
+      $name = if($cols -ge 17){ "$($arr.GetValue($r,17))".Trim() } else { '' }
+      if($branch -and $curPth -ne $null -and $code -ne $null -and $name -ne '' -and ($code -is [double] -or "$code" -match '^\d+$')){
+        $recs.Add([pscustomobject]@{
+          branch=$branch; pth_id=[int64]$curPth; code="$([int64]$code)"; name=$name
+          qty=[double]$arr.GetValue($r,12); pur=[double]$arr.GetValue($r,6)
+        })
       }
     }
-    $wb.Close($false)
-    Write-Host ("  {0}: مخزن '{1}' -> فرع {2} | {3} بند" -f (Split-Path $file -Leaf), $store, $branch, $recs.Count)
+    $stxt = ($stores.Keys | ForEach-Object { "$_=$($stores[$_])" }) -join ', '
+    Write-Host ("  {0}: [{1}] | {2} بند" -f (Split-Path $file -Leaf), $stxt, $recs.Count)
     return $recs
   } finally { $x.Quit(); [System.Runtime.InteropServices.Marshal]::ReleaseComObject($x)|Out-Null }
 }
