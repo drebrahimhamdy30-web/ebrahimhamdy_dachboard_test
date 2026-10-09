@@ -383,6 +383,17 @@
       if (!v || v === 'null') return false;
       return !(v === 'completed' || v === 'complete' || v === 'مكتمل' || v === 'مكتملة' || v === 'مكتمله');
     }
+    /* مفتاح المرتجع = الفاتورة + الفرع + **اليوم**. رقم الفاتورة
+       لوحده مش كافي: العميل يقدر يرجّع على نفس الفاتورة في أيام
+       مختلفة، وكل مرة دي مرتجع مستقل له حالته. */
+    function retDay(r){ return String((r && r.return_day) || ''); }
+    function retFind(billNo, branch, day){
+      return RETURNS.find(function(r){
+        return String(r.return_bill_no) === String(billNo)
+            && String(r.return_branch || '') === String(branch || '')
+            && retDay(r) === String(day || '');
+      });
+    }
     function retEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
     /* التبويب بقى يعرض نوعين (قرار المالك 2026-10-02):
          • مرتجع على فاتورة تعاقد — السلوك الأصلي
@@ -444,11 +455,12 @@
 
       body.innerHTML = pageItems.map(r=>{
         const rb = retEsc(r.return_bill_no), br = retEsc(r.return_branch||'');
+        const rd = retEsc(retDay(r));
         // 3 حالات في قايمة واحدة بدل زر «اختر فاتورة». «مقابل فاتورة»
         // بتفتح نافذة اختيار الفاتورة، والرجوع لـ«قيد الانتظار» بيفك الربط.
         const st = stOf(r);
         const action = `<select class="form-select ret-st" style="width:auto;min-width:150px"
-             onchange="setReturnStatus('${rb}','${br}',this.value,this)">
+             onchange="setReturnStatus('${rb}','${br}','${rd}',this.value,this)">
             <option value="قيد الانتظار" ${st==='قيد الانتظار'?'selected':''}>⏳ قيد الانتظار</option>
             <option value="مقابل فاتورة" ${st==='مقابل فاتورة'?'selected':''}>🧾 مقابل فاتورة</option>
             <option value="رصيد" ${st==='رصيد'?'selected':''}>💰 رصيد</option>
@@ -482,8 +494,8 @@
     }
     function retGo(p){ retPage=p; renderReturns(); window.scrollTo({top:0,behavior:'smooth'}); }
 
-    function openPicker(returnBillNo, branch){
-      pickCurrent = RETURNS.find(r=>String(r.return_bill_no)===String(returnBillNo) && String(r.return_branch||'')===String(branch||''));
+    function openPicker(returnBillNo, branch, day){
+      pickCurrent = retFind(returnBillNo, branch, day);
       if (!pickCurrent) return;
       document.getElementById('pick-ret-info').innerHTML =
         `المرتجع <b>${retEsc(pickCurrent.return_bill_no)}</b> · العميل <b>${retEsc(pickCurrent.cust_name||pickCurrent.cust_code||'—')}</b> · القيمة <b>${pickCurrent.total_value}</b> · ${retFmtDate(pickCurrent.return_date)}<br><span class="sc-mini">اختر فاتورة بيع تعاقد متاحة — هتتعلّم «مقابل مرتجع» تلقائيًا.</span>`;
@@ -534,6 +546,7 @@
         const r = await fetch(RPC + 'match_contract_return', { method:'POST', headers: await CI_H(), body: JSON.stringify({
           p_return_bill_no: pickCurrent.return_bill_no,
           p_return_branch: pickCurrent.return_branch || '',
+          p_return_day: retDay(pickCurrent) || null,
           p_invoice_id: invoiceId,
           p_return_value: pickCurrent.total_value || 0,
           p_user: ciReviewer()
@@ -553,8 +566,8 @@
          رصيد         → صف من غير فاتورة: المرتجع اتحسب رصيد للعميل
        ⚠️ الانتقال بين «مقابل فاتورة» و«رصيد» بيفك الربط القديم الأول —
           لأن فك الربط هو اللي بيرجّع حالة الفاتورة لأصلها. */
-    async function setReturnStatus(returnBillNo, branch, next, sel){
-      const row = RETURNS.find(r=>String(r.return_bill_no)===String(returnBillNo) && String(r.return_branch||'')===String(branch||''));
+    async function setReturnStatus(returnBillNo, branch, day, next, sel){
+      const row = retFind(returnBillNo, branch, day);
       const cur = row ? (row.match_status || (row.matched_invoice_bill_no ? 'مقابل فاتورة' : 'قيد الانتظار')) : 'قيد الانتظار';
       if (next === cur) return;
       if (sel) sel.disabled = true;
@@ -563,7 +576,8 @@
       try {
         if (cur !== 'قيد الانتظار') {
           const r0 = await fetch(RPC + 'unmatch_contract_return', { method:'POST', headers: await CI_H(),
-            body: JSON.stringify({ p_return_bill_no: returnBillNo, p_return_branch: branch||'' }) });
+            body: JSON.stringify({ p_return_bill_no: returnBillNo, p_return_branch: branch||'',
+                                   p_return_day: day||null }) });
           const j0 = await r0.json();
           if (!r0.ok || (j0 && j0.success===false)) { alert('تعذّر تغيير الحالة: '+((j0&&j0.error)||'')); revert(); return; }
           if (row){ row.matched_invoice_bill_no=null; row.matched_at=null; row.match_status='قيد الانتظار'; }
@@ -580,6 +594,7 @@
           const r1 = await fetch(SB_URL_CI + '/rest/v1/contract_return_matches', { method:'POST',
             headers: await CI_HW(),
             body: JSON.stringify({ return_bill_no: String(returnBillNo), return_branch: branch||null,
+              return_day: day||null,
               status: next, return_value: (row && row.total_value) || 0, matched_by: ciReviewer() }) });
           if (!r1.ok){ alert(sbFailMsg('تعذّر حفظ الحالة', r1.status)); revert(); return; }
           if (row) row.match_status = next;
@@ -589,18 +604,18 @@
 
         // مقابل فاتورة → نفس نافذة الاختيار القديمة
         if (sel) sel.disabled=false;
-        openPicker(returnBillNo, branch);
+        openPicker(returnBillNo, branch, day);
         renderReturns();
       } catch(e){ alert('تعذّر تغيير الحالة'); revert(); }
     }
 
-    async function unmatchReturn(returnBillNo, branch){
+    async function unmatchReturn(returnBillNo, branch, day){
       if (!confirm('فك الربط وإرجاع حالة الفاتورة؟')) return;
       try {
-        const r = await fetch(RPC + 'unmatch_contract_return', { method:'POST', headers: await CI_H(), body: JSON.stringify({ p_return_bill_no: returnBillNo, p_return_branch: branch||'' }) });
+        const r = await fetch(RPC + 'unmatch_contract_return', { method:'POST', headers: await CI_H(), body: JSON.stringify({ p_return_bill_no: returnBillNo, p_return_branch: branch||'', p_return_day: day||null }) });
         const res = await r.json();
         if (res && res.success===false){ alert('تعذّر فك الربط: '+(res.error||'')); return; }
-        const row = RETURNS.find(r=>String(r.return_bill_no)===String(returnBillNo) && String(r.return_branch||'')===String(branch||''));
+        const row = retFind(returnBillNo, branch, day);
         if (row){ row.matched_invoice_bill_no=null; row.matched_at=null; row.match_status='قيد الانتظار'; }
         renderReturns();
       } catch(e){ alert('تعذّر فك الربط'); }
@@ -910,7 +925,9 @@ function getNextSerial(billType) {
     const RP_PAGE = 10, RP_MAX_PAGES = 5;
     let rpInvoice = null, rpRows = [], rpPage = 1, rpSel = new Set(), rpTimer = null;
 
-    function rpKey(x){ return String(x.return_bill_no) + "|" + String(x.return_branch || ""); }
+    // نفس المفتاح الكامل — من غير اليوم كان اختيار مرتجع بيعلّم
+    // كل مرتجعات نفس الفاتورة في الأيام التانية.
+    function rpKey(x){ return String(x.return_bill_no) + "|" + String(x.return_branch || "") + "|" + String(x.return_day || ""); }
 
     function openReturnsPicker(id){
       const item = allData.find(x => x.id == id);
@@ -1020,6 +1037,7 @@ function getNextSerial(billType) {
           const r = await fetch(RPC + "match_contract_return", { method:"POST", headers: await CI_H(), body: JSON.stringify({
             p_return_bill_no: x.return_bill_no,
             p_return_branch:  x.return_branch || "",
+            p_return_day:     x.return_day || null,
             p_invoice_id:     Number(invId),
             p_return_value:   x.total_value || 0,
             p_user:           ciReviewer()
