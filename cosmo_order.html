@@ -180,6 +180,8 @@
             <option value="pending">لم يُطلب</option>
             <option value="ordered">تم الطلب</option>
           </select>
+          <input type="text" id="best-filter" class="form-input" list="best-list" placeholder="أفضل مورّد..." oninput="applyFilters()" title="فلترة بأفضل مورّد (أقل سعر شراء)" style="max-width:200px;">
+          <datalist id="best-list"></datalist>
         </div>
 
         <!-- الفروع + الأزرار في سطر واحد -->
@@ -845,8 +847,20 @@ saveQty();
       // شيل أي شركة مختارة لم تعد موجودة في النوع الحالي
       selectedCompanies = selectedCompanies.filter(function(c){return allCompanies.includes(c);});
       renderCompanyChips();
+      buildBestList();
 
       applyFilters();
+    }
+
+    // قائمة «أفضل مورّد» للفلترة — من الموردين الظاهرين في النتيجة الحالية
+    function buildBestList(){
+      var dl=document.getElementById('best-list'); if(!dl) return;
+      var set={};
+      allResults.forEach(function(i){ var b=cosmoBest[String(i.code)]; if(b&&b.price_store) set[b.price_store]=1; });
+      dl.innerHTML='';
+      Object.keys(set).sort(function(a,b){return String(a).localeCompare(String(b),'ar');}).forEach(function(n){
+        var o=document.createElement('option'); o.value=n; dl.appendChild(o);
+      });
     }
 
     // ===== Filters =====
@@ -854,6 +868,8 @@ saveQty();
       var search   =document.getElementById('search-input').value.trim().toLowerCase();
       var statusF  =document.getElementById('status-filter').value;
       var companies=getSelectedCompanies();
+      var bestEl   =document.getElementById('best-filter');
+      var bestF    =bestEl ? bestEl.value.trim().toLowerCase() : '';
 
       // كل الفلاتر ماعدا إخفاء المتجاهَل — ده نطاق العدّادات
       scopedResults=allResults.filter(function(item){
@@ -862,6 +878,7 @@ saveQty();
         if(companies.length&&!companies.includes(item.company)) return false;
         if(statusF==='pending'&&state.ordered) return false;
         if(statusF==='ordered'&&!state.ordered) return false;
+        if(bestF){ var bb=cosmoBest[String(item.code)]; if(!bb||!bb.price_store||String(bb.price_store).toLowerCase().indexOf(bestF)===-1) return false; }
         return true;
       });
       filteredResults = showIgnored ? scopedResults.slice()
