@@ -243,6 +243,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           <input type="text" id="ord-search" class="form-input" placeholder="🔍 بحث بالصنف أو الكود..." oninput="ordDebounce()" style="max-width:180px">
           <select id="ord-wh" class="form-select" style="max-width:150px" onchange="ordPage=1;loadOrders()"><option value="">كل المخازن</option></select>
           <select id="ord-company" class="form-select" style="max-width:150px" onchange="ordPage=1;loadOrders()"><option value="">كل الشركات</option></select>
+          <input type="text" id="ord-bestsup" class="form-select" list="ord-bestsup-list" placeholder="أفضل مورّد..." style="max-width:150px" oninput="ordDebounce()" title="فلترة بأفضل مورّد (أقل سعر شراء من فواتير الشراء)">
+          <datalist id="ord-bestsup-list"></datalist>
           <select id="ord-under" class="form-select" style="max-width:150px" onchange="ordPage=1;loadOrders()"><option value="on">تحت الطلب</option><option value="off">ليست تحت الطلب</option><option value="" selected>الكل</option></select>
           <span style="display:flex;align-items:center;gap:3px;font-size:0.78rem;font-weight:700;white-space:nowrap">الرصيد
             <select id="ord-stock-op" class="form-select" style="max-width:56px;padding:6px 4px" onchange="ordPage=1;loadOrders()"><option value="lte">≤</option><option value="gte">≥</option></select>
@@ -891,6 +893,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const q = document.getElementById('ord-search').value.trim();
       const w = document.getElementById('ord-wh').value;
       const co = document.getElementById('ord-company').value;
+      const bsup = document.getElementById('ord-bestsup').value.trim();
       const surpOnly = document.getElementById('ord-surp-only').checked;
       // أعمدة الفائض بتتبني من الفروع — كانت تلاتة مكتوبة بالإيد
       const surpCols = BR_KEYS.map(k => 'surplus_' + k).join(',');
@@ -902,6 +905,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       if (w === '__none__') url += '&best_store=is.null';       // بدون مخزن متاح
       else if (w) url += '&best_store=eq.' + encodeURIComponent(w);
       if (co) url += '&company=eq.' + encodeURIComponent(co);
+      if (bsup) url += '&best_pur_store=ilike.*' + encodeURIComponent(bsup) + '*';
       if (surpOnly) url += '&surplus_other=gt.0';
       // إخفاء الأصناف اللي اتطلبت تحويل (لسه في المهلة)
       if (ordTransferPending.size) url += '&itm_code=not.in.(' + [...ordTransferPending].map(c => '"' + String(c).replace(/"/g, '') + '"').join(',') + ')';
@@ -1065,6 +1069,13 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         const list = await (await fetch(REST + 'rpc/get_purchase_companies', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' })).json();
         const sel = document.getElementById('ord-company');
         sel.innerHTML = '<option value="">كل الشركات</option>' + (list || []).map(c => '<option value="' + esc(c.company) + '">' + esc(c.company) + '</option>').join('');
+      } catch (e) {}
+    }
+    async function loadOrdBestSuppliers() {
+      try {
+        const list = await (await fetch(REST + 'rpc/get_order_best_suppliers', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' })).json();
+        const dl = document.getElementById('ord-bestsup-list');
+        if (dl) dl.innerHTML = (list || []).map(s => '<option value="' + esc(s) + '"></option>').join('');
       } catch (e) {}
     }
     async function loadOrdStores() {
@@ -1484,12 +1495,14 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     async function exportOrders() {
       const w = document.getElementById('ord-wh').value;
       const co = document.getElementById('ord-company').value;
+      const bsup = document.getElementById('ord-bestsup').value.trim();
       const q = document.getElementById('ord-search').value.trim();
       const surpOnly = document.getElementById('ord-surp-only').checked;
       let base = REST + 'purchase_orders_flat?select=best_store,itm_code,itm_name,best_item_name,net_required,best_price,best_disc,company'
         + '&branch=eq.' + encodeURIComponent(ordBranch) + '&net_required=gt.0&order=best_store.asc,itm_name.asc';
       base += w ? '&best_store=eq.' + encodeURIComponent(w) : '&best_store=not.is.null';
       if (co) base += '&company=eq.' + encodeURIComponent(co);
+      if (bsup) base += '&best_pur_store=ilike.*' + encodeURIComponent(bsup) + '*';
       if (surpOnly) base += '&surplus_other=gt.0';
       if (q) { const e = encodeURIComponent(q); base += '&or=(itm_name.ilike.*' + e + '*,itm_code.eq.' + e + ')'; }
       base += ordExtraFilters();
@@ -2738,7 +2751,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       // loadMeta/loadMonths/loadPage اتشالوا من هنا — دول بتوع تبويب «معدل
       // الاستهلاك» وبيتحمّلوا أول ما يتفتح (showTab). اللي فاضل مشترك أو
       // بتاع «الطلبيات» وهو التبويب الافتراضي.
-      loadBranchReps(); loadOrdStores(); loadOrdCompanies();
+      loadBranchReps(); loadOrdStores(); loadOrdCompanies(); loadOrdBestSuppliers();
       ordSyncFitBtn();
       showTab('orders');   // الطلبيات هو التبويب الافتراضي عند فتح الشاشة
     })();
