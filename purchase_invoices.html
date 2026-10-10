@@ -394,16 +394,36 @@
     function dateOnly(ts){ if(!ts) return '—'; try{ return new Date(ts).toLocaleDateString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',year:'numeric'}); }catch(e){ return ts; } }
 
     // الدوال بترجّع jsonb (كائن واحد) مش صفوف — فبنقرا الرد الخام بدل fetchPage
+    /* ⚠️ بتوكن المستخدم مش المفتاح العام. السيرفر بيقصر نتيجة دوال
+       المشتريات على فرع المستخدم (الأدمن وحده بيشوف الكل)، والقصر ده
+       محتاج هوية — بالمفتاح العام الطلب بيترفض. */
+    let LAST_RPC_ERR = '';
     async function rpc(fn, body){
+      LAST_RPC_ERR = '';
       try{
+        const tok = (typeof Session !== 'undefined' && Session.bearer) ? await Session.bearer() : SB_ANON_API;
         const r = await fetch(SB_URL_API + '/rest/v1/rpc/' + fn, {
           method:'POST',
-          headers:{ 'Content-Type':'application/json', apikey: SB_ANON_API, Authorization:'Bearer ' + SB_ANON_API },
+          headers:{ 'Content-Type':'application/json', apikey: SB_ANON_API, Authorization:'Bearer ' + tok },
           body: JSON.stringify(body||{})
         });
-        if(!r.ok) return null;
+        if(!r.ok){
+          LAST_RPC_ERR = await r.text().catch(() => '');
+          const m = rpcErrMsg();
+          if(m) toast(m, 6000);
+          return null;
+        }
         return await r.json();
-      }catch(e){ return null; }
+      }catch(e){ LAST_RPC_ERR = String((e && e.message) || e); return null; }
+    }
+
+    /* رسالة السيرفر نفسها أوضح من «تعذّر التحميل» — بتقول إن الحساب
+       غير مربوط بفرع أو إن الصلاحية ناقصة. */
+    function rpcErrMsg(){
+      const raw = LAST_RPC_ERR || '';
+      if(!/42501|غير مصرّح|غير مربوط/.test(raw)) return '';
+      const m = raw.match(/"message"\s*:\s*"([^"]+)"/);
+      return m ? m[1] : 'غير مصرّح بعرض هذه البيانات';
     }
 
     // كل تبويب يحمّل بياناته أول ما يتفتح بس (lazy) — مش كلهم مرة واحدة
@@ -467,8 +487,13 @@
         VEN_DATA = await rpcAuth('get_supplier_report', { p_from: from, p_to: to, p_branch: br });
       }catch(e){
         VEN_DATA = null;
-        document.getElementById('vRows').innerHTML =
-          '<tr><td colspan="12" class="loading">تعذّر تحميل التقرير. يُرجى المحاولة مرة أخرى.</td></tr>';
+        /* رسالة السيرفر أوضح: بتقول إن الحساب غير مربوط بفرع أو إن
+           الصلاحية ناقصة، بدل رسالة فشل عامة. */
+        const raw = String((e && e.message) || e);
+        const m = raw.match(/"message"s*:s*"([^"]+)"/);
+        const msg = (m && m[1]) || 'تعذّر تحميل التقرير. يُرجى المحاولة مرة أخرى.';
+        document.getElementById('vChart').innerHTML =
+          '<div class="loading" style="padding:20px">' + msg + '</div>';
         return;
       }
       renderVendors();
@@ -576,7 +601,30 @@
     function localToday(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
     function monthsAgo(n){ const d=new Date(); d.setMonth(d.getMonth()-n); const p=x=>String(x).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
     function daysAgo(n){ const d=new Date(); d.setDate(d.getDate()-n); const p=x=>String(x).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
-    function brOptsHtml(){ return '<option value="">كل الفروع</option>' + Object.keys(BR).map(c=>`<option value="${c}">${BR[c]}</option>`).join(''); }
+    function isAdminUser(){
+      try{
+        const u = (typeof Session !== 'undefined' && Session.user) ? Session.user() : null;
+        return !!u && u.role === 'admin';
+      }catch(e){ return false; }
+    }
+    function myBranchCode(){
+      try{
+        const u = (typeof Session !== 'undefined' && Session.user) ? Session.user() : null;
+        if(!u || !u.branch) return null;
+        return (typeof Branches !== 'undefined' && Branches.toCode) ? Branches.toCode(u.branch) : null;
+      }catch(e){ return null; }
+    }
+    /* غير الأدمن بيشوف فرعه بس. ده للوضوح مش للحماية — السيرفر بيفرض
+       نفس القيد جوّه الدوال، فتعديل الـselect من المتصفح مابيفيدش. */
+    function brOptsHtml(){
+      if(!isAdminUser()){
+        const c = myBranchCode();
+        return (c && BR[c])
+          ? `<option value="${c}">${BR[c]}</option>`
+          : '<option value="">— حسابك غير مربوط بفرع —</option>';
+      }
+      return '<option value="">كل الفروع</option>' + Object.keys(BR).map(c=>`<option value="${c}">${BR[c]}</option>`).join('');
+    }
     function venOptsHtml(list){ return (Array.isArray(list)?list:[]).map(n=>`<option value="${esc(n)}"></option>`).join(''); }
     let _venNames=null;
     async function vendorNames(){ if(_venNames) return _venNames; const r=await rpc('get_purchase_vendor_names',{p_branch:null}); _venNames=Array.isArray(r)?r:[]; return _venNames; }
@@ -813,7 +861,8 @@
       const body = Object.assign(filters(), { p_page: curPage, p_page_size: PAGE });
       const res = await rpc('get_purchases', body);
       const d = Array.isArray(res) ? res[0] : res;
-      if(!d){ document.getElementById('rows').innerHTML = '<tr><td colspan="11" class="empty">تعذّر التحميل</td></tr>'; return; }
+      if(!d){ document.getElementById('rows').innerHTML =
+          '<tr><td colspan="11" class="empty">' + (rpcErrMsg() || 'تعذّر التحميل') + '</td></tr>'; return; }
       totalRows = Number(d.total)||0;
       document.getElementById('kCount').textContent = f0(d.total);
       document.getElementById('kValue').textContent = f0(d.total_value);
@@ -920,8 +969,7 @@
     }
 
     function initBranches(){
-      const sel=document.getElementById('fBranch');
-      sel.innerHTML = '<option value="">كل الفروع</option>' + Object.keys(BR).map(c=>`<option value="${c}">${BR[c]}</option>`).join('');
+      document.getElementById('fBranch').innerHTML = brOptsHtml();
     }
 
     // ═══ استيراد شيت المشتريات (تحديث الكود والاسم بس) ═══
