@@ -107,7 +107,9 @@
   <div class="container">
     <div class="tabs">
       <button class="tab active" data-tab="invoices" onclick="switchTab('invoices')">فواتير الشراء</button>
-      <button class="tab" data-tab="review" onclick="switchTab('review')">مراجعة المشتريات</button>
+      <button class="tab" data-tab="match" onclick="switchTab('match')">مطابقة أمر توريد الأدوية</button>
+      <button class="tab" data-tab="expiry" onclick="switchTab('expiry')">قرب انتهاء الصلاحية</button>
+      <button class="tab" data-tab="surplus" onclick="switchTab('surplus')">مرتجع للفائض</button>
     </div>
 
     <!-- تبويب الفواتير -->
@@ -147,15 +149,8 @@
       </div>
     </div>
 
-    <!-- تبويب المراجعة -->
-    <div class="panel" id="panel-review">
-      <div class="subtabs">
-        <button class="subtab active" data-sub="match" onclick="subTab('match')"><i class="fas fa-clipboard-check"></i> مطابقة أمر التوريد</button>
-        <button class="subtab" data-sub="expiry" onclick="subTab('expiry')"><i class="fas fa-triangle-exclamation"></i> تنبيه الصلاحية</button>
-      </div>
-
-      <!-- (1) مطابقة أمر التوريد -->
-      <div class="subpanel active" id="sub-match">
+    <!-- تبويب مطابقة أمر توريد الأدوية -->
+    <div class="panel" id="panel-match">
         <div class="sh-head">
           <div class="sh-title"><i class="fas fa-clipboard-check"></i> مطابقة أمر التوريد بالفاتورة</div>
           <button class="btn-p" onclick="loadMatch()"><i class="fas fa-sync-alt"></i> تحديث</button>
@@ -196,8 +191,8 @@
         <div class="pager"><div class="pages" id="missPages"></div><div class="info" id="missInfo"></div></div>
       </div>
 
-      <!-- (2) تنبيه الصلاحية -->
-      <div class="subpanel" id="sub-expiry">
+    <!-- تبويب قرب انتهاء الصلاحية -->
+    <div class="panel" id="panel-expiry">
         <div class="sh-head">
           <div class="sh-title"><i class="fas fa-triangle-exclamation"></i> تنبيه الصلاحية والمرتجعات</div>
           <button class="btn-p" onclick="loadReview()"><i class="fas fa-sync-alt"></i> تحديث</button>
@@ -223,7 +218,38 @@
           </table>
         </div>
         <div class="pager"><div class="pages" id="revPages"></div><div class="info" id="revInfo"></div></div>
+    </div>
+
+    <!-- تبويب مرتجع للفائض -->
+    <div class="panel" id="panel-surplus">
+      <div class="sh-head">
+        <div class="sh-title"><i class="fas fa-rotate-left"></i> مرتجع الفائض للمورّد</div>
+        <button class="btn-p" onclick="loadSurplus()"><i class="fas fa-sync-alt"></i> تحديث</button>
       </div>
+      <div class="filters">
+        <div class="fld"><label>الفرع</label><select class="inp" id="sBranch" onchange="loadSurplus()"></select></div>
+        <div class="fld"><label>المورّد</label><input class="inp" id="sVendor" list="sVendorList" placeholder="كل الموردين — اكتب للبحث" onchange="loadSurplus()"><datalist id="sVendorList"></datalist></div>
+        <div class="fld"><label>من تاريخ الشراء</label><input class="inp" type="date" id="sFrom" onchange="loadSurplus()"></div>
+        <div class="fld"><label>إلى تاريخ</label><input class="inp" type="date" id="sTo" onchange="loadSurplus()"></div>
+      </div>
+      <div class="note">
+        الأصناف اللي اشتريناها وعندها فائض عن المستهدف ومحدش من الفروع محتاجه — مرشّحة للمرتجع للمورّد اللي اشترينا منه.
+        الفائض بيتحسب على الرصيد الحالي (لحظي) من نفس مصدر الطلبيات؛ الفلاتر بتصفّي المشتريات المعروضة بس.
+        اختار مورّد تطلّع كل مرتجعاته. (افتراضي: مشتريات آخر 3 شهور.)
+      </div>
+      <div class="kpis">
+        <div class="kpi b"><div class="l">صفوف قابلة للمرتجع</div><div class="v num" id="sCount">—</div></div>
+        <div class="kpi g"><div class="l">قيمة المرتجع المقترحة</div><div class="v num" id="sValue">—</div></div>
+      </div>
+      <div class="card scroll-tbl" style="padding:0">
+        <table class="pv">
+          <thead><tr>
+            <th>الكود</th><th>الصنف</th><th>الفرع</th><th>المورّد</th><th>اشترينا منه</th><th>آخر سعر شراء</th><th>فائض الفرع</th><th>محتاجه فروع تانية</th><th>قابل للمرتجع</th><th>مقترح لهذا المورّد</th><th>قيمة المرتجع</th>
+          </tr></thead>
+          <tbody id="surRows"><tr><td colspan="11" class="loading">جارِ التحميل…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="pager"><div class="pages" id="surPages"></div><div class="info" id="surInfo"></div></div>
     </div>
   </div>
 
@@ -263,37 +289,80 @@
       }catch(e){ return null; }
     }
 
-    let reviewReady=false;
+    // كل تبويب يحمّل بياناته أول ما يتفتح بس (lazy) — مش كلهم مرة واحدة
+    const TAB_LOADED = { invoices:true };   // الفواتير بتتحمّل في init
     function switchTab(t){
       document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active', b.dataset.tab===t));
       document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
       document.getElementById('panel-'+t).classList.add('active');
-      if(t==='review' && !reviewReady){ reviewReady=true; initReview(); }
+      if(!TAB_LOADED[t]){ TAB_LOADED[t]=true;
+        if(t==='match') initMatch();
+        else if(t==='expiry') initExpiry();
+        else if(t==='surplus') initSurplus();
+      }
     }
 
     function localToday(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
+    function monthsAgo(n){ const d=new Date(); d.setMonth(d.getMonth()-n); const p=x=>String(x).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
+    function brOptsHtml(){ return '<option value="">كل الفروع</option>' + Object.keys(BR).map(c=>`<option value="${c}">${BR[c]}</option>`).join(''); }
+    function venOptsHtml(list){ return (Array.isArray(list)?list:[]).map(n=>`<option value="${esc(n)}"></option>`).join(''); }
+    let _venNames=null;
+    async function vendorNames(){ if(_venNames) return _venNames; const r=await rpc('get_purchase_vendor_names',{p_branch:null}); _venNames=Array.isArray(r)?r:[]; return _venNames; }
 
-    let expiryReady=false;
-    function subTab(s){
-      document.querySelectorAll('.subtab').forEach(b=>b.classList.toggle('active', b.dataset.sub===s));
-      document.querySelectorAll('.subpanel').forEach(p=>p.classList.remove('active'));
-      document.getElementById('sub-'+s).classList.add('active');
-      if(s==='expiry' && !expiryReady){ expiryReady=true; loadReview(); }
+    async function initMatch(){
+      const t = localToday();
+      document.getElementById('mBranch').innerHTML = brOptsHtml();
+      document.getElementById('mFrom').value = t; document.getElementById('mTo').value = t;
+      document.getElementById('mVendorList').innerHTML = venOptsHtml(await vendorNames());
+      loadMatch();
+    }
+    async function initExpiry(){
+      const t = localToday();
+      document.getElementById('rBranch').innerHTML = brOptsHtml();
+      document.getElementById('rFrom').value = t; document.getElementById('rTo').value = t;
+      document.getElementById('rVendorList').innerHTML = venOptsHtml(await vendorNames());
+      loadReview();
+    }
+    async function initSurplus(){
+      document.getElementById('sBranch').innerHTML = brOptsHtml();
+      document.getElementById('sFrom').value = monthsAgo(3); document.getElementById('sTo').value = localToday();
+      document.getElementById('sVendorList').innerHTML = venOptsHtml(await vendorNames());
+      loadSurplus();
     }
 
-    async function initReview(){
-      const t = localToday();
-      const brOpts = '<option value="">كل الفروع</option>' + Object.keys(BR).map(c=>`<option value="${c}">${BR[c]}</option>`).join('');
-      document.getElementById('mBranch').innerHTML = brOpts;
-      document.getElementById('rBranch').innerHTML = brOpts;
-      document.getElementById('mFrom').value = t; document.getElementById('mTo').value = t;
-      document.getElementById('rFrom').value = t; document.getElementById('rTo').value = t;
-      const names = await rpc('get_purchase_vendor_names', { p_branch: null });
-      const list = Array.isArray(names)?names:[];
-      const dOpts = list.map(n=>`<option value="${esc(n)}"></option>`).join('');
-      document.getElementById('mVendorList').innerHTML = dOpts;
-      document.getElementById('rVendorList').innerHTML = dOpts;
-      loadMatch(); // التبويب الافتراضي = المطابقة
+    // ═══ مرتجع الفائض للمورّد ═══
+    function surplusFilters(){ return {
+      p_branch: document.getElementById('sBranch').value||null,
+      p_vendor: document.getElementById('sVendor').value||null,
+      p_from: document.getElementById('sFrom').value||null,
+      p_to: document.getElementById('sTo').value||null
+    }; }
+    async function loadSurplus(){
+      document.getElementById('surRows').innerHTML='<tr><td colspan="11" class="loading">جارِ التحميل…</td></tr>';
+      const res = await rpc('get_purchase_surplus_return', surplusFilters());
+      renderSurplus(Array.isArray(res)?res:[]);
+    }
+    function renderSurplus(rows){
+      let totVal=0; rows.forEach(r=>{ totVal += Number(r.ret_value)||0; });
+      document.getElementById('sCount').textContent = f0(rows.length);
+      document.getElementById('sValue').textContent = f0(totVal);
+      const row = r=>{
+        const otherNeed = Math.max(0, (Number(r.total_req)||0) - (Number(r.req)||0));
+        return `<tr>
+          <td class="num">${esc(r.itm_code||'—')}</td>
+          <td><span style="font-weight:700">${esc(r.itm_name||'—')}</span></td>
+          <td><span class="brtag">${BR[r.branch]||r.branch_ar||r.branch}</span></td>
+          <td class="ven">${esc(r.vendor||'—')}</td>
+          <td class="num">${f0(r.bought_qty)}</td>
+          <td class="num">${f2(r.last_price)}</td>
+          <td class="num">${f0(r.surplus)}</td>
+          <td class="num">${otherNeed>0?f0(otherNeed):'—'}</td>
+          <td class="num"><b>${f0(r.returnable)}</b></td>
+          <td class="num" style="color:#15803d;font-weight:800">${f0(r.ret_qty)}</td>
+          <td class="num">${f0(r.ret_value)}</td>
+        </tr>`;
+      };
+      clp('sur', rows, row, 'surRows','surPages','surInfo', 11, 'مفيش فائض قابل للمرتجع بالفلتر الحالي ✓');
     }
 
     // ═══ مطابقة أمر التوريد ═══
