@@ -22,6 +22,11 @@
     .sh-title{ font-size:1.15rem; font-weight:900; display:flex; align-items:center; gap:8px; }
     .sh-title i{ color:var(--pur-teal); }
     .btn-p{ background:var(--pur-teal); color:#fff; border:none; border-radius:var(--radius-md); padding:8px 14px; font-family:var(--font); font-weight:700; font-size:.8rem; cursor:pointer; }
+    /* زر ثانوي للفترات الجاهزة في تقرير الموردين */
+    .btn-s{ background:var(--surface-2); color:var(--text); border:1.5px solid var(--border); border-radius:var(--radius-md); padding:7px 11px; font-family:var(--font); font-weight:700; font-size:.76rem; cursor:pointer; }
+    .btn-s:hover{ background:var(--surface-3); }
+    th.vsort{ cursor:pointer; user-select:none; }
+    th.vsort:hover{ color:var(--text); }
     .filters{ display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:14px; }
     .fld{ display:flex; flex-direction:column; gap:4px; }
     .fld label{ font-size:.72rem; color:var(--text-muted); }
@@ -110,6 +115,7 @@
       <button class="tab" data-tab="match" onclick="switchTab('match')">مطابقة أمر توريد الأدوية</button>
       <button class="tab" data-tab="expiry" onclick="switchTab('expiry')">قرب انتهاء الصلاحية</button>
       <button class="tab" data-tab="surplus" onclick="switchTab('surplus')">مرتجع للفائض</button>
+      <button class="tab" data-tab="vendors" onclick="switchTab('vendors')">تقرير الموردين</button>
     </div>
 
     <!-- تبويب الفواتير -->
@@ -259,6 +265,83 @@
   </div>
   <div id="toast"></div>
 
+  
+    <div class="panel" id="panel-vendors">
+      <div class="sh-head">
+        <div class="sh-title"><i class="fas fa-ranking-star"></i> تقرير الموردين</div>
+        <div style="display:flex;gap:8px">
+          <button class="btn-p" onclick="exportVendors()"><i class="fas fa-file-excel"></i> تصدير</button>
+          <button class="btn-p" onclick="loadVendors()"><i class="fas fa-sync-alt"></i> تحديث</button>
+        </div>
+      </div>
+      <div class="filters">
+        <div class="fld"><label>الفرع</label><select class="inp" id="vBranch" onchange="loadVendors()"></select></div>
+        <div class="fld"><label>من تاريخ الفاتورة</label><input class="inp" type="date" id="vFrom" onchange="loadVendors()"></div>
+        <div class="fld"><label>إلى تاريخ</label><input class="inp" type="date" id="vTo" onchange="loadVendors()"></div>
+        <div class="fld"><label>فترات جاهزة</label>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn-s" onclick="vPeriod('m0')">الشهر الحالي</button>
+            <button class="btn-s" onclick="vPeriod('m1')">الشهر الماضي</button>
+            <button class="btn-s" onclick="vPeriod('m3')">آخر ٣ شهور</button>
+          </div>
+        </div>
+      </div>
+      <div class="note">
+        الربح هنا <b>فعلي وليس تقديريًا</b>: كل سطر شراء يحمل سعر الشراء وسعر البيع معًا،
+        فالربح المتوقع = (الكمية + البونص) × سعر البيع − قيمة الفاتورة. وهو ربح الصفقة وقت
+        الشراء، لا ربحًا محقّقًا — يتحقق عند البيع الفعلي.
+        «فرق سعر ضائع» = الفرق بين ما دُفع فعلًا وأرخص سعر كان متاحًا لنفس الصنف من مورّد
+        آخر داخل نفس الفترة. «صلاحية قصيرة» = قيمة المشتريات التي تنتهي صلاحيتها خلال
+        ٦ أشهر من تاريخ الفاتورة.
+        (الأصناف بلا كود ولا اسم محتسبة في إجماليات المورّد ومستبعدة من جداول الأصناف.)
+      </div>
+      <div class="kpis">
+        <div class="kpi b"><div class="l">إجمالي المشتريات</div><div class="v num" id="vBuy">—</div></div>
+        <div class="kpi g"><div class="l">الربح المتوقع</div><div class="v num" id="vProfit">—</div></div>
+        <div class="kpi a"><div class="l">هامش الربح</div><div class="v num" id="vMargin">—</div></div>
+        <div class="kpi r"><div class="l">فرق سعر ضائع</div><div class="v num" id="vLost">—</div></div>
+      </div>
+
+      <div class="sh-title" style="margin:6px 0 8px"><i class="fas fa-truck-field"></i> الموردون <span id="vCount" style="font-weight:600;color:var(--text-secondary);font-size:.78rem"></span></div>
+      <div class="card scroll-tbl" style="padding:0;margin-bottom:16px">
+        <table class="pv">
+          <thead><tr>
+            <th>المورّد</th>
+            <th class="vsort" data-k="buy">المشتريات ▾</th>
+            <th class="vsort" data-k="share">% من الإجمالي</th>
+            <th class="vsort" data-k="profit">الربح المتوقع</th>
+            <th class="vsort" data-k="margin">الهامش</th>
+            <th class="vsort" data-k="bills">الفواتير</th>
+            <th class="vsort" data-k="items">الأصناف</th>
+            <th class="vsort" data-k="avg_bill">متوسط الفاتورة</th>
+            <th class="vsort" data-k="bonus">البونص</th>
+            <th class="vsort" data-k="back">المرتجع</th>
+            <th class="vsort" data-k="short_exp">صلاحية قصيرة</th>
+            <th class="vsort" data-k="lost">فرق سعر ضائع</th>
+          </tr></thead>
+          <tbody id="vRows"><tr><td colspan="12" class="loading">جارٍ التحميل…</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="sh-title" style="margin:6px 0 8px"><i class="fas fa-money-bill-trend-up"></i> أعلى فرص التوفير الضائعة</div>
+      <div class="card scroll-tbl" style="padding:0;margin-bottom:16px">
+        <table class="pv">
+          <thead><tr><th>الصنف</th><th>الكود</th><th>المورّد</th><th>الكمية</th>
+            <th>سعر الوحدة المدفوع</th><th>أرخص سعر متاح</th><th>الفرق الضائع</th></tr></thead>
+          <tbody id="vSav"><tr><td colspan="7" class="loading">—</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="sh-title" style="margin:6px 0 8px"><i class="fas fa-boxes-stacked"></i> أعلى الأصناف قيمة شراء</div>
+      <div class="card scroll-tbl" style="padding:0">
+        <table class="pv">
+          <thead><tr><th>الصنف</th><th>الكود</th><th>أكبر مورّد له</th>
+            <th>قيمة الشراء</th><th>الربح المتوقع</th><th>الهامش</th></tr></thead>
+          <tbody id="vItems"><tr><td colspan="6" class="loading">—</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
   <script src="config.js?v=20260904c"></script>
   <script src="session.js?v=20260926dl"></script>
   <script src="branches.js?v=20260904d"></script>
@@ -299,7 +382,127 @@
         if(t==='match') initMatch();
         else if(t==='expiry') initExpiry();
         else if(t==='surplus') initSurplus();
+        else if(t==='vendors') initVendors();
       }
+    }
+
+    /* ═══ تقرير الموردين ═══ */
+    let VEN_DATA = null, VEN_SORT = { k:'buy', dir:-1 };
+
+    function monthStart(back){
+      const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - (back||0));
+      const p = n => String(n).padStart(2,'0');
+      return `${d.getFullYear()}-${p(d.getMonth()+1)}-01`;
+    }
+    function monthEnd(back){
+      const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - (back||0) + 1); d.setDate(0);
+      const p = n => String(n).padStart(2,'0');
+      return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+    }
+
+    function initVendors(){
+      document.getElementById('vBranch').innerHTML = brOptsHtml();
+      vPeriod('m0');   // الافتراضي: الشهر الحالي
+      document.querySelectorAll('.vsort').forEach(th => th.addEventListener('click', () => {
+        const k = th.dataset.k;
+        VEN_SORT = { k, dir: (VEN_SORT.k === k ? -VEN_SORT.dir : -1) };
+        renderVendors();
+      }));
+    }
+
+    function vPeriod(p){
+      if(p === 'm0'){ document.getElementById('vFrom').value = monthStart(0); document.getElementById('vTo').value = localToday(); }
+      else if(p === 'm1'){ document.getElementById('vFrom').value = monthStart(1); document.getElementById('vTo').value = monthEnd(1); }
+      else { document.getElementById('vFrom').value = monthStart(2); document.getElementById('vTo').value = localToday(); }
+      loadVendors();
+    }
+
+    async function loadVendors(){
+      const from = document.getElementById('vFrom').value;
+      const to   = document.getElementById('vTo').value;
+      const br   = document.getElementById('vBranch').value || null;
+      if(!from || !to) return;
+      document.getElementById('vRows').innerHTML = '<tr><td colspan="12" class="loading">جارٍ التحميل…</td></tr>';
+      try{
+        /* rpcAuth بتوكن المستخدم مش المفتاح العام: التقرير بيكشف تكاليف
+           الشراء وهوامش الربح، والمفتاح العام منشور مع الصفحة. */
+        VEN_DATA = await rpcAuth('get_supplier_report', { p_from: from, p_to: to, p_branch: br });
+      }catch(e){
+        VEN_DATA = null;
+        document.getElementById('vRows').innerHTML =
+          '<tr><td colspan="12" class="loading">تعذّر تحميل التقرير. يُرجى المحاولة مرة أخرى.</td></tr>';
+        return;
+      }
+      renderVendors();
+    }
+
+    function renderVendors(){
+      const d = VEN_DATA || {};
+      const sm = d.summary || {};
+      document.getElementById('vBuy').textContent    = f0(sm.buy) + ' ج';
+      document.getElementById('vProfit').textContent = f0(sm.profit) + ' ج';
+      document.getElementById('vMargin').textContent = (sm.margin == null ? '—' : sm.margin + '%');
+      document.getElementById('vLost').textContent   = f0(sm.lost) + ' ج';
+      document.getElementById('vCount').textContent  =
+        (sm.vendors ? `(${f0(sm.vendors)} مورّد · ${f0(sm.bills)} فاتورة)` : '');
+
+      const rows = (d.vendors || []).slice().sort((a,b) => {
+        const x = Number(a[VEN_SORT.k]) || 0, y = Number(b[VEN_SORT.k]) || 0;
+        return (x - y) * VEN_SORT.dir;
+      });
+      document.querySelectorAll('.vsort').forEach(th => {
+        const base = th.textContent.replace(/[ ▾▴]+$/, '');
+        th.textContent = base + (th.dataset.k === VEN_SORT.k ? (VEN_SORT.dir < 0 ? ' ▾' : ' ▴') : '');
+      });
+
+      document.getElementById('vRows').innerHTML = rows.length ? rows.map(v => `<tr>
+        <td><b>${esc(v.ven)}</b></td>
+        <td class="num">${f0(v.buy)}</td>
+        <td class="num">${v.share}%</td>
+        <td class="num" style="color:#16a34a;font-weight:700">${f0(v.profit)}</td>
+        <td class="num">${v.margin}%</td>
+        <td class="num">${f0(v.bills)}</td>
+        <td class="num">${f0(v.items)}</td>
+        <td class="num">${f0(v.avg_bill)}</td>
+        <td class="num">${v.bonus ? f0(v.bonus) : '—'}</td>
+        <td class="num">${v.back ? f0(v.back) : '—'}</td>
+        <td class="num">${v.short_exp ? f0(v.short_exp) : '—'}</td>
+        <td class="num" style="color:${v.lost ? '#dc2626' : 'inherit'}">${v.lost ? f0(v.lost) : '—'}</td>
+      </tr>`).join('') : '<tr><td colspan="12" class="loading">لا توجد مشتريات في هذه الفترة</td></tr>';
+
+      document.getElementById('vSav').innerHTML = (d.savings || []).length
+        ? d.savings.map(x => `<tr>
+            <td>${esc(x.name)}</td><td class="num">${esc(x.code || '—')}</td>
+            <td>${esc(x.ven)}</td><td class="num">${f0(x.qty)}</td>
+            <td class="num">${f2(x.paid)}</td>
+            <td class="num" style="color:#16a34a">${f2(x.best)}</td>
+            <td class="num" style="color:#dc2626;font-weight:700">${f0(x.lost)}</td></tr>`).join('')
+        : '<tr><td colspan="7" class="loading">لا توجد فروق أسعار في هذه الفترة</td></tr>';
+
+      document.getElementById('vItems').innerHTML = (d.top_items || []).length
+        ? d.top_items.map(x => `<tr>
+            <td>${esc(x.name)}</td><td class="num">${esc(x.code || '—')}</td>
+            <td>${esc(x.ven)}</td><td class="num">${f0(x.buy)}</td>
+            <td class="num" style="color:#16a34a">${f0(x.profit)}</td>
+            <td class="num">${x.margin}%</td></tr>`).join('')
+        : '<tr><td colspan="6" class="loading">—</td></tr>';
+    }
+
+    function exportVendors(){
+      if(!VEN_DATA || !(VEN_DATA.vendors || []).length){ toast('لا توجد بيانات للتصدير', 2500); return; }
+      const rows = VEN_DATA.vendors.map(v => ({
+        'المورّد': v.ven, 'المشتريات': v.buy, '% من الإجمالي': v.share,
+        'الربح المتوقع': v.profit, 'الهامش %': v.margin, 'الفواتير': v.bills,
+        'الأصناف': v.items, 'متوسط الفاتورة': v.avg_bill, 'البونص': v.bonus,
+        'المرتجع': v.back, 'صلاحية قصيرة': v.short_exp, 'فرق سعر ضائع': v.lost
+      }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'الموردون');
+      if((VEN_DATA.savings || []).length)
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(VEN_DATA.savings.map(x => ({
+          'الصنف': x.name, 'الكود': x.code, 'المورّد': x.ven, 'الكمية': x.qty,
+          'المدفوع': x.paid, 'الأرخص': x.best, 'الفرق الضائع': x.lost }))), 'فرص التوفير');
+      XLSX.writeFile(wb, `تقرير-الموردين-${document.getElementById('vFrom').value}_${document.getElementById('vTo').value}.xlsx`);
     }
 
     function localToday(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
