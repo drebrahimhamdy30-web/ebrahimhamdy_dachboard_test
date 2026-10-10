@@ -20,7 +20,7 @@ grant execute on function public.require_page_edit(text) to authenticated;
 
 create or replace function public.purchase_stage_clear()
 returns void language plpgsql security definer set search_path=public as $$
-begin perform require_page_edit('purchase_invoices'); delete from public.purchase_xlsx_stage; end$$;
+begin perform require_page_edit('purchase_invoices'); delete from public.purchase_xlsx_stage where true; end$$;
 
 create or replace function public.purchase_stage_add(p_rows jsonb)
 returns integer language plpgsql security definer set search_path=public as $$
@@ -55,7 +55,7 @@ begin
   on conflict (branch,itm_id) do update set itm_code=excluded.itm_code,itm_name=excluded.itm_name,updated_at=now();
   get diagnostics v_mapped=row_count;
   v_applied := public.apply_item_code_map();
-  delete from public.purchase_xlsx_stage;
+  delete from public.purchase_xlsx_stage where true;
   return jsonb_build_object('stage',v_stage,'mapped',v_mapped,'applied',v_applied);
 end$$;
 
