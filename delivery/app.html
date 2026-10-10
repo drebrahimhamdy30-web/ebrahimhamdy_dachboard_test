@@ -104,6 +104,16 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text);min-h
 .hs-results.open{display:block}
 .hs-row{padding:7px 11px;border-bottom:1px solid #f1f5f9;font-size:.76rem;line-height:1.5}
 .hs-row:last-child{border-bottom:none}
+/* صفوف التكلفة: التاريخ والمورّد والفرع تحت بعض بخط أصغر */
+.hs-cost{margin-top:4px;display:grid;gap:3px}
+.hs-cost-r{display:flex;align-items:center;gap:6px;font-size:.72rem;color:#475569;
+           background:var(--gray-light);border-radius:7px;padding:3px 7px}
+.hs-cost-r b{font-size:.8rem;color:var(--text)}
+.hs-cost-r .d{color:#64748b;font-weight:600}
+.hs-cost-r .v{margin-right:auto;color:#334155;font-weight:600;
+              white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40%}
+.hs-cost-r .br{color:#0e7490;font-weight:700}
+.hs-cost-r.last b{color:var(--primary)}
 .quick-links{display:flex;align-items:center;gap:.35rem;flex-wrap:nowrap;overflow-x:auto;min-width:0;scrollbar-width:none}
 .quick-links::-webkit-scrollbar{display:none}
 .qbtn{height:34px;padding:0 .7rem;border-radius:9px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);display:inline-flex;align-items:center;gap:.35rem;cursor:pointer;transition:all .15s;position:relative;flex-shrink:0;font-family:'Cairo',sans-serif;font-size:.75rem;font-weight:700;white-space:nowrap}
@@ -383,6 +393,7 @@ body.dark{     --text-light:#6b7a94;  --gray-light:#16223a; --primary-light:#124
         <select id="hsMode" class="hs-mode" onchange="hsSearch()">
           <option value="stock">المخزون</option>
           <option value="stores">المخازن</option>
+          <option value="cost">التكلفة</option>
         </select>
         <input type="text" tabindex="-1" aria-hidden="true" autocomplete="username" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none">
         <input id="hsInput" class="hs-input" type="search" name="hdr_item_q" placeholder="🔍 بحث ذكي عن صنف..." autocomplete="off" data-lpignore="true" data-form-type="other" oninput="hsDebounce()">
@@ -978,6 +989,13 @@ function hsPrice(x) {
   const m = parseFloat(x.m_p);
   return (isFinite(m) && m > 0) ? m : null;
 }
+/* التاريخ جاي ISO من السيرفر — نعرضه يوم/شهر من غير new Date()
+   عشان ما نقعش في إزاحة المنطقة الزمنية على تاريخ مجرّد */
+function hsDate(v) {
+  const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? m[3] + '/' + m[2] : '—';
+}
+
 function hsShow(html) { const r = document.getElementById('hsResults'); if (r) { r.innerHTML = html; r.classList.add('open'); } }
 function hsClose() { const r = document.getElementById('hsResults'); if (r) r.classList.remove('open'); }
 function hsDebounce() { clearTimeout(hsTimer); hsTimer = setTimeout(hsSearch, 300); }
@@ -996,6 +1014,36 @@ async function hsSearch() {
         + '<div style="color:#334155;margin-top:2px">' + hsQtyLine(x)
         + (x.unit ? ' · ' + hsEsc(x.unit) : '')
         + (hsPrice(x) != null ? ' · سعر ' + hsR1(hsPrice(x)) : '') + '</div></div>').join(''));
+    } else if (mode === 'cost') {
+      /* آخر أسعار الشراء من فواتير الشراء المزامنة من eplus.
+         الدالة بتجمّع بـ(تاريخ، مورّد، سعر) لأن نفس الشراء بيتسجّل
+         بفاتورة لكل فرع، فمن غير التجميع «آخر 4 أسعار» بتطلع نفس
+         السعر مكرر 4 مرات. */
+      const { data, error } = await db.rpc('search_item_cost',
+        { p_q: q, p_limit: 6, p_hist: 4 });
+      if (error) {
+        const miss = /PGRST202|does not exist|not find the function/i.test(
+          (error.message || '') + (error.hint || ''));
+        hsShow('<div class="hs-row" style="color:#b91c1c">' + (miss
+          ? 'بيانات فواتير الشراء غير متاحة على هذا الخادم بعد.'
+          : 'تعذّر البحث في التكلفة.') + '</div>');
+        return;
+      }
+      const rows = Array.isArray(data) ? data : [];
+      if (!rows.length) { hsShow('<div class="hs-row" style="color:#64748b">لا توجد مشتريات بهذا الاسم أو الكود</div>'); return; }
+      const brName = c => { try { return Branches.toName(c) || c; } catch (e) { return c; } };
+      hsShow(rows.map(x =>
+        '<div class="hs-row"><b>' + hsEsc(x.name) + '</b> <span style="color:#94a3b8">' + hsEsc(x.code) + '</span>'
+        + '<div class="hs-cost">' + (x.prices || []).map((p, i) =>
+            '<div class="hs-cost-r' + (i === 0 ? ' last' : '') + '">'
+            + '<b>' + hsR1(p.eff != null ? p.eff : p.price) + '</b>'
+            + (Number(p.dis) > 0 ? ' <span style="color:#15803d">-' + p.dis + '%</span>' : '')
+            + (Number(p.bonus) > 0 ? ' <span style="color:#b45309">+' + hsR1(p.bonus) + ' بونص</span>' : '')
+            + '<span class="d">' + hsEsc(hsDate(p.d)) + '</span>'
+            + '<span class="v">' + hsEsc(p.ven || '—') + '</span>'
+            + '<span class="br">' + hsEsc((p.branches || []).map(brName).join('، ')) + '</span>'
+            + '</div>').join('')
+        + '</div></div>').join(''));
     } else {
       const qs = q.replace(/[,()%]/g, ' ').trim();
       const { data } = await db.from('store_item_prices')
