@@ -278,9 +278,11 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
               <th data-col="save">كمية التوفير</th>
               <th data-col="stock">الرصيد</th>
               <th data-col="company">الشركة</th>
+              <th data-col="bestsup" title="أرخص مورّد اشترينا منه الصنف — آخر 3 شهور، وإلا كل الفواتير">أفضل مورّد<br><span style="font-weight:400;font-size:.68rem;opacity:.85">شراء آخر 3ش</span></th>
+              <th data-col="bestprice" title="أقل سعر شراء دفعناه للصنف">سعر الشراء</th>
               <th data-col="arch">أرشفة</th>
             </tr></thead>
-            <tbody id="ord-body"><tr><td colspan="16" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr></tbody>
+            <tbody id="ord-body"><tr><td colspan="18" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr></tbody>
           </table>
         </div>
         <div id="ord-pager"></div>
@@ -920,7 +922,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     }
 
     // ===== تحكّم أعمدة جدول الطلبيات: عرض + ترتيب (محفوظ في المتصفح) =====
-    const ORD_COLS_DEF = ['sel','code','name','send','net','store','sprice','sdisc','req','surplus','rate','save','stock','company','arch'];
+    const ORD_COLS_DEF = ['sel','code','name','send','net','store','sprice','sdisc','req','surplus','rate','save','stock','company','bestsup','bestprice','arch'];
     // خريطة الفرز: عمود العرض → عمود قاعدة البيانات (server-side لكل البيانات مش الصفحة)
     const ORD_SORT_MAP = { code:'itm_code', name:'itm_name', net:'net_required', store:'best_store', sprice:'price', sdisc:'best_disc', req:'required', surplus:'surplus_other', rate:'base_rate', save:'rate', stock:'stock', company:'company' };
     let ordSortCol = 'name', ordSortDir = 'asc';   // الافتراضي: ترتيب أبجدي حسب اسم الصنف
@@ -1096,16 +1098,38 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       await loadOrdSendQty();
       ordSelBranch = ordBranch;
     }
+    let ordBest = {};
+    async function ordLoadBest(rows) {
+      ordBest = {};
+      const codes = [...new Set(rows.map(r => r.itm_code).filter(Boolean))];
+      if (!codes.length) return;
+      try {
+        const url = REST + 'best_purchase_by_code?select=itm_code,price_store,best_price,src&itm_code=in.(' + codes.map(c => encodeURIComponent(c)).join(',') + ')';
+        const r = await fetch(url, { headers: H });
+        (await r.json()).forEach(x => { ordBest[x.itm_code] = x; });
+      } catch (e) {}
+    }
+    function bestSupCell(code) {
+      const b = ordBest[code];
+      if (!b || !b.price_store) return '<span style="color:var(--text-muted)">—</span>';
+      const fb = b.src === 'all' ? ' <span style="font-size:.6rem;background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:20px">كل الفواتير</span>' : '';
+      return '<span style="font-weight:700;color:#0f766e">' + esc(b.price_store) + '</span>' + fb;
+    }
+    function bestPriceCell(code) {
+      const b = ordBest[code];
+      return (!b || b.best_price == null) ? '—' : numv(b.best_price);
+    }
     async function loadOrders() {
       const body = document.getElementById('ord-body');
-      body.innerHTML = '<tr><td colspan="16" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr>';
+      body.innerHTML = '<tr><td colspan="18" style="padding:24px;color:var(--text-muted);">جارٍ التحميل…</td></tr>';
       try {
         if (ordSelBranch !== ordBranch) await loadOrderSelections();
         const res = await fetch(buildOrdQuery((ordPage - 1) * ORD_SIZE), { headers: { ...H, 'Prefer': 'count=exact' } });
         const rows = await res.json();
         const cr = res.headers.get('content-range');
         ordTotal = cr && cr.includes('/') ? parseInt(cr.split('/')[1]) : rows.length;
-        if (!rows.length) { body.innerHTML = '<tr><td colspan="16" style="padding:24px;color:var(--text-muted);">لا توجد أصناف مطلوبة بهذا الفلتر.</td></tr>'; ordPager(); return; }
+        if (!rows.length) { body.innerHTML = '<tr><td colspan="18" style="padding:24px;color:var(--text-muted);">لا توجد أصناف مطلوبة بهذا الفلتر.</td></tr>'; ordPager(); return; }
+        await ordLoadBest(rows);
         ordById = {};
         body.innerHTML = rows.map(r => {
           ordById[r.id] = r; r._wh = null;
@@ -1164,6 +1188,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
             + '<td data-col="save">' + numv(r.rate) + '</td>'
             + '<td data-col="stock">' + numv(r.stock) + '</td>'
             + '<td data-col="company" style="font-size:.7rem;color:var(--text-muted)">' + esc(r.company) + '</td>'
+            + '<td data-col="bestsup">' + bestSupCell(r.itm_code) + '</td>'
+            + '<td data-col="bestprice" style="font-weight:800">' + bestPriceCell(r.itm_code) + '</td>'
             + '<td data-col="arch">' + arch + '</td>'
             + '</tr>';
         }).join('');
@@ -1171,7 +1197,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         ordPager();
         ordApplyLayout();
         ordSendNav();
-      } catch (e) { body.innerHTML = '<tr><td colspan="16" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>'; }
+      } catch (e) { body.innerHTML = '<tr><td colspan="18" style="padding:24px;color:var(--danger);">خطأ في التحميل</td></tr>'; }
     }
     async function ordSelToggle(code, on, stock) {
       if (!canOrder) return;   // المشتريات فقط

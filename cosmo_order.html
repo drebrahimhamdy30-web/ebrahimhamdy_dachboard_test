@@ -244,6 +244,7 @@
        عدّاد «متجاهل» كان بيتحسب على allResults (الكتالوج كله) والباقي على
        المفلتر، فكان بيقول «متجاهل: 156» وانت مفلتر على شركة نصيبها صفر. */
     var dataLoaded=false, allResults=[], scopedResults=[], filteredResults=[];
+    var cosmoBest={};   // أفضل مورّد (أقل سعر شراء) لكل كود — من best_purchase_by_code
     var itemStates = {};
     /* ===== تحويل بدل شراء =====
        لما تختار فرع واحد، بدل أعمدة الفروع بيظهر عمود واحد بيقول:
@@ -558,6 +559,7 @@ saveQty();
         ]);
         stockSummary=Array.isArray(r[0])?r[0]:[];
         salesData   =Array.isArray(r[1])?r[1]:[];
+        try { if(!Object.keys(cosmoBest).length){ (await Session.getAll('best_purchase_by_code?select=itm_code,price_store,best_price,src')||[]).forEach(function(x){ cosmoBest[String(x.itm_code)]=x; }); } } catch(e){}
         dataLoaded=true;
         document.getElementById('result-container').innerHTML='<div class="loading-overlay">✅ جاهز — اضغط "احسب"</div>';
       } catch(e){
@@ -965,6 +967,13 @@ saveQty();
     }
 
     // ===== Render =====
+    function cosmoBestCells(code){
+      var b = cosmoBest[String(code)];
+      if(!b || b.best_price==null){ return '<td style="color:var(--text-muted)">—</td><td style="color:var(--text-muted)">—</td>'; }
+      var fb = b.src==='all' ? ' <span style="font-size:.6rem;background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:20px">كل الفواتير</span>' : '';
+      return '<td style="font-weight:700;color:#0f766e">'+ (b.price_store||'—') + fb +'</td>'+
+             '<td style="font-weight:800">'+ (Math.round(Number(b.best_price)*100)/100) +'</td>';
+    }
     function renderResults(list){
       var container=document.getElementById('result-container');
       // نرجع لأول صفحة عند تغيّر الفلاتر فقط (مش عند تعليم/تجاهل صنف)
@@ -1003,6 +1012,8 @@ saveQty();
                 <th>${brLbl} الهدف</th>
                 <th>${brLbl} الرصيد</th>
                 ${singleBranch() ? '<th>تحويل بدل شراء</th>' : brHeadCells('احتياج·رصيد·معدل·×')}
+                <th title="أرخص مورّد اشترينا منه الصنف — آخر 3 شهور، وإلا كل الفواتير">أفضل مورّد<br><span style="font-weight:400;font-size:.68rem;opacity:.85">شراء آخر 3ش</span></th>
+                <th title="أقل سعر شراء دفعناه للصنف">سعر الشراء</th>
               </tr>
             </thead>
             <tbody>
@@ -1056,6 +1067,7 @@ saveQty();
           '<td style="color:var(--accent-dark);font-weight:700;">'+r1(item.totalTarget)+'</td>'+
           '<td style="font-weight:600;">'+r1(item.totalStock)+'</td>'+
           (singleBranch() ? transferCell(item) : BR_KEYS.map(function(k){ return bc(item[k]); }).join(''))+
+          cosmoBestCells(item.code)+
         '</tr>';
       });
 
