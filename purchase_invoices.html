@@ -609,15 +609,22 @@
       p_from: document.getElementById('sFrom').value||null,
       p_to: document.getElementById('sTo').value||null
     }; }
-    async function loadSurplus(){
-      document.getElementById('surRows').innerHTML='<tr><td colspan="11" class="loading">جارِ التحميل…</td></tr>';
-      const res = await rpc('get_purchase_surplus_return', surplusFilters());
-      renderSurplus(Array.isArray(res)?res:[]);
+    // ═══ مرتجع الفائض للمورّد (ترقيم + إجماليات من السيرفر) ═══
+    let surPage = 1; const SUR_PER = 50;
+    async function loadSurplus(page){
+      surPage = (page && page>0) ? page : 1;
+      document.getElementById('surRows').innerHTML='<tr><td colspan="12" class="loading">جارِ التحميل…</td></tr>';
+      const f = surplusFilters(); f.p_limit = SUR_PER; f.p_offset = (surPage-1)*SUR_PER;
+      const res = await rpc('get_purchase_surplus_return', f);
+      renderSurplus(res || {});
     }
-    function renderSurplus(rows){
-      let totVal=0; rows.forEach(r=>{ totVal += Number(r.ret_value)||0; });
-      document.getElementById('sCount').textContent = f0(rows.length);
-      document.getElementById('sValue').textContent = f0(totVal);
+    function renderSurplus(res){
+      const rows  = (res && Array.isArray(res.rows)) ? res.rows : [];
+      const total = Number(res && res.total_count)||0;
+      document.getElementById('sCount').textContent = f0(total);
+      document.getElementById('sValue').textContent = f0(Number(res && res.total_value)||0);
+      const tb=document.getElementById('surRows'), box=document.getElementById('surPages'), inf=document.getElementById('surInfo');
+      if(!rows.length){ tb.innerHTML='<tr><td colspan="12" class="empty">لا يوجد فائض قابل للإرجاع بالفلتر الحالي ✓</td></tr>'; box.innerHTML=''; inf.textContent=''; return; }
       const row = r=>`<tr>
           <td class="num">${esc(r.itm_code||'—')}</td>
           <td><span style="font-weight:700">${esc(r.itm_name||'—')}</span></td>
@@ -632,7 +639,16 @@
           <td class="num" style="color:#15803d;font-weight:800"><b>${f0(r.returnable)}</b></td>
           <td class="num">${f0(r.ret_value)}</td>
         </tr>`;
-      clp('sur', rows, row, 'surRows','surPages','surInfo', 12, 'لا يوجد فائض قابل للإرجاع بالفلتر الحالي ✓');
+      tb.innerHTML = rows.map(row).join('');
+      const pages = Math.max(1, Math.ceil(total/SUR_PER));
+      if(surPage>pages){ surPage=pages; }
+      const btn=(l,p,d,a)=>`<button class="pg ${a?'active':''}" ${d?'disabled':''} onclick="loadSurplus(${p})">${l}</button>`;
+      let h=btn('»',1,surPage===1)+btn('‹',surPage-1,surPage===1);
+      let st=Math.max(1,surPage-2), e=Math.min(pages,st+4); st=Math.max(1,e-4);
+      for(let i=st;i<=e;i++) h+=btn(i,i,false,i===surPage);
+      h+=btn('›',surPage+1,surPage===pages)+btn('«',pages,surPage===pages);
+      box.innerHTML=h;
+      inf.textContent=`صفحة ${surPage} من ${pages} · إجمالي ${f0(total)}`;
     }
 
     // ═══ مطابقة أمر التوريد ═══
