@@ -24,7 +24,17 @@ try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_d
 body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
 .perm-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:.75rem}
 .no-access{text-align:center;padding:4rem 1rem;color:var(--text-muted)}
-.matrix-wrap{overflow-x:auto;background:var(--surface);border-radius:12px;border:1px solid var(--border)}
+/* الهيدر كان عليه position:sticky من الأول ومكانش شغّال: overflow-x:auto
+   بيخلّي الحاوية نفسها حاوية تمرير، فالالتصاق بيتحسب عليها هي — وهي
+   من غير ارتفاع محدد مابتتمررش رأسيًا أصلًا، اللي بيتمرّر هو الصفحة.
+   بإعطائها ارتفاع أقصى بقت هي اللي بتتمرّر، فالهيدر بيثبت فعلًا. */
+.matrix-wrap{overflow:auto;max-height:calc(100vh - 190px);background:var(--surface);border-radius:12px;border:1px solid var(--border)}
+.scope-row td{background:var(--surface-2,#f8fafc);font-weight:700;border-bottom:2px solid var(--border)}
+.scope-row td:first-child{text-align:right !important}
+.scope-sel{font-family:inherit;font-size:.74rem;font-weight:700;padding:3px 6px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text)}
+.scope-txt{font-size:.74rem;font-weight:700}
+.scope-all{color:var(--primary)}
+.scope-own{color:var(--text-muted)}
 table.matrix{border-collapse:collapse;font-size:.78rem;min-width:900px;width:100%}
 table.matrix th,table.matrix td{padding:.5rem .6rem;border-bottom:1px solid var(--border);text-align:center;white-space:nowrap}
 table.matrix th{background:var(--gray-light);position:sticky;top:0;z-index:2}
@@ -91,6 +101,7 @@ const ROLES = [
 // و4 شاشات مكانتش موجودة هنا خالص فماكانش ينفع تتعدّل صلاحياتها.
 
 let permData = {};   // permData[role][page] = {can_view, can_edit}
+let scopeData = {};  // scopeData[role] = true يعني كل الفروع، وإلا فرعه بس
 // تبويبات الشاشات: TABS[page] = [{tab_key,title}]، tabDenied["role|page|tab"] = true لو ممنوع
 let TABS = {}, tabDenied = {}, openTabs = new Set();
 let editMode = false;
@@ -113,6 +124,13 @@ async function loadPermissions(){
     document.getElementById('permBody').innerHTML='<div class="no-access">⚠️ تعذّر تحميل الصلاحيات من الخادم.<br>من فضلك حدّث الصفحة وحاول تاني — الحفظ متوقّف مؤقتاً لحماية الصلاحيات من المسح.</div>';
     return;
   }
+  // نطاق الفروع لكل دور — مفيش صف = فرعه بس
+  scopeData = {};
+  try{
+    const sc = await db.from('role_branch_scope').select('role,all_branches');  // data-ok: صف واحد لكل دور — 9 أدوار في النظام كله
+    (sc.data||[]).forEach(r => { scopeData[r.role] = !!r.all_branches; });
+  }catch(e){ console.error('branch scope load failed', e); }
+
   permData={};
   data.forEach(r=>{
     if(!permData[r.role]) permData[r.role]={};
@@ -154,6 +172,26 @@ function render(){
   let html = `<div class="matrix-wrap"><table class="matrix"><thead><tr><th>الصفحة</th>`;
   ROLES.forEach(r => html += `<th>${r.label}</th>`);
   html += `</tr></thead><tbody>`;
+
+  /* نطاق الفروع: إعداد للدور كله مش لصفحة بعينها، فمكانه فوق المصفوفة.
+     الأدمن ثابت على كل الفروع — السيرفر بيفرض ده مهما اتبعت من هنا. */
+  html += `<tr class="scope-row"><td>🏬 نطاق الفروع</td>`;
+  ROLES.forEach(role => {
+    if(role.key === 'admin'){
+      html += `<td><span class="scope-txt scope-all">كل الفروع</span></td>`;
+      return;
+    }
+    const all = !!scopeData[role.key];
+    if(editMode){
+      html += `<td><select class="scope-sel" data-role="${role.key}">
+        <option value="own"${all?'':' selected'}>فرعه بس</option>
+        <option value="all"${all?' selected':''}>كل الفروع</option>
+      </select></td>`;
+    } else {
+      html += `<td><span class="scope-txt ${all?'scope-all':'scope-own'}">${all?'كل الفروع':'فرعه بس'}</span></td>`;
+    }
+  });
+  html += `</tr>`;
 
   const grouped = Pages.grouped();
   Pages.sections().forEach(group => {
@@ -222,6 +260,16 @@ async function savePermissions(){
   try{
     const { error } = await db.rpc('save_page_permissions_bulk', { p_updates: updates });
     if(error) throw error;
+
+    // نطاق الفروع (الأدمن مش في اللستة — ثابت على كل الفروع)
+    const scopeUpdates = [];
+    document.querySelectorAll('#permBody select.scope-sel').forEach(sel => {
+      scopeUpdates.push({ role: sel.dataset.role, all_branches: sel.value === 'all' });
+    });
+    if(scopeUpdates.length){
+      const { error: sErr } = await db.rpc('save_role_branch_scope', { p_updates: scopeUpdates });
+      if(sErr) throw sErr;
+    }
     // التبويبات: نبعت اللي اتغيّر بس (الجدول بيفضل صغير — مفيش صف = مسموح)
     const tabUpdates = [];
     document.querySelectorAll('#permBody input.tab-chk').forEach(c => {
