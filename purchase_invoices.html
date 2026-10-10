@@ -140,6 +140,7 @@
       <button class="tab" data-tab="expiry" onclick="switchTab('expiry')">قرب انتهاء الصلاحية</button>
       <button class="tab" data-tab="surplus" onclick="switchTab('surplus')">مرتجع للفائض</button>
       <button class="tab" data-tab="vendors" onclick="switchTab('vendors')">تقرير الموردين</button>
+      <button class="tab" data-tab="returns" onclick="switchTab('returns')">مرتجعات فواتير الشراء</button>
     </div>
 
     <!-- تبويب الفواتير -->
@@ -362,6 +363,38 @@
       </div>
     </div>
 
+    <!-- تبويب مرتجعات فواتير الشراء -->
+    <div class="panel" id="panel-returns">
+      <div class="sh-head">
+        <div class="sh-title"><i class="fas fa-rotate-left"></i> مرتجعات فواتير الشراء</div>
+        <button class="btn-p" onclick="loadReturns()"><i class="fas fa-sync-alt"></i> تحديث</button>
+      </div>
+      <div class="filters">
+        <div class="fld"><label>الفرع</label><select class="inp" id="xBranch" onchange="loadReturns()"></select></div>
+        <div class="fld"><label>المورّد</label><input class="inp" id="xVendor" list="xVendorList" placeholder="كل الموردين — اكتب للبحث" onchange="loadReturns()"><datalist id="xVendorList"></datalist></div>
+        <div class="fld"><label>من تاريخ المرتجع</label><input class="inp" type="date" id="xFrom" onchange="loadReturns()"></div>
+        <div class="fld"><label>إلى تاريخ</label><input class="inp" type="date" id="xTo" onchange="loadReturns()"></div>
+      </div>
+      <div class="note">
+        مرتجعات الموردين بنوعيها: <b>مرتجع على فاتورة</b> (كمية مرتجعة على بند الفاتورة) و<b>مرتجع شراء عام</b> (مستند مرتجع مستقل غير مربوط بفاتورة).
+        «تاريخ المرتجع» تاريخ تسجيل المرتجع، و«تاريخ الفاتورة» يظهر للمرتبط بفاتورة فقط. (الافتراضي: آخر ٣٠ يومًا.)
+      </div>
+      <div class="kpis">
+        <div class="kpi b"><div class="l">عدد البنود المرتجعة</div><div class="v num" id="xCount">—</div></div>
+        <div class="kpi a"><div class="l">إجمالي الكمية</div><div class="v num" id="xQty">—</div></div>
+        <div class="kpi g"><div class="l">إجمالي قيمة المرتجع</div><div class="v num" id="xValue">—</div></div>
+      </div>
+      <div class="card scroll-tbl" style="padding:0">
+        <table class="pv">
+          <thead><tr>
+            <th>المصدر</th><th>تاريخ المرتجع</th><th>تاريخ الفاتورة</th><th>الفرع</th><th>المورّد</th><th>الكود</th><th>الصنف</th><th>الكمية</th><th>سعر المرتجع</th><th>القيمة</th><th>رقم الفاتورة</th>
+          </tr></thead>
+          <tbody id="xRows"><tr><td colspan="11" class="loading">جارٍ التحميل…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="pager"><div class="pages" id="xPages"></div><div class="info" id="xInfo"></div></div>
+    </div>
+
   <script src="config.js?v=20260904c"></script>
   <script src="session.js?v=20260926dl"></script>
   <script src="branches.js?v=20260904d"></script>
@@ -437,7 +470,52 @@
         else if(t==='expiry') initExpiry();
         else if(t==='surplus') initSurplus();
         else if(t==='vendors') initVendors();
+        else if(t==='returns') initReturns();
       }
+    }
+
+    // ═══ مرتجعات فواتير الشراء (النوعين: مرتجع على فاتورة + مرتجع شراء عام) ═══
+    async function initReturns(){
+      document.getElementById('xBranch').innerHTML = brOptsHtml();
+      document.getElementById('xFrom').value = daysAgo(30); document.getElementById('xTo').value = localToday();
+      document.getElementById('xVendorList').innerHTML = venOptsHtml(await vendorNames());
+      loadReturns();
+    }
+    function returnsFilters(){ return {
+      p_branch: document.getElementById('xBranch').value||null,
+      p_vendor: document.getElementById('xVendor').value||null,
+      p_from: document.getElementById('xFrom').value||null,
+      p_to: document.getElementById('xTo').value||null
+    }; }
+    async function loadReturns(){
+      document.getElementById('xRows').innerHTML='<tr><td colspan="11" class="loading">جارٍ التحميل…</td></tr>';
+      const res = await rpc('get_purchase_returns', returnsFilters());
+      renderReturns(Array.isArray(res)?res:[]);
+    }
+    function renderReturns(rows){
+      let totVal=0, totQty=0; rows.forEach(r=>{ totVal+=Number(r.value)||0; totQty+=Number(r.qty)||0; });
+      document.getElementById('xCount').textContent = f0(rows.length);
+      document.getElementById('xQty').textContent = f0(totQty);
+      document.getElementById('xValue').textContent = f0(totVal);
+      const row = r=>{
+        const onBill = r.source && r.source.indexOf('فاتورة')!==-1;
+        const srcBadge = '<span style="font-size:.66rem;font-weight:700;padding:2px 8px;border-radius:20px;background:'
+          + (onBill?'#e0f2fe;color:#0369a1':'#fef3c7;color:#92400e') + '">' + esc(r.source||'—') + '</span>';
+        return `<tr>
+          <td>${srcBadge}</td>
+          <td>${dateOnly(r.ret_date)}</td>
+          <td>${r.bill_date?dateOnly(r.bill_date):'<span style="color:var(--text-muted)">—</span>'}</td>
+          <td><span class="brtag">${BR[r.branch]||r.branch}</span></td>
+          <td class="ven">${esc(r.vendor||'—')}</td>
+          <td class="num">${esc(r.code||'—')}</td>
+          <td>${esc(r.name||'—')}</td>
+          <td class="num">${f0(r.qty)}</td>
+          <td class="num">${f2(r.price)}</td>
+          <td class="num" style="font-weight:700">${f0(r.value)}</td>
+          <td class="num">${esc(r.bill_no||'—')}</td>
+        </tr>`;
+      };
+      clp('xret', rows, row, 'xRows','xPages','xInfo', 11, 'لا توجد مرتجعات بالفلتر الحالي');
     }
 
     /* ═══ تقرير الموردين ═══ */
