@@ -52,12 +52,15 @@ begin
        and coalesce(i.line_total,0) > 0
        and (p_branch is null or p_branch = '' or h.branch = p_branch)
   ),
-  best as (
-    select key, min(unit_cost) as min_cost
-      from l where unit_cost is not null and key is not null group by key
+  best as (   /* أرخص تكلفة وحدة + **مين** باعها بالسعر ده وإمتى */
+    select distinct on (key)
+           key, unit_cost as min_cost, ven as best_ven, d as best_d
+      from l
+     where unit_cost is not null and key is not null
+     order by key, unit_cost asc, d desc
   ),
   ln as (
-    select l.*, b.min_cost,
+    select l.*, b.min_cost, b.best_ven, b.best_d,
            case when l.key is not null and l.unit_cost is not null
                      and b.min_cost is not null and l.unit_cost > b.min_cost
                 then (l.unit_cost - b.min_cost) * (l.qnty + l.bonus) end as lost
@@ -100,6 +103,7 @@ begin
         select jsonb_build_object('ven', ven, 'code', max(itm_code),
                  'name', max(itm_name), 'qty', round(sum(qnty+bonus),2),
                  'paid', round(max(unit_cost),2), 'best', round(max(min_cost),2),
+                 'best_ven', max(best_ven), 'best_d', max(best_d),
                  'lost', round(sum(lost))) as x
           from ln where lost > 0 and key is not null
          group by ven, key

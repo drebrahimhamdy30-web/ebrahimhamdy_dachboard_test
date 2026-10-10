@@ -6,7 +6,7 @@
   <title>فواتير الشراء - Phalix</title>
   <link rel="stylesheet" href="tokens.css?v=20260906">
   <script>try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_dark")==="1"?"dark":"light");document.documentElement.setAttribute("data-theme",_t==="dark"?"dark":"light");}catch(e){}</script>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=20261011">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
@@ -25,6 +25,30 @@
     /* زر ثانوي للفترات الجاهزة في تقرير الموردين */
     .btn-s{ background:var(--surface-2); color:var(--text); border:1.5px solid var(--border); border-radius:var(--radius-md); padding:7px 11px; font-family:var(--font); font-weight:700; font-size:.76rem; cursor:pointer; }
     .btn-s:hover{ background:var(--surface-3); }
+    /* رسم أعمدة أفقية مجمّعة. المحور واحد لأن المشتريات والربح بنفس
+       الوحدة (جنيه) — محورين بمقياسين مختلفين ممنوع، بيخلّي أي
+       مقارنة بصرية كاذبة. اللونان متفحوصان لعمى الألوان في الوضعين
+       (ΔE 27.5 deutan على السطح الفاتح والداكن). */
+    .vch-wrap{ background:var(--surface); border:1.5px solid var(--border);
+               border-radius:var(--radius-lg); padding:14px 16px; margin-bottom:16px; position:relative; }
+    .vch-top{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:12px; }
+    .vch-lg{ display:flex; align-items:center; gap:14px; font-size:.76rem; font-weight:700; color:var(--text-secondary); }
+    .vch-lg i{ width:11px; height:11px; border-radius:3px; display:inline-block; margin-left:5px; }
+    .vch-tools{ margin-right:auto; display:flex; gap:6px; }
+    .vch-row{ display:grid; grid-template-columns:150px 1fr; gap:12px; align-items:center;
+              padding:7px 0; border-bottom:1px solid var(--border); }
+    .vch-row:last-child{ border-bottom:none; }
+    .vch-name{ font-size:.78rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .vch-bars{ display:grid; gap:2px; }   /* فاصل 2px بين العمودين */
+    .vch-b{ display:flex; align-items:center; gap:7px; }
+    .vch-fill{ height:11px; border-radius:0 4px 4px 0; min-width:2px; transition:width .25s; }
+    .vch-val{ font-size:.73rem; font-weight:700; color:var(--text-secondary);
+              font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .vch-row:hover{ background:var(--surface-2); }
+    .vch-tip{ position:absolute; pointer-events:none; opacity:0; transition:opacity .12s;
+              background:var(--text); color:var(--surface); font-size:.74rem; font-weight:700;
+              padding:6px 9px; border-radius:7px; white-space:nowrap; z-index:20; }
+    .vch-tip.on{ opacity:1; }
     th.vsort{ cursor:pointer; user-select:none; }
     th.vsort:hover{ color:var(--text); }
     .filters{ display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:14px; }
@@ -295,40 +319,36 @@
         ٦ أشهر من تاريخ الفاتورة.
         (الأصناف بلا كود ولا اسم محتسبة في إجماليات المورّد ومستبعدة من جداول الأصناف.)
       </div>
-      <div class="kpis">
-        <div class="kpi b"><div class="l">إجمالي المشتريات</div><div class="v num" id="vBuy">—</div></div>
-        <div class="kpi g"><div class="l">الربح المتوقع</div><div class="v num" id="vProfit">—</div></div>
-        <div class="kpi a"><div class="l">هامش الربح</div><div class="v num" id="vMargin">—</div></div>
-        <div class="kpi r"><div class="l">فرق سعر ضائع</div><div class="v num" id="vLost">—</div></div>
-      </div>
-
       <div class="sh-title" style="margin:6px 0 8px"><i class="fas fa-truck-field"></i> الموردون <span id="vCount" style="font-weight:600;color:var(--text-secondary);font-size:.78rem"></span></div>
-      <div class="card scroll-tbl" style="padding:0;margin-bottom:16px">
+      <div class="vch-wrap" id="vChartWrap">
+        <div class="vch-top">
+          <div class="vch-lg">
+            <span><i style="background:#3b82f6"></i>المشتريات</span>
+            <span><i style="background:#16a34a"></i>الربح المتوقع</span>
+          </div>
+          <div class="vch-tools">
+            <button class="btn-s" id="vSortBuy" onclick="vSetSort('buy')">ترتيب بالمشتريات</button>
+            <button class="btn-s" id="vSortProfit" onclick="vSetSort('profit')">ترتيب بالربح</button>
+            <button class="btn-s" onclick="vToggleTable()" id="vTblBtn">عرض كجدول</button>
+          </div>
+        </div>
+        <div id="vChart"><div class="loading" style="padding:20px">جارٍ التحميل…</div></div>
+        <div class="vch-tip" id="vTip"></div>
+      </div>
+      <div class="card scroll-tbl" id="vTableWrap" style="padding:0;margin-bottom:16px;display:none">
         <table class="pv">
-          <thead><tr>
-            <th>المورّد</th>
-            <th class="vsort" data-k="buy">المشتريات ▾</th>
-            <th class="vsort" data-k="share">% من الإجمالي</th>
-            <th class="vsort" data-k="profit">الربح المتوقع</th>
-            <th class="vsort" data-k="margin">الهامش</th>
-            <th class="vsort" data-k="bills">الفواتير</th>
-            <th class="vsort" data-k="items">الأصناف</th>
-            <th class="vsort" data-k="avg_bill">متوسط الفاتورة</th>
-            <th class="vsort" data-k="bonus">البونص</th>
-            <th class="vsort" data-k="back">المرتجع</th>
-            <th class="vsort" data-k="short_exp">صلاحية قصيرة</th>
-            <th class="vsort" data-k="lost">فرق سعر ضائع</th>
-          </tr></thead>
-          <tbody id="vRows"><tr><td colspan="12" class="loading">جارٍ التحميل…</td></tr></tbody>
+          <thead><tr><th>المورّد</th><th>المشتريات</th><th>الربح المتوقع</th></tr></thead>
+          <tbody id="vRows"></tbody>
         </table>
       </div>
 
       <div class="sh-title" style="margin:6px 0 8px"><i class="fas fa-money-bill-trend-up"></i> أعلى فرص التوفير الضائعة</div>
       <div class="card scroll-tbl" style="padding:0;margin-bottom:16px">
         <table class="pv">
-          <thead><tr><th>الصنف</th><th>الكود</th><th>المورّد</th><th>الكمية</th>
-            <th>سعر الوحدة المدفوع</th><th>أرخص سعر متاح</th><th>الفرق الضائع</th></tr></thead>
-          <tbody id="vSav"><tr><td colspan="7" class="loading">—</td></tr></tbody>
+          <thead><tr><th>الصنف</th><th>الكود</th><th>اشتريت من</th><th>الكمية</th>
+            <th>سعر الوحدة المدفوع</th><th>أرخص سعر متاح</th><th>كان متاحًا عند</th>
+            <th>الفرق الضائع</th></tr></thead>
+          <tbody id="vSav"><tr><td colspan="8" class="loading">—</td></tr></tbody>
         </table>
       </div>
 
@@ -387,7 +407,8 @@
     }
 
     /* ═══ تقرير الموردين ═══ */
-    let VEN_DATA = null, VEN_SORT = { k:'buy', dir:-1 };
+    let VEN_DATA = null, VEN_SORT = { k:'buy', dir:-1 }, VEN_AS_TABLE = false;
+    const VCH_TOP = 12;   // باقي الموردين بيتجمّعوا في صف واحد
 
     function monthStart(back){
       const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - (back||0));
@@ -403,11 +424,14 @@
     function initVendors(){
       document.getElementById('vBranch').innerHTML = brOptsHtml();
       vPeriod('m0');   // الافتراضي: الشهر الحالي
-      document.querySelectorAll('.vsort').forEach(th => th.addEventListener('click', () => {
-        const k = th.dataset.k;
-        VEN_SORT = { k, dir: (VEN_SORT.k === k ? -VEN_SORT.dir : -1) };
-        renderVendors();
-      }));
+    }
+
+    function vSetSort(k){ VEN_SORT = { k, dir:-1 }; renderVendors(); }
+
+    function vToggleTable(){
+      VEN_AS_TABLE = !VEN_AS_TABLE;
+      document.getElementById('vTableWrap').style.display = VEN_AS_TABLE ? '' : 'none';
+      document.getElementById('vTblBtn').textContent = VEN_AS_TABLE ? 'إخفاء الجدول' : 'عرض كجدول';
     }
 
     function vPeriod(p){
@@ -439,36 +463,50 @@
     function renderVendors(){
       const d = VEN_DATA || {};
       const sm = d.summary || {};
-      document.getElementById('vBuy').textContent    = f0(sm.buy) + ' ج';
-      document.getElementById('vProfit').textContent = f0(sm.profit) + ' ج';
-      document.getElementById('vMargin').textContent = (sm.margin == null ? '—' : sm.margin + '%');
-      document.getElementById('vLost').textContent   = f0(sm.lost) + ' ج';
       document.getElementById('vCount').textContent  =
         (sm.vendors ? `(${f0(sm.vendors)} مورّد · ${f0(sm.bills)} فاتورة)` : '');
 
-      const rows = (d.vendors || []).slice().sort((a,b) => {
-        const x = Number(a[VEN_SORT.k]) || 0, y = Number(b[VEN_SORT.k]) || 0;
-        return (x - y) * VEN_SORT.dir;
-      });
-      document.querySelectorAll('.vsort').forEach(th => {
-        const base = th.textContent.replace(/[ ▾▴]+$/, '');
-        th.textContent = base + (th.dataset.k === VEN_SORT.k ? (VEN_SORT.dir < 0 ? ' ▾' : ' ▴') : '');
+      const all = (d.vendors || []).slice().sort((a,b) =>
+        (Number(b[VEN_SORT.k]) || 0) - (Number(a[VEN_SORT.k]) || 0));
+
+      ['vSortBuy','vSortProfit'].forEach(id => {
+        const on = (id === 'vSortBuy' ? 'buy' : 'profit') === VEN_SORT.k;
+        const b = document.getElementById(id);
+        if (b) { b.style.borderColor = on ? 'var(--pur-teal)' : ''; b.style.color = on ? 'var(--pur-teal)' : ''; }
       });
 
-      document.getElementById('vRows').innerHTML = rows.length ? rows.map(v => `<tr>
+      /* أكتر من 12 مورّد بيبقى الرسم غير مقروء، فالباقي بيتجمّع في صف
+         واحد بدل ما يتشال — الإجمالي يفضل صح بصريًا. */
+      let rows = all.slice(0, VCH_TOP);
+      const rest = all.slice(VCH_TOP);
+      if (rest.length) rows = rows.concat([{
+        ven: `باقي الموردين (${f0(rest.length)})`,
+        buy: rest.reduce((t,v) => t + Number(v.buy || 0), 0),
+        profit: rest.reduce((t,v) => t + Number(v.profit || 0), 0),
+        margin: null, rest: true }]);
+
+      const max = Math.max(1, ...rows.map(v => Number(v.buy) || 0));
+      const bar = (val, color, label) => `<div class="vch-b">
+          <div class="vch-fill" style="width:${Math.max(0.4, (Number(val)||0) / max * 100)}%;background:${color}"
+               data-tip="${label}: ${f0(val)} ج"></div>
+          <span class="vch-val">${f0(val)}</span></div>`;
+
+      document.getElementById('vChart').innerHTML = rows.length ? rows.map(v => `
+        <div class="vch-row">
+          <div class="vch-name" title="${esc(v.ven)}">${esc(v.ven)}${
+            v.margin != null ? ` <span style="font-weight:600;color:var(--text-secondary)">${v.margin}%</span>` : ''}</div>
+          <div class="vch-bars">
+            ${bar(v.buy, '#3b82f6', 'المشتريات')}
+            ${bar(v.profit, '#16a34a', 'الربح المتوقع')}
+          </div>
+        </div>`).join('')
+        : '<div class="loading" style="padding:20px">لا توجد مشتريات في هذه الفترة</div>';
+
+      document.getElementById('vRows').innerHTML = all.length ? all.map(v => `<tr>
         <td><b>${esc(v.ven)}</b></td>
         <td class="num">${f0(v.buy)}</td>
-        <td class="num">${v.share}%</td>
         <td class="num" style="color:#16a34a;font-weight:700">${f0(v.profit)}</td>
-        <td class="num">${v.margin}%</td>
-        <td class="num">${f0(v.bills)}</td>
-        <td class="num">${f0(v.items)}</td>
-        <td class="num">${f0(v.avg_bill)}</td>
-        <td class="num">${v.bonus ? f0(v.bonus) : '—'}</td>
-        <td class="num">${v.back ? f0(v.back) : '—'}</td>
-        <td class="num">${v.short_exp ? f0(v.short_exp) : '—'}</td>
-        <td class="num" style="color:${v.lost ? '#dc2626' : 'inherit'}">${v.lost ? f0(v.lost) : '—'}</td>
-      </tr>`).join('') : '<tr><td colspan="12" class="loading">لا توجد مشتريات في هذه الفترة</td></tr>';
+      </tr>`).join('') : '<tr><td colspan="3" class="loading">لا توجد مشتريات</td></tr>';
 
       document.getElementById('vSav').innerHTML = (d.savings || []).length
         ? d.savings.map(x => `<tr>
@@ -476,8 +514,10 @@
             <td>${esc(x.ven)}</td><td class="num">${f0(x.qty)}</td>
             <td class="num">${f2(x.paid)}</td>
             <td class="num" style="color:#16a34a">${f2(x.best)}</td>
+            <td><b style="color:#16a34a">${esc(x.best_ven || '—')}</b>${
+              x.best_d ? ` <span style="color:var(--text-secondary);font-size:.74rem">${esc(x.best_d)}</span>` : ''}</td>
             <td class="num" style="color:#dc2626;font-weight:700">${f0(x.lost)}</td></tr>`).join('')
-        : '<tr><td colspan="7" class="loading">لا توجد فروق أسعار في هذه الفترة</td></tr>';
+        : '<tr><td colspan="8" class="loading">لا توجد فروق أسعار في هذه الفترة</td></tr>';
 
       document.getElementById('vItems').innerHTML = (d.top_items || []).length
         ? d.top_items.map(x => `<tr>
@@ -487,6 +527,20 @@
             <td class="num">${x.margin}%</td></tr>`).join('')
         : '<tr><td colspan="6" class="loading">—</td></tr>';
     }
+
+    /* تلميح عند المرور على أي عمود — الرسم تفاعلي مش صورة */
+    document.addEventListener('mouseover', e => {
+      const f = e.target.closest && e.target.closest('.vch-fill');
+      const tip = document.getElementById('vTip');
+      if (!tip) return;
+      if (!f) { tip.classList.remove('on'); return; }
+      const wrap = document.getElementById('vChartWrap');
+      const r = f.getBoundingClientRect(), w = wrap.getBoundingClientRect();
+      tip.textContent = f.dataset.tip || '';
+      tip.style.top  = (r.top - w.top - 28) + 'px';
+      tip.style.left = Math.max(4, r.left - w.left) + 'px';
+      tip.classList.add('on');
+    });
 
     function exportVendors(){
       if(!VEN_DATA || !(VEN_DATA.vendors || []).length){ toast('لا توجد بيانات للتصدير', 2500); return; }
