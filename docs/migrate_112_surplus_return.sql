@@ -1,22 +1,20 @@
 /* ═══════════════════════════════════════════════════════════════════
    مرتجع الفائض للمورّد — get_purchase_surplus_return  (تقرير عرض لحظي)
    ═══════════════════════════════════════════════════════════════════
-   تبويب جديد في شاشة فواتير الشراء: الأصناف اللي اشتريناها وعندها فائض
-   «محدش محتاجه» → مرشّحة للمرتجع للمورّد اللي اشترينا منه.
+   تبويب في شاشة فواتير الشراء: الأصناف اللي اشتريناها وعندها فائض عن
+   الهدف الكلي → مرشّحة للمرتجع للمورّد اللي اشترينا منه.
 
-   ⚠️ مفيش حساب فائض/معدل جديد — بنقرا نفس المصدر الموحّد:
-     • معدل الفائض   = consumption_flat.sur_<فرع>        (معدل شهري)
-     • الرصيد        = stock_flat.<حرف>_q
-     • كمية الفائض   = floor(الرصيد − معدل الفائض) بشرط الرصيد ≥ الحد الأدنى
-                       وإعداد الفرع×التصنيف مفعّل  — نفس معادلة get_purchase_orders
-     • الاحتياج      = floor(req_qty(av_<فرع>, الرصيد, min_immediate, reorder_ratio))
-   «الفائض اللي محدش محتاجه» للفرع = الفائض − احتياج باقي الفروع (تحويل داخلي الأول).
-   محافظ (conservative): لو أكتر من فرع عنده فائض بيطرح احتياج الباقي من كلٍّ،
-   فالمقترح للمرتجع بيطلع أصغر — وده الاتجاه الآمن (مانرجّعش حاجة محتاجينها).
+   ⚠️ الفائض **كلي لكل الفروع** (زي «إجمالي الهدف/الرصيد» في شاشة الطلبيات):
+     • إجمالي الرصيد  = Σ stock_flat.<حرف>_q           (كل الفروع)
+     • إجمالي الهدف   = Σ consumption_flat.av_<فرع>     (كل الفروع) = المستهدف
+     • الفائض         = floor(إجمالي الرصيد − إجمالي الهدف)  (> 0 فقط)
+   كده التحويل الداخلي متحسوب ضمنيًا: لو فرع تحت هدفه، إجمالي الهدف بيرتفع
+   فالفائض بيقل أو يختفي — فمانرجّعش حاجة محتاجينها في أي فرع.
 
    الفلاتر (الفرع/المورّد/الفترة) بتصفّي **المشتريات المعروضة** بس؛ الفائض
    بيتحسب على الرصيد الحالي دايمًا (لحظي، مش متخزّن). المورّد = ilike جزئي.
-   بيرجّع صف لكل (فرع × مورّد اشترينا منه) عشان تفلتر بالمورّد وتشوف كل مرتجعاته.
+   بيرجّع صف لكل (فرع شراء × مورّد اشترينا منه)؛ الرصيد/الهدف/الفائض كلية
+   (نفسها في كل صفوف الصنف). القابل للمرتجع للمورّد = الأقل من (الفائض/كمية الشراء).
 
    يتطبّق على: السحابة **و** السيرفر الذاتي. (لا يحتاج refresh — لحظي.)
    ═══════════════════════════════════════════════════════════════════ */
@@ -33,53 +31,32 @@ security definer
 set search_path to 'public'
 as $fn$
 declare
-  v_sfx text := '';
-  v_sql text;
-  v_out jsonb;
-  r     record;
+  v_stock  text := '';   -- Σ رصيد كل الفروع
+  v_target text := '';   -- Σ هدف (av) كل الفروع
+  v_sql    text;
+  v_out    jsonb;
+  r        record;
 begin
-  /* صفوف الفائض لكل فرع — طول (branch,itm_code) — للأصناف اللي اتشرت فقط */
   for r in select * from public.branch_letters() loop
-    v_sfx := v_sfx
-      || case when v_sfx = '' then '' else ' union all ' end
-      || ' select ' || quote_literal(r.code) || '::text branch,'
-      || '        ' || quote_literal(r.name) || '::text branch_ar,'
-      || '        sf.itm_code,'
-      || '        coalesce(sf.' || quote_ident(r.letter || '_q') || ',0)::numeric q,'
-      || '        coalesce(cf.' || quote_ident('sur_' || r.code) || ',0)::numeric sr,'
-      || '        coalesce(cf.' || quote_ident('av_'  || r.code) || ',0)::numeric av,'
-      || '        public.item_category(sf.co, sf.med) cat'
-      || '   from stock_flat sf'
-      || '   left join consumption_flat cf on cf.code = sf.itm_code'
-      || '  where exists (select 1 from purchase_invoice_items z where z.itm_code = sf.itm_code)';
+    v_stock  := v_stock  || ' + coalesce(sf.' || quote_ident(r.letter || '_q') || ',0)';
+    v_target := v_target || ' + coalesce(cf.' || quote_ident('av_' || r.code) || ',0)';
   end loop;
+  v_stock  := ltrim(v_stock,  ' +');
+  v_target := ltrim(v_target, ' +');
 
   v_sql :=
-       'with cfg as (select min_immediate mn, reorder_ratio ratio, min_stock_surplus mss'
-    || '               from purchase_settings where id = 1),'
-    || ' sfx as (' || v_sfx || '),'
-    || ' calc as ('
-    || '   select x.*,'
-    || '          floor(public.req_qty(x.av, x.q, (select mn from cfg), (select ratio from cfg)))::int req,'
-    || '          case when g.branch is null then 0'
-    || '               when x.q >= coalesce(g.min_stock_surplus, (select mss from cfg))'
-    || '                and floor(x.q - x.sr) > 0'
-    || '               then floor(x.q - x.sr)::int else 0 end surplus'
-    || '     from sfx x'
-    || '     left join branch_calc_settings g'
-    || '       on g.branch = x.branch_ar and g.category = x.cat and g.active'
-    || ' ),'
-    || ' tot as (select itm_code, sum(req) total_req from calc group by itm_code),'
-    || ' ret as ('
-    || '   select c.*, t.total_req,'
-    || '          greatest(0, c.surplus - greatest(0, t.total_req - c.req))::int returnable'
-    || '     from calc c join tot t using (itm_code)'
-    || '    where c.surplus > 0'
+       'with tot as ('
+    || '   select sf.itm_code,'
+    || '          (' || v_stock  || ')::numeric total_stock,'
+    || '          (' || v_target || ')::numeric total_target,'
+    || '          floor((' || v_stock || ') - (' || v_target || '))::int surplus'
+    || '     from stock_flat sf'
+    || '     left join consumption_flat cf on cf.code = sf.itm_code'
+    || '    where exists (select 1 from purchase_invoice_items z where z.itm_code = sf.itm_code)'
     || ' ),'
     || ' pur as ('
     || '   select pii.branch, pii.itm_code, pih.ven_name_ar vendor,'
     || '          sum(pii.qnty)::numeric bought_qty, count(*)::int n_lines, max(pii.itm_name) pname,'
-    /* الفاتورة اللي هنرجّع منها = أحدث فاتورة من المورّد ده للصنف (نفس مصدر سعر الشراء) */
     || '          (array_agg(pih.ven_bill_date order by pih.ven_bill_date desc nulls last, pih.pth_id desc))[1] last_bill,'
     || '          (array_agg(pih.ven_bill_no  order by pih.ven_bill_date desc nulls last, pih.pth_id desc))[1] last_bill_no,'
     || '          (array_agg(pih.pth_id       order by pih.ven_bill_date desc nulls last, pih.pth_id desc))[1] last_pth,'
@@ -96,19 +73,18 @@ begin
     || ' select coalesce(jsonb_agg(to_jsonb(t)'
     || '          order by t.returnable desc, t.ret_value desc nulls last, t.itm_code), ''[]''::jsonb)'
     || '   from ('
-    || '     select r.branch, r.branch_ar, r.itm_code,'
+    || '     select p.branch,'
+    || '            (select bl.name from public.branch_letters() bl where bl.code = p.branch) branch_ar,'
+    || '            p.itm_code,'
     || '            coalesce(nullif(btrim(cf.itm_name),''''), nullif(btrim(sf.n),''''), p.pname) itm_name,'
-    || '            r.q stock,'
-    /* المستهدف = اللي الفرع يحتفظ به (معدل الفائض) + احتياج باقي الفروع (الهدف لكل الفروع) */
-    || '            round(r.sr + greatest(0, r.total_req - r.req))::numeric target,'
-    || '            r.returnable,'
+    || '            tt.total_stock stock, tt.total_target target, tt.surplus returnable,'
     || '            p.vendor, p.last_bill_no bill_no, p.last_pth, p.last_bill bill_date, p.bought_qty, p.last_price,'
-    || '            round(coalesce(p.last_price,0) * least(r.returnable, p.bought_qty))::numeric ret_value'
-    || '       from ret r'
-    || '       join pur p on p.branch = r.branch and p.itm_code = r.itm_code'
-    || '       left join consumption_flat cf on cf.code = r.itm_code'
-    || '       left join stock_flat sf on sf.itm_code = r.itm_code'
-    || '      where r.returnable > 0'
+    || '            least(tt.surplus, p.bought_qty)::int ret_qty,'
+    || '            round(coalesce(p.last_price,0) * least(tt.surplus, p.bought_qty))::numeric ret_value'
+    || '       from pur p'
+    || '       join tot tt on tt.itm_code = p.itm_code and tt.surplus > 0'
+    || '       left join consumption_flat cf on cf.code = p.itm_code'
+    || '       left join stock_flat sf on sf.itm_code = p.itm_code'
     || '   ) t';
 
   execute v_sql into v_out using p_branch, p_vendor, p_from, p_to;
