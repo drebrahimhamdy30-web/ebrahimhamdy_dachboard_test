@@ -408,33 +408,9 @@ body.dark{     --text-light:#6b7a94;  --gray-light:#16223a; --primary-light:#124
         </div>
       </div>
 
-      <!-- تحصيلات الموردين — نفس فكرة زر المهام، مجمّعة بالفرع -->
-      <div class="tq-wrap" id="scWrap" style="display:none">
-        <button class="qbtn" id="scBtn" title="بحث عن مورد" onclick="scToggle(event)">
-          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.6" y2="16.6"/></svg>
-          <span>بحث مورد</span>
-          <span class="qbtn-badge" id="scBadge">0</span>
-        </button>
-        <div class="tq-panel" id="scPanel" style="width:420px">
-          <div class="tq-head">
-            <span class="tq-head-t">بحث عن مورد</span>
-            <span class="sc-br-n" id="scCount"></span>
-          </div>
-          <div style="padding:.45rem .6rem;border-bottom:1px solid var(--border)">
-            <input type="search" id="scQ" class="sc-search" placeholder="🔍 اكتب اسم المورد أو كوده..." oninput="scRender()">
-          </div>
-          <div class="tq-list" id="scList"><div class="tq-empty">⏳ جارٍ التحميل…</div></div>
-          <div class="tq-foot" id="scFoot"></div>
-        </div>
-      </div>
-
-      <!-- كارت تفاصيل المورد — برّه لوحة البار عشان ياخد عرض كافي -->
-      <div class="sd-overlay" id="scCard" onclick="if(event.target===this)scCloseCard()">
-        <div class="sd-card">
-          <button class="sd-x" onclick="scCloseCard()" title="إغلاق">✕</button>
-          <div id="scCardBody"></div>
-        </div>
-      </div>
+      <!-- زر «بحث مورد» ولوحته اتشالوا بقرار المالك. دوال sc* سايبها
+           زي ما هي: scInit() بتخرج بأمان لما #scWrap مش موجود، فمفيش
+           داعي نلمس الاستدعاء في Branches.ready(). -->
 
       <!-- الإشعارات: فضلت بره القوائم بطلب المالك. العدّاد مخفي لحد ما
            يتحدّد مصدر الرقم — setQuickBadge('notif', n) جاهزة ليه.
@@ -753,7 +729,7 @@ const SECTION_ORDER = ['المبيعات والعملاء','المخزون وا�
 const SECTION_SHORT = {
   'المبيعات والعملاء':'المبيعات', 'المخزون والجرد':'المخزون',
   'المشتريات والموردين':'المشتريات', 'التعاقدات والتحصيل':'التعاقدات',
-  'الحسابات والخزينة':'الحسابات', 'الإدارة والنظام':'النظام'
+  'الحسابات والخزينة':'الحسابات', 'الإدارة والنظام':'الإدارة'
 };
 /* «إعدادات التوصيل» 4 صفحات بس فبتتعرض جوّه «التوصيل» تحت فاصل */
 const SECTION_MERGE = { 'إعدادات التوصيل':'التوصيل' };
@@ -838,6 +814,10 @@ function buildSidebar() {
   // زر الإشعارات بره القوائم — يظهر بس لو الصفحة مسموحة
   const nb = document.getElementById('notifBtn');
   if (nb) nb.style.display = allowedPages.some(p => p.page === 'notifications.html') ? '' : 'none';
+  /* قياس فوري الأول: requestAnimationFrame مابيشتغلش والتبويب في
+     الخلفية، فالشريط كان بيفضل visibility:hidden لحد ما المستخدم
+     يفتح التبويب. والـrAF بعده بيعيد القياس بعد الرسم. */
+  navFit();
   requestAnimationFrame(navFit);
 }
 
@@ -904,6 +884,16 @@ document.addEventListener('click', e => {
     if (!was) { panel.classList.add('show'); mb.classList.add('open'); }
     return;
   }
+  /* الضغط على صفحة: لازم يقفل القائمة واللوحة. من غير ده كان الشرط
+     اللي تحت (e.target.closest('.m-menu')) بيرجع بدري والقائمة تفضل
+     مفتوحة بعد ما الصفحة تتفتح. */
+  const item = e.target.closest('.nav-item');
+  if (item) {
+    navCloseMenus();
+    const sh = document.getElementById('navSheet'); if (sh) sh.classList.remove('open');
+    return;
+  }
+
   const acc = e.target.closest('.acc-btn');
   if (acc) {
     acc.classList.toggle('open');
@@ -926,6 +916,11 @@ document.addEventListener('mouseover', e => {
 });
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') navCloseMenus(); });
+
+/* الضغط جوّه الإطار (الصفحة المفتوحة) مابيوصلش لمستند الشل خالص، فالقائمة
+   كانت بتفضل مفتوحة فوق الصفحة. أول ما التركيز يروح للإطار الشل بياخد
+   blur — نقفل عندها. */
+window.addEventListener('blur', navCloseMenus);
 window.addEventListener('resize', navFit);
 window.addEventListener('resize', () => { if (typeof navSheetPos === 'function') navSheetPos(); });
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(navFit);
@@ -1566,6 +1561,14 @@ function frameLoaded() {
     const doc = document.getElementById('mainFrame').contentDocument;
     if (doc) doc.querySelectorAll('.nav-bar').forEach(el => { el.style.display = 'none'; });
     if (doc && doc.body) doc.body.classList.toggle('dark', darkOn);   // انشر الوضع الداكن للصفحة المحمّلة
+
+    /* الضغط جوّه الإطار مابيوصلش لمستند الشل، فالقائمة المنسدلة كانت
+       بتفضل مفتوحة فوق الصفحة. الإطار نفس الأصل فنقدر نسمع جوّاه —
+       capture عشان الصفحة لو بتوقف الانتشار ما تمنعناش. */
+    if (doc && typeof navCloseMenus === 'function') {
+      doc.addEventListener('mousedown', navCloseMenus, true);
+      doc.addEventListener('touchstart', navCloseMenus, { capture: true, passive: true });
+    }
   } catch (e) { /* الصفحة لسه بتحمّل أو مختلفة الأصل — نتجاهل بأمان */ }
 }
 
