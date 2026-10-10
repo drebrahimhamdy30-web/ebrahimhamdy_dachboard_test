@@ -121,7 +121,13 @@ begin
   select coalesce(jsonb_agg(to_jsonb(r)),'[]'::jsonb) into v_miss from (
     select (select br.code from br where br.ar=orr.br_ar) as branch, orr.br_ar, orr.order_id, orr.code as itm_code,
            (select sl.store from supplier_links sl where sl.id=orr.order_id) as store,
-           (select it->>'name' from supplier_links sl, jsonb_array_elements(sl.items) it where sl.id=orr.order_id and (it->>'code')=orr.code limit 1) as itm_name,
+           -- اسمنا من القاموس الحالي بالكود (أدق من اسم الأمر اللي ممكن يكون قديم)؛ احتياطي = اسم الأمر
+           coalesce(
+             (select m.itm_name from item_code_map m where m.itm_code=orr.code limit 1),
+             (select it->>'name' from supplier_links sl, jsonb_array_elements(sl.items) it where sl.id=orr.order_id and (it->>'code')=orr.code limit 1)
+           ) as itm_name,
+           -- اسم الصنف عند المخزن (من الأمر = best_item_name) — لكشف التكويد الغلط لو اختلف عن اسمنا
+           (select it->>'name' from supplier_links sl, jsonb_array_elements(sl.items) it where sl.id=orr.order_id and (it->>'code')=orr.code limit 1) as store_item_name,
            (select it->>'qty' from supplier_links sl, jsonb_array_elements(sl.items) it where sl.id=orr.order_id and (it->>'code')=orr.code limit 1) as qty_ordered,
            (select s.qty from stk2 s where s.brc=(select br.code from br where br.ar=orr.br_ar) and s.itm_code=orr.code) as stock
     from (select distinct order_id, br_ar, code from ord_reply) orr

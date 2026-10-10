@@ -188,9 +188,9 @@
         <div class="card scroll-tbl" style="padding:0">
           <table class="pv">
             <thead><tr>
-              <th>الكود</th><th>الصنف</th><th>الفرع</th><th>المخزن</th><th>الكمية المطلوبة</th><th>الرصيد الحالي</th>
+              <th>الكود</th><th>الصنف (عندنا)</th><th>اسمه عند المخزن</th><th>الفرع</th><th>المخزن</th><th>الكمية المطلوبة</th><th>الرصيد الحالي</th>
             </tr></thead>
-            <tbody id="missRows"><tr><td colspan="6" class="loading">جارِ التحميل…</td></tr></tbody>
+            <tbody id="missRows"><tr><td colspan="7" class="loading">جارِ التحميل…</td></tr></tbody>
           </table>
         </div>
         <div class="pager"><div class="pages" id="missPages"></div><div class="info" id="missInfo"></div></div>
@@ -310,6 +310,15 @@
       const d = Array.isArray(res)?res[0]:res;
       renderMatch(d||{});
     }
+    // كشف احتمال تكويد غلط: اسمنا واسم المخزن لنفس الكود مفيش بينهم كلمة أساسية مشتركة
+    const NM_STOP = new Set(['مجم','جم','جرام','مل','قرص','اقراص','كبسول','كبسولة','كيس','اكياس','لبوس','اقمع','اقماع','عرض','جديد','شريط','قطعه','قطعة','امبول','نقط','شراب','كريم','جيل','مرهم','بخاخ','فوار','علبه','علبة','سعر']);
+    function nmWords(s){ return String(s||'').replace(/[^؀-ۿ\s]/g,' ').split(/\s+/).map(w=>w.trim()).filter(w=>w.length>=3 && !NM_STOP.has(w)); }
+    function nameMismatch(ours, store){
+      if(!ours || !store) return false;
+      const a=new Set(nmWords(ours)), b=nmWords(store);
+      if(!a.size || !b.length) return false;
+      return !b.some(w=>a.has(w));
+    }
     function renderMatch(d){
       const recv = Array.isArray(d.received_not_ordered)?d.received_not_ordered:[];
       const miss = Array.isArray(d.ordered_not_received)?d.ordered_not_received:[];
@@ -346,16 +355,22 @@
       const missRow = r=>{
         const name = r.itm_name ? `<span style="font-weight:700">${esc(r.itm_name)}</span>`
                                 : '<span style="color:var(--text-muted)">—</span>';
-        return `<tr>
+        const sn = r.store_item_name;
+        const mm = nameMismatch(r.itm_name, sn);
+        const storeName = sn
+          ? (mm ? `<span style="color:#dc2626;font-weight:700" title="الاسم عندنا مختلف عن اسم المخزن لنفس الكود — راجع التكويد">${esc(sn)} ⚠️</span>` : esc(sn))
+          : '<span style="color:var(--text-muted)">—</span>';
+        return `<tr${mm?' style="background:#fff1f2"':''}>
           <td class="num">${esc(r.itm_code||'—')}</td>
           <td>${name}</td>
+          <td>${storeName}</td>
           <td><span class="brtag">${BR[r.branch]||r.br_ar||'—'}</span></td>
           <td class="ven">${esc(r.store||'—')}</td>
           <td class="num">${r.qty_ordered!=null?esc(r.qty_ordered):'—'}</td>
           <td class="num">${r.stock==null?'—':f0(r.stock)}</td>
         </tr>`;
       };
-      clp('miss', miss, missRow, 'missRows','missPages','missInfo', 6, 'كل المعتمد وصل ✓');
+      clp('miss', miss, missRow, 'missRows','missPages','missInfo', 7, 'كل المعتمد وصل ✓');
     }
     function reviewFilters(){ return {
       p_branch: document.getElementById('rBranch').value||null,
