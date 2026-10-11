@@ -825,29 +825,40 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const back = (q === Number(dflt));
       el.classList.toggle('edited', !back);
       el.title = back ? 'الكمية اللي هتتبعت للمورّد — صفر = استبعاد' : ('الأصل ' + dflt);
+      const row = ordById[id];
+      if (row) row.send_qty = q;
       try {
-        /* كتابة مزدوجة زي تجاوز المخزن في pickWh: العمود المحسوب علشان
-           يبان فورًا (الكرون بيعيد البناء كل 10 دقايق بس)، والجدول علشان
-           التعديل يرجع بعد كل إعادة حساب. */
-        const row = ordById[id];
-        if (row) row.send_qty = q;
-        await fetch(REST + 'purchase_orders_flat?id=eq.' + id, {
-          method:'PATCH', headers:{ ...H, 'Content-Type':'application/json', 'Prefer':'return=minimal' },
-          body: JSON.stringify({ send_qty: q }) });
+        /* كتابة مزدوجة زي تجاوز المخزن في pickWh — بس **الترتيب مقصود**:
+           مصدر الحقيقة (order_send_qty) الأول، وبعده العمود المحسوب.
+           لو العمود فشل، الكرون بيصلّحه خلال 10 دقايق. العكس كان
+           بيضيّع التعديل خالص لو الـPATCH وقع.
+
+           ⚠️ `fetch` **مابيرميش** على 401/403 — بيرجّع ok=false وخلاص.
+              فمن غير فحص `r.ok` كان فشل الصلاحية أو انتهاء الجلسة
+              يعدّي بالصمت والمستخدم يفتكر الكمية اتحفظت. */
+        const must = r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r; };
+
         if (back) {
-          await fetch(REST + 'order_send_qty?branch=eq.' + encodeURIComponent(ordBranch)
+          must(await fetch(REST + 'order_send_qty?branch=eq.' + encodeURIComponent(ordBranch)
             + '&itm_code=eq.' + encodeURIComponent(code),
-            { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });
+            { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } }));
         } else {
-          await fetch(REST + 'order_send_qty?on_conflict=branch,itm_code', {
+          must(await fetch(REST + 'order_send_qty?on_conflict=branch,itm_code', {
             method:'POST', headers:{ ...H, 'Content-Type':'application/json',
               'Prefer':'resolution=merge-duplicates,return=minimal' },
-            body: JSON.stringify({ branch: ordBranch, itm_code: code, qty: q, updated_at: new Date().toISOString() }) });
+            body: JSON.stringify({ branch: ordBranch, itm_code: code, qty: q, updated_at: new Date().toISOString() }) }));
         }
+
+        /* العمود المحسوب — علشان الرابط والإكسل يشوفوا الرقم فورًا */
+        const pr = await fetch(REST + 'purchase_orders_flat?id=eq.' + id, {
+          method:'PATCH', headers:{ ...H, 'Content-Type':'application/json', 'Prefer':'return=minimal' },
+          body: JSON.stringify({ send_qty: q }) });
+        if (!pr.ok) toast('اتحفظت — هتبان في الرابط والإكسل خلال 10 دقائق');
       } catch (e) {
         el.classList.add('edited');
         el.title = 'لم يتم حفظ هذه الكمية على الخادم';
-        alert('تعذّر حفظ الكمية: ' + e.message);
+        alert(typeof sbFailMsg === 'function' ? sbFailMsg('تعذّر حفظ الكمية')
+                                              : ('تعذّر حفظ الكمية: ' + e.message));
       }
     }
 
