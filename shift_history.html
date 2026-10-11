@@ -206,9 +206,13 @@ function toast(msg,type='ok'){
 
 const role=(Session.role()||'').trim();
 // admin + accountant => كل الفروع | manager => فرعه فقط
-const isAdminView = role==='admin' || role==='accountant' || role==='reviewer';
+/* ⚠️ فصل مقصود: صلاحية الاعتماد تفضل بالدور زي ما هي، واللي اتغيّر
+   هو **نطاق الفروع** بس — بقى من شاشة الصلاحيات وبيتقرا جوّه init().
+   لو خلطناهم، تغيير النطاق كان هيدّي أو يمنع حق الاعتماد بالغلط. */
+const canApproveRole = role==='admin' || role==='accountant' || role==='reviewer';
+let isAdminView = false;
 const isManager   = role==='manager';
-const canConfirm  = isAdminView || isManager;   // صلاحية الاعتماد والتوريد
+const canConfirm  = canApproveRole || isManager;   // صلاحية الاعتماد والتوريد
 const isAdmin     = role==='admin';               // بعض إجراءات كشف الحساب للأدمن فقط
 const canClose    = role==='admin' || role==='accountant';   // إقفال الفترة (الفتح للأدمن بس)
 const MY_BRANCH   = (Session.branch()).trim();
@@ -254,6 +258,7 @@ function switchTab(t){
 
 async function init(){
   try{
+    isAdminView = await Session.seesAllBranches();
     const branches=await api('branches?select=name&order=name');
     const sel=document.getElementById('f-branch');
     sel.innerHTML='<option value="">كل الفروع</option>'+

@@ -177,7 +177,9 @@
     const FREQ_ORDER = ['daily','weekly','monthly','yearly'];
     // الفروع من إعدادات المؤسسة (مع fallback للقيم الحالية)
     const BRANCHES = Branches.names();
-    const IS_ADMIN = (Session.role()||'').trim() === 'admin';
+    /* نطاق الفروع من شاشة الصلاحيات — بيتقرا قبل أول رسم تحت.
+       بيبدأ false (الأضيق) عشان لو القراءة اتأخرت مايبانش أوسع. */
+    let IS_ADMIN = false;
     const USER_BRANCH_RAW = (Session.branch()).trim();
     const USER_BRANCH = (window.orgBranchAlias ? window.orgBranchAlias(USER_BRANCH_RAW) : USER_BRANCH_RAW);
     let selectedBranch = IS_ADMIN ? (BRANCHES.includes(USER_BRANCH)?USER_BRANCH:BRANCHES[0]) : (USER_BRANCH || BRANCHES[0]);
@@ -433,8 +435,14 @@
 
     document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeTask(); });
     document.getElementById('tk-date').value = todayCairo();
-    renderBranchBar();
-    loadAll();
+    (async () => {
+      IS_ADMIN = await Session.seesAllBranches();
+      /* الحساب اللي نطاقه كل الفروع وفرعه مش فرع حقيقي (زي «كل الفروع»
+         بتاعة الأدمن) يبدأ على أول فرع — زي السلوك القديم بالظبط. */
+      if (IS_ADMIN && !BRANCHES.includes(selectedBranch)) selectedBranch = BRANCHES[0];
+      renderBranchBar();
+      loadAll();
+    })();
   </script>
 <!-- صلاحيات التبويبات: بيخفي التبويبات الممنوعة على دور المستخدم (من شاشة الصلاحيات) -->
 <script>try { Session.guardTabs('tasks'); } catch (e) { console.error('guardTabs', e); }</script>
