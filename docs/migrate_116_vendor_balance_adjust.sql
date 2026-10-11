@@ -105,4 +105,24 @@ begin
 end$fn$;
 grant execute on function public.get_supplier_open(text,text,date,date) to anon, authenticated;
 
+/* تطبيق الفروق بالجملة من شيت أرصدة eplus (branch, code, bal) — ضبط كامل */
+create or replace function public.apply_vendor_adjust_bulk(p_rows jsonb, p_thresh numeric default 0.5)
+returns jsonb language plpgsql security definer set search_path to 'public' as $fn$
+declare n int; matched int;
+begin
+  delete from vendor_balance_adjust where true;
+  with e as (select * from jsonb_to_recordset(p_rows) as t(branch text, code text, bal numeric)),
+  ins as (
+    insert into vendor_balance_adjust(branch, ven_name_ar, ven_code, adjust, note, updated_by)
+    select e.branch, pv.ven_name_ar, pv.ven_code, round((e.bal - pv.ven_current_credit)::numeric,2), 'eplus xlsx', 'نظام'
+      from e join purchase_vendors pv on pv.branch=e.branch and pv.ven_code::text=e.code
+     where abs(e.bal - coalesce(pv.ven_current_credit,0)) > p_thresh
+    returning 1)
+  select (select count(*) from ins) into n;
+  select count(*) into matched from (select * from jsonb_to_recordset(p_rows) as t(branch text, code text, bal numeric)) q
+    join purchase_vendors pv on pv.branch=q.branch and pv.ven_code::text=q.code;
+  return jsonb_build_object('adjusted', n, 'matched', matched);
+end$fn$;
+grant execute on function public.apply_vendor_adjust_bulk(jsonb,numeric) to service_role, authenticated;
+
 notify pgrst, 'reload schema';
