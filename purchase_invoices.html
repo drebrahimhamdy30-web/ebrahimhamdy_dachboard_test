@@ -685,6 +685,28 @@
         return !!u && u.role === 'admin';
       }catch(e){ return false; }
     }
+
+    /* نطاق الفروع للدور من إعدادات شاشة الصلاحيات (role_branch_scope).
+       ⚠️ كان الفلتر بيفحص «أدمن؟» بس، فالدور اللي المالك داله «كل
+       الفروع» كان السيرفر بيسمح له والشاشة بتوريه فرعه بس — الواجهة
+       بقت أضيق من الصلاحية الفعلية. */
+    let MY_ALL_BRANCHES = false;
+    async function loadMyBranchScope(){
+      try{
+        if(isAdminUser()){ MY_ALL_BRANCHES = true; return; }
+        const u = (typeof Session !== 'undefined' && Session.user) ? Session.user() : null;
+        if(!u || !u.role) return;
+        const tok = (typeof Session !== 'undefined' && Session.bearer) ? await Session.bearer() : SB_ANON_API;
+        const r = await fetch(SB_URL_API + '/rest/v1/role_branch_scope?select=all_branches&role=eq.'
+                  + encodeURIComponent(u.role), {   // data-ok: صف واحد بفلتر على المفتاح الأساسي
+          headers:{ apikey: SB_ANON_API, Authorization:'Bearer ' + tok }
+        });
+        if(!r.ok) return;
+        const rows = await r.json();
+        MY_ALL_BRANCHES = !!(Array.isArray(rows) && rows[0] && rows[0].all_branches);
+      }catch(e){ /* نفضل على فرعه بس — الأضيق هو الآمن */ }
+    }
+    function seesAllBranches(){ return isAdminUser() || MY_ALL_BRANCHES; }
     function myBranchCode(){
       try{
         const u = (typeof Session !== 'undefined' && Session.user) ? Session.user() : null;
@@ -695,7 +717,7 @@
     /* غير الأدمن بيشوف فرعه بس. ده للوضوح مش للحماية — السيرفر بيفرض
        نفس القيد جوّه الدوال، فتعديل الـselect من المتصفح مابيفيدش. */
     function brOptsHtml(){
-      if(!isAdminUser()){
+      if(!seesAllBranches()){
         const c = myBranchCode();
         return (c && BR[c])
           ? `<option value="${c}">${BR[c]}</option>`
@@ -1105,11 +1127,12 @@
     (typeof checkAuth==='function'?checkAuth():Promise.resolve(1)).then(async u=>{
       if(!u && typeof checkAuth==='function') return;
       await syncBranchNames();
+      await loadMyBranchScope();
       initBranches();
       initImportBtn();
       await onVendorScope();
       await load(1);
-    }).catch(async()=>{ await syncBranchNames(); initBranches(); await load(1); });
+    }).catch(async()=>{ await syncBranchNames(); await loadMyBranchScope(); initBranches(); await load(1); });
   </script>
 </body>
 </html>
