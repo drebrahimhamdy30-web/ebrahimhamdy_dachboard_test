@@ -208,16 +208,22 @@ function normBranchKey(s){
   return String(s||'').trim().replace(/\u0649/g,'\u064a').replace(/\u0629/g,'\u0647').replace(/[\u0623\u0625\u0622]/g,'\u0627').replace(/\s+/g,' ');
 }
 const USER_ROLE_MI=(Session.role()||'').trim();
-const IS_ACCOUNTANT_MI=USER_ROLE_MI==='accountant'||USER_ROLE_MI==='admin'||USER_ROLE_MI==='manager'||USER_ROLE_MI==='reviewer';
+/* نطاق الفروع من شاشة الصلاحيات بدل لستة أدوار محفورة هنا.
+   بيبدأ false (الأضيق) وبيتقرا جوّه الـIIFE اللي بيبني الـselector. */
+let IS_ACCOUNTANT_MI=false;
 const BRANCHES_MI=Branches.names();
 const USER_BRANCH_RAW=(Session.branch()).trim();
 const USER_BRANCH_DEFAULT=BRANCH_ALIAS[USER_BRANCH_RAW]||USER_BRANCH_RAW;
 let USER_BRANCH=USER_BRANCH_DEFAULT;
-// لو محاسب/أدمن: ابدأ بأول فرع لو مفيش فرع محدد
-if(IS_ACCOUNTANT_MI&&!USER_BRANCH)USER_BRANCH=BRANCHES_MI[0];
+/* الأدمن فرعه «كل الفروع» مش فرع حقيقي، فلازم يبدأ على أول فرع —
+   والفحص ده لازم يفضل متزامن لأن أول تحميل للبيانات بيستعمل
+   USER_BRANCH قبل ما قراءة النطاق (async) تخلص. */
+if(Session.isAdmin()&&!BRANCHES_MI.includes(USER_BRANCH))USER_BRANCH=BRANCHES_MI[0];
 
-// بناء selector الفرع لو محاسب/أدمن
-(function(){
+// بناء selector الفرع لو نطاق الدور «كل الفروع»
+(async function(){
+  IS_ACCOUNTANT_MI = await Session.seesAllBranches();
+  if(IS_ACCOUNTANT_MI&&!BRANCHES_MI.includes(USER_BRANCH))USER_BRANCH=BRANCHES_MI[0];
   const lbl=$('#branch-label');
   if(!lbl)return;
   if(IS_ACCOUNTANT_MI){
