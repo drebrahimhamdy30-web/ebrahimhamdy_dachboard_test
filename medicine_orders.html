@@ -811,33 +811,29 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
        الفرع الأول) ومع إعادة الحساب ومع تحديث الصفحة. ومن غير حفظ
        ماكانش ينفع رابط واحد ياخد كل الفروع أصلًا.
 
-       `ORD_SEND` هنا = كميات **الفرع المعروض** بس، بتتحمّل مع تبديل
-       الفرع. إنشاء الرابط بيقرا الجدول كامل لكل الفروع.
-       ⚠️ الصنف اللي ماتعدّلش مالوش صف خالص — عشان لو net_required
-          اتغيّر بعد إعادة حساب، اللي ماتلمسوش ياخد الرقم الجديد مش القديم.
-          فالرجوع للأصل = حذف الصف، مش حفظ الرقم المحسوب. */
-    let ORD_SEND = {};
+       والرقم المعروض بيجي من عمود `send_qty` المحسوب على الصف نفسه
+       (`coalesce(order_send_qty.qty, net_required)` جوّه
+       `get_purchase_orders`) — فالشاشة والرابط والإكسل بيقروا نفس
+       الرقم من نفس المكان، ومافيش حساب في المتصفح.
+       ⚠️ الصنف اللي ماتعدّلش مالوش صف في `order_send_qty` خالص — عشان
+          لو net_required اتغيّر بعد إعادة حساب، اللي ماتلمسوش ياخد
+          الرقم الجديد مش القديم. فالرجوع للأصل = حذف الصف. */
 
-    async function loadOrdSendQty() {
-      try {
-        let all = [], off = 0;
-        for (;;) {
-          const b = await (await fetch(REST + 'order_send_qty?select=itm_code,qty&branch=eq.'
-            + encodeURIComponent(ordBranch) + '&limit=1000&offset=' + off, { headers: H })).json();
-          all = all.concat(b || []); if (!Array.isArray(b) || b.length < 1000) break; off += 1000;
-        }
-        ORD_SEND = {}; all.forEach(x => { ORD_SEND[x.itm_code] = Number(x.qty); });
-      } catch (e) { ORD_SEND = {}; }
-    }
-
-    async function ordSendQty(code, dflt, el) {
+    async function ordSendQty(id, code, dflt, el) {
       const q = Math.max(0, Math.floor(Number(el.value) || 0));
       el.value = q;
       const back = (q === Number(dflt));
-      if (back) delete ORD_SEND[code]; else ORD_SEND[code] = q;
       el.classList.toggle('edited', !back);
       el.title = back ? 'الكمية اللي هتتبعت للمورّد — صفر = استبعاد' : ('الأصل ' + dflt);
       try {
+        /* كتابة مزدوجة زي تجاوز المخزن في pickWh: العمود المحسوب علشان
+           يبان فورًا (الكرون بيعيد البناء كل 10 دقايق بس)، والجدول علشان
+           التعديل يرجع بعد كل إعادة حساب. */
+        const row = ordById[id];
+        if (row) row.send_qty = q;
+        await fetch(REST + 'purchase_orders_flat?id=eq.' + id, {
+          method:'PATCH', headers:{ ...H, 'Content-Type':'application/json', 'Prefer':'return=minimal' },
+          body: JSON.stringify({ send_qty: q }) });
         if (back) {
           await fetch(REST + 'order_send_qty?branch=eq.' + encodeURIComponent(ordBranch)
             + '&itm_code=eq.' + encodeURIComponent(code),
@@ -897,7 +893,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const surpOnly = document.getElementById('ord-surp-only').checked;
       // أعمدة الفائض بتتبني من الفروع — كانت تلاتة مكتوبة بالإيد
       const surpCols = BR_KEYS.map(k => 'surplus_' + k).join(',');
-      let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,net_required,' + surpCols + ',surplus_other,best_store,best_price,best_disc,best_item_name,active_months,sale_bills,ex_archived'
+      let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,net_required,send_qty,' + surpCols + ',surplus_other,best_store,best_price,best_disc,best_item_name,active_months,sale_bills,ex_archived'
         + '&branch=eq.' + encodeURIComponent(ordBranch)
         + '&order=' + ((ordSortCol && ORD_SORT_MAP[ordSortCol]) ? (ORD_SORT_MAP[ordSortCol] + '.' + ordSortDir + '.nullslast') : 'required.desc,itm_name.asc')
         + '&limit=' + ORD_SIZE + '&offset=' + offset;
@@ -1106,7 +1102,6 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         const tp = await (await fetch(REST + 'order_transfer_pending?select=itm_code&branch=eq.' + encodeURIComponent(ordBranch) + '&requested_at=gte.' + cutoff, { headers: H })).json();
         ordTransferPending = new Set((tp || []).map(x => x.itm_code));
       } catch (e) { ordTransferPending = new Set(); }
-      await loadOrdSendQty();
       ordSelBranch = ordBranch;
     }
     let ordBest = {};
@@ -1162,12 +1157,12 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
             + 'onchange="ordSelToggle(\'' + cc + '\',this.checked,' + Number(r.stock || 0) + ')">';
           // الكمية المرسلة: الافتراضي = صافي المطلوب، والمعدّلة بتتلوّن
           const sendDflt = Number(r.net_required != null ? r.net_required : r.required) || 0;
-          const sendQ    = (ORD_SEND[r.itm_code] != null) ? ORD_SEND[r.itm_code] : sendDflt;
+          const sendQ    = (r.send_qty != null) ? Number(r.send_qty) : sendDflt;
           const sendEd   = sendQ !== sendDflt;
           const sendCell = '<input type="number" min="0" step="1" class="ord-send-inp' + (sendEd ? ' edited' : '') + '"'
             + ' value="' + sendQ + '" ' + (canOrder ? '' : 'disabled ')
             + 'title="' + (sendEd ? 'الأصل ' + sendDflt : 'الكمية اللي هتتبعت للمورّد — صفر = استبعاد') + '"'
-            + ' onchange="ordSendQty(\'' + cc + '\',' + sendDflt + ',this)">';
+            + ' onchange="ordSendQty(' + r.id + ',\'' + cc + '\',' + sendDflt + ',this)">';
           const arch = canOrder ? '<button class="ord-actbtn" style="background:#fee2e2;color:#b91c1c" title="أرشفة الصنف" onclick="archiveItem(' + r.id + ')"><i class="fas fa-box-archive"></i></button>' : '';
           /* «نشط شهر واحد» لوحده مؤشر ضعيف — بيصطاد أصناف ماشية فعلًا.
              الحكم من الفواتير: فاتورة واحدة = شاذ (والمعدل اتنزّل لـ1 في
@@ -1248,7 +1243,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         await fetch(REST + 'order_store_override?itm_code=neq.__none__', { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });   // مسح ارتباطات المخازن
         await fetch(REST + 'order_transfer_pending?itm_code=neq.__none__', { method:'DELETE', headers:{ ...H, 'Prefer':'return=minimal' } });   // مسح إخفاء التحويلات المعلّقة
         await fetch(REST + 'rpc/refresh_purchase_orders', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' });   // إعادة التوزيع الطبيعي
-        ordSelCodes = new Set(); ordSelStock = {}; ordTransferPending = new Set(); ORD_SEND = {}; ordSelBranch = null; ordPage = 1; await loadOrders();
+        ordSelCodes = new Set(); ordSelStock = {}; ordTransferPending = new Set(); ordSelBranch = null; ordPage = 1; await loadOrders();
         toast('تم بدء يوم جديد — اتمسح تحت الطلب والكميات وارتباطات المخازن ✓');
       } catch (e) { alert('تعذّر المسح: ' + e.message); }
       finally { if (btn) btn.disabled = false; }
@@ -1335,14 +1330,12 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       msg.innerHTML = 'جارٍ إنشاء الرابط…';
       try {
         /* كل الفروع — مفيش فلتر branch */
-        /* ⚠️ مفيش فلتر `net_required>0` هنا عن قصد. الصنف اللي فرع تاني
-           عنده فائض يغطّيه صافي مطلوبه صفر، بس الشاشة بتعرضه وخانة
-           الكمية فيه شغّالة — فلما المشتريات تكتب كمية فيه تبقى تعمّد
-           شراء رغم الفائض. الفلتر كان بيقص الصف قبل ما نشوف الكمية،
-           فـ101 من 155 كمية معدَّلة كانت بتتحفظ وماتوصلش المورّد.
-           القرار النهائي تحت على `qty > 0` بعد ما ناخد التعديل. */
-        let base = REST + 'purchase_orders_flat?select=branch,itm_code,itm_name,best_item_name,net_required,required'
-          + '&best_store=eq.' + encodeURIComponent(store)
+        /* الفلتر على `send_qty` مش على `net_required` — الصنف اللي فرع
+           تاني عنده فائض يغطّيه صافي مطلوبه صفر، لكن لو المشتريات كتبت
+           فيه كمية تبقى تعمّدت شراءه رغم الفائض. الفلتر القديم كان
+           بيقصّه قبل ما حد يشوف الكمية (101 من 155 كانوا بيضيعوا). */
+        let base = REST + 'purchase_orders_flat?select=branch,itm_code,itm_name,best_item_name,send_qty,net_required,required'
+          + '&best_store=eq.' + encodeURIComponent(store) + '&send_qty=gt.0'
           + '&order=itm_name.asc';
         const co = document.getElementById('ord-company').value;
         const q  = document.getElementById('ord-search').value.trim();
@@ -1361,15 +1354,6 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         }
         if (!all.length) { msg.innerHTML = '<span class="msg-err">لا توجد أصناف بهذا الفلتر.</span>'; return; }
 
-        /* الكميات المعدَّلة لكل الفروع — مفتاح (فرع ⇢ كود) */
-        const SQ = {};
-        let sq = [], soff = 0;
-        for (;;) {
-          const b = await (await fetch(REST + 'order_send_qty?select=branch,itm_code,qty&limit=1000&offset=' + soff, { headers: H })).json();
-          sq = sq.concat(b || []); if (!Array.isArray(b) || b.length < 1000) break; soff += 1000;
-        }
-        sq.forEach(x => { (SQ[x.branch] = SQ[x.branch] || {})[x.itm_code] = Number(x.qty); });
-
         /* ترتيب الفروع زي شريط الفروع في الشاشة — المورّد يشوف نفس الترتيب */
         const brOrder = BR_KEYS.map(k => BR[k]);
         const rank = b => { const i = brOrder.indexOf(b); return i === -1 ? 99 : i; };
@@ -1377,12 +1361,11 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         /* اسم المخزن هو اللي بيروح للمورّد — هو بيدوّر باسمه هو */
         const items = all.map(x => {
           const dflt = Number(x.net_required != null ? x.net_required : x.required) || 0;
-          const ed   = SQ[x.branch] && SQ[x.branch][x.itm_code];
+          const qty  = Number(x.send_qty) || 0;
           return { branch: x.branch, code: x.itm_code,
                    name: (x.best_item_name || x.itm_name),
-                   qty: (ed != null ? ed : dflt), _ed: ed != null };
-        }).filter(x => x.qty > 0)
-          .sort((a, b) => rank(a.branch) - rank(b.branch) || String(a.name).localeCompare(b.name, 'ar'));
+                   qty: qty, _ed: qty !== dflt };   // معدَّلة = مختلفة عن المحسوب
+        }).sort((a, b) => rank(a.branch) - rank(b.branch) || String(a.name).localeCompare(b.name, 'ar'));
 
         if (!items.length) { msg.innerHTML = '<span class="msg-err">كل الأصناف كميتها صفر — مفيش حاجة تتبعت.</span>'; return; }
 
@@ -1504,8 +1487,11 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const bsup = document.getElementById('ord-bestsup').value.trim();
       const q = document.getElementById('ord-search').value.trim();
       const surpOnly = document.getElementById('ord-surp-only').checked;
-      let base = REST + 'purchase_orders_flat?select=best_store,itm_code,itm_name,best_item_name,net_required,best_price,best_disc,company'
-        + '&branch=eq.' + encodeURIComponent(ordBranch) + '&net_required=gt.0&order=best_store.asc,itm_name.asc';
+      /* «العدد» = الكمية المرسلة (تعديلات المشتريات لو موجودة) زي الرابط
+         بالظبط — قبل كده كان بيكتب net_required فالإكسل والرابط كانوا
+         بيقولوا رقمين مختلفين لنفس الصنف. */
+      let base = REST + 'purchase_orders_flat?select=best_store,itm_code,itm_name,best_item_name,send_qty,best_price,best_disc,company'
+        + '&branch=eq.' + encodeURIComponent(ordBranch) + '&send_qty=gt.0&order=best_store.asc,itm_name.asc';
       base += w ? '&best_store=eq.' + encodeURIComponent(w) : '&best_store=not.is.null';
       if (co) base += '&company=eq.' + encodeURIComponent(co);
       if (bsup) base += '&best_pur_store=ilike.*' + encodeURIComponent(bsup) + '*';
@@ -1523,7 +1509,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       /* عمود «الفرع» للتوضيح. عمود «متاح» اتشال مع مسار الاستيراد —
          التعليم بقى على «رابط المورّد» بـcheckbox حقيقي، والإكسل بقى
          للعرض والأرشفة. */
-      const rows = all.map(x => ({ 'الفرع': ordBranch, 'المخزن': x.best_store, 'الكود': x.itm_code, 'اسم الصنف لدى المخزن': (x.best_item_name || x.itm_name), 'الاسم عندنا': x.itm_name, 'العدد': x.net_required, 'سعر البيع': x.best_price, 'الخصم %': x.best_disc }));
+      const rows = all.map(x => ({ 'الفرع': ordBranch, 'المخزن': x.best_store, 'الكود': x.itm_code, 'اسم الصنف لدى المخزن': (x.best_item_name || x.itm_name), 'الاسم عندنا': x.itm_name, 'العدد': x.send_qty, 'سعر البيع': x.best_price, 'الخصم %': x.best_disc }));
       const ws = XLSX.utils.json_to_sheet(rows);
       ws['!cols'] = [{wch:12},{wch:16},{wch:9},{wch:40},{wch:34},{wch:7},{wch:10},{wch:9}];
       const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'طلبية');
@@ -1596,7 +1582,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const q  = document.getElementById('ord-search').value.trim();
       const surpOnly = document.getElementById('ord-surp-only').checked;
       let base = REST + 'purchase_orders_flat?select=itm_code,itm_name,best_item_name,net_required,best_price,best_disc'
-        + '&branch=eq.' + encodeURIComponent(ordBranch) + '&net_required=gt.0'
+        + '&branch=eq.' + encodeURIComponent(ordBranch) + '&send_qty=gt.0'
         + '&best_store=eq.' + encodeURIComponent(PH_STORE) + '&order=itm_name.asc';
       if (co) base += '&company=eq.' + encodeURIComponent(co);
       if (surpOnly) base += '&surplus_other=gt.0';
@@ -1699,7 +1685,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         const q  = document.getElementById('ord-search').value.trim();
         const surpOnly = document.getElementById('ord-surp-only').checked;
         let base = REST + 'purchase_orders_flat?select=itm_code,itm_name,best_item_name,best_price,best_disc'
-          + '&branch=eq.' + encodeURIComponent(ordBranch) + '&net_required=gt.0'
+          + '&branch=eq.' + encodeURIComponent(ordBranch) + '&send_qty=gt.0'
           + '&best_store=eq.' + encodeURIComponent(PH_STORE) + '&order=itm_name.asc';
         if (co) base += '&company=eq.' + encodeURIComponent(co);
         if (surpOnly) base += '&surplus_other=gt.0';
