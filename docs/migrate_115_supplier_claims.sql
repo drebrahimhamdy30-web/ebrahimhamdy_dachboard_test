@@ -188,8 +188,8 @@ begin
   on conflict (branch, pth_id) do nothing;
 
   insert into claim_returns(branch, ret_kind, r1, r2, reason, claim_id)
-  select p_branch, r->>'kind', (r->>'r1')::bigint, (r->>'r2')::bigint, coalesce(r->>'reason','غير مطلوب'), v_id
-  from jsonb_array_elements(coalesce(p_ret,'[]'::jsonb)) r
+  select p_branch, el->>'kind', (el->>'r1')::bigint, (el->>'r2')::bigint, coalesce(el->>'reason','غير مطلوب'), v_id
+  from jsonb_array_elements(coalesce(p_ret,'[]'::jsonb)) el
   on conflict (branch, ret_kind, r1, r2) do nothing;
 
   return jsonb_build_object('id', v_id, 'net', v_net, 'invoices', v_inv, 'returns', v_ret, 'notarr', v_notarr, 'disc', v_disc, 'by', v_by);
