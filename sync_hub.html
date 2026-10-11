@@ -36,6 +36,16 @@
     .bgrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(215px,1fr)); gap:12px; margin-top:6px; }
     .bcard{ border:1.5px solid var(--border); border-radius:var(--radius-md); padding:13px; background:var(--surface); }
     .bcard.off{ opacity:.78; }
+    /* نص الخطأ لازم يبان على الشاشة — tooltip بالـhover مابينفعش على التاتش
+       ولا بيبان في صورة الشاشة، وده كان بيخلّي كل تشخيص يحتاج استعلام يدوي */
+    .berr{ margin-top:8px; padding:8px 10px; border-radius:8px; background:#fef2f2;
+           border:1px solid #fecaca; color:#991b1b; font-size:.74rem; line-height:1.6; }
+    [data-theme="dark"] .berr{ background:#2a1416; border-color:#7f1d1d; color:#fca5a5; }
+    .berr .why{ display:block; font-weight:700; margin-bottom:3px; }
+    .berr .raw{ display:block; font-family:monospace; direction:ltr; text-align:left;
+                opacity:.85; word-break:break-word; }
+    .rerr{ color:#dc2626; font-size:.72rem; display:block; max-width:420px;
+           overflow:hidden; text-overflow:ellipsis; white-space:nowrap; direction:ltr; text-align:left; }
     .brow{ display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
     .bname{ font-size:1rem; font-weight:800; }
     .dot{ display:inline-flex; align-items:center; gap:5px; font-size:.68rem; font-weight:800; padding:3px 8px; border-radius:20px; }
@@ -113,6 +123,7 @@
     const BR_NAMES = { mamora:'المعمورة', san:'سان ستيفانو', bishr:'سيدى بشر', seyouf:'السيوف' };
     const ALL_BRANCHES = ['mamora','san','bishr','seyouf'];
     let JOBS = [], STATE = [], canEdit = false, expandedJob = 'purchases';
+    let ERRS = {};   // ERRS['job|branch'] = نص آخر خطأ
 
     function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2600); }
     function cairo(ts){ if(!ts) return '—'; try{ return new Date(ts).toLocaleString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }catch(e){ return ts; } }
@@ -133,6 +144,15 @@
       JOBS  = await sbGet('sync_jobs?select=id,name,enabled,interval_minutes,window_days,window_refresh_minutes,last_run_at,last_status,steps&order=sort_order.asc'); // data-ok: مهام معدودة (صفوف قليلة)
       STATE = await sbGet('sync_branch_state?select=*'); // data-ok: ٤ فروع لكل مهمة بحد أقصى
       const runs = await Session.fetchPage('sync_runs?select=*&order=ran_at.desc', { limit: 40 });
+      /* أحدث خطأ لكل (مهمة × فرع): استعلام منفصل عشان الخطأ يفضل باين
+         حتى لو جدول الجولات الـ40 الأخيرة كلهم نجاح لفروع تانية */
+      ERRS = {};
+      const er = await Session.fetchPage(
+        'sync_runs?select=job_id,branch,error,ran_at&status=eq.error&order=ran_at.desc', { limit: 120 });
+      (er.ok ? er.rows : []).forEach(r => {
+        const k = r.job_id + '|' + (r.branch || '');
+        if (!(k in ERRS)) ERRS[k] = r.error || '';   // أول واحد = الأحدث (مرتّب تنازلي)
+      });
       renderJobs();
       renderBranches();
       renderRuns(runs.ok ? runs.rows : []);
@@ -140,6 +160,25 @@
 
     function stOf(job){ return STATE.filter(s=>s.job_id===job); }
     function targetsOf(job){ try{ return (job.steps||[]).map(s=>s.target).join(' / '); }catch(e){ return ''; } }
+
+    /* ترجمة نص SQL Server/الشبكة لسبب مفهوم + الخطوة التالية.
+       الأهم إنها بتفرّق بين «وصلنا ورفض الحساب» و«مافيش وصول خالص» —
+       التشخيص الغلط هنا بيضيّع ساعات على الفايروول بدل الحساب. */
+    function errWhy(msg){
+      const m = String(msg || '');
+      if(/Login failed/i.test(m))
+        return 'سيرفر الفرع شغّال ورفض حساب القراءة — الحساب مش موجود أو كلمة السر مختلفة. '
+             + 'غالبًا بعد تسطيب SQL Server جديد. الحل: نفّذ docs/eplus_reader_setup.sql على سيرفر الفرع.';
+      if(/network-related|not accessible|server was not found|Timeout expired/i.test(m))
+        return 'مافيش وصول لسيرفر الفرع — جهاز مقفول، أو البورت/الفايروول، أو الشبكة بين الفرعين.';
+      if(/Cannot open database|server principal/i.test(m))
+        return 'حساب القراءة موجود بس مش مربوط بقاعدة Genius (مستخدم يتيم بعد استعادة نسخة).';
+      if(/Invalid object name/i.test(m))
+        return 'القاعدة متصلة بس الجدول مش موجود — إصدار قاعدة مختلف أو قاعدة غلط.';
+      if(/UPSERT|POST|PATCH|GET /i.test(m))
+        return 'الاتصال بسوبابيز نفسه فشل — مش مشكلة في الفرع.';
+      return '';
+    }
 
     function statusPill(st){
       const m={ok:['ok','نجاح'],error:['err','خطأ'],empty:['empty','لا جديد']};
@@ -187,6 +226,9 @@
           <div class="kv"><span>آخر مزامنة</span><b>${s?ago(s.last_sync_at):'—'}</b></div>
           <div class="kv"><span>آخر رقم فاتورة</span><b>${s?num(s.last_pth):'—'}</b></div>
           <div class="kv"><span>آخر نتيجة</span><b>${s?({ok:'نجاح',error:'خطأ',empty:'لا جديد'}[s.last_status]||'—'):'—'}</b></div>
+          ${(s && s.last_status==='error' && ERRS[job.id+'|'+code]) ? `<div class="berr">
+            ${errWhy(ERRS[job.id+'|'+code]) ? `<span class="why">${esc(errWhy(ERRS[job.id+'|'+code]))}</span>` : ''}
+            <span class="raw">${esc(ERRS[job.id+'|'+code])}</span></div>` : ''}
           <div class="bact">
             <span class="sw-lbl"><button class="tgl ${enabled?'':'o'}" ${dis} onclick="toggleBranch('${job.id}','${code}',${!enabled})"></button> ${enabled?'مفعّل':'موقوف'}</span>
             ${enabled?`<button class="btn-sync o sm" ${dis} onclick="runNow('${job.id}','${code}')"><i class="fas fa-rotate"></i> زامن</button>`:''}
@@ -211,7 +253,7 @@
         <td style="font-variant-numeric:tabular-nums">${num(r.new_rows)}</td>
         <td style="font-variant-numeric:tabular-nums">${num(r.item_rows)}</td>
         <td style="font-variant-numeric:tabular-nums">${r.duration_ms!=null?(r.duration_ms/1000).toFixed(1)+' ث':'—'}</td>
-        <td>${statusPill(r.status)}${r.error?` <span title="${esc(r.error)}" style="color:#dc2626">ⓘ</span>`:''}</td>
+        <td>${statusPill(r.status)}${r.error?`<span class="rerr" title="${esc(r.error)}">${esc(r.error)}</span>`:''}</td>
       </tr>`).join('');
     }
 
