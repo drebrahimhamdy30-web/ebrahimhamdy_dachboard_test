@@ -122,3 +122,12 @@ from unnest(array['accountant','admin','cashier','employee','inventory','manager
 on conflict (role, page) do update set can_view=true;
 
 notify pgrst,'reload schema';
+
+/* ── مفتاح مزامنة الفرع في جدول الفروع (الشاشة بتقراه بدل الهاردكود) ── */
+alter table public.branches add column if not exists sync_key text;
+update public.branches set sync_key = case
+  when name like '%معمور%' then 'mamora'
+  when name like '%سان%' or name like '%ستيفانو%' then 'san'
+  when name like '%بشر%' then 'bishr'
+  when name like '%سيوف%' then 'seyouf' end
+where sync_key is null;

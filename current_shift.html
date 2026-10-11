@@ -68,9 +68,12 @@
   <div id="content"><div class="state">جارِ التحميل…</div></div>
 </div>
 <script>
-const BR = { mamora:'المعمورة', san:'سان ستيفانو', bishr:'سيدى بشر', seyouf:'السيوف' };
 const norm = s => String(s||'').replace(/\s+/g,'').replace(/^ال/,'').replace(/[ىي]/g,'ي');
-const BR_REV = {}; Object.entries(BR).forEach(([k,v])=>{ BR_REV[norm(v)]=k; });
+let BRANCHES = [];  // {id,name,sync_key} من جدول الفروع
+async function loadBranches(){
+  try{ const r=await fetch(SB_URL_API+"/rest/v1/branches?select=id,name,sync_key&sync_key=not.is.null&order=name",{headers:{apikey:SB_ANON_API,Authorization:'Bearer '+SB_ANON_API}});
+    BRANCHES = r.ok ? (await r.json()) : []; }catch(e){ BRANCHES=[]; }
+}
 const CHANNELS = ['instapay','paymob 1','paymob 7','orange cash','fawry313','fawry 6008','vodafon cash'];
 const fmt = n => (n<0?'−':'') + Math.abs(Math.round(Number(n)||0)).toLocaleString('en-US');
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -79,7 +82,7 @@ async function rpc(fn, body){
     headers:{'Content-Type':'application/json', apikey:SB_ANON_API, Authorization:'Bearer '+SB_ANON_API}, body:JSON.stringify(body||{}) });
     if(!r.ok) return null; return await r.json(); }catch(e){ return null; }
 }
-let BRANCH='mamora', POINTS=[], CUR=null, SHIFT=null, TXN=[], chFilter=null, typeFilter=null;
+let BRANCH='', POINTS=[], CUR=null, SHIFT=null, TXN=[], chFilter=null, typeFilter=null;
 
 function roleDefaultPoint(points){
   let role=''; try{ role=(typeof Session!=='undefined'&&Session.role)?Session.role():''; }catch(e){}
@@ -87,16 +90,20 @@ function roleDefaultPoint(points){
   const pv=points.find(x=>/نقط/.test(x.point_name)); return pv?pv.cashier_id:(points[0]&&points[0].cashier_id);
 }
 async function init(){
-  let bname='', seesAll=false;
+  await loadBranches();
+  let bid='', bname='', seesAll=false;
+  try{ bid=(typeof Session!=='undefined'&&Session.branchId)?Session.branchId():''; }catch(e){}
   try{ bname=(typeof Session!=='undefined'&&Session.branch)?Session.branch():''; }catch(e){}
   try{ seesAll=(typeof Session!=='undefined'&&Session.seesAllBranches)?await Session.seesAllBranches():false; }catch(e){}
-  const myKey=BR_REV[norm(bname)]; if(myKey) BRANCH=myKey;
+  const mine = BRANCHES.find(b=>b.id&&b.id===bid) || BRANCHES.find(b=>norm(b.name)===norm(bname));
+  if(mine) BRANCH=mine.sync_key; else if(BRANCHES.length) BRANCH=BRANCHES[0].sync_key;
   const sel=document.getElementById('brSel');
-  if(seesAll || !myKey){
-    sel.style.display=''; sel.innerHTML=Object.entries(BR).map(([k,v])=>`<option value="${k}" ${k===BRANCH?'selected':''}>${v}</option>`).join('');
+  if(seesAll || !mine){
+    sel.style.display=''; sel.innerHTML=BRANCHES.map(b=>`<option value="${b.sync_key}" ${b.sync_key===BRANCH?'selected':''}>${esc(b.name)}</option>`).join('');
     sel.onchange=()=>{ BRANCH=sel.value; loadPoints(); };
   }
   document.getElementById('refreshBtn').onclick=()=>loadShift();
+  if(!BRANCH){ document.getElementById('content').innerHTML='<div class="state">تعذّر تحميل الفروع.</div>'; return; }
   await loadPoints();
   setInterval(()=>{ if(CUR) loadShift(); }, 60000);
 }
