@@ -15,7 +15,7 @@ try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_d
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../delivery-style.css">
 <script src="../../config.js?v=20260903"></script>
-<script src="../../session.js?v=20261011s"></script>
+<script src="../../session.js?v=20261011p"></script>
 <script src="../../branches.js?v=20260904"></script>
 <script src="../../pages.js?v=20260905"></script>
 <script src="../../brand.js?v=20260904"></script>
@@ -32,6 +32,12 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
 .scope-row td{background:var(--surface-2,#f8fafc);font-weight:700;border-bottom:2px solid var(--border)}
 .scope-row td:first-child{text-align:right !important}
 .scope-sel{font-family:inherit;font-size:.74rem;font-weight:700;padding:3px 6px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text)}
+/* خانة «كل الفروع» جوّه كل خلية — النطاق بقى لكل شاشة مش لكل دور */
+.cellwrap{display:flex;flex-direction:column;align-items:center;gap:3px}
+.scope-chk{display:inline-flex;align-items:center;gap:3px;font-size:.66rem;font-weight:700;color:var(--text-muted);cursor:pointer;white-space:nowrap}
+.scope-chk input{accent-color:var(--primary);width:13px;height:13px;cursor:pointer;margin:0}
+.scope-chk.on{color:var(--primary)}
+.scope-mark{font-size:.66rem;font-weight:700;color:var(--primary);display:block;margin-top:2px}
 .scope-txt{font-size:.74rem;font-weight:700}
 .scope-all{color:var(--primary)}
 .scope-own{color:var(--text-muted)}
@@ -101,7 +107,6 @@ const ROLES = [
 // و4 شاشات مكانتش موجودة هنا خالص فماكانش ينفع تتعدّل صلاحياتها.
 
 let permData = {};   // permData[role][page] = {can_view, can_edit}
-let scopeData = {};  // scopeData[role] = true يعني كل الفروع، وإلا فرعه بس
 // تبويبات الشاشات: TABS[page] = [{tab_key,title}]، tabDenied["role|page|tab"] = true لو ممنوع
 let TABS = {}, tabDenied = {}, openTabs = new Set();
 let editMode = false;
@@ -117,24 +122,17 @@ async function loadPermissions(){
   }
   loadOk=false;
   await Pages.ready();   // الكتالوج لازم يكون جاهز قبل الرسم
-  const {data,error}=await db.from('page_permissions').select('role,page,page_key,can_view,can_edit');
+  const {data,error}=await db.from('page_permissions').select('role,page,page_key,can_view,can_edit,all_branches');
   if(error || !data || data.length===0){
     console.error('permissions load failed', error);
     document.getElementById('permActions').innerHTML='';
     document.getElementById('permBody').innerHTML='<div class="no-access">⚠️ تعذّر تحميل الصلاحيات من الخادم.<br>من فضلك حدّث الصفحة وحاول تاني — الحفظ متوقّف مؤقتاً لحماية الصلاحيات من المسح.</div>';
     return;
   }
-  // نطاق الفروع لكل دور — مفيش صف = فرعه بس
-  scopeData = {};
-  try{
-    const sc = await db.from('role_branch_scope').select('role,all_branches');  // data-ok: صف واحد لكل دور — 9 أدوار في النظام كله
-    (sc.data||[]).forEach(r => { scopeData[r.role] = !!r.all_branches; });
-  }catch(e){ console.error('branch scope load failed', e); }
-
   permData={};
   data.forEach(r=>{
     if(!permData[r.role]) permData[r.role]={};
-    permData[r.role][r.page_key || Pages.keyOf(r.page)]={can_view:r.can_view, can_edit:r.can_edit};
+    permData[r.role][r.page_key || Pages.keyOf(r.page)]={can_view:r.can_view, can_edit:r.can_edit, all_branches:!!r.all_branches};
   });
   // التبويبات: الكتالوج + المنع (مفيش صف = مسموح)
   try{
@@ -167,28 +165,45 @@ function renderActions(){
   }
 }
 
+/* اختصار سطر الدور: بيحرّك خانات الدور كلها في الواجهة بس —
+   الحفظ بيقرا الخانات نفسها، فمفيش مصدرين للحقيقة. */
+function setAllScope(roleKey, val){
+  if(!val) return;
+  document.querySelectorAll('#permBody input.scope-cell[data-role="'+roleKey+'"]').forEach(c => {
+    c.checked = (val === 'all');
+    c.closest('.scope-chk').classList.toggle('on', c.checked);
+  });
+}
+
+document.addEventListener('change', e => {
+  const c = e.target.closest && e.target.closest('input.scope-cell');
+  if (c) c.closest('.scope-chk').classList.toggle('on', c.checked);
+});
+
 function render(){
   renderActions();
   let html = `<div class="matrix-wrap"><table class="matrix"><thead><tr><th>الصفحة</th>`;
   ROLES.forEach(r => html += `<th>${r.label}</th>`);
   html += `</tr></thead><tbody>`;
 
-  /* نطاق الفروع: إعداد للدور كله مش لصفحة بعينها، فمكانه فوق المصفوفة.
-     الأدمن ثابت على كل الفروع — السيرفر بيفرض ده مهما اتبعت من هنا. */
-  html += `<tr class="scope-row"><td>🏬 نطاق الفروع</td>`;
+  /* النطاق بقى لكل (دور × شاشة) في الخلايا تحت. السطر ده بقى
+     **اختصار**: بيحدّد كل خانات الدور مرة واحدة — مش إعداد مستقل،
+     عشان ما يبقاش فيه مصدرين للحقيقة بيختلفوا. */
+  html += `<tr class="scope-row"><td>🏬 تحديد كل الشاشات</td>`;
   ROLES.forEach(role => {
     if(role.key === 'admin'){
       html += `<td><span class="scope-txt scope-all">كل الفروع</span></td>`;
       return;
     }
-    const all = !!scopeData[role.key];
     if(editMode){
-      html += `<td><select class="scope-sel" data-role="${role.key}">
-        <option value="own"${all?'':' selected'}>فرعه بس</option>
-        <option value="all"${all?' selected':''}>كل الفروع</option>
+      html += `<td><select class="scope-sel" onchange="setAllScope('${role.key}', this.value)">
+        <option value="">— اختر —</option>
+        <option value="own">كلها فرعه بس</option>
+        <option value="all">كلها كل الفروع</option>
       </select></td>`;
     } else {
-      html += `<td><span class="scope-txt ${all?'scope-all':'scope-own'}">${all?'كل الفروع':'فرعه بس'}</span></td>`;
+      const n = Object.values(permData[role.key] || {}).filter(p => p && p.all_branches).length;
+      html += `<td><span class="scope-txt ${n?'scope-all':'scope-own'}">${n ? n + ' شاشة' : '—'}</span></td>`;
     }
   });
   html += `</tr>`;
@@ -206,14 +221,22 @@ function render(){
       ROLES.forEach(role => {
         const pp = permData[role.key]?.[page] || {};
         const cur = pp.can_edit ? 'edit' : (pp.can_view ? 'view' : '');
+        const scoped = !!pp.all_branches;
         if(editMode){
-          html += `<td><select class="perm-sel" data-role="${role.key}" data-page="${page}">
-            <option value=""${cur===''?' selected':''}>—</option>
-            <option value="view"${cur==='view'?' selected':''}>عرض</option>
-            <option value="edit"${cur==='edit'?' selected':''}>عرض وتعديل</option>
-          </select></td>`;
+          /* الأدمن كل الفروع دايمًا — السيرفر بيفرضها مهما اتبعت */
+          const chk = role.key === 'admin'
+            ? '<span class="scope-chk on">🏬 كل الفروع</span>'
+            : `<label class="scope-chk${scoped?' on':''}" title="يشوف كل الفروع في الشاشة دي">
+                 <input type="checkbox" class="scope-cell" data-role="${role.key}" data-page="${page}"${scoped?' checked':''}>🏬</label>`;
+          html += `<td><div class="cellwrap">
+            <select class="perm-sel" data-role="${role.key}" data-page="${page}">
+              <option value=""${cur===''?' selected':''}>—</option>
+              <option value="view"${cur==='view'?' selected':''}>عرض</option>
+              <option value="edit"${cur==='edit'?' selected':''}>عرض وتعديل</option>
+            </select>${chk}</div></td>`;
         } else {
-          html += `<td>${cur==='edit'?'✏️ عرض وتعديل':(cur==='view'?'👁 عرض':'—')}</td>`;
+          const mark = (cur && (scoped || role.key === 'admin')) ? '<span class="scope-mark">🏬 كل الفروع</span>' : '';
+          html += `<td>${cur==='edit'?'✏️ عرض وتعديل':(cur==='view'?'👁 عرض':'—')}${mark}</td>`;
         }
       });
       html += `</tr>`;
@@ -261,13 +284,13 @@ async function savePermissions(){
     const { error } = await db.rpc('save_page_permissions_bulk', { p_updates: updates });
     if(error) throw error;
 
-    // نطاق الفروع (الأدمن مش في اللستة — ثابت على كل الفروع)
+    // نطاق الفروع لكل (دور × شاشة) — الأدمن مش في اللستة، ثابت كل الفروع
     const scopeUpdates = [];
-    document.querySelectorAll('#permBody select.scope-sel').forEach(sel => {
-      scopeUpdates.push({ role: sel.dataset.role, all_branches: sel.value === 'all' });
+    document.querySelectorAll('#permBody input.scope-cell').forEach(c => {
+      scopeUpdates.push({ role: c.dataset.role, page_key: c.dataset.page, all_branches: c.checked });
     });
     if(scopeUpdates.length){
-      const { error: sErr } = await db.rpc('save_role_branch_scope', { p_updates: scopeUpdates });
+      const { error: sErr } = await db.rpc('save_page_branch_scope', { p_updates: scopeUpdates });
       if(sErr) throw sErr;
     }
     // التبويبات: نبعت اللي اتغيّر بس (الجدول بيفضل صغير — مفيش صف = مسموح)

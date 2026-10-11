@@ -349,20 +349,13 @@ const Session = (function () {
      حطّيتها هنا مش في كل شاشة عشان نسختين من نفس القاعدة بتتفرّع:
      شاشة المشتريات وشاشة طلبيات الأدوية كانتا بتفحصا «أدمن؟» بس،
      فالدور اللي ليه كل الفروع كان بيتقفل على فرعه في الواجهة. */
-  let _scopeCache = null;
-  async function seesAllBranches() {
-    if (_scopeCache !== null) return _scopeCache;
-    if (isAdmin()) { _scopeCache = true; return true; }
+  async function seesAllBranches(page) {
+    if (isAdmin()) return true;
     try {
-      const r = await fetch(
-        PHALIX_CONFIG.supabaseUrl + '/rest/v1/role_branch_scope?select=all_branches&role=eq.'
-        + encodeURIComponent(role()),   // data-ok: صف واحد بفلتر على المفتاح الأساسي
-        { headers: { apikey: PHALIX_CONFIG.supabaseAnonKey,
-                     Authorization: 'Bearer ' + (get('authJwt') || PHALIX_CONFIG.supabaseAnonKey) } });
-      const rows = r.ok ? await r.json() : [];
-      _scopeCache = !!(Array.isArray(rows) && rows[0] && rows[0].all_branches);
-    } catch (e) { _scopeCache = false; }
-    return _scopeCache;
+      const q = String(page || thisPage()).trim();
+      const p = (await pages()).find(x => x.key === q || x.page === q);
+      return !!(p && p.all_branches);
+    } catch (e) { return false; }
   }
 
   /* can() بتقبل المفتاح الثابت ('supplier_balances') أو اسم الملف
