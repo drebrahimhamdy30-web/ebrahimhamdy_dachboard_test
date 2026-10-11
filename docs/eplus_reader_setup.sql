@@ -1,87 +1,75 @@
 /* ============================================================
-   إعادة إنشاء حساب القراءة فقط على eplus بعد تسطيب SQL Server جديد
+   إعادة إنشاء حساب القراءة فقط (phalix_reader) على eplus
+   بعد تسطيب SQL Server جديد أو استعادة قاعدة من نسخة.
    ------------------------------------------------------------
-   يُنفَّذ على سيرفر SQL الخاص بالفرع نفسه (SSMS → New Query)
-   بحساب sysadmin (sa أو حساب ويندوز أدمن)، وقاعدة التنفيذ master.
+   ⚠️ سيرفرات الفروع = SQL Server 2000. الصيغة هنا 2000
+      (sp_addlogin ... مش CREATE LOGIN/sys.server_principals بتوع 2005+).
 
-   السبب: تسطيب SQL Server جديد بيمسح قاعدة master، ومعاها كل
-   تسجيلات الدخول — ومنها phalix_reader. المزامنة ساعتها بتوصل
-   للسيرفر وبيرفض الدخول («Login failed for user 'phalix_reader'»).
+   السبب: تسطيب SQL جديد بيمسح master (وفيها التسجيلات)، واستعادة
+   القاعدة بتخلّي المستخدم جوّه Genius «يتيم» (SID قديم). العرض:
+   «Login failed» أو بعد الإنشاء «SELECT permission denied» رغم db_datareader.
 
-   ⚠️ الحساب ده للقراءة فقط. ممنوع أي صلاحية كتابة على Genius —
-   نظام البيع مابيتكتبش فيه من برّه أبدًا.
+   ⚠️ كلمة السر لازم = نفس الموجودة في:
+      C:\ProgramData\phalix\sync_engine.json (جهاز المعمورة)
+      المفتاح branches.<الفرع>.password — انسخها زي ما هي.
 
-   ⚠️ كلمة السر لازم تكون **نفس** الموجودة في ملف إعدادات المزامنة
-   على جهاز المعمورة: C:\ProgramData\phalix\sync_engine.json
-   (المفتاح branches.<الفرع>.password). لو حطيت كلمة سر جديدة،
-   لازم تعدّل الملف ده كمان وإلا المزامنة تفضل واقفة.
+   ───────────────────────────────────────────────────────────
+   التشغيل:
+   (أ) لو عندك حساب sysadmin (sa أو حساب ويندوز سيسأدمن):
+       افتح Query Analyzer (isqlw.exe) → اتصل → الصق ده وشغّل F5.
+       أو: osql -S . -U sa -P <sa> -i eplus_reader_setup.sql
+
+   (ب) لو مفيش sysadmin معروف (sa مجهول، وحساب الويندوز مش sysadmin):
+       شغّل osql بحساب NT AUTHORITY\SYSTEM (sysadmin على SQL 2000)
+       عبر مهمة مجدولة مؤقتة من PowerShell بحساب أدمن ويندوز:
+         schtasks /create /tn pfix /tr "<bat يشغّل osql -S . -E -i هذا_الملف>" ^
+                  /sc once /st 23:59 /ru SYSTEM /rl HIGHEST /f
+         schtasks /run /tn pfix   &&   schtasks /delete /tn pfix /f
    ============================================================ */
 
-/* (0) فحص: هل السيرفر بيسمح بتسجيل دخول SQL أصلًا؟
-      لو رجّع 1 يعني «Windows Authentication only» — لازم تتحوّل
-      لـMixed Mode من خصائص السيرفر:
-      SSMS → right-click السيرفر → Properties → Security →
-      «SQL Server and Windows Authentication mode» → ثم إعادة
-      تشغيل خدمة SQL Server (الإعداد مابيسريش غير بعد الريستارت). */
-SELECT SERVERPROPERTY('IsIntegratedSecurityOnly') AS windows_only_1_yes,
-       @@VERSION AS sql_version;
+/* (0) فحص: السيرفر بيسمح بتسجيل دخول SQL؟ لو رجّع 1 = Windows-only،
+      حوّله Mixed Mode (Enterprise Manager → Properties → Security) + ريستارت. */
+SELECT CONVERT(int, SERVERPROPERTY('IsIntegratedSecurityOnly')) AS windows_only_1_yes,
+       @@VERSION AS sql_version
 GO
 
-/* (1) تسجيل الدخول */
-USE master;
+/* (1) التسجيل (master) — صيغة SQL 2000 */
+USE master
 GO
-IF NOT EXISTS (SELECT 1 FROM sys.server_principals WHERE name = 'phalix_reader')
-BEGIN
-  CREATE LOGIN [phalix_reader]
-    WITH PASSWORD = N'<<ضع_نفس_كلمة_السر_من_sync_engine.json>>',
-         DEFAULT_DATABASE = [Genius],
-         CHECK_POLICY = OFF,      -- عشان ماتنتهيش صلاحيتها وتوقف المزامنة
-         CHECK_EXPIRATION = OFF;
-  PRINT 'تم إنشاء تسجيل الدخول phalix_reader';
-END
+IF NOT EXISTS (SELECT 1 FROM syslogins WHERE name = 'phalix_reader')
+  EXEC sp_addlogin 'phalix_reader', '<<ضع_نفس_كلمة_السر_من_sync_engine.json>>', 'Genius'
 ELSE
-BEGIN
-  /* موجود بالفعل: نضبط كلمة السر ونلغي انتهاء الصلاحية */
-  ALTER LOGIN [phalix_reader]
-    WITH PASSWORD = N'<<ضع_نفس_كلمة_السر_من_sync_engine.json>>',
-         CHECK_POLICY = OFF, CHECK_EXPIRATION = OFF;
-  ALTER LOGIN [phalix_reader] ENABLE;
-  PRINT 'تم تحديث تسجيل الدخول الموجود';
-END
+  EXEC sp_password NULL, '<<ضع_نفس_كلمة_السر_من_sync_engine.json>>', 'phalix_reader'
 GO
 
-/* (2) المستخدم جوّه قاعدة Genius
-      لو القاعدة مستعادة من نسخة احتياطية، المستخدم بيبقى موجود
-      لكن «يتيم» (SID بتاع سيرفر قديم) — ALTER USER بتربطه بالجديد. */
-USE [Genius];
+/* (2) ⭐ إصلاح المستخدم «اليتيم» جوّه Genius — المفتاح لو القاعدة مستعادة.
+      بيربط مستخدم phalix_reader الموجود بالتسجيل الجديد (SID). */
+USE Genius
 GO
-IF EXISTS (SELECT 1 FROM sys.database_principals WHERE name = 'phalix_reader')
-  ALTER USER [phalix_reader] WITH LOGIN = [phalix_reader];   -- إصلاح اليتيم
+IF EXISTS (SELECT 1 FROM sysusers WHERE name = 'phalix_reader' AND issqluser = 1)
+  EXEC sp_change_users_login 'Update_One', 'phalix_reader', 'phalix_reader'
 ELSE
-  CREATE USER [phalix_reader] FOR LOGIN [phalix_reader];
+  EXEC sp_grantdbaccess 'phalix_reader'   -- مش موجود أصلًا: أنشئ المستخدم
 GO
 
-/* (3) قراءة فقط — ومنع الكتابة صريح مش بالاعتماد على غياب الصلاحية */
-EXEC sp_addrolemember N'db_datareader', N'phalix_reader';   -- شغّالة على كل الإصدارات
-GO
-DENY INSERT, UPDATE, DELETE, ALTER, EXECUTE TO [phalix_reader];
+/* (3) قراءة فقط على كل الجداول */
+EXEC sp_addrolemember 'db_datareader', 'phalix_reader'
 GO
 
-/* (4) تأكيد: لازم ترجّع صفوف من الجداول اللي المزامنة بتقراها */
+/* (4) تأكيد: لازم ترجّع صفوف من جداول المزامنة */
 SELECT 'Vendor' t, COUNT(*) n FROM Vendor
 UNION ALL SELECT 'pur_trans_h', COUNT(*) FROM pur_trans_h
-UNION ALL SELECT 'pur_trans_d', COUNT(*) FROM pur_trans_d
 UNION ALL SELECT 'Item_back_h', COUNT(*) FROM Item_back_h
-UNION ALL SELECT 'Item_back_d', COUNT(*) FROM Item_back_d
 UNION ALL SELECT 'Store',       COUNT(*) FROM Store
-UNION ALL SELECT 'Employee',    COUNT(*) FROM Employee;
+UNION ALL SELECT 'Employee',    COUNT(*) FROM Employee
 GO
 
-/* (5) أهم رقم: أعلى فاتورة شراء في الفرع.
-      مركز المزامنة بيزامن «الأجدد من آخر فاتورة» (last_pth)، فلو
-      القاعدة استُعيدت من نسخة أقدم ورجع الترقيم لورا، الفواتير
-      الجديدة هتفضل أقل من المؤشّر المخزّن وماتوصلش أبدًا —
-      ساعتها نصفّر المؤشّر من مركز المزامنة («سحب فترة»). */
+/* (5) ⚠️ أهم رقم: أعلى فاتورة شراء. المزامنة بتجيب «الأجدد من المؤشّر
+      المخزّن». لو ده أقل من المؤشّر (بسبب استعادة نسخة أقدم) الفواتير
+      الجديدة مش هتوصل أبدًا بصمت — ساعتها صفّر المؤشّر («سحب فترة»). */
 SELECT (SELECT MAX(pth_id) FROM pur_trans_h) AS max_purchase_id,
-       (SELECT MAX(ibh_id) FROM Item_back_h) AS max_return_id;
+       (SELECT MAX(ibh_id) FROM Item_back_h) AS max_return_id
 GO
+
+/* (6) تأكيد نهائي من برّه — لازم يرجّع رقم:
+      osql -S . -U phalix_reader -P <pw> -d Genius -Q "SELECT MAX(pth_id) FROM pur_trans_h" */
