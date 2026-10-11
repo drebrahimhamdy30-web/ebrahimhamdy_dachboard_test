@@ -195,6 +195,7 @@
     let rawData        = [];
     let activeUser     = null;
     let userBranchName = '';
+    let SEE_ALL_BRANCHES = false;   // نطاق الدور من شاشة الصلاحيات
 
     // الفروع الثابتة في النظام
     const ALL_BRANCHES = Branches.names();
@@ -247,10 +248,11 @@
         '<span style="background:var(--danger);color:#fff;padding:1px 6px;border-radius:5px;font-weight:800;">تحويل</span>');
     }
 
-    checkAuth().then(user => {
+    checkAuth().then(async user => {
       activeUser = user;
       if (user) {
         userBranchName = (Session.branch() || "المعمورة").trim();
+        SEE_ALL_BRANCHES = await Session.seesAllBranches();
         document.getElementById('branch-tag').textContent = userBranchName;
         loadTransfers();
       }
@@ -316,6 +318,13 @@
         const userBr      = branchOf(item.user);   // فرع الطالب (بدل اسم المستخدم/الموبايل)
         const isTarget    = Branches.same(item.branch, userBranchName);
         const isSource    = (userBr === userBranchName);
+
+        /* ⚠️ لما الاتجاه على «الكل» كان الشرط بيعدّي كل الصفوف — يعني
+           الموظف كان شايف تحويلات بين فرعين تانيين مالوش فيها دعوة.
+           القاعدة: اللي بعته أو اللي جاله بس، إلا لو نطاق دوره كل الفروع. */
+        const mine        = isTarget || isSource;
+        if (!SEE_ALL_BRANCHES && !mine) return false;
+
         const dirMatch    = (dv === 'all') || (dv === 'inbound' && isTarget) || (dv === 'outbound' && isSource);
         const statMatch   = (sv === 'all') || ((item.state || 'pending') === sv);
         const branchMatch = (bv === 'all') || Branches.same(userBr, bv) || Branches.same(item.branch, bv);
