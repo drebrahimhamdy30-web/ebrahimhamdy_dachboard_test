@@ -340,6 +340,31 @@ const Session = (function () {
     return _permCache;
   }
 
+  /* نطاق الفروع للدور — بيتظبط من شاشة الصلاحيات (role_branch_scope).
+     الأدمن دايمًا كل الفروع. أي فشل = فرعه بس، لأن الأضيق هو الآمن.
+
+     ⚠️ ده إعلام للواجهة بس عشان تعرض الفلتر الصح؛ القيد الحقيقي على
+     السيرفر جوّه الدوال (purchase_branch_scope) ومش معتمد على ده.
+
+     حطّيتها هنا مش في كل شاشة عشان نسختين من نفس القاعدة بتتفرّع:
+     شاشة المشتريات وشاشة طلبيات الأدوية كانتا بتفحصا «أدمن؟» بس،
+     فالدور اللي ليه كل الفروع كان بيتقفل على فرعه في الواجهة. */
+  let _scopeCache = null;
+  async function seesAllBranches() {
+    if (_scopeCache !== null) return _scopeCache;
+    if (isAdmin()) { _scopeCache = true; return true; }
+    try {
+      const r = await fetch(
+        PHALIX_CONFIG.supabaseUrl + '/rest/v1/role_branch_scope?select=all_branches&role=eq.'
+        + encodeURIComponent(role()),   // data-ok: صف واحد بفلتر على المفتاح الأساسي
+        { headers: { apikey: PHALIX_CONFIG.supabaseAnonKey,
+                     Authorization: 'Bearer ' + (get('authJwt') || PHALIX_CONFIG.supabaseAnonKey) } });
+      const rows = r.ok ? await r.json() : [];
+      _scopeCache = !!(Array.isArray(rows) && rows[0] && rows[0].all_branches);
+    } catch (e) { _scopeCache = false; }
+    return _scopeCache;
+  }
+
   /* can() بتقبل المفتاح الثابت ('supplier_balances') أو اسم الملف
      ('supplier_balances.html')، ومن غير وسيط بتفترض الصفحة الحالية.
      get_role_pages بترجّع الاتنين فالمقارنة بتنجح مع أي شكل.          */
@@ -554,7 +579,7 @@ const Session = (function () {
     return u;
   }
 
-  return { KEYS, ROLES, normRole, user, isLoggedIn, role, branch, branchId,
+  return { KEYS, ROLES, normRole, user, isLoggedIn, role, branch, branchId, seesAllBranches,
            username, fullName, is, isAdmin, decodeJwt, jwtValid, tokenValid,
            refresh, validToken, bearer, headers, client,
            save, resolveBranchId, clear, logout, loginPage, thisPage,
