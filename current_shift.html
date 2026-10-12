@@ -36,6 +36,8 @@
   .flabel{font-size:11.5px;color:var(--muted);font-weight:700}
   .chip{font-size:12px;font-weight:600;padding:4px 11px;border:1px solid var(--line);border-radius:999px;background:#fff;cursor:pointer}
   .chip.active{background:var(--teal);color:#fff;border-color:var(--teal)}
+  .usel{font-size:12px;font-weight:600;padding:4px 8px;border:1px solid var(--line);border-radius:8px;background:#fff;color:inherit;font-family:inherit;max-width:180px}
+  .usel:focus{outline:none;border-color:var(--teal)}
   .shown{margin-inline-start:auto;font-size:12.5px;font-weight:700;color:var(--teal-d);background:#f0fdfa;border:1px solid #99f6e4;border-radius:8px;padding:6px 12px}
   .note{font-size:11.5px;color:var(--teal-d);background:#ccfbf1;border:1px solid #99f6e4;border-radius:7px;padding:5px 11px;margin-bottom:10px}
   .tablecard{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:auto}
@@ -82,7 +84,7 @@ async function rpc(fn, body){
     headers:{'Content-Type':'application/json', apikey:SB_ANON_API, Authorization:'Bearer '+SB_ANON_API}, body:JSON.stringify(body||{}) });
     if(!r.ok) return null; return await r.json(); }catch(e){ return null; }
 }
-let BRANCH='', POINTS=[], CUR=null, SHIFT=null, TXN=[], chFilter=null, typeFilter=null;
+let BRANCH='', POINTS=[], CUR=null, SHIFT=null, TXN=[], chFilter=null, typeFilter=null, userFilter=null;
 
 function roleDefaultPoint(points){
   let role=''; try{ role=(typeof Session!=='undefined'&&Session.role)?Session.role():''; }catch(e){}
@@ -114,7 +116,7 @@ async function loadPoints(){
   if(!POINTS.length){ tabs.innerHTML=''; document.getElementById('content').innerHTML='<div class="state">لا توجد نقاط بيع لهذا الفرع.</div>'; return; }
   CUR = roleDefaultPoint(POINTS);
   tabs.innerHTML = POINTS.map(p=>`<button class="tab ${p.cashier_id===CUR?'active':''}" data-c="${p.cashier_id}">${esc(p.point_name)}</button>`).join('');
-  tabs.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{ CUR=+b.dataset.c; chFilter=null; typeFilter=null; tabs.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b)); loadShift(); });
+  tabs.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{ CUR=+b.dataset.c; chFilter=null; typeFilter=null; userFilter=null; tabs.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b)); loadShift(); });
   loadShift();
 }
 async function loadShift(){
@@ -156,6 +158,8 @@ function render(){
       <input type="search" id="q" placeholder="🔎 بحث بالطرف / الملاحظة / المستخدم…">
       <span class="flabel">النوع:</span>
       ${['كاش','فيزا','صرف','توريد'].map(t=>`<button class="chip tp ${typeFilter===t?'active':''}" data-t="${t}">${t}</button>`).join('')}
+      <span class="flabel">المستخدم:</span>
+      <select id="userSel" class="usel"><option value="">الكل</option>${[...new Set(TXN.map(t=>t.user_name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ar')).map(u=>`<option value="${esc(u)}" ${userFilter===u?'selected':''}>${esc(u)}</option>`).join('')}</select>
       <span class="shown" id="shown"></span>
     </div>
     <div class="tablecard"><table><thead><tr>
@@ -164,12 +168,13 @@ function render(){
   document.querySelectorAll('.vch[data-ch]').forEach(c=>c.onclick=()=>{ chFilter=(chFilter===c.dataset.ch?null:c.dataset.ch); render(); });
   document.querySelectorAll('.chip.tp').forEach(c=>c.onclick=()=>{ typeFilter=(typeFilter===c.dataset.t?null:c.dataset.t); drawRows(); document.querySelectorAll('.chip.tp').forEach(x=>x.classList.toggle('active',x.dataset.t===typeFilter)); });
   document.getElementById('q').oninput=drawRows;
+  const us=document.getElementById('userSel'); if(us) us.onchange=()=>{ userFilter=us.value||null; drawRows(); };
   drawRows();
 }
 function drawRows(){
   const q=(document.getElementById('q').value||'').trim().toLowerCase();
   const rows=TXN.filter((t,i)=>{ t._i=i;
-    return (!typeFilter||t.kind===typeFilter) && (!chFilter||t.channel===chFilter) &&
+    return (!typeFilter||t.kind===typeFilter) && (!chFilter||t.channel===chFilter) && (!userFilter||t.user_name===userFilter) &&
       (!q||((t.party||'')+' '+(t.notes||'')+' '+(t.user_name||'')).toLowerCase().includes(q)); });
   const sum=rows.reduce((a,t)=>a+(t.kind==='صرف'?-1:1)*(+t.amount),0);
   document.getElementById('shown').textContent='المعروض: '+rows.length+' · مجموع: '+fmt(sum)+' ج';
