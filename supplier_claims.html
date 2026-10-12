@@ -103,6 +103,7 @@
     <div class="tabs">
       <button class="tab on" id="tabBtnClose" onclick="switchTab('close')"><i class="fas fa-lock"></i> تقفيل المطالبات</button>
       <button class="tab" id="tabBtnLog" onclick="switchTab('log')"><i class="fas fa-clock-rotate-left"></i> سجل المطالبات المغلقة</button>
+      <button class="tab" id="tabBtnReview" onclick="switchTab('review')"><i class="fas fa-scale-balanced"></i> مراجعة الأرصدة</button>
     </div>
 
     <div id="msg" class="msg"></div>
@@ -197,6 +198,33 @@
           <tbody id="histBody"><tr><td colspan="7" class="empty">—</td></tr></tbody>
         </table></div>
         <div class="pager" id="histPager"></div>
+      </div>
+    </div>
+
+    <div id="paneReview" class="pane" style="display:none">
+      <div class="toprow">
+        <div class="bar">
+          <div class="fld"><label>الفرع</label><select class="inp" id="rvBr" onchange="loadReview()"></select></div>
+          <div class="fld"><label>بحث بالمورّد</label><input class="inp" id="rvVen" list="venList" placeholder="كل الموردين" oninput="rvDeb()"></div>
+          <div class="fld"><label>تجاهل فرق ≤ (ج)</label><input class="inp" type="number" id="rvTol" value="5" min="0" style="width:110px" onchange="loadReview()"></div>
+          <button class="btn btn-g" onclick="loadReview()"><i class="fas fa-sync-alt"></i> تحديث</button>
+        </div>
+        <div class="recon" style="grid-template-columns:repeat(2,1fr)">
+          <div><div class="k">موردين الفرق فيهم أكبر من الحد</div><div class="v num" id="rvCount">—</div></div>
+          <div class="bal"><div class="k">إجمالي الفروقات (قيمة مطلقة)</div><div class="v num" id="rvSum">—</div></div>
+        </div>
+      </div>
+      <div class="note">
+        الموردين اللي رصيدهم في eplus <b>مش مطابق</b> لصافي المفتوح (فواتير مفتوحة − مرتجعات مفتوحة). الفرق الأقل من أو يساوي الحد (افتراضي 5ج) بيتعتبر مطابق ومايظهرش.
+        اضغط «افتح» لمراجعة المورّد في تبويب التقفيل.
+      </div>
+      <div class="card">
+        <div class="card-h"><span><i class="fas fa-scale-balanced"></i> أرصدة غير مطابقة</span><span class="code" id="rvInfo"></span></div>
+        <div class="scroll" style="max-height:52vh"><table class="hist">
+          <thead><tr><th>الفرع</th><th>المورّد</th><th>الرصيد (eplus)</th><th>فواتير مفتوحة</th><th>مرتجعات</th><th>الصافي المفتوح</th><th>الفرق</th><th></th></tr></thead>
+          <tbody id="rvBody"><tr><td colspan="8" class="empty">—</td></tr></tbody>
+        </table></div>
+        <div class="pager" id="rvPager"></div>
       </div>
     </div>
   </div>
@@ -322,12 +350,14 @@
     }
 
     function switchTab(t){
-      const isLog=(t==='log');
-      document.getElementById('paneClose').style.display=isLog?'none':'';
-      document.getElementById('paneLog').style.display=isLog?'':'none';
-      document.getElementById('tabBtnClose').classList.toggle('on',!isLog);
-      document.getElementById('tabBtnLog').classList.toggle('on',isLog);
-      if(isLog) loadHistory();
+      const panes={close:'paneClose', log:'paneLog', review:'paneReview'};
+      const btns ={close:'tabBtnClose', log:'tabBtnLog', review:'tabBtnReview'};
+      for(const k in panes){
+        document.getElementById(panes[k]).style.display=(k===t)?'':'none';
+        document.getElementById(btns[k]).classList.toggle('on',k===t);
+      }
+      if(t==='log') loadHistory();
+      if(t==='review') loadReview();
     }
     let HIST=[], histPage=1; const HIST_PP=30; let histT=null;
     function histDeb(){ clearTimeout(histT); histT=setTimeout(()=>{ histPage=1; renderHist(); },280); }
@@ -367,6 +397,55 @@
       p.innerHTML=h;
     }
     function histGo(n){ histPage=n; renderHist(); const sc=document.querySelector('#paneLog .scroll'); if(sc) sc.scrollTop=0; }
+
+    // ═══ مراجعة أرصدة الموردين ═══
+    let RV=[], rvPage=1; const RV_PP=30; let rvT=null;
+    function rvDeb(){ clearTimeout(rvT); rvT=setTimeout(()=>{ rvPage=1; renderRv(); },280); }
+    async function loadReview(){
+      const br=document.getElementById('rvBr').value||null;
+      const tol=Number(document.getElementById('rvTol').value); const minDiff=isFinite(tol)&&tol>=0?tol:5;
+      document.getElementById('rvBody').innerHTML='<tr><td colspan="8" class="empty">جارِ التحميل…</td></tr>';
+      const res=await rpc('get_supplier_balance_review',{p_branch:br, p_min_diff:minDiff});
+      RV=(res&&Array.isArray(res.rows))?res.rows:[];
+      document.getElementById('rvCount').textContent=f0((res&&res.total_count)||0);
+      document.getElementById('rvSum').textContent=f0((res&&res.total_abs_diff)||0);
+      rvPage=1; renderRv();
+    }
+    function renderRv(){
+      const q=(document.getElementById('rvVen').value||'').trim();
+      let list=RV; if(q) list=RV.filter(x=>(x.vendor||'').includes(q));
+      document.getElementById('rvInfo').textContent='('+f0(list.length)+' مورّد)';
+      const pages=Math.max(1,Math.ceil(list.length/RV_PP));
+      if(rvPage>pages) rvPage=pages;
+      const slice=list.slice((rvPage-1)*RV_PP, rvPage*RV_PP);
+      document.getElementById('rvBody').innerHTML = slice.length ? slice.map(x=>`<tr>
+        <td><span class="src b">${esc(BR[x.branch]||x.branch)}</span></td>
+        <td style="font-weight:600">${esc(x.vendor||'—')}</td>
+        <td class="num">${f0(x.balance)}</td>
+        <td class="num">${f0(x.inv_total)}</td>
+        <td class="num" style="color:var(--red)">${f0(x.ret_total)}</td>
+        <td class="num" style="font-weight:700">${f0(x.open_net)}</td>
+        <td class="num" style="font-weight:800;color:${Number(x.diff)>=0?'#b45309':'var(--red)'}">${f0(x.diff)}</td>
+        <td><button class="btn btn-p" style="padding:3px 10px;font-size:.7rem" data-br="${esc(x.branch)}" data-ven="${esc(x.vendor)}" onclick="openVendor(this)"><i class="fas fa-arrow-left"></i> افتح</button></td></tr>`).join('')
+        : '<tr><td colspan="8" class="empty">كل الأرصدة مطابقة ضمن الحد ✓</td></tr>';
+      renderRvPager(pages);
+    }
+    function renderRvPager(pages){
+      const p=document.getElementById('rvPager');
+      if(pages<=1){ p.innerHTML=''; return; }
+      let h='<button '+(rvPage<=1?'disabled':'')+' onclick="rvGo(1)">«</button><button '+(rvPage<=1?'disabled':'')+' onclick="rvGo('+(rvPage-1)+')">‹</button>';
+      const from=Math.max(1,rvPage-2), to=Math.min(pages,rvPage+2);
+      for(let i=from;i<=to;i++) h+='<button class="'+(i===rvPage?'on':'')+'" onclick="rvGo('+i+')">'+i+'</button>';
+      h+='<button '+(rvPage>=pages?'disabled':'')+' onclick="rvGo('+(rvPage+1)+')">›</button><button '+(rvPage>=pages?'disabled':'')+' onclick="rvGo('+pages+')">»</button>';
+      h+='<span class="pinfo">صفحة '+rvPage+' من '+pages+'</span>';
+      p.innerHTML=h;
+    }
+    function rvGo(n){ rvPage=n; renderRv(); const sc=document.querySelector('#paneReview .scroll'); if(sc) sc.scrollTop=0; }
+    function openVendor(btn){
+      document.getElementById('brSel').value=btn.dataset.br;
+      document.getElementById('venSel').value=btn.dataset.ven;
+      switchTab('close'); loadOpen();
+    }
     async function viewClaim(id){
       const d = await rpc('get_claim_detail',{p_id:id});
       if(!d || d.error){ showMsg((d&&d.error)||'تعذّر تحميل التفاصيل',false); return; }
@@ -401,6 +480,7 @@
       const sel=document.getElementById('brSel');
       sel.innerHTML = Object.keys(BR).map(c=>`<option value="${c}">${BR[c]}</option>`).join('');
       document.getElementById('histBr').innerHTML = sel.innerHTML;
+      document.getElementById('rvBr').innerHTML = '<option value="">كل الفروع</option>' + sel.innerHTML;
       document.getElementById('fromD').value='2026-09-01'; document.getElementById('toD').value=today();
       try{ const p=(typeof Session!=='undefined'&&Session.can)?await Session.can('supplier_claims.html'):{edit:true}; canEdit=!!(p&&p.edit); }catch(e){ canEdit=false; }
       if(!canEdit) document.getElementById('closeBtn').style.display='none';
