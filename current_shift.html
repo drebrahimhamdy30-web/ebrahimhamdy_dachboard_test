@@ -91,12 +91,16 @@ function roleDefaultPoint(points){
   if(/cash|كاشير/i.test(role)){ const p=points.find(x=>/كاشير/.test(x.point_name)); if(p) return p.cashier_id; }
   const pv=points.find(x=>/نقط/.test(x.point_name)); return pv?pv.cashier_id:(points[0]&&points[0].cashier_id);
 }
-// النقاط الظاهرة حسب الدور: الكاشير يشوف الكاشير فقط، الصيادلة/الدكاترة نقطة البيع فقط، الباقي الكل
-function visiblePoints(points){
-  let role=''; try{ role=(typeof Session!=='undefined'&&Session.role)?Session.role():''; }catch(e){}
-  if(/cash|كاشير/i.test(role)) return points.filter(x=>/كاشير/.test(x.point_name));
-  if(/pharm|صيدل|دكتور|طبيب/i.test(role)) return points.filter(x=>/نقط/.test(x.point_name));
-  return points;
+// كل نقطة = تبويب (كاشير / نقطة البيع)؛ الظهور من صلاحيات التبويبات (شاشة الصلاحيات)
+function pointTabKey(p){ return /كاشير/.test(p.point_name) ? 'cashier' : 'pos'; }
+async function visiblePoints(points){
+  const out=[];
+  for(const p of points){
+    let ok=true;
+    try{ if(typeof Session!=='undefined' && Session.tabAllowed) ok = await Session.tabAllowed('current_shift', pointTabKey(p)); }catch(e){ ok=true; }
+    if(ok) out.push(p);
+  }
+  return out;
 }
 async function init(){
   await loadBranches();
@@ -121,10 +125,10 @@ async function loadPoints(){
   POINTS = (await rpc('get_shift_points',{p_branch:BRANCH})) || [];
   const tabs=document.getElementById('tabs');
   if(!POINTS.length){ tabs.innerHTML=''; document.getElementById('content').innerHTML='<div class="state">لا توجد نقاط بيع لهذا الفرع.</div>'; return; }
-  const VP = visiblePoints(POINTS);
-  if(!VP.length){ tabs.innerHTML=''; document.getElementById('content').innerHTML='<div class="state">لا توجد نقطة مخصّصة لدورك في هذا الفرع.</div>'; return; }
+  const VP = await visiblePoints(POINTS);
+  if(!VP.length){ tabs.innerHTML=''; document.getElementById('content').innerHTML='<div class="state">لا توجد نقطة مسموحة لدورك في هذا الفرع.</div>'; return; }
   CUR = roleDefaultPoint(VP);
-  tabs.innerHTML = VP.map(p=>`<button class="tab ${p.cashier_id===CUR?'active':''}" data-c="${p.cashier_id}">${esc(p.point_name)}</button>`).join('');
+  tabs.innerHTML = VP.map(p=>`<button class="tab ${p.cashier_id===CUR?'active':''}" data-c="${p.cashier_id}" data-tk="${pointTabKey(p)}">${esc(p.point_name)}</button>`).join('');
   tabs.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{ CUR=+b.dataset.c; chFilter=null; typeFilter=null; userFilter=null; tabs.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b)); loadShift(); });
   loadShift();
 }
