@@ -73,6 +73,14 @@
   .msg.ok{ background:#dcfce7; color:var(--green); display:block; } .msg.err{ background:#fee2e2; color:#b91c1c; display:block; }
   .empty{ text-align:center; color:var(--text-muted,#6b7280); padding:18px; }
   .hist td,.hist th{ font-size:.76rem; }
+  .tabs{ display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
+  .tab{ font-size:.86rem; font-weight:800; padding:9px 20px; border:1px solid var(--border,#e5e7eb); border-radius:10px; background:#fff; color:inherit; cursor:pointer; font-family:inherit; display:flex; align-items:center; gap:6px; }
+  .tab.on{ background:var(--teal); color:#fff; border-color:var(--teal); }
+  .pager{ display:flex; gap:6px; align-items:center; justify-content:center; padding:10px; flex-wrap:wrap; }
+  .pager button{ min-width:32px; height:32px; border:1px solid var(--border,#e5e7eb); border-radius:7px; background:#fff; cursor:pointer; font-family:inherit; font-weight:700; font-size:.8rem; }
+  .pager button.on{ background:var(--teal); color:#fff; border-color:var(--teal); }
+  .pager button:disabled{ opacity:.4; cursor:default; }
+  .pager .pinfo{ font-size:.76rem; color:var(--text-muted,#6b7280); margin-inline-start:8px; }
 </style>
 </head>
 <body>
@@ -80,6 +88,14 @@
   <div class="wrap">
     <h1><span class="ic"><i class="fas fa-file-invoice-dollar"></i></span> حسابات الموردين ٢ — تقفيل المطالبات</h1>
 
+    <div class="tabs">
+      <button class="tab on" id="tabBtnClose" onclick="switchTab('close')"><i class="fas fa-lock"></i> تقفيل المطالبات</button>
+      <button class="tab" id="tabBtnLog" onclick="switchTab('log')"><i class="fas fa-clock-rotate-left"></i> سجل المطالبات المغلقة</button>
+    </div>
+
+    <div id="msg" class="msg"></div>
+
+    <div id="paneClose" class="pane">
     <div class="toprow">
       <div class="bar">
         <div class="fld"><label>المورّد</label><input class="inp" id="venSel" list="venList" placeholder="اكتب اسم المورّد" style="min-width:200px" onchange="loadOpen()"><datalist id="venList"></datalist></div>
@@ -96,8 +112,6 @@
         <div class="diff"><div class="k">الفرق (المفتوح − الرصيد)</div><div class="v num" id="rDiff">—</div></div>
       </div>
     </div>
-
-    <div id="msg" class="msg"></div>
 
     <div class="grid2">
       <div class="card">
@@ -138,18 +152,30 @@
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-h"><span><i class="fas fa-clock-rotate-left"></i> سجل المطالبات المقفولة</span><span class="code">اضغط «مراجعة» لعرض تفاصيل أي مطالبة</span></div>
-      <div class="scroll" style="max-height:34vh"><table class="hist">
-        <thead><tr><th>التاريخ</th><th>قيمة الفواتير</th><th>المرتجعات</th><th>الصافي</th><th>أقفلها</th><th></th></tr></thead>
-        <tbody id="histBody"><tr><td colspan="6" class="empty">—</td></tr></tbody>
-      </table></div>
-    </div>
-
     <div class="note">
       الفاتورة بتتجمع <b>بقيمتها الكاملة</b>، والمرتجع (على فاتورة أو عام) بيتخصم <b>مرة واحدة</b> من بند المرتجعات.
       «لم يصل» بتتفرّق من سبب المرتجع. <b>«الصافي المفتوح»</b> (فواتير − مرتجعات، لكل المفتوح) المفروض يساوي <b>الرصيد الحالي</b>؛
       الفرق غالبًا دين أقدم من خط البداية (2026-09-01). بعد الإغلاق الفواتير تتعلّم «مدفوع» والمرتجعات «تم» ومتظهرش تاني.
+    </div>
+    </div><!-- /paneClose -->
+
+    <div id="paneLog" class="pane" style="display:none">
+      <div class="toprow">
+        <div class="bar">
+          <div class="fld"><label>الفرع</label><select class="inp" id="histBr" onchange="loadHistory()"></select></div>
+          <div class="fld"><label>المورّد (اختياري)</label><input class="inp" id="histVen" list="venList" placeholder="كل الموردين" oninput="histDeb()"></div>
+          <button class="btn btn-g" onclick="loadHistory()"><i class="fas fa-sync-alt"></i> تحديث</button>
+          <span class="code" id="histCount" style="align-self:center"></span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span><i class="fas fa-clock-rotate-left"></i> سجل المطالبات المغلقة</span><span class="code">اضغط «مراجعة» لعرض تفاصيل أي مطالبة</span></div>
+        <div class="scroll" style="max-height:52vh"><table class="hist">
+          <thead><tr><th>التاريخ</th><th>المورّد</th><th>قيمة الفواتير</th><th>المرتجعات</th><th>الصافي</th><th>أقفلها</th><th></th></tr></thead>
+          <tbody id="histBody"><tr><td colspan="7" class="empty">—</td></tr></tbody>
+        </table></div>
+        <div class="pager" id="histPager"></div>
+      </div>
     </div>
   </div>
 
@@ -226,7 +252,7 @@
         : '<tr><td colspan="8" class="empty">لا مرتجعات مفتوحة بالفلتر</td></tr>';
       document.getElementById('allInv').checked=false; document.getElementById('allRet').checked=false;
       document.getElementById('localVal').value=0; document.getElementById('discPct').value=0;
-      calc(); loadHistory();
+      calc();
     }
 
     function rowTog(k,i,on){ const r=document.getElementById(k+i); if(r) r.classList.toggle('on',on); calc(); }
@@ -266,27 +292,59 @@
         const out=await rpcAuth('close_supplier_claim', body);
         showMsg('تم الإغلاق ✓ — الصافي '+f0(out&&out.net)+' (أقفلها: '+esc(out&&out.by)+')', true);
         document.getElementById('claimNote').value='';
-        await loadOpen();
+        await loadOpen(); loadHistory();
       }catch(e){
         const m=String((e&&e.message)||e);
         showMsg((m.includes('42501')||m.includes('مصرّح'))?'غير مصرّح: محتاج صلاحية «تعديل» على الشاشة':('تعذّر الإغلاق: '+m), false);
       } finally { document.getElementById('closeBtn').disabled=false; }
     }
 
+    function switchTab(t){
+      const isLog=(t==='log');
+      document.getElementById('paneClose').style.display=isLog?'none':'';
+      document.getElementById('paneLog').style.display=isLog?'':'none';
+      document.getElementById('tabBtnClose').classList.toggle('on',!isLog);
+      document.getElementById('tabBtnLog').classList.toggle('on',isLog);
+      if(isLog) loadHistory();
+    }
+    let HIST=[], histPage=1; const HIST_PP=30; let histT=null;
+    function histDeb(){ clearTimeout(histT); histT=setTimeout(()=>{ histPage=1; renderHist(); },280); }
     async function loadHistory(){
-      const ven=document.getElementById('venSel').value.trim(), br=document.getElementById('brSel').value;
-      const rows=await rpc('get_supplier_claims',{p_branch:br, p_vendor:ven});
-      const list=(Array.isArray(rows)?rows:[]).filter(x=>!x.is_baseline);
-      document.getElementById('histBody').innerHTML = list.length ? list.map(x=>`<tr>
+      const br=document.getElementById('histBr').value||null;
+      const rows=await rpc('get_supplier_claims',{p_branch:br, p_vendor:null});
+      HIST=(Array.isArray(rows)?rows:[]).filter(x=>!x.is_baseline);
+      histPage=1; renderHist();
+    }
+    function renderHist(){
+      const ven=(document.getElementById('histVen').value||'').trim();
+      let list=HIST; if(ven) list=HIST.filter(x=>(x.ven_name_ar||'').includes(ven));
+      document.getElementById('histCount').textContent='('+f0(list.length)+' مطالبة)';
+      const pages=Math.max(1,Math.ceil(list.length/HIST_PP));
+      if(histPage>pages) histPage=pages;
+      const slice=list.slice((histPage-1)*HIST_PP, histPage*HIST_PP);
+      document.getElementById('histBody').innerHTML = slice.length ? slice.map(x=>`<tr>
         <td>${dOnly(x.closed_at)}</td>
+        <td>${esc(x.ven_name_ar||'—')}</td>
         <td class="num">${f0(x.invoices_total)}</td>
         <td class="num" style="color:var(--red)">${f0((Number(x.returns_total)||0)+(Number(x.notarr_total)||0))}</td>
         <td class="num" style="font-weight:800">${f0(x.net_paid)}</td>
         <td>${esc(x.closed_by||'—')}</td>
         <td style="white-space:nowrap"><button class="btn btn-p" style="padding:3px 9px;font-size:.7rem" onclick="viewClaim(${x.id})"><i class="fas fa-eye"></i> مراجعة</button>
           ${canEdit?(' <button class="btn btn-g" style="padding:3px 8px;font-size:.7rem" onclick="reopen('+x.id+')">إلغاء</button>'):''}</td></tr>`).join('')
-        : '<tr><td colspan="6" class="empty">لا مطالبات بعد</td></tr>';
+        : '<tr><td colspan="7" class="empty">لا مطالبات مغلقة</td></tr>';
+      renderHistPager(pages);
     }
+    function renderHistPager(pages){
+      const p=document.getElementById('histPager');
+      if(pages<=1){ p.innerHTML=''; return; }
+      let h='<button '+(histPage<=1?'disabled':'')+' onclick="histGo(1)">«</button><button '+(histPage<=1?'disabled':'')+' onclick="histGo('+(histPage-1)+')">‹</button>';
+      const from=Math.max(1,histPage-2), to=Math.min(pages,histPage+2);
+      for(let i=from;i<=to;i++) h+='<button class="'+(i===histPage?'on':'')+'" onclick="histGo('+i+')">'+i+'</button>';
+      h+='<button '+(histPage>=pages?'disabled':'')+' onclick="histGo('+(histPage+1)+')">›</button><button '+(histPage>=pages?'disabled':'')+' onclick="histGo('+pages+')">»</button>';
+      h+='<span class="pinfo">صفحة '+histPage+' من '+pages+'</span>';
+      p.innerHTML=h;
+    }
+    function histGo(n){ histPage=n; renderHist(); const sc=document.querySelector('#paneLog .scroll'); if(sc) sc.scrollTop=0; }
     async function viewClaim(id){
       const d = await rpc('get_claim_detail',{p_id:id});
       if(!d || d.error){ showMsg((d&&d.error)||'تعذّر تحميل التفاصيل',false); return; }
@@ -313,13 +371,14 @@
     function closeModal(){ document.getElementById('ovl').classList.remove('on'); }
     async function reopen(id){
       if(!confirm('إلغاء إغلاق المطالبة؟ هترجع الفواتير والمرتجعات مفتوحة.')) return;
-      try{ await rpcAuth('reopen_supplier_claim',{p_id:id}); await loadOpen(); showMsg('تم إلغاء الإغلاق',true); }
+      try{ await rpcAuth('reopen_supplier_claim',{p_id:id}); loadHistory(); await loadOpen(); showMsg('تم إلغاء الإغلاق',true); }
       catch(e){ showMsg('تعذّر الإلغاء',false); }
     }
 
     async function init(){
       const sel=document.getElementById('brSel');
       sel.innerHTML = Object.keys(BR).map(c=>`<option value="${c}">${BR[c]}</option>`).join('');
+      document.getElementById('histBr').innerHTML = sel.innerHTML;
       document.getElementById('fromD').value='2026-09-01'; document.getElementById('toD').value=today();
       try{ const p=(typeof Session!=='undefined'&&Session.can)?await Session.can('supplier_claims.html'):{edit:true}; canEdit=!!(p&&p.edit); }catch(e){ canEdit=false; }
       if(!canEdit) document.getElementById('closeBtn').style.display='none';
