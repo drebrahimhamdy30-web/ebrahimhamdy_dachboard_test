@@ -173,7 +173,7 @@ async function loadShift(){
 }
 function kpis(){
   const cash=TXN.filter(t=>t.kind==='كاش').reduce((a,t)=>a+ +t.amount,0);
-  const visa=TXN.filter(t=>t.kind==='فيزا').reduce((a,t)=>a+ +(t.visa_value||t.amount),0);
+  const visa=TXN.filter(t=>t.kind==='فيزا').reduce((a,t)=>a+ (t.paid!=null? +t.paid : +t.amount),0);
   const sarf=TXN.filter(t=>t.kind==='صرف').reduce((a,t)=>a+ +t.amount,0);
   const tran=TXN.filter(t=>t.kind==='توريد').reduce((a,t)=>a+ +t.amount,0);
   const op=Number(SHIFT.opening)||0;
@@ -183,7 +183,7 @@ function render(){
   const k=kpis();
   const startTxt = SHIFT.shift_start ? new Date(SHIFT.shift_start).toLocaleString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
   const users=(SHIFT.users||[]).map(esc).join('، ')||'—';
-  const byCh={}; TXN.filter(t=>t.kind==='فيزا').forEach(t=>{const c=t.channel||'—'; byCh[c]=byCh[c]||{t:0,n:0}; byCh[c].t+=+(t.visa_value||t.amount); byCh[c].n++;});
+  const byCh={}; TXN.filter(t=>t.kind==='فيزا').forEach(t=>{const c=t.channel||'—'; byCh[c]=byCh[c]||{t:0,n:0}; byCh[c].t+=(t.paid!=null?+t.paid:+t.amount); byCh[c].n++;});
   const chips=Object.entries(byCh).sort((a,b)=>b[1].t-a[1].t).map(([c,v])=>`<span class="vch ${chFilter===c?'on':''}" data-ch="${esc(c)}">${esc(c)} <b>${fmt(v.t)}</b> (${v.n})</span>`).join('')||'<span class="vch">—</span>';
   document.getElementById('content').innerHTML = `
     <div class="meta">
@@ -219,7 +219,7 @@ function render(){
       <span class="shown" id="shown"></span>
     </div>
     <div class="tablecard"><table><thead><tr>
-      <th>الوقت</th><th>النوع</th><th>القيمة</th><th class="r">من</th><th class="r">الى</th><th class="r">المستخدم</th><th>الجهاز</th><th>الحساب</th><th>رقم الفيزا</th><th class="r">ملاحظات</th>
+      <th>الوقت</th><th>النوع</th><th>قيمة المدفوع</th><th>القيمة</th><th class="r">من</th><th class="r">الى</th><th class="r">المستخدم</th><th>الجهاز</th><th>الحساب</th><th class="r">ملاحظات</th>
     </tr></thead><tbody id="tb"></tbody></table></div>`;
   document.querySelectorAll('.vch[data-ch]').forEach(c=>c.onclick=()=>{ chFilter=(chFilter===c.dataset.ch?null:c.dataset.ch); render(); });
   document.querySelectorAll('.chip.tp').forEach(c=>c.onclick=()=>{ typeFilter=(typeFilter===c.dataset.t?null:c.dataset.t); drawRows(); document.querySelectorAll('.chip.tp').forEach(x=>x.classList.toggle('active',x.dataset.t===typeFilter)); });
@@ -240,18 +240,21 @@ function drawRows(){
     const acct = editable
       ? `<select class="e eacct" data-i="${t._i}"><option value="" ${!iv?'selected':''}>— كاش</option>${CHANNELS.map(c=>`<option ${t.channel===c?'selected':''}>${esc(c)}</option>`).join('')}</select>`
       : esc(t.channel||'—');
+    const paidCell = iv ? `<input class="e epaid" data-i="${t._i}" type="number" value="${t.paid!=null?t.paid:t.amount}" style="width:82px">` : '';
     return `<tr><td>${esc(t.time)}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
+      `<td>${paidCell}</td>`+
       `<td class="num ${t.kind==='صرف'?'neg':'pos'}">${t.kind==='صرف'?'−':''}${fmt(t.amount)}</td>`+
       `<td class="r">${esc(t.from||'—')}</td><td class="r">${esc(t.to||'—')}</td>`+
       `<td class="r">${esc(t.user_name||'—')}</td><td class="dev">${esc(t.computer||'—')}</td>`+
-      `<td class="${iv?'visa':''}">${acct}</td><td class="num">${t.kind==='فيزا'?esc(t.visa_no||'—'):''}</td><td class="notes">${esc(t.notes||'')}</td></tr>`;
+      `<td class="${iv?'visa':''}">${acct}</td><td class="notes">${esc(t.notes||'')}</td></tr>`;
   }).join('') || '<tr><td colspan="10" class="state">لا توجد حركات مطابقة.</td></tr>';
   document.querySelectorAll('.eacct').forEach(s=>s.onchange=()=>{
     const t=TXN[+s.dataset.i]; const v=s.value;
-    if(v){ t.kind='فيزا'; t.channel=v; } else { t.kind='كاش'; t.channel=''; }
-    const k=kpis();
-    const nt=document.getElementById('k-net'); if(nt){ nt.textContent=fmt(k.net); nt.classList.toggle('neg',k.net<0); nt.classList.toggle('pos',k.net>=0); }
-    const vt=document.getElementById('k-visa'); if(vt) vt.textContent=fmt(k.visa);
+    if(v){ t.kind='فيزا'; t.channel=v; if(t.paid==null) t.paid=+t.amount; } else { t.kind='كاش'; t.channel=''; }
+    render();
+  });
+  document.querySelectorAll('.epaid').forEach(inp=>inp.onchange=()=>{
+    const t=TXN[+inp.dataset.i]; const v=parseFloat(inp.value); t.paid=isFinite(v)?v:+t.amount;
     render();
   });
 }
@@ -326,10 +329,11 @@ function renderShiftDetail(d){
   const rows= txns.length ? txns.map(t=>{
     const cls=t.kind==='صرف'?'out':(t.kind==='فيزا'?'visa':(t.kind==='توريد'?'in':'cash'));
     return `<tr><td>${esc(t.time)}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
+      `<td class="num">${t.kind==='فيزا'?fmt(t.paid!=null?t.paid:t.amount):''}</td>`+
       `<td class="num ${t.kind==='صرف'?'neg':'pos'}">${t.kind==='صرف'?'−':''}${fmt(t.amount)}</td>`+
       `<td class="r">${esc(t.from||'—')}</td><td class="r">${esc(t.to||'—')}</td>`+
       `<td class="r">${esc(t.user_name||'—')}</td><td class="dev">${esc(t.computer||'—')}</td>`+
-      `<td>${esc(t.channel||'—')}</td><td class="num">${t.kind==='فيزا'?esc(t.visa_no||'—'):''}</td><td class="notes">${esc(t.notes||'')}</td></tr>`;
+      `<td>${esc(t.channel||'—')}</td><td class="notes">${esc(t.notes||'')}</td></tr>`;
   }).join('') : '<tr><td colspan="10" class="state">لا توجد حركات.</td></tr>';
   document.getElementById('content').innerHTML=`
     <div style="margin-bottom:10px"><button class="lnk" onclick="showShiftLog()">‹ رجوع للسجل</button></div>
@@ -354,7 +358,7 @@ function renderShiftDetail(d){
       <div class="it" style="color:var(--muted)">الأرقام فوق من تقفيل eplus؛ قائمة الحركات للمراجعة</div>
     </div>
     <div class="tablecard"><table><thead><tr>
-      <th>الوقت</th><th>النوع</th><th>القيمة</th><th class="r">من</th><th class="r">الى</th><th class="r">المستخدم</th><th>الجهاز</th><th>الحساب</th><th>رقم الفيزا</th><th class="r">ملاحظات</th>
+      <th>الوقت</th><th>النوع</th><th>قيمة المدفوع</th><th>القيمة</th><th class="r">من</th><th class="r">الى</th><th class="r">المستخدم</th><th>الجهاز</th><th>الحساب</th><th class="r">ملاحظات</th>
     </tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 window.addEventListener('DOMContentLoaded', init);
