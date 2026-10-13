@@ -393,13 +393,18 @@
        عشان ما يحصلش إن الإعداد اتغيّر والأرقام لسه قديمة. */
     const CAT_AR = { med:'أدوية', cos:'كوزمو', paper:'ورقيات' };
     let CALC = [], TIERS = [], TIERS_DEL = [];
+    /* الأرقام العامة من purchase_settings — بتظهر كـplaceholder في خانات
+       نقطة الطلب عشان المالك يشوف الموروث من غير ما يتخزّن في الصف */
+    let PS = { mn: 3, ratio: 0.5 };
 
     async function calcLoad(){
       try {
-        const [a, b] = await Promise.all([
+        const [a, b, p] = await Promise.all([
           fetch(REST+'branch_calc_settings?select=*&order=branch.asc,category.asc', { headers: await H() }).then(r=>r.json()),   // data-ok: جدول إعدادات — صف لكل فرع×تصنيف
-          fetch(REST+'category_rate_tiers?select=*&order=category.asc,rate_min.asc',  { headers: await H() }).then(r=>r.json())    // data-ok: جدول إعدادات — شرائح قليلة
+          fetch(REST+'category_rate_tiers?select=*&order=category.asc,rate_min.asc',  { headers: await H() }).then(r=>r.json()),   // data-ok: جدول إعدادات — شرائح قليلة
+          fetch(REST+'purchase_settings?id=eq.1&select=min_immediate,reorder_ratio', { headers: await H() }).then(r=>r.json())     // data-ok: صف واحد
         ]);
+        if (Array.isArray(p) && p[0]) PS = { mn: Number(p[0].min_immediate), ratio: Number(p[0].reorder_ratio) };
         CALC  = Array.isArray(a) ? a : [];
         TIERS = Array.isArray(b) ? b : [];
         calcRender(); tierRender();
@@ -417,7 +422,10 @@
       if (!CALC.length){ document.getElementById('os-calc').textContent = 'مفيش إعدادات — طبّق migrate_85.'; return; }
       var h = '<table class="os-tbl"><thead><tr>'
             + '<th>الفرع</th><th>التصنيف</th><th>مصدر معدل الشراء</th><th>يأخذ من</th>'
-            + '<th>معدل الفائض</th><th>أقل رصيد لاعتبار فائض</th><th>داخل الحسابات</th></tr></thead><tbody>';
+            + '<th>معدل الفائض</th><th>أقل رصيد لاعتبار فائض</th>'
+            + '<th title="الصنف اللي معدله أقل من كده نطلبه أول ما ينزل تحت المعدل. فاضي = ' + (PS.mn ?? 3) + '">حد الصنف البطيء</th>'
+            + '<th title="الصنف السريع نطلبه لما الرصيد ينزل للنسبة دي من معدله. فاضي = ' + Math.round((PS.ratio ?? 0.5) * 100) + '%">نطلب عند % من المعدل</th>'
+            + '<th>داخل الحسابات</th></tr></thead><tbody>';
       var lastBr = null;
       CALC.forEach(function(r, i){
         var newBr = r.branch !== lastBr; lastBr = r.branch;
@@ -433,6 +441,10 @@
           +    '<option value="same"'+(r.surplus_mode==='same'?' selected':'')+'>نفس معدل الشراء</option>'
           +    '<option value="source_full"'+(r.surplus_mode==='source_full'?' selected':'')+'>معدل الفرع المصدر كاملًا</option></select></td>'
           +  '<td><input type="number" min="0" step="1" style="width:76px" data-i="'+i+'" data-k="min_stock_surplus" value="'+(r.min_stock_surplus==null?2:r.min_stock_surplus)+'" onchange="calcSet(this)"></td>'
+          /* فاضي = خُد العام من purchase_settings، فالرقم العام بيظهر
+             كـplaceholder مش كقيمة — عشان تفرّق بين «موروث» و«محدَّد». */
+          +  '<td><input type="number" min="0" step="0.5" style="width:76px" placeholder="'+(PS.mn ?? 3)+'" data-i="'+i+'" data-k="min_immediate" value="'+(r.min_immediate==null?'':r.min_immediate)+'" onchange="calcSet(this)"></td>'
+          +  '<td><input type="number" min="1" max="100" step="5" style="width:76px" placeholder="'+Math.round((PS.ratio ?? 0.5)*100)+'" data-i="'+i+'" data-k="reorder_pct" value="'+(r.reorder_ratio==null?'':Math.round(r.reorder_ratio*100))+'" onchange="calcSet(this)"></td>'
           +  '<td style="text-align:center"><input type="checkbox" data-i="'+i+'" data-k="active"'+(r.active?' checked':'')+' onchange="calcSet(this)"></td>'
           +  '</tr>';
       });
@@ -441,8 +453,14 @@
 
     function calcSet(el){
       var i = +el.dataset.i, k = el.dataset.k;
-      CALC[i][k] = (el.type === 'checkbox') ? el.checked
-                 : (k === 'min_stock_surplus' ? (parseFloat(el.value) || 0) : el.value);
+      if (el.type === 'checkbox')            CALC[i][k] = el.checked;
+      else if (k === 'min_stock_surplus')    CALC[i][k] = parseFloat(el.value) || 0;
+      /* الفاضي لازم يفضل null مش صفر — null = «خُد العام»، وصفر قيمة
+         حقيقية بتغيّر الحساب. فمابنستخدمش `|| 0` هنا. */
+      else if (k === 'min_immediate')        CALC[i][k] = el.value === '' ? null : (parseFloat(el.value) || 0);
+      else if (k === 'reorder_pct')          CALC[i].reorder_ratio = el.value === '' ? null
+                                               : Math.min(1, Math.max(0.01, (parseFloat(el.value) || 0) / 100));
+      else                                   CALC[i][k] = el.value;
       CALC[i]._dirty = true;
       /* «مشتق» من غير مصدر = صف بترفضه القاعدة، فبنفتح/نقفل الخانة مع الاختيار */
       if (k === 'rate_source') calcRender();
@@ -493,6 +511,8 @@
                                    source_branch: r.rate_source === 'derived' ? r.source_branch : null,
                                    surplus_mode: r.surplus_mode,
                                    min_stock_surplus: r.min_stock_surplus,
+                                   min_immediate: r.min_immediate ?? null,
+                                   reorder_ratio: r.reorder_ratio ?? null,
                                    active: !!r.active,
                                    updated_at: new Date().toISOString() }) });
           r._dirty = false;
