@@ -2980,14 +2980,7 @@ async function confirmPostpone(){
   const now=new Date().toISOString();
 
   // لو الطلب في رحلة → شيله منها
-  const tripEntry=Object.entries(tripOrdersMap).find(([,ids])=>ids.includes(id));
-  if(tripEntry){
-    const tripId=tripEntry[0];
-    await db.from('trip_orders').delete().eq('trip_id',tripId).eq('order_id',id);
-    const {data:to}=await db.from('trip_orders').select('id').eq('trip_id',tripId);
-    await db.from('trips').update({orders_count:(to||[]).length,updated_at:now}).eq('id',tripId);
-    await autoCloseTripIfEmpty(tripId);
-  }
+  await detachOrderFromTrip(id, now);
 
   await db.from('orders').update({
     status:'postponed',
@@ -3030,17 +3023,9 @@ async function confirmCancel(){
   showLoading(true);
   const now=new Date().toISOString();
   // لو الطلب مرتبط برحلة → شيله منها كمان
-  const tripEntry=Object.entries(tripOrdersMap).find(([,ids])=>ids.includes(id));
-  let tripId=null;
-  if(tripEntry){
-    tripId=tripEntry[0];
-    await db.from('trip_orders').delete().eq('trip_id',tripId).eq('order_id',id);
-    const {data:to}=await db.from('trip_orders').select('id').eq('trip_id',tripId);
-    await db.from('trips').update({orders_count:(to||[]).length,updated_at:now}).eq('id',tripId);
-  }
+  await detachOrderFromTrip(id, now);
   await db.from('orders').update({status:'cancelled',cancelled_reason:reason,driver_id:null,deliveryman:null,updated_at:now}).eq('id',id);
   await addOrderLog(id,'order_cancelled',{reason:reason||'—'});
-  if(tripId) await autoCloseTripIfEmpty(tripId);
   closeModal('cancelModal');showToast('تم الإلغاء');await loadAll();showLoading(false);
 }
 
@@ -3168,6 +3153,32 @@ async function pickupAllTrip(tripId,e){
 }
 
 // يغلق الرحلة تلقائياً لو فضيت من كل الأوردرات — من غير ما يأثر على "دور" الطيار
+/* فكّ ارتباط الطلب بأي رحلة + تحديث عدد طلباتها + قفلها لو فضيت.
+   ------------------------------------------------------------------
+   كانت متكرّرة حرفيًا في التأجيل والإلغاء وإلغاء العميل، و**ناقصة** في
+   «تشغيل طلب مؤجل» — فالطلب كان بيرجع «للتوزيع» وهو لسه مربوط بالرحلة:
+   يتعرض مرّتين، وعلى كارت الرحلة مايتعملوش أي إجراء لأن حالته مش
+   assigned. (الطيار بيأجّل من التطبيق والطلب بيفضل في الرحلة بقصد —
+   kept_in_trip — فالحالة دي بتحصل في الشغل العادي مش حالة شاذة.)
+
+   بتقرا الرابط من القاعدة مش من tripOrdersMap، لأن الماب ده نسخة في
+   المتصفح وممكن تكون قديمة — وده بالظبط اللي بيخلّي الصف الزومبي يعيش. */
+async function detachOrderFromTrip(orderId, nowIso){
+  if(!orderId) return null;
+  const now = nowIso || new Date().toISOString();
+  const {data:links} = await db.from('trip_orders').select('trip_id').eq('order_id', orderId);  // data-ok: روابط طلب واحد — صف أو اتنين بحد أقصى
+  let last = null;
+  for(const l of (links||[])){
+    const tripId = l.trip_id;
+    await db.from('trip_orders').delete().eq('trip_id', tripId).eq('order_id', orderId);
+    const {data:rest} = await db.from('trip_orders').select('id').eq('trip_id', tripId);  // data-ok: طلبات رحلة واحدة
+    await db.from('trips').update({orders_count:(rest||[]).length, updated_at:now}).eq('id', tripId);
+    await autoCloseTripIfEmpty(tripId);
+    last = tripId;
+  }
+  return last;
+}
+
 async function autoCloseTripIfEmpty(tripId){
   if(!tripId) return;
   const {data:to} = await db.from('trip_orders').select('id').eq('trip_id', tripId);
@@ -3782,15 +3793,7 @@ function openReassign(orderId, tripId){
 async function openCancelByCustomer(orderId){
   showLoading(true);
   const now=new Date().toISOString();
-  // Find trip
-  const tripEntry=Object.entries(tripOrdersMap).find(([,ids])=>ids.includes(orderId));
-  if(tripEntry){
-    const tripId=tripEntry[0];
-    await db.from('trip_orders').delete().eq('trip_id',tripId).eq('order_id',orderId);
-    const {data:to}=await db.from('trip_orders').select('id').eq('trip_id',tripId);
-    await db.from('trips').update({orders_count:(to||[]).length,updated_at:now}).eq('id',tripId);
-    await autoCloseTripIfEmpty(tripId);
-  }
+  await detachOrderFromTrip(orderId, now);
   await db.from('orders').update({
     status:'cancelled',cancelled_reason:'العميل ألغى الطلب',
     driver_id:null,deliveryman:null,updated_at:now
@@ -3805,6 +3808,10 @@ async function activatePostponed(orderId, e){
   if(!confirm('تشغيل الطلب المؤجل وإعادته للتوزيع؟'))return;
   showLoading(true);
   const now=new Date().toISOString();
+  /* لازم يتشال من الرحلة الأول: الطلب المؤجل ممكن يكون لسه فيها
+     (الطيار بيأجّل من التطبيق والطلب بيفضل معاه)، ومن غير كده بيرجع
+     «للتوزيع» وهو متعلّق بالرحلة فيتعرض مرّتين ومايتعملوش أي إجراء. */
+  const _detached = await detachOrderFromTrip(orderId, now);
   await db.from('orders').update({
     status:'pending',
     postpone_reason:null,
@@ -3814,7 +3821,8 @@ async function activatePostponed(orderId, e){
     picked_at:null,
     updated_at:now
   }).eq('id',orderId);
-  await addOrderLog(orderId,'order_edited',{action:'reactivated_from_postponed'});
+  await addOrderLog(orderId,'order_edited',{action:'reactivated_from_postponed',
+    ...(_detached?{removed_from_trip:true}:{})});
   showToast('✓ تم تشغيل الطلب — سيتم توزيعه تلقائياً');
   await loadAll();
   showLoading(false);
