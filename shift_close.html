@@ -772,13 +772,25 @@ async function doCloseShift(){
       };
     });
     await api('pos_shift_lines',{method:'POST',body:JSON.stringify(lines)});
-    await fetch(SB_URL+`/rest/v1/pos_wallet_transfers?branch=eq.${encodeURIComponent(branch)}&shift_id=is.null&is_disbursed=eq.false`,{
-      method:'PATCH',
-      headers:await shcH('return=minimal'),
-      body:JSON.stringify({shift_id:shift.id})
-    });
+    /* ختم التحويلات برقم الشيفت = اللي بيمنع إنها تتحسب تاني.
+       كان fetch خام من غير فحص، و fetch مابترميش على 400/403 — فلما
+       حارس الفترة المقفولة رفض الختم، الشاشة قالت «تم بنجاح» والتحويل
+       فضل معلّق واتحسب في ٣ شيفتات ورا بعض (المعمورة، 553 ج).
+       api() بترمي على أي رد مش ناجح، والفشل بيتقال صريح — الشيفت
+       نفسه اتحفظ خلاص فما ينفعش نلغيه، بس ما ينفعش نسكت كمان. */
+    let stampErr=null;
+    try{
+      await api(`pos_wallet_transfers?branch=eq.${encodeURIComponent(branch)}&shift_id=is.null&is_disbursed=eq.false`,{
+        method:'PATCH',
+        body:JSON.stringify({shift_id:shift.id})
+      });
+    }catch(e){ stampErr = (e && e.message) ? String(e.message).slice(0,160) : 'سبب غير معروف'; }
     closeModal();
-    toast('تم إغلاق الشيفت بنجاح ✓');
+    if(stampErr){
+      toast('تم إغلاق الشيفت، إلا أنه تعذّر ربط تحويلات المحافظ به، وسيتم احتسابها مجددًا في الشيفت التالي. يُرجى إبلاغ الإدارة. السبب: '+stampErr,'err');
+    } else {
+      toast('تم إغلاق الشيفت بنجاح ✓');
+    }
     // الشيفت الجاي: آخر عملية إنستاباي الحالية تصبح دليل البداية
     let newInstaNote=LAST_INSTAPAY_NOTE;
     METHODS.forEach(m=>{
