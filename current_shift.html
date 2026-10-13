@@ -51,6 +51,12 @@
   .pill.cash{background:#e0f2fe;color:#075985}.pill.visa{background:#f3e8ff;color:#6b21a8}.pill.out{background:#fee2e2;color:#991b1b}.pill.in{background:#dcfce7;color:#166534}
   select.e{font-family:inherit;font-size:11.5px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:6px;max-width:120px}
   .state{padding:34px;text-align:center;color:var(--muted);font-weight:600}
+  .pager{display:flex;gap:6px;align-items:center;justify-content:center;padding:12px;flex-wrap:wrap}
+  .pager button{min-width:32px;height:32px;border:1px solid var(--line);border-radius:7px;background:#fff;cursor:pointer;font-family:inherit;font-weight:700;font-size:13px}
+  .pager button.on{background:var(--teal);color:#fff;border-color:var(--teal)} .pager button:disabled{opacity:.4;cursor:default}
+  .pager .pinfo{font-size:12px;color:var(--muted);margin-inline-start:8px}
+  .logrow{cursor:pointer} .logrow:hover{background:#f0fdfa}
+  .lnk{background:none;border:0;color:var(--teal-d);font-weight:800;cursor:pointer;font-family:inherit;font-size:13px}
   @media(max-width:760px){body{padding:10px}.kpi{min-width:100%}}
 </style>
 <script src="config.js?v=20261011"></script>
@@ -85,6 +91,7 @@ async function rpc(fn, body){
     if(!r.ok) return null; return await r.json(); }catch(e){ return null; }
 }
 let BRANCH='', POINTS=[], CUR=null, SHIFT=null, TXN=[], chFilter=null, typeFilter=null, userFilter=null;
+let VIEW='shift', SLsc=null, SLcashier=null;  // VIEW: shift | log | detail
 
 function roleDefaultPoint(points){
   let role=''; try{ role=(typeof Session!=='undefined'&&Session.role)?Session.role():''; }catch(e){}
@@ -115,10 +122,15 @@ async function init(){
     sel.style.display=''; sel.innerHTML=BRANCHES.map(b=>`<option value="${b.sync_key}" ${b.sync_key===BRANCH?'selected':''}>${esc(b.name)}</option>`).join('');
     sel.onchange=()=>{ BRANCH=sel.value; loadPoints(); };
   }
-  document.getElementById('refreshBtn').onclick=()=>loadShift();
+  document.getElementById('refreshBtn').onclick=refreshCurrent;
   if(!BRANCH){ document.getElementById('content').innerHTML='<div class="state">تعذّر تحميل الفروع.</div>'; return; }
   await loadPoints();
-  setInterval(()=>{ if(CUR) loadShift(); }, 60000);
+  setInterval(()=>{ if(VIEW==='shift' && CUR) loadShift(); }, 60000);
+}
+function refreshCurrent(){
+  if(VIEW==='log') loadShiftLog();
+  else if(VIEW==='detail' && SLsc!=null) openShiftDetail(SLsc, SLcashier);
+  else if(CUR) loadShift();
 }
 async function loadPoints(){
   document.getElementById('content').innerHTML='<div class="state">جارِ التحميل…</div>';
@@ -126,13 +138,23 @@ async function loadPoints(){
   const tabs=document.getElementById('tabs');
   if(!POINTS.length){ tabs.innerHTML=''; document.getElementById('content').innerHTML='<div class="state">لا توجد نقاط بيع لهذا الفرع.</div>'; return; }
   const VP = await visiblePoints(POINTS);
-  if(!VP.length){ tabs.innerHTML=''; document.getElementById('content').innerHTML='<div class="state">لا توجد نقطة مسموحة لدورك في هذا الفرع.</div>'; return; }
-  CUR = roleDefaultPoint(VP);
-  tabs.innerHTML = VP.map(p=>`<button class="tab ${p.cashier_id===CUR?'active':''}" data-c="${p.cashier_id}" data-tk="${pointTabKey(p)}">${esc(p.point_name)}</button>`).join('');
-  tabs.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{ CUR=+b.dataset.c; chFilter=null; typeFilter=null; userFilter=null; tabs.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b)); loadShift(); });
-  loadShift();
+  let showLog=false;
+  try{ if(typeof Session!=='undefined' && Session.tabAllowed) showLog = await Session.tabAllowed('current_shift','shiftlog'); }catch(e){ showLog=false; }
+  if(!VP.length && !showLog){ tabs.innerHTML=''; document.getElementById('content').innerHTML='<div class="state">لا توجد نقطة مسموحة لدورك في هذا الفرع.</div>'; return; }
+  CUR = VP.length ? roleDefaultPoint(VP) : null;
+  let html = VP.map(p=>`<button class="tab" data-c="${p.cashier_id}" data-tk="${pointTabKey(p)}">${esc(p.point_name)}</button>`).join('');
+  if(showLog) html += `<button class="tab" data-mode="log"><i class="fas fa-clock-rotate-left"></i> سجل الشيفتات</button>`;
+  tabs.innerHTML = html;
+  tabs.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{
+    tabs.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));
+    if(b.dataset.mode==='log'){ showShiftLog(); }
+    else { CUR=+b.dataset.c; chFilter=null; typeFilter=null; userFilter=null; loadShift(); }
+  });
+  if(VP.length){ const fb=tabs.querySelector('.tab[data-c]'); if(fb) fb.classList.add('active'); loadShift(); }
+  else { const lb=tabs.querySelector('.tab[data-mode="log"]'); if(lb) lb.classList.add('active'); showShiftLog(); }
 }
 async function loadShift(){
+  VIEW='shift';
   SHIFT = await rpc('get_current_shift',{p_branch:BRANCH, p_cashier:CUR});
   if(!SHIFT){ document.getElementById('content').innerHTML='<div class="state">تعذّر التحميل.</div>'; return; }
   TXN = (SHIFT.transactions||[]).map(t=>({...t}));  // نسخة قابلة للتعديل
@@ -209,6 +231,106 @@ function drawRows(){
     document.getElementById('k-visa').innerHTML=fmt(k.visa)+' <small>ج</small>';
     render();
   });
+}
+// ═══════════ سجل الشيفتات ═══════════
+let SL=[], slPage=1; const SL_PER=30;
+function dmy(s){ if(!s) return '—'; try{ return new Date(s).toLocaleDateString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',year:'numeric'}); }catch(e){ return s; } }
+function hm(s){ if(!s) return '—'; try{ return new Date(s).toLocaleTimeString('ar-EG',{timeZone:'Africa/Cairo',hour:'2-digit',minute:'2-digit',hour12:true}); }catch(e){ return s; } }
+function showShiftLog(){
+  VIEW='log';
+  const pointOpts='<option value="">كل النقاط</option>'+POINTS.map(p=>`<option value="${p.cashier_id}">${esc(p.point_name)}</option>`).join('');
+  const d=new Date(), p=n=>String(n).padStart(2,'0');
+  const toS=`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+  const d7=new Date(Date.now()-7*864e5); const fromS=`${d7.getFullYear()}-${p(d7.getMonth()+1)}-${p(d7.getDate())}`;
+  document.getElementById('content').innerHTML=`
+    <div class="toolbar">
+      <span class="flabel">النقطة</span><select id="slPt" onchange="slPage=1;loadShiftLog()">${pointOpts}</select>
+      <span class="flabel">من</span><input type="date" id="slFrom" value="${fromS}" onchange="slPage=1;loadShiftLog()">
+      <span class="flabel">إلى</span><input type="date" id="slTo" value="${toS}" onchange="slPage=1;loadShiftLog()">
+      <span class="shown" id="slShown"></span>
+    </div>
+    <div class="tablecard"><table><thead><tr>
+      <th>التاريخ</th><th>النقطة</th><th>الفترة</th><th>الرصيد الإفتتاحى</th><th>القيمة (نظام)</th><th>الفعلي المعدود</th><th>الفرق</th><th>التحويل</th><th></th>
+    </tr></thead><tbody id="slBody"><tr><td colspan="9" class="state">جارِ التحميل…</td></tr></tbody></table></div>
+    <div class="pager" id="slPager"></div>`;
+  slPage=1; loadShiftLog();
+}
+async function loadShiftLog(){
+  VIEW='log';
+  const pt=document.getElementById('slPt').value||null;
+  const from=document.getElementById('slFrom').value||null, to=document.getElementById('slTo').value||null;
+  document.getElementById('slBody').innerHTML='<tr><td colspan="9" class="state">جارِ التحميل…</td></tr>';
+  const res=await rpc('get_shift_log',{p_branch:BRANCH, p_cashier: pt?+pt:null, p_from:from, p_to:to, p_limit:SL_PER, p_offset:(slPage-1)*SL_PER});
+  SL=(res&&res.rows)||[]; renderShiftLog((res&&res.total_count)||0);
+}
+function renderShiftLog(total){
+  const sh=document.getElementById('slShown'); if(sh) sh.textContent='عدد الشيفتات: '+fmt(total);
+  const tb=document.getElementById('slBody');
+  tb.innerHTML = SL.length ? SL.map(x=>{
+    const dc=Number(x.diff)>=0?'pos':'neg';
+    return `<tr class="logrow" data-sc="${x.sc_id}" data-c="${x.cashier_id}">
+      <td>${dmy(x.closed_at)}</td><td>${esc(x.point_name||'—')}</td>
+      <td style="font-size:12px">${hm(x.shift_start)} ← ${hm(x.closed_at)}</td>
+      <td class="num">${fmt(x.opening)}</td><td class="num">${fmt(x.system_cash)}</td><td class="num">${fmt(x.actual_cash)}</td>
+      <td class="num ${dc}" style="font-weight:800">${Number(x.diff)>0?'+':''}${fmt(x.diff)}</td>
+      <td class="num">${fmt(x.transfer)}</td><td><button class="lnk">مراجعة ›</button></td></tr>`;
+  }).join('') : '<tr><td colspan="9" class="state">لا توجد شيفتات في المدى المختار.</td></tr>';
+  tb.querySelectorAll('.logrow').forEach(r=>r.onclick=()=>openShiftDetail(+r.dataset.sc, +r.dataset.c));
+  renderPager('slPager', Math.max(1,Math.ceil(total/SL_PER)), slPage, 'slGo');
+}
+function slGo(n){ slPage=n; loadShiftLog(); window.scrollTo(0,0); }
+function renderPager(elId, pages, cur, goFn){
+  const p=document.getElementById(elId); if(!p) return;
+  if(pages<=1){ p.innerHTML=''; return; }
+  let h=`<button ${cur<=1?'disabled':''} onclick="${goFn}(1)">«</button><button ${cur<=1?'disabled':''} onclick="${goFn}(${cur-1})">‹</button>`;
+  const from=Math.max(1,cur-2), to=Math.min(pages,cur+2);
+  for(let i=from;i<=to;i++) h+=`<button class="${i===cur?'on':''}" onclick="${goFn}(${i})">${i}</button>`;
+  h+=`<button ${cur>=pages?'disabled':''} onclick="${goFn}(${cur+1})">›</button><button ${cur>=pages?'disabled':''} onclick="${goFn}(${pages})">»</button><span class="pinfo">صفحة ${cur} من ${pages}</span>`;
+  p.innerHTML=h;
+}
+async function openShiftDetail(sc_id, cashier_id){
+  VIEW='detail'; SLsc=sc_id; SLcashier=cashier_id;
+  document.getElementById('content').innerHTML='<div class="state">جارِ تحميل الشيفت…</div>';
+  const d=await rpc('get_shift_detail',{p_branch:BRANCH, p_cashier:cashier_id, p_sc_id:sc_id});
+  if(!d || d.error){ document.getElementById('content').innerHTML='<div class="state">'+esc((d&&d.error)||'تعذّر التحميل')+'</div>'; return; }
+  renderShiftDetail(d);
+}
+function renderShiftDetail(d){
+  const users=(d.users||[]).join('، ');
+  const diffCls=Number(d.diff)>=0?'g':'r';
+  const chips=(d.visa_by_channel||[]).map(c=>`<span class="pill visa" style="margin:2px">${esc(c.channel)} ${fmt(c.total)} (${c.cnt})</span>`).join('')||'—';
+  const txns=(d.transactions||[]);
+  const rows= txns.length ? txns.map(t=>{
+    const cls=t.kind==='صرف'?'out':(t.kind==='فيزا'?'visa':(t.kind==='توريد'?'in':'cash'));
+    return `<tr><td>${esc(t.time)}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
+      `<td>${esc(t.channel||'—')}</td><td class="r">${esc(t.party||'—')}</td><td class="r">${esc(t.user_name||'—')}</td>`+
+      `<td class="num ${t.kind==='صرف'?'neg':'pos'}">${t.kind==='صرف'?'−':''}${fmt(t.amount)}</td><td class="dev">${esc(t.computer||'—')}</td><td class="notes">${esc(t.notes||'')}</td></tr>`;
+  }).join('') : '<tr><td colspan="8" class="state">لا توجد حركات.</td></tr>';
+  document.getElementById('content').innerHTML=`
+    <div style="margin-bottom:10px"><button class="lnk" onclick="showShiftLog()">‹ رجوع للسجل</button></div>
+    <div class="meta">
+      <div class="it"><span class="k">النقطة</span><b>${esc(d.point)}</b></div>
+      <div class="it"><span class="k">الفترة</span><b>${dmy(d.shift_start)} · ${hm(d.shift_start)} ← ${hm(d.closed_at)}</b></div>
+      <div class="it"><span class="k">عدد المعاملات</span><b>${fmt(d.count)}</b></div>
+      <div class="users" title="${esc(users)}">👤 ${esc(users||'—')}</div>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="lbl">الرصيد الإفتتاحى</div><div class="val">${fmt(d.opening)} <small>ج</small></div></div>
+      <div class="kpi"><div class="lbl">القيمة (كاش النظام)</div><div class="val">${fmt(d.system_cash)} <small>ج</small></div></div>
+      <div class="kpi"><div class="lbl">الفعلي المعدود</div><div class="val">${fmt(d.actual_cash)} <small>ج</small></div></div>
+      <div class="kpi ${diffCls}"><div class="lbl">الفرق (فعلي − نظام)</div><div class="val">${Number(d.diff)>0?'+':''}${fmt(d.diff)} <small>ج</small></div>
+        <div class="formula">محوّل للخزنة: ${fmt(d.transfer)} ج</div></div>
+      <div class="kpi v"><div class="lbl">إجمالي الفيزا</div><div class="val">${fmt(d.visa_in)} <small>ج</small></div><div class="formula">${chips}</div></div>
+    </div>
+    <div class="meta" style="font-size:12px">
+      <div class="it"><span class="k">كاش الحركات</span><b>${fmt(d.cash_in)}</b></div>
+      <div class="it"><span class="k">صرف</span><b class="neg">−${fmt(d.sarf)}</b></div>
+      <div class="it"><span class="k">توريد</span><b>${fmt(d.transfer_in)}</b></div>
+      <div class="it" style="color:var(--muted)">الأرقام فوق من تقفيل eplus؛ قائمة الحركات للمراجعة</div>
+    </div>
+    <div class="tablecard"><table><thead><tr>
+      <th>الوقت</th><th>النوع</th><th>الحساب</th><th class="r">الطرف</th><th class="r">المستخدم</th><th>القيمة</th><th>الجهاز</th><th class="r">ملاحظات</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 window.addEventListener('DOMContentLoaded', init);
 </script>
