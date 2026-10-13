@@ -95,6 +95,7 @@
   .rev-n{font-size:.76rem;color:var(--muted);margin-top:8px;font-weight:700}
   .hint{background:var(--card);border:1px dashed var(--brand);border-radius:11px;padding:9px 12px;
         font-size:.8rem;font-weight:700;color:var(--brand-d);margin-bottom:8px}
+  .hint.rest{border-style:solid;border-color:var(--ok);color:var(--ok)}
 </style>
 </head>
 <body>
@@ -122,6 +123,32 @@ var FN = 'https://rxtjoqulmgkkcohmgzgi.supabase.co/functions/v1/supplier_order';
 
 var TOKEN = new URLSearchParams(location.search).get('t') || '';
 var ITEMS = [], BRANCHES = [], TAB = '', MARK = new Set(), SENT = false, NOTE = '';
+var RESTORED = 0;
+
+/* ═══ حفظ التحديد في متصفح المورّد ═══════════════════════════════
+   التحديد كله كان في ذاكرة الصفحة ومافيش حفظ لحد ما يضغط «إرسال»،
+   فأي reload أو إغلاق للتبويب كان بيمسحه **من غير أي إنذار**. وعلى
+   موبايل ده وارد جدًا: المتصفح بيفرّغ الصفحة لما تسيبها وترجع، وسحبة
+   لتحت بالغلط = إعادة تحميل.
+   (الابرار 2026-10-13: 18 صنف في 3 فروع، الرابط اتفتح 8 مرات،
+    والرد وصل بصفر رغم إنه بيرد 65–97% كل مرة.)
+
+   التخزين لكل توكن لوحده، وبيتمسح بعد الإرسال الناجح. وأي استدعاء
+   محاط بـtry لأن التخزين بيترمي استثناء في وضع التصفح الخاص. */
+var LS_KEY = 'sup.' + TOKEN.slice(0, 16);
+
+function saveLocal(){
+  try { localStorage.setItem(LS_KEY,
+    JSON.stringify({ m: [].concat.apply([], [[...MARK]]), n: NOTE, t: TAB, at: Date.now() })); }
+  catch(e){}
+}
+function loadLocal(){
+  try {
+    var o = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
+    return (o && Array.isArray(o.m)) ? o : null;
+  } catch(e){ return null; }
+}
+function clearLocal(){ try { localStorage.removeItem(LS_KEY); } catch(e){} }
 
 /* مفتاح السطر — نفس الفاصل المستخدم في الدالة على السيرفر */
 function K(b, c){ return String(b) + '\u0001' + String(c); }
@@ -153,6 +180,18 @@ async function load(){
     BRANCHES = [];
     ITEMS.forEach(function(x){ if(BRANCHES.indexOf(x.branch) === -1) BRANCHES.push(x.branch); });
     TAB = BRANCHES[0] || '';
+
+    /* رجّع اللي كان متحدد قبل أي reload — بس اللي لسه في الطلبية */
+    if(!SENT){
+      var saved = loadLocal();
+      if(saved){
+        var valid = {};
+        ITEMS.forEach(function(x){ valid[K(x.branch, x.code)] = 1; });
+        saved.m.forEach(function(k){ if(valid[k] && !MARK.has(k)){ MARK.add(k); RESTORED++; } });
+        NOTE = saved.n || '';
+        if(saved.t && BRANCHES.indexOf(saved.t) > -1) TAB = saved.t;
+      }
+    }
 
     document.getElementById('h-title').textContent = j.store || 'قائمة الطلب';
     document.getElementById('h-sub').textContent = ITEMS.length + ' صنف'
@@ -204,6 +243,7 @@ function render(){
     ? '<div class="hint">الطلب مقسوم على ' + BRANCHES.length + ' فروع. علّم المتاح في كل فرع،'
       + ' وزر الإرسال في <b>آخر فرع</b> وبيبعت الطلبية كلها مرة واحدة.</div>'
     : '';
+  if(RESTORED) hint += '<div class="hint rest">تم استرجاع <b>' + RESTORED + '</b> صنف كنت حددتهم قبل إعادة فتح الصفحة.</div>';
 
   var html =
     '<div class="bar">' + tabs + hint
@@ -262,10 +302,10 @@ function render(){
 /* الملاحظة بتعيش عبر التبويبات — حقل واحد للطلبية كلها */
 function keepNote(){
   var el = document.getElementById('note');
-  if(el) NOTE = el.value;
+  if(el && el.value !== NOTE){ NOTE = el.value; saveLocal(); }
 }
 
-function goTab(b){ keepNote(); TAB = b; render(); window.scrollTo(0,0); }
+function goTab(b){ keepNote(); TAB = b; saveLocal(); render(); window.scrollTo(0,0); }
 
 /* زر الإرسال بيظهر في **آخر تبويب بس** — منعًا للخبطة: المورّد كان
    ممكن يضغط إرسال وهو في أول فرع فيتبعت كل حاجة ناقصة ويتقفل الرابط.
@@ -300,6 +340,7 @@ function toggle(code){
   keepNote();
   var k = K(TAB, code);
   if(MARK.has(k)) MARK.delete(k); else MARK.add(k);
+  saveLocal();
   render();
 }
 
@@ -311,13 +352,26 @@ function markAll(on){
     var k = K(x.branch, x.code);
     if(on) MARK.add(k); else MARK.delete(k);
   });
+  saveLocal();
   render();
 }
 
 async function submitReply(){
   keepNote();
   var btn = document.getElementById('send'), fm = document.getElementById('fmsg');
-  if(!MARK.size && !confirm('لم تحدد أي صنف. هل تريد الإرسال كـ«لا يوجد متاح»؟')) return;
+  /* الإرسال الفاضي لازم يكون قرارًا واضحًا مش ضغطة بالعادة — رابط
+     وصل برد صفر من 18 صنف من مخزن بيرد 65–97% كل مرة. فالرسالة بقت
+     بالأرقام وبتفصيل كل فرع بدل «لم تحدد أي صنف». */
+  if(!MARK.size){
+    var det = BRANCHES.length > 1
+      ? '\n' + BRANCHES.map(function(b){
+          return '• ' + b + ': 0 من ' + ITEMS.filter(function(x){ return x.branch === b; }).length;
+        }).join('\n')
+      : '';
+    if(!confirm('سيتم إرسال «لا يوجد متاح» للطلبية كلها.\n\n'
+        + '0 من ' + ITEMS.length + ' صنف' + det
+        + '\n\nالإرسال مرة واحدة فقط ولا يمكن التعديل بعده. هل تريد المتابعة؟')) return;
+  }
 
   /* تنبيه لو فرع كامل ماتعلّم فيه حاجة — غالبًا نسي التبويب.
      والإرسال مرة واحدة ومابيتكررش، فالتأكيد هنا آخر فرصة. */
@@ -339,6 +393,7 @@ async function submitReply(){
     });
     var j = await r.json();
     if(!r.ok){ fm.textContent = j.error || 'تعذّر الإرسال'; btn.disabled = false; return; }
+    clearLocal();          // الرد وصل — مابقاش محتاج النسخة المحلية
     showDone(j.saved);
   }catch(e){ fm.textContent = 'تعذّر الاتصال'; btn.disabled = false; }
 }
