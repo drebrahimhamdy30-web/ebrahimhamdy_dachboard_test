@@ -219,7 +219,7 @@ function render(){
       <span class="shown" id="shown"></span>
     </div>
     <div class="tablecard"><table><thead><tr>
-      <th>الوقت</th><th>النوع</th><th>الحساب</th><th class="r">الطرف</th><th class="r">المستخدم</th><th>القيمة</th><th>الجهاز</th><th class="r">ملاحظات</th>
+      <th>الوقت</th><th>النوع</th><th>القيمة</th><th class="r">من</th><th class="r">الى</th><th class="r">المستخدم</th><th>الجهاز</th><th>الحساب</th><th class="r">ملاحظات</th>
     </tr></thead><tbody id="tb"></tbody></table></div>`;
   document.querySelectorAll('.vch[data-ch]').forEach(c=>c.onclick=()=>{ chFilter=(chFilter===c.dataset.ch?null:c.dataset.ch); render(); });
   document.querySelectorAll('.chip.tp').forEach(c=>c.onclick=()=>{ typeFilter=(typeFilter===c.dataset.t?null:c.dataset.t); drawRows(); document.querySelectorAll('.chip.tp').forEach(x=>x.classList.toggle('active',x.dataset.t===typeFilter)); });
@@ -231,7 +231,7 @@ function drawRows(){
   const q=(document.getElementById('q').value||'').trim().toLowerCase();
   const rows=TXN.filter((t,i)=>{ t._i=i;
     return (!typeFilter||t.kind===typeFilter) && (!chFilter||t.channel===chFilter) && (!userFilter||t.user_name===userFilter) &&
-      (!q||((t.party||'')+' '+(t.notes||'')+' '+(t.user_name||'')).toLowerCase().includes(q)); });
+      (!q||((t.from||'')+' '+(t.to||'')+' '+(t.party||'')+' '+(t.notes||'')+' '+(t.user_name||'')).toLowerCase().includes(q)); });
   const sum=rows.reduce((a,t)=>a+(t.kind==='صرف'?-1:1)*(+t.amount),0);
   document.getElementById('shown').textContent='المعروض: '+rows.length+' · مجموع: '+fmt(sum)+' ج';
   document.getElementById('tb').innerHTML = rows.map(t=>{
@@ -241,9 +241,11 @@ function drawRows(){
       ? `<select class="e eacct" data-i="${t._i}"><option value="" ${!iv?'selected':''}>— كاش</option>${CHANNELS.map(c=>`<option ${t.channel===c?'selected':''}>${esc(c)}</option>`).join('')}</select>`
       : esc(t.channel||'—');
     return `<tr><td>${esc(t.time)}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
-      `<td class="${iv?'visa':''}">${acct}</td><td class="r">${esc(t.party||'—')}</td><td class="r">${esc(t.user_name||'—')}</td>`+
-      `<td class="num ${t.kind==='صرف'?'neg':'pos'}">${t.kind==='صرف'?'−':''}${fmt(t.amount)}</td><td class="dev">${esc(t.computer||'—')}</td><td class="notes">${esc(t.notes||'')}</td></tr>`;
-  }).join('') || '<tr><td colspan="8" class="state">لا توجد حركات مطابقة.</td></tr>';
+      `<td class="num ${t.kind==='صرف'?'neg':'pos'}">${t.kind==='صرف'?'−':''}${fmt(t.amount)}</td>`+
+      `<td class="r">${esc(t.from||'—')}</td><td class="r">${esc(t.to||'—')}</td>`+
+      `<td class="r">${esc(t.user_name||'—')}</td><td class="dev">${esc(t.computer||'—')}</td>`+
+      `<td class="${iv?'visa':''}">${acct}</td><td class="notes">${esc(t.notes||'')}</td></tr>`;
+  }).join('') || '<tr><td colspan="9" class="state">لا توجد حركات مطابقة.</td></tr>';
   document.querySelectorAll('.eacct').forEach(s=>s.onchange=()=>{
     const t=TXN[+s.dataset.i]; const v=s.value;
     if(v){ t.kind='فيزا'; t.channel=v; } else { t.kind='كاش'; t.channel=''; }
@@ -324,9 +326,11 @@ function renderShiftDetail(d){
   const rows= txns.length ? txns.map(t=>{
     const cls=t.kind==='صرف'?'out':(t.kind==='فيزا'?'visa':(t.kind==='توريد'?'in':'cash'));
     return `<tr><td>${esc(t.time)}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
-      `<td>${esc(t.channel||'—')}</td><td class="r">${esc(t.party||'—')}</td><td class="r">${esc(t.user_name||'—')}</td>`+
-      `<td class="num ${t.kind==='صرف'?'neg':'pos'}">${t.kind==='صرف'?'−':''}${fmt(t.amount)}</td><td class="dev">${esc(t.computer||'—')}</td><td class="notes">${esc(t.notes||'')}</td></tr>`;
-  }).join('') : '<tr><td colspan="8" class="state">لا توجد حركات.</td></tr>';
+      `<td class="num ${t.kind==='صرف'?'neg':'pos'}">${t.kind==='صرف'?'−':''}${fmt(t.amount)}</td>`+
+      `<td class="r">${esc(t.from||'—')}</td><td class="r">${esc(t.to||'—')}</td>`+
+      `<td class="r">${esc(t.user_name||'—')}</td><td class="dev">${esc(t.computer||'—')}</td>`+
+      `<td>${esc(t.channel||'—')}</td><td class="notes">${esc(t.notes||'')}</td></tr>`;
+  }).join('') : '<tr><td colspan="9" class="state">لا توجد حركات.</td></tr>';
   document.getElementById('content').innerHTML=`
     <div style="margin-bottom:10px"><button class="lnk" onclick="showShiftLog()">‹ رجوع للسجل</button></div>
     <div class="meta">
@@ -350,7 +354,7 @@ function renderShiftDetail(d){
       <div class="it" style="color:var(--muted)">الأرقام فوق من تقفيل eplus؛ قائمة الحركات للمراجعة</div>
     </div>
     <div class="tablecard"><table><thead><tr>
-      <th>الوقت</th><th>النوع</th><th>الحساب</th><th class="r">الطرف</th><th class="r">المستخدم</th><th>القيمة</th><th>الجهاز</th><th class="r">ملاحظات</th>
+      <th>الوقت</th><th>النوع</th><th>القيمة</th><th class="r">من</th><th class="r">الى</th><th class="r">المستخدم</th><th>الجهاز</th><th>الحساب</th><th class="r">ملاحظات</th>
     </tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 window.addEventListener('DOMContentLoaded', init);
