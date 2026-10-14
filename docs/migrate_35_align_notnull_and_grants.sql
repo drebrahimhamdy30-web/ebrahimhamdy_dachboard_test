@@ -59,17 +59,18 @@ end $$;
 
 create temp table _cc as
 select * from dblink('cloud', $q$
-  select c.relname, a.attname, a.attnotnull, pg_get_expr(ad.adbin, ad.adrelid)
+  select c.relname, a.attname, a.attnotnull, pg_get_expr(ad.adbin, ad.adrelid),
+         a.attgenerated
   from pg_class c
   join pg_namespace n on n.oid = c.relnamespace
   join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
   left join pg_attrdef ad on ad.adrelid = c.oid and ad.adnum = a.attnum
   where n.nspname = 'public' and c.relkind = 'r'
-$q$) as t(tbl text, col text, nn boolean, dflt text);
+$q$) as t(tbl text, col text, nn boolean, dflt text, gen "char");
 
 create temp table _lc as
 select c.relname as tbl, a.attname as col, a.attnotnull as nn,
-       pg_get_expr(ad.adbin, ad.adrelid) as dflt
+       pg_get_expr(ad.adbin, ad.adrelid) as dflt, a.attgenerated as gen
 from pg_class c
 join pg_namespace n on n.oid = c.relnamespace
 join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
@@ -102,6 +103,30 @@ select tbl as "الجدول", col as "العمود",
             when dflt is not null then 'هنملاه بالافتراضي الأول'
             else '🔴 فاضي ومفيش افتراضي — هنتخطّاه' end as "الخطة"
 from _nn order by 1, 2;
+
+-- ═══ ١ب) القيم الافتراضية ════════════════════════════════════════
+-- بنيت محاذاة not null وسبت القيمة الافتراضية. وده فرق حقيقي مش شكلي:
+-- regions.min_order_amount على السحابة 25 وعلى السيرفر 0 — يعني منطقة
+-- جديدة تتضاف بعد التحويل تاخد حد أدنى غلط، ومفيش حاجة تقول.
+-- آمن: تغيير القيمة الافتراضية مابيلمسش الصفوف الموجودة، بيأثر على
+-- الإدخال الجديد بس.
+create temp table _df(tbl text, col text, cloud_d text, srv_d text);
+insert into _df
+select c.tbl, c.col, c.dflt, l.dflt
+from _cc c
+join _lc l on l.tbl = c.tbl and l.col = c.col
+where coalesce(c.dflt, '') is distinct from coalesce(l.dflt, '')
+  -- العمود المولّد تعبيره مش قيمة افتراضية — يتشال من المحاذاة دي
+  and coalesce(c.gen, ' ') <> 's'
+  and coalesce(l.gen, ' ') <> 's'
+  and c.tbl in (select tbl from _ctabs);
+
+\echo ''
+\echo '════ قيم افتراضية مختلفة ════'
+select tbl as "الجدول", col as "العمود",
+       coalesce(cloud_d, '(مفيش)') as "السحابة",
+       coalesce(srv_d, '(مفيش)')   as "السيرفر"
+from _df order by 1, 2;
 
 -- ═══ ٢) الصلاحيات ═════════════════════════════════════════════════
 
@@ -213,6 +238,22 @@ begin
     end;
   end loop;
 
+  -- ١ب) القيم الافتراضية
+  for r in select * from _df order by tbl, col loop
+    begin
+      if coalesce(r.cloud_d, '') = '' then
+        execute format('alter table public.%I alter column %I drop default', r.tbl, r.col);
+        insert into _log values ('افتراضي', r.tbl||'.'||r.col, true, '(اتشالت)');
+      else
+        execute format('alter table public.%I alter column %I set default %s',
+                       r.tbl, r.col, r.cloud_d);
+        insert into _log values ('افتراضي', r.tbl||'.'||r.col, true, r.cloud_d);
+      end if;
+    exception when others then
+      insert into _log values ('افتراضي', r.tbl||'.'||r.col, false, left(sqlerrm, 150));
+    end;
+  end loop;
+
   -- ٢) الصلاحيات — REVOKE الأول، لأن GRANT بتضيف مابتشيلش
   for r in select * from _gd order by tbl, grantee loop
     begin
@@ -254,8 +295,8 @@ select نوع as "النوع", هدف as "الهدف",
 from _log order by ok, نوع, هدف;
 
 \echo ''
-echo '⚠️ شغّل schema_drift_watch.sql — المتوقّع صفر.'
-echo '   (الدوال المعزولة وجداول النسخ مستثناة في الحارس نفسه.)'
+\echo '⚠️ شغّل schema_drift_watch.sql — المتوقّع صفر.'
+\echo '   (الدوال المعزولة وجداول النسخ مستثناة في الحارس نفسه.)'
 
 \else
 \echo ''

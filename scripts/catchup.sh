@@ -41,12 +41,20 @@ cd "$COMPOSE_DIR" 2>/dev/null || { echo "${R}✗ مجلد سوبابيز مش م
 CID="$(docker compose ps -q db 2>/dev/null | head -1)"
 [ -n "$CID" ] || { echo "${R}✗ حاوية القاعدة مش لاقيها${N}"; exit 2; }
 
+STEP_FAIL=0
+
 run() {  # $1=ملف  $2=وصف  [$3=apply]
   local f="$REPO/docs/$1" extra=()
-  [ -f "$f" ] || { echo "${R}✗ مش لاقي $f${N}"; return 2; }
+  [ -f "$f" ] || { echo "${R}✗ مش لاقي $f${N}"; STEP_FAIL=1; return 2; }
   [ "${3:-}" = "apply" ] && extra=(-v apply=1)
   printf '\n%s── %s ──%s\n' "$B" "$2" "$N"
-  docker exec -i "$CID" psql -U "$DB_USER" -d postgres "${extra[@]}" < "$f"
+  # ⚠️ لازم نفحص النتيجة. كانت بتتجاهل، فـmigrate_35 قعد يرمي خطأ في
+  #    آخر سطر والاستلحاق بيكمّل عادي — الشغل بيتم والخطأ بيعدّي.
+  #    «اتنفّذ» مش «اشتغل صح».
+  if ! docker exec -i "$CID" psql -U "$DB_USER" -d postgres "${extra[@]}" < "$f"; then
+    printf '  %s🔴 الخطوة دي رجّعت خطأ — الشغل ممكن يكون ناقص%s\n' "$R" "$N"
+    STEP_FAIL=1
+  fi
 }
 
 if [ "$APPLY" != 1 ]; then
@@ -85,6 +93,12 @@ OUT="$(docker exec -i "$CID" psql -U "$DB_USER" -d postgres \
 echo "$OUT" | sed -n '/حاجات موجودة على السحابة/,$p'
 
 if echo "$OUT" | grep -q 'مفيش انحراف'; then
+  if [ "$STEP_FAIL" = 1 ]; then
+    printf '\n%s⚠️ الحارس بيقول صفر، بس خطوة من خطوات الاستلحاق رجّعت خطأ.%s\n' "$Y" "$N"
+    printf '   شوف الخرج فوق قبل ما تعتمد النتيجة — الحارس بيقيس زوايا\n'
+    printf '   معيّنة بس، فخطأ في خطوة ممكن يسيب حاجة مايشوفهاش.\n'
+    exit 1
+  fi
   printf '\n%s%s✓ السيرفر مطابق للسحابة.%s\n' "$G" "$B" "$N"
   exit 0
 fi
