@@ -132,25 +132,35 @@ insert into _sql values ($SIG$
   union all
   -- سيكوينس: النوع والخطوة بس — last_value بيختلف بشكل شرعي
   select 'سيكوينس', 'sequence:' || s.sequencename,
-         s.data_type::text || ' | inc=' || s.increment
+         s.data_type::text || ' | inc=' || s.increment_by
   from pg_sequences s where s.schemaname = 'public'
 
   union all
   -- صلاحيات الجداول: anon مفتاح عام، فأي زيادة = باب مفتوح
-  select 'صلاحية-جدول', 'grant:' || g.table_name || ':' || g.grantee,
-         string_agg(g.privilege_type, ',' order by g.privilege_type)
-  from information_schema.role_table_grants g
-  where g.table_schema = 'public' and g.grantee in ('anon','authenticated','service_role')
-  group by g.table_name, g.grantee
+  select 'صلاحية-جدول',
+         'grant:' || c.relname || ':' ||
+           case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end,
+         string_agg(a.privilege_type, ',' order by a.privilege_type)
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  cross join lateral aclexplode(c.relacl) a
+  where n.nspname = 'public' and c.relkind in ('r','p','v','m')
+    and (a.grantee = 0
+         or pg_get_userbyid(a.grantee) in ('anon','authenticated','service_role'))
+  group by c.relname, a.grantee
 
   union all
   -- صلاحيات تنفيذ الدوال: PUBLIC بياخد EXECUTE افتراضيًا، فأي دالة
   -- جديدة بتفتح الباب تاني لو محدش سحبها
   select 'صلاحية-دالة', 'fngrant:' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')',
-         coalesce(array_to_string(array(
-           select r.r from (values ('anon'),('authenticated'),('service_role'),('PUBLIC')) r(r)
-           where has_function_privilege(case when r.r = 'PUBLIC' then 'public' else r.r end, p.oid, 'EXECUTE')
-         ), ','), '-')
+         coalesce((select string_agg(t.x, ',' order by t.x) from (
+           select distinct case when a.grantee = 0 then 'PUBLIC'
+                                else pg_get_userbyid(a.grantee) end as x
+           from aclexplode(p.proacl) a
+           where a.privilege_type = 'EXECUTE'
+             and (a.grantee = 0
+                  or pg_get_userbyid(a.grantee) in ('anon','authenticated','service_role'))
+         ) t), 'افتراضي — PUBLIC عندها EXECUTE ضمنيًا')
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public' and p.prokind in ('f','p')
     and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e')
