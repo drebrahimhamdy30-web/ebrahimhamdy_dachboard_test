@@ -323,6 +323,18 @@ begin
   end;
 
   begin
+    -- كرونات السحابة: cutover.sh go بيجدولهم كلهم من فيو **حي**، فالعدد
+    -- بيتغيّر. الدليل كان مكتوب فيه ١٢ وبقوا ١٦ — رقم محفور بيقدم.
+    -- كرون ناقص بعد التحويل مابيرميش خطأ، بيخلّي أرقام واقفة.
+    select count(*) into k from dblink('cloud',
+      'select 1 from cron.job where active') as t(x int);
+    insert into _iso values ('كرونات السحابة النشطة', k::text,
+      'cutover.sh go بيجدولهم كلهم — بالاسم فبيستبدل مش بيضيف');
+  exception when others then
+    insert into _iso values ('كرونات السحابة النشطة', 'مقدرتش أفحص', '⚠️');
+  end;
+
+  begin
     execute 'select count(*) from public.driver_fcm_tokens' into k;
     insert into _iso values ('توكنات تليفونات الطيارين', k::text,
       case when k = 0 then '✓ فاضي' else '⚠️ فيه توكنات حقيقية — حزام أمان ناقص' end);
