@@ -1519,22 +1519,17 @@ async function loadHeaderStats() {
     /* ⚠️ كانت: db.from('orders').select(...) لكل الطلبات (36 ألف صف) والعدّ
        في المتصفح — وPostgREST بيقص عند 1000، فالعدّادات كانت محسوبة على
        شريحة مش كل البيانات (والقص من غير ORDER = صفوف عشوائية تقريبًا).
-       دلوقتي العدّ بيحصل في القاعدة: تلات نداءات خفيفة بترجّع رقم بس.  */
-    const lateBefore = new Date(Date.now() - 30 * 60000).toISOString();
-    const [pending, picked, late] = await Promise.all([
-      Session.count('orders?select=id&status=eq.pending'),
-      Session.count('orders?select=id&status=eq.picked'),
-      /* المتأخر: لسه في الشارع وعدّى عليه نص ساعة من وقت الفاتورة.
-         ⚠️ القائمة إيجابية بقصد مش not.in: مع not.in القاعدة بتعدّ
-         الـ٤٨ ألف صف كلهم عشان تستبعد التلاتة (٣٨ م.ث لكل نداء، والنداء
-         بيتكرر كل دقيقة لكل متصفح مفتوح). بالقائمة الإيجابية الفهرس
-         idx_orders_status_billdate بيشتغل على العمودين → 0.4 م.ث.
-         الحالات دي هي **بالظبط** مكمّلة لـ(completed, cancelled,
-         delivered)؛ أي حالة جديدة تتضاف للنظام لازم تتزوّد هنا. */
-      Session.count('orders?select=id&status=in.(pending,assigned,picked,postponed,failed)' +
-                    '&bill_date=lt.' + encodeURIComponent(lateBefore))
-    ]);
-    if (pending == null && picked == null) return;
+       بعدها بقت تلات نداءات عدّ، ودلوقتي **نداء واحد**: get_header_stats
+       بتمسح الطلبات المفتوحة مرة واحدة وترجّع التلات أرقام.
+       مع كل متصفح مفتوح ده بيوفّر ٢٨٨٠ نداء في اليوم.
+
+       ⚠️ الدالة SECURITY INVOKER بقصد، فحارس الصلاحيات على جدول
+       الطلبات بيفضل شغّال: موظف الفرع بيشوف فرعه بس زي الأول. */
+    const { data: hs, error: hsErr } = await db.rpc('get_header_stats', { p_late_minutes: 30 });
+    if (hsErr || !hs) return;
+    const pending = Number(hs.pending) || 0;
+    const picked  = Number(hs.picked)  || 0;
+    const late    = Number(hs.late)    || 0;
 
     const ordersBadge = document.getElementById('nav-badge-orders');
     if (ordersBadge) { ordersBadge.textContent = pending; ordersBadge.style.display = pending > 0 ? 'inline-block' : 'none'; }
