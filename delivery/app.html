@@ -1524,8 +1524,14 @@ async function loadHeaderStats() {
     const [pending, picked, late] = await Promise.all([
       Session.count('orders?select=id&status=eq.pending'),
       Session.count('orders?select=id&status=eq.picked'),
-      // المتأخر: لسه في الشارع وعدّى عليه نص ساعة من وقت الفاتورة
-      Session.count('orders?select=id&status=not.in.(completed,cancelled,delivered)' +
+      /* المتأخر: لسه في الشارع وعدّى عليه نص ساعة من وقت الفاتورة.
+         ⚠️ القائمة إيجابية بقصد مش not.in: مع not.in القاعدة بتعدّ
+         الـ٤٨ ألف صف كلهم عشان تستبعد التلاتة (٣٨ م.ث لكل نداء، والنداء
+         بيتكرر كل دقيقة لكل متصفح مفتوح). بالقائمة الإيجابية الفهرس
+         idx_orders_status_billdate بيشتغل على العمودين → 0.4 م.ث.
+         الحالات دي هي **بالظبط** مكمّلة لـ(completed, cancelled,
+         delivered)؛ أي حالة جديدة تتضاف للنظام لازم تتزوّد هنا. */
+      Session.count('orders?select=id&status=in.(pending,assigned,picked,postponed,failed)' +
                     '&bill_date=lt.' + encodeURIComponent(lateBefore))
     ]);
     if (pending == null && picked == null) return;
