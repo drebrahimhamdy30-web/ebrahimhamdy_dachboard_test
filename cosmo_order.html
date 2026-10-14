@@ -113,6 +113,19 @@
     .qty-edited { border-color:var(--accent)!important;background:#eff6ff!important; }
     .branch-stock { color:#7f1d1d;font-weight:800;font-size:0.78rem; }
     /* صف البحث + الشركات في سطر واحد */
+    /* شريط «كل شركة وكام صنف» — شرائح قابلة للضغط بتفلتر الشركة */
+    .co-sum { display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;padding-top:10px;border-top:1px solid var(--border); }
+    .co-sum:empty { display:none; }
+    .co-sum .co-h { width:100%;font-size:0.72rem;font-weight:800;color:var(--text-muted);margin-bottom:2px; }
+    .co-pill { display:inline-flex;align-items:center;gap:6px;background:var(--surface-2);border:1.5px solid var(--border);
+               border-radius:20px;padding:3px 10px;font-size:0.74rem;font-weight:700;color:var(--text-secondary);
+               cursor:pointer;user-select:none;white-space:nowrap; }
+    .co-pill:hover { border-color:var(--accent); }
+    .co-pill.on { background:var(--accent);border-color:var(--accent);color:#fff; }
+    .co-pill b { font-size:0.78rem;color:var(--accent-dark); }
+    .co-pill.on b { color:#fff; }
+    .co-more { font-size:0.72rem;font-weight:700;color:var(--accent-dark);cursor:pointer;align-self:center;padding:3px 6px; }
+
     .search-company-row { display:grid;grid-template-columns:1fr 1.4fr;gap:8px;margin-bottom:10px;align-items:stretch; }
     @media(max-width:600px){ .search-company-row{grid-template-columns:1fr;} }
     .search-company-row .field-icon-wrap { display:flex;align-items:center; }
@@ -209,6 +222,9 @@
               <i class="fas fa-trash-alt"></i> مسح الطلبيات
             </button>
           </div>
+
+          <!-- كل شركة وكام صنف مطلوب فيها — مرتّبة بالأعلى أولًا -->
+          <div id="co-summary" class="co-sum"></div>
         </div>
       </div>
 
@@ -247,6 +263,9 @@
        عدّاد «متجاهل» كان بيتحسب على allResults (الكتالوج كله) والباقي على
        المفلتر، فكان بيقول «متجاهل: 156» وانت مفلتر على شركة نصيبها صفر. */
     var dataLoaded=false, allResults=[], scopedResults=[], filteredResults=[];
+    var coSumAll=false;   // شريط الشركات: عارض الكل ولا أول 12
+    function escHtml(s){ return String(s==null?'':s)
+      .replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
     var cosmoBest={};   // أفضل مورّد (أقل سعر شراء) لكل كود — من best_purchase_by_code
     var itemStates = {};
     /* ===== تحويل بدل شراء =====
@@ -884,7 +903,56 @@ saveQty();
       });
       filteredResults = showIgnored ? scopedResults.slice()
         : scopedResults.filter(function(i){ return !(itemStates[i.code]||{}).ignored; });
+      renderCompanySummary(search, statusF, bestF);
       renderResults(filteredResults);
+    }
+
+    /* ═══ كل شركة وكام صنف مطلوب فيها ═══════════════════════════════
+       ⚠️ العدّ **بيتجاهل فلتر الشركة نفسه** عن قصد — لو عدّينا على
+       `scopedResults` كان الشريط هيقع على الشركة المختارة لوحدها
+       ويبقى بلا فايدة. فبنطبّق كل الفلاتر التانية بس، والشريحة
+       المختارة بتتعلّم بدل ما تخفي الباقي.
+       والمتجاهَل مابيتعدّش (إلا لو «إظهار المتجاهَل» شغّال) عشان
+       الرقم يطابق عمود «أصناف» في شريط النتائج. */
+    function renderCompanySummary(search, statusF, bestF){
+      var box = document.getElementById('co-summary');
+      if(!box) return;
+
+      var pool = allResults.filter(function(item){
+        var state = itemStates[item.code] || {};
+        if(search && !item.name.toLowerCase().includes(search) && !item.code.includes(search)) return false;
+        if(statusF === 'pending' && state.ordered) return false;
+        if(statusF === 'ordered' && !state.ordered) return false;
+        if(bestF){ var bb = cosmoBest[String(item.code)];
+                   if(!bb || !bb.price_store || String(bb.price_store).toLowerCase().indexOf(bestF) === -1) return false; }
+        if(!showIgnored && state.ignored) return false;
+        return true;
+      });
+
+      if(!pool.length){ box.innerHTML = ''; return; }
+
+      var by = {};
+      pool.forEach(function(i){
+        var c = (i.company || '').trim() || 'بدون شركة';
+        by[c] = (by[c] || 0) + 1;
+      });
+      var list = Object.keys(by).map(function(c){ return { c: c, n: by[c] }; })
+                       .sort(function(a, b){ return b.n - a.n || a.c.localeCompare(b.c, 'ar'); });
+
+      var sel = getSelectedCompanies();
+      var LIM = 12, shown = coSumAll ? list.length : Math.min(LIM, list.length);
+
+      box.innerHTML = '<div class="co-h">الشركات (' + list.length + ') — الأعلى طلبًا أولًا</div>'
+        + list.slice(0, shown).map(function(x){
+            return '<span class="co-pill' + (sel.includes(x.c) ? ' on' : '') + '"'
+                 + ' onclick="toggleCompanyPick(' + JSON.stringify(x.c).replace(/"/g, '&quot;') + ')"'
+                 + ' title="اضغط للفلترة على الشركة دي">'
+                 + escHtml(x.c) + ' <b>' + x.n + '</b></span>';
+          }).join('')
+        + (list.length > LIM
+            ? '<span class="co-more" onclick="coSumAll=!coSumAll;applyFilters()">'
+              + (coSumAll ? 'أقل ▲' : 'باقي ' + (list.length - LIM) + ' ▼') + '</span>'
+            : '');
     }
 
     /* الزرار بيعرض عدد المتجاهَل **جوّه الفلتر الحالي**، وبيتقفل لو العدد صفر —
