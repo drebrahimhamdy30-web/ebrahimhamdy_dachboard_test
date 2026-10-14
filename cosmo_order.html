@@ -125,6 +125,27 @@
     .co-pill b { font-size:0.78rem;color:var(--accent-dark); }
     .co-pill.on b { color:#fff; }
     .co-more { font-size:0.72rem;font-weight:700;color:var(--accent-dark);cursor:pointer;align-self:center;padding:3px 6px; }
+    .co-edit { margin-inline-start:auto;font-size:0.72rem;font-weight:800;color:var(--accent-dark);cursor:pointer;
+               background:none;border:1.5px dashed var(--border);border-radius:20px;padding:3px 12px;font-family:var(--font); }
+    .co-edit:hover { border-color:var(--accent); }
+
+    /* مودال اختيار الشركات */
+    .pc-bg { display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;align-items:center;justify-content:center;padding:16px; }
+    .pc-bg.open { display:flex; }
+    .pc-box { background:var(--surface);border-radius:14px;width:min(620px,100%);max-height:86vh;display:flex;flex-direction:column;box-shadow:var(--shadow-md); }
+    .pc-head { padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px; }
+    .pc-head b { font-size:0.95rem; }
+    .pc-head .x { margin-inline-start:auto;cursor:pointer;color:var(--text-muted);font-size:1.1rem; }
+    .pc-tools { padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap; }
+    .pc-tools input { flex:1;min-width:150px;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);
+                      font-family:var(--font);font-size:0.8rem;background:var(--surface);color:var(--text-primary); }
+    .pc-list { overflow-y:auto;padding:6px 10px;flex:1; }
+    .pc-row { display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:8px;cursor:pointer;font-size:0.8rem; }
+    .pc-row:hover { background:var(--surface-2); }
+    .pc-row input { width:16px;height:16px;accent-color:var(--accent); }
+    .pc-row .n { margin-inline-start:auto;font-weight:800;color:var(--text-muted);font-size:0.75rem; }
+    .pc-foot { padding:11px 16px;border-top:1px solid var(--border);display:flex;gap:9px;align-items:center; }
+    .pc-foot .cnt { font-size:0.76rem;color:var(--text-muted);font-weight:700; }
 
     .search-company-row { display:grid;grid-template-columns:1fr 1.4fr;gap:8px;margin-bottom:10px;align-items:stretch; }
     @media(max-width:600px){ .search-company-row{grid-template-columns:1fr;} }
@@ -249,6 +270,29 @@
     </div>
   </div>
 
+  <!-- اختيار شركاتي المتابَعة -->
+  <div class="pc-bg" id="pc-bg" onclick="if(event.target===this)pcClose()">
+    <div class="pc-box">
+      <div class="pc-head">
+        <b>شركاتي المتابَعة</b>
+        <span style="font-size:.74rem;color:var(--text-muted)">المختارة بس هي اللي تظهر في الشريط</span>
+        <span class="x" onclick="pcClose()">&times;</span>
+      </div>
+      <div class="pc-tools">
+        <input id="pc-search" placeholder="ابحث عن شركة…" oninput="pcRender()">
+        <button class="btn cos-btn cos-btn-ghost" onclick="pcAllVisible(true)">علّم الظاهر</button>
+        <button class="btn cos-btn cos-btn-ghost" onclick="pcAllVisible(false)">امسح الظاهر</button>
+      </div>
+      <div class="pc-list" id="pc-list"></div>
+      <div class="pc-foot">
+        <span class="cnt" id="pc-count"></span>
+        <span style="margin-inline-start:auto"></span>
+        <button class="btn cos-btn cos-btn-ghost" onclick="pcClose()">إلغاء</button>
+        <button class="btn cos-btn cos-btn-excel" id="pc-save" onclick="pcSave()">حفظ</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="config.js?v=20260904c"></script>
   <script src="session.js?v=20261011p"></script>
@@ -263,7 +307,9 @@
        عدّاد «متجاهل» كان بيتحسب على allResults (الكتالوج كله) والباقي على
        المفلتر، فكان بيقول «متجاهل: 156» وانت مفلتر على شركة نصيبها صفر. */
     var dataLoaded=false, allResults=[], scopedResults=[], filteredResults=[];
-    var coSumAll=false;   // شريط الشركات: عارض الكل ولا أول 12
+    /* شركاتي المتابَعة — الشريط بيعرضها هي بس. فاضية = بنطلب الاختيار
+       بدل ما نطلّع 300 شركة. مصدرها جدول pinned_companies المشترك. */
+    var PINNED = new Set(), pinnedLoaded = false, pcDraft = null;
     function escHtml(s){ return String(s==null?'':s)
       .replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
     var cosmoBest={};   // أفضل مورّد (أقل سعر شراء) لكل كود — من best_purchase_by_code
@@ -500,6 +546,7 @@ saveQty();
       if (typeof Branches !== 'undefined' && Branches.ready) await Branches.ready();
       initBranches();
       loadRulesView();
+      await loadPinned();   // قبل أول رسم للشريط
       loadAllData();
     });
 
@@ -939,20 +986,119 @@ saveQty();
       var list = Object.keys(by).map(function(c){ return { c: c, n: by[c] }; })
                        .sort(function(a, b){ return b.n - a.n || a.c.localeCompare(b.c, 'ar'); });
 
+      /* المتابَعة بس — والباقي بيختفي بقرار المالك. الشركة المتابَعة
+         اللي مالهاش أصناف في التبويب الحالي مابتظهرش، فالقائمة الواحدة
+         بتخدم التلات تبويبات من غير ما تزحمهم. */
+      var shownList = list.filter(function(x){ return PINNED.has(x.c); });
       var sel = getSelectedCompanies();
-      var LIM = 12, shown = coSumAll ? list.length : Math.min(LIM, list.length);
+      var btn = '<button class="co-edit" onclick="pcOpen()">'
+              + (PINNED.size ? 'تعديل شركاتي (' + PINNED.size + ')' : 'اختر شركاتي') + '</button>';
 
-      box.innerHTML = '<div class="co-h">الشركات (' + list.length + ') — الأعلى طلبًا أولًا</div>'
-        + list.slice(0, shown).map(function(x){
-            return '<span class="co-pill' + (sel.includes(x.c) ? ' on' : '') + '"'
-                 + ' onclick="toggleCompanyPick(' + JSON.stringify(x.c).replace(/"/g, '&quot;') + ')"'
-                 + ' title="اضغط للفلترة على الشركة دي">'
-                 + escHtml(x.c) + ' <b>' + x.n + '</b></span>';
+      if(!PINNED.size){
+        box.innerHTML = '<div class="co-h">الشركات</div>'
+          + '<span style="font-size:.76rem;color:var(--text-muted)">اختر الشركات اللي بتتعامل معاها عشان تظهر عدّاداتها هنا — '
+          + list.length + ' شركة في النتائج الحالية.</span>' + btn;
+        return;
+      }
+
+      box.innerHTML = '<div class="co-h">شركاتي (' + shownList.length + ' من ' + PINNED.size + ') — الأعلى طلبًا أولًا</div>'
+        + (shownList.length
+            ? shownList.map(function(x){
+                return '<span class="co-pill' + (sel.includes(x.c) ? ' on' : '') + '"'
+                     + ' onclick="toggleCompanyPick(' + JSON.stringify(x.c).replace(/"/g, '&quot;') + ')"'
+                     + ' title="اضغط للفلترة على الشركة دي">'
+                     + escHtml(x.c) + ' <b>' + x.n + '</b></span>';
+              }).join('')
+            : '<span style="font-size:.76rem;color:var(--text-muted)">مفيش من شركاتك حاجة مطلوبة في الفلتر ده.</span>')
+        + btn;
+    }
+
+    /* ═══ اختيار شركاتي ═══════════════════════════════════════════ */
+    async function loadPinned(){
+      try {
+        var r = await fetch(SB_URL_API+'/rest/v1/pinned_companies?select=company&order=sort_order.asc', { headers: await sbH() });   // data-ok: قائمة إعدادات قصيرة
+        var j = await r.json();
+        PINNED = new Set(Array.isArray(j) ? j.map(function(x){ return x.company; }) : []);
+      } catch(e){ PINNED = new Set(); }
+      pinnedLoaded = true;
+    }
+
+    function pcOpen(){
+      /* نسخة شغل منفصلة — الإلغاء مايأثرش على المعروض */
+      pcDraft = new Set(PINNED);
+      document.getElementById('pc-search').value = '';
+      document.getElementById('pc-bg').classList.add('open');
+      pcRender();
+    }
+    function pcClose(){ document.getElementById('pc-bg').classList.remove('open'); pcDraft = null; }
+
+    /* كل الشركات اللي في نتائج الحساب (كل التبويبات اللي اتحسبت) +
+       المتابَعة الحالية — عشان شركة متابَعة مالهاش أصناف دلوقتي تفضل
+       ظاهرة وتقدر تشيلها. */
+    function pcPool(){
+      var by = {};
+      allResults.forEach(function(i){
+        var c = (i.company || '').trim() || 'بدون شركة';
+        by[c] = (by[c] || 0) + 1;
+      });
+      PINNED.forEach(function(c){ if(by[c] === undefined) by[c] = 0; });
+      return Object.keys(by).map(function(c){ return { c: c, n: by[c] }; })
+                   .sort(function(a, b){ return b.n - a.n || a.c.localeCompare(b.c, 'ar'); });
+    }
+
+    function pcVisible(){
+      var q = (document.getElementById('pc-search').value || '').trim().toLowerCase();
+      return pcPool().filter(function(x){ return !q || x.c.toLowerCase().includes(q); });
+    }
+
+    function pcRender(){
+      var rows = pcVisible();
+      document.getElementById('pc-list').innerHTML = rows.length
+        ? rows.map(function(x){
+            return '<label class="pc-row"><input type="checkbox"' + (pcDraft.has(x.c) ? ' checked' : '')
+                 + ' onchange="pcToggle(' + JSON.stringify(x.c).replace(/"/g, '&quot;') + ',this.checked)">'
+                 + '<span>' + escHtml(x.c) + '</span><span class="n">' + x.n + '</span></label>';
           }).join('')
-        + (list.length > LIM
-            ? '<span class="co-more" onclick="coSumAll=!coSumAll;applyFilters()">'
-              + (coSumAll ? 'أقل ▲' : 'باقي ' + (list.length - LIM) + ' ▼') + '</span>'
-            : '');
+        : '<div style="padding:18px;text-align:center;color:var(--text-muted);font-size:.8rem">مفيش نتائج</div>';
+      document.getElementById('pc-count').textContent = 'مختار ' + pcDraft.size + ' من ' + pcPool().length;
+    }
+
+    function pcToggle(name, on){ on ? pcDraft.add(name) : pcDraft.delete(name); pcRender(); }
+    function pcAllVisible(on){
+      pcVisible().forEach(function(x){ on ? pcDraft.add(x.c) : pcDraft.delete(x.c); });
+      pcRender();
+    }
+
+    async function pcSave(){
+      var btn = document.getElementById('pc-save'), old = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = 'جارٍ الحفظ…';
+      try {
+        var add = [...pcDraft].filter(function(c){ return !PINNED.has(c); });
+        var del = [...PINNED].filter(function(c){ return !pcDraft.has(c); });
+        var ord = [...pcDraft];
+
+        /* ⚠️ fetch مابيرميش على 401/403 — بيرجّع ok=false وخلاص. فمن
+           غير فحص r.ok كان فشل الصلاحية يعدّي بالصمت والمستخدم يفتكر
+           القائمة اتحفظت. */
+        var must = function(r){ if(!r.ok) throw new Error('HTTP ' + r.status); return r; };
+
+        if(ord.length) must(await fetch(SB_URL_API+'/rest/v1/pinned_companies?on_conflict=company', {
+          method:'POST',
+          headers: await sbH({ 'Content-Type':'application/json', Prefer:'resolution=merge-duplicates, return=minimal' }),
+          body: JSON.stringify(ord.map(function(c, i){ return { company: c, sort_order: i, updated_at: new Date().toISOString() }; })) }));
+
+        if(del.length){
+          var inList = del.map(function(c){ return '"' + String(c).replace(/"/g, '') + '"'; }).join(',');
+          must(await fetch(SB_URL_API+'/rest/v1/pinned_companies?company=in.(' + encodeURIComponent(inList) + ')',
+            { method:'DELETE', headers: await sbH({ Prefer:'return=minimal' }) }));
+        }
+
+        PINNED = new Set(pcDraft);
+        pcClose();
+        applyFilters();
+      } catch(e){
+        alert(typeof sbFailMsg === 'function' ? sbFailMsg('تعذّر حفظ القائمة') : ('تعذّر حفظ القائمة: ' + e.message));
+      } finally { btn.disabled = false; btn.innerHTML = old; }
     }
 
     /* الزرار بيعرض عدد المتجاهَل **جوّه الفلتر الحالي**، وبيتقفل لو العدد صفر —
