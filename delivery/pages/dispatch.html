@@ -3188,6 +3188,17 @@ async function detachOrderFromTrip(orderId, nowIso){
   return last;
 }
 
+// فصل طلب عالق من الرحلة من غير تغيير حالته (لتنظيف طلب ملغي/عالق ظاهر في كارت الرحلة)
+async function cleanDetachOrder(orderId){
+  if(!confirm('إزالة الطلب من الرحلة؟ (مش هيغيّر حالته — مجرد فصله من كارت الرحلة)'))return;
+  showLoading(true);
+  await detachOrderFromTrip(orderId);
+  await addOrderLog(orderId,'order_edited',{action:'detached_from_trip_cleanup'});
+  showLoading(false);
+  showToast('✓ تم إزالة الطلب من الرحلة');
+  await loadAll();
+}
+
 async function autoCloseTripIfEmpty(tripId){
   if(!tripId) return;
   const {data:to} = await db.from('trip_orders').select('id').eq('trip_id', tripId);
@@ -3710,8 +3721,17 @@ if(o.delivered_at){
     moreBtns+=`<button class="na-mi danger" onclick="${_cm}openCancelByCustomer('${orderId}')"><i>🚫</i> العميل ألغى</button>`;
   }
   else{
-    // باقي الحالات (معلّق/متوصّل/ملغي…): السجل بس
+    // باقي الحالات (معلّق/متوصّل/ملغي…)
     moreBtns+=`<button class="na-mi" onclick="${_cm}openLog('${orderId}',null)"><i>📋</i> سجل الطلب</button>`;
+    // طلب عالق في رحلة بحالة مش نشطة (ملغي/معلّق/مؤجل وهو متنقل لرحلة) → زر فصل نظيف
+    // عشان المتابع يقدر يشيله من الرحلة. المتوصّل/المكتمل بيفضلوا (بيخصّوا الرحلة).
+    if(tripId && tripId!=='null' && ['cancelled','pending','postponed'].includes(o.status))
+      moreBtns+=`<button class="na-mi" onclick="${_cm}cleanDetachOrder('${orderId}')"><i>↩</i> إزالة من الرحلة <span class="na-hint">من غير تغيير حالته</span></button>`;
+    // pending/مؤجل لسه ينفع يتلغي
+    if(['pending','postponed'].includes(o.status)){
+      moreBtns+=`<div class="na-sep"></div>`;
+      moreBtns+=`<button class="na-mi danger" onclick="${_cm}openCancel('${orderId}',null)"><i>🚫</i> إلغاء الطلب</button>`;
+    }
   }
 
   /* الأفعال السريعة بتتقسم على عددها الفعلي — لو واحد بس مايتمططش على التلت */
