@@ -50,8 +50,8 @@ run() {  # $1=ملف  $2=وصف  [$3=apply]
 }
 
 if [ "$APPLY" != 1 ]; then
-  run migrate_34_catchup_from_cloud.sql "١/٣ الناقص من السحابة (تجربة)"
-  run migrate_35_align_notnull_and_grants.sql "٢/٣ الصلاحيات و not null (تجربة)"
+  run migrate_34_catchup_from_cloud.sql "١/٤ الناقص من السحابة (تجربة)"
+  run migrate_35_align_notnull_and_grants.sql "٣/٤ الصلاحيات و not null (تجربة)"
   printf '\n%s(تجربة — مفيش حاجة اتغيّرت)%s\n' "$Y" "$N"
   echo "للتنفيذ: $0 --apply"
   exit 0
@@ -60,7 +60,7 @@ fi
 # الجسر الأول: cloudsrc لقطة، وأي عمود جديد على السحابة مش فيها.
 # migrate_34 بيقرا بـdblink (طازة) فمش متأثر، بس migrate_35 والحارس
 # بيقروا من cloudsrc — فلازم يتبني قبلهم.
-printf '\n%s── ٠/٣ إعادة بناء جسر السحابة ──%s\n' "$B" "$N"
+printf '\n%s── ٠/٤ إعادة بناء جسر السحابة ──%s\n' "$B" "$N"
 if docker exec -i "$CID" psql -U "$DB_USER" -d postgres -q -v ON_ERROR_STOP=1 \
      < "$REPO/docs/reimport_cloudsrc.sql" >/dev/null 2>&1; then
   echo "  ✓ الجسر اتبنى من الأول"
@@ -68,11 +68,18 @@ else
   echo "  ${Y}⚠️ فشلت — الأعمدة الجديدة ممكن ترجع فاضية${N}"
 fi
 
-run migrate_34_catchup_from_cloud.sql "١/٣ الناقص من السحابة" apply
-run migrate_35_align_notnull_and_grants.sql "٢/٣ الصلاحيات و not null" apply
+run migrate_34_catchup_from_cloud.sql "١/٤ الناقص من السحابة" apply
+# الملكية **بعد** 34: الجداول الجديدة بتتعمل بمالك supabase_admin
+# (لأن الترحيل بيتنفّذ بيه)، والمفروض postgres زي السحابة. ودالة
+# SECURITY DEFINER مملوكة لسوبر يوزر بتشتغل بصلاحيات أعلى من نظيرتها
+# — بتوسّع ثقب بهدوء من غير أي إشارة.
+# كانت ناقصة من الاستلحاق: المسح الشامل طلّع ٣٠ ملكية مختلفة.
+run migrate_33_object_owners.sql "٢/٤ الملكية" 
+
+run migrate_35_align_notnull_and_grants.sql "٣/٤ الصلاحيات و not null" apply
 
 # ── التحقّق: الحارس هو الحكم، مش خرج الترحيلات ────────────────────
-printf '\n%s── ٣/٣ التحقّق ──%s\n' "$B" "$N"
+printf '\n%s── ٤/٤ التحقّق ──%s\n' "$B" "$N"
 OUT="$(docker exec -i "$CID" psql -U "$DB_USER" -d postgres \
        < "$REPO/docs/schema_drift_watch.sql" 2>&1)"
 echo "$OUT" | sed -n '/حاجات موجودة على السحابة/,$p'
