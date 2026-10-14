@@ -1444,14 +1444,23 @@ async function rejectAtt(id,driverId){
 // حمل المناطق الصعبة — يحدّد أقل طيارين ذهابًا للمناطق الصعبة هذا الشهر (مع مراعاة ساعات العمل)
 // خريطة معدّل المناطق الصعبة لكل طيار (رحلات صعبة ÷ ساعات العمل) — نحسب الأقل 2 بين الحاضرين وقت العرض
 let hardRateMap={};
-async function loadHardLoad(){
+/* معدل الرحلات الصعبة = تجميع **من أول الشهر**، فبيتحرّك ببطء شديد.
+   كان بيتحسب مع كل نبضة (كل ٣٠ ثانية) وبيكلّف ٥٢ م.ث على القاعدة —
+   ٧٥ ألف نداء في ٤ أيام. بقى كل ساعة: نفس الرقم على الشاشة بعُشر
+   الحمل. بيتحدّث فورًا برضه لو الأدمن غيّر الفرع أو الخريطة فاضية. */
+let _hardAt=0, _hardBranch=null;
+async function loadHardLoad(force){
   try{
     const branchId=currentUser?.role==='admin'?activeBranchId:(currentUser?.branch_id||null);
-    if(!branchId){ hardRateMap={}; return; }
+    if(!branchId){ hardRateMap={}; _hardBranch=null; return; }
+    const fresh = !force && branchId===_hardBranch
+               && (Date.now()-_hardAt) < 3600000
+               && Object.keys(hardRateMap).length > 0;
+    if(fresh) return;
     const {data}=await db.rpc('get_hard_load',{p_branch:branchId});
     const m={}; (data||[]).forEach(r=>{ m[r.driver_id]=Number(r.hard_rate)||0; });
-    hardRateMap=m;
-  }catch(e){ hardRateMap={}; }
+    hardRateMap=m; _hardAt=Date.now(); _hardBranch=branchId;
+  }catch(e){ hardRateMap={}; _hardAt=0; }
 }
 
 // حمل عدد الرحلات الكلي لكل طيار هذا الشهر — لتمييز الطيار الأقل في عدد الرحلات
