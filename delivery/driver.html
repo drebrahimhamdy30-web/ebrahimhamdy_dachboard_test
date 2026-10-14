@@ -665,11 +665,25 @@ function checkNewOrders(){
 // ===== REALTIME SUBSCRIPTIONS =====
 let ordersChannel = null;
 
-function subscribeToOrders(){
+/* ⚠️ الـWebSocket بتاع Realtime **مابياخدش** التوكن من global.fetch
+   اللي فوق — ده بيتطبّق على نداءات REST بس. من غير setAuth الاشتراك
+   بيتعمل بمفتاح anon، وسياسة orders بتدي anon صفر صفوف، فالسيرفر
+   مابيبعتش أي حدث والاشتراك يفضل ساكت من غير أي رسالة خطأ. */
+async function rtAuth(){
+  try{
+    const t = await Session.validToken();
+    if(t && db.realtime && typeof db.realtime.setAuth === 'function') await db.realtime.setAuth(t);
+    return !!t;
+  }catch(e){ return false; }
+}
+
+async function subscribeToOrders(){
   if(!driverRecord) return;
 
-  // إلغاء الاشتراك القديم
+  // إلغاء الاشتراك القديم (الدالة كانت بتتنادى مرتين فيطلع قناتين)
   if(ordersChannel){ db.removeChannel(ordersChannel); ordersChannel=null; }
+
+  await rtAuth();
 
   ordersChannel = db.channel(`driver-orders-${driverRecord.id}`)
     .on('postgres_changes', {
@@ -677,23 +691,13 @@ function subscribeToOrders(){
       schema: 'public',
       table: 'orders',
       filter: `driver_id=eq.${driverRecord.id}`
-    }, async (payload) => {
-      // طلب جديد اتعيّن
-      if(payload.eventType === 'UPDATE' && payload.new?.status === 'assigned' && payload.old?.status !== 'assigned'){
-        await loadAll();
-        startContinuousSound('new_order');
-        showBanner('📦 طلب جديد وصلك! اضغط للإيقاف', '#16a34a', true);
-      }
-      // طلب اتشال
-      else if(payload.eventType === 'UPDATE' && !payload.new?.driver_id && payload.old?.driver_id){
-        await loadAll();
-        playSound('order_removed');
-        showBanner('طلب تم إزالته من رحلتك', '#6b7280');
-      }
-      // أي تغيير تاني
-      else {
-        await loadAll();
-      }
+    }, async () => {
+      /* ⚠️ مابنقررش الصوت من payload.old: السيرفر مابيبعتش الصف
+         القديم إلا لو REPLICA IDENTITY FULL (وده بيكبّر الـWAL على
+         جدول شغّال). وكمان كان هيدّي إنذار مكرر لأن loadAll()
+         بتنادي checkNewOrders() اللي بتعمل نفس الحاجة صح:
+         بتقارن قايمة الطلبات الحالية باللي قبلها، وبتسكت أول تحميل. */
+      await loadAll();
     })
     .subscribe();
 }
@@ -762,12 +766,14 @@ window.addEventListener('DOMContentLoaded', async()=>{
   await loadAttendance();
   await loadAll();
   load(false);
-  subscribeToOrders();
+  await subscribeToOrders();
   subscribeToCallNotifications();
   setInterval(loadAttendance, 30000);
   setInterval(updateAllTimers, 60000);
-  // Realtime subscription للطلبات
-  subscribeToOrders();
+  /* التوكن عمره ساعة وبيتجدّد في الخلفية، لكن الـWebSocket بيفضل
+     على التوكن القديم — فبنحدّثه كل ٩ دقايق وإلا الاشتراك بيموت
+     بعد ساعة من غير ما حد ياخد باله. */
+  setInterval(rtAuth, 9 * 60 * 1000);
 });
 
 async function loadDriver(){
