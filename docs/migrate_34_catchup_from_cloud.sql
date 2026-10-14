@@ -90,8 +90,10 @@ norm as (
     and split_part(c.obj,':',1) not in (select e.obj from excl e)
     and not exists (select 1 from excl e where c.obj like e.obj || '%')
     -- جداول مؤقتة بتتعمل وتتمسح مع كل دورة مزامنة — مالهاش لازمة
-    and c.obj not like '%\_staging'
-    and c.obj not like '%\_staging:%'
+    -- بالاحتواء زي الحارس بالظبط. كان «بينتهي بـ» فالحارس بيتجاهل
+    -- stock_san_staging_itm_code_idx والترحيل بيحاول يعمله ويفشل —
+    -- أداتين بتقيسوا نفس الحاجة بقاعدتين مختلفتين.
+    and c.obj not like '%\_staging%'
     and c.obj !~ '_backup_[0-9]{8}'
     and c.obj !~ 'backfill'
 ),
@@ -132,16 +134,17 @@ where t.kind = b.kind and t.obj = b.obj;
 create temp table _cloud_cols as
 select * from dblink('cloud', $q$
   select c.relname, a.attname, format_type(a.atttypid, a.atttypmod),
-         a.attnotnull, pg_get_expr(ad.adbin, ad.adrelid), a.attnum
+         a.attnotnull, pg_get_expr(ad.adbin, ad.adrelid), a.attnum,
+         a.attgenerated
   from pg_class c
   join pg_namespace n on n.oid = c.relnamespace
   join pg_attribute a on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
   left join pg_attrdef ad on ad.adrelid = c.oid and ad.adnum = a.attnum
   where n.nspname = 'public' and c.relkind = 'r'
-$q$) as t(tbl text, col text, typ text, nn boolean, dflt text, pos int);
+$q$) as t(tbl text, col text, typ text, nn boolean, dflt text, pos int, gen "char");
 
 create temp table _missing_cols as
-select c.tbl, c.col, c.typ, c.nn, c.dflt
+select c.tbl, c.col, c.typ, c.nn, c.dflt, c.gen
 from _cloud_cols c
 join pg_class k on k.relname = c.tbl
 join pg_namespace ns on ns.oid = k.relnamespace and ns.nspname = 'public' and k.relkind = 'r'
@@ -241,7 +244,15 @@ begin
       -- (list_sales_months ثم sales_price_review) فبقت تتعالج لوحدها
       -- بدل ما تتصلّح بالإيد كل مرة. الـdrop بيشيل الصلاحيات معاه
       -- فبنرجّعها من fn_acl بتاع السحابة.
-      if r.kind = 'function' and sqlerrm like '%cannot change return type%' then
+      -- create or replace مابتقدرش تغيّر حاجات معيّنة في التوقيع.
+      -- عالجت «نوع الإرجاع» امبارح، وبعد يوم طلعت «قيم البارامترات
+      -- الافتراضية» بنفس الحل بالظبط. فالمعالجة بقت للعيلة كلها:
+      -- أي خطأ معناه «لازم drop ثم create».
+      if r.kind = 'function' and (
+           sqlerrm like '%cannot change return type%'
+        or sqlerrm like '%cannot remove parameter defaults%'
+        or sqlerrm like '%cannot change name of input parameter%'
+        or sqlerrm like '%cannot change data type of existing parameter%') then
         begin
           for sig in select pp.oid::regprocedure::text
                      from pg_proc pp join pg_namespace nn on nn.oid = pp.pronamespace
@@ -267,9 +278,19 @@ begin
   -- ٢) الأعمدة الناقصة على جداول موجودة — nullable دايمًا
   for r in select * from _missing_cols order by tbl, col loop
     begin
-      stmt := format('alter table public.%I add column if not exists %I %s',
-                     r.tbl, r.col, r.typ);
-      if r.dflt is not null then stmt := stmt || ' default ' || r.dflt; end if;
+      -- ⚠️ العمود المولّد (generated always as ... stored) تعبيره
+      --    بيشاور على أعمدة تانية، فحطّه كـdefault بيرمي
+      --    «cannot use column reference in DEFAULT expression».
+      --    لازم يتعمل بصيغته الأصلية. ومعاه ملحوظة: العمود ده
+      --    مابيتحسبش في نسخ البيانات خالص (القاعدة بتحسبه لوحدها).
+      if r.gen = 's' then
+        stmt := format('alter table public.%I add column if not exists %I %s generated always as (%s) stored',
+                       r.tbl, r.col, r.typ, r.dflt);
+      else
+        stmt := format('alter table public.%I add column if not exists %I %s',
+                       r.tbl, r.col, r.typ);
+        if r.dflt is not null then stmt := stmt || ' default ' || r.dflt; end if;
+      end if;
       execute stmt;
       insert into _log values (35, 'column', r.tbl || '.' || r.col, true,
         case when r.nn then 'اتضاف nullable — على السحابة not null' else null end);
