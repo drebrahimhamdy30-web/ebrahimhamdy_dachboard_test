@@ -139,6 +139,10 @@
     .ord-actbtn { border:none;border-radius:6px;padding:4px 8px;font-family:inherit;font-size:0.7rem;font-weight:700;cursor:pointer;white-space:nowrap; }
     .ord-send-inp { width:72px;text-align:center;padding:3px 4px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-primary);font-family:inherit;font-size:0.78rem;font-weight:700; }
     .ord-send-inp.edited { border-color:#b45309;color:#b45309;background:#fffbeb; }
+    .exp-chip { display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fcd34d;
+                border-radius:20px;padding:2px 9px;font-size:0.7rem;font-weight:700;cursor:pointer;white-space:nowrap; }
+    .exp-chip:hover { background:#fde68a; }
+    .exp-chip b { font-size:0.76rem; }
     .ord-send-inp:disabled { opacity:.5;cursor:not-allowed; }
     .ord-tr { background:#16a34a;color:#fff; }
     .ord-bw { background:var(--surface-3);color:var(--text-primary); }
@@ -276,6 +280,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
               <th data-col="sdisc">خصم المخزن</th>
               <th data-col="req">مطلوب</th>
               <th data-col="surplus">فائض الفروع</th>
+              <th data-col="expiry" title="رصيد عند فرع تاني صلاحيته قربت وهو مش هيبيعه قبل التاريخ — اطلبه منه بدل ما تشتري">طلب لقرب الصلاحية</th>
               <th data-col="rate">معدل الاستهلاك</th>
               <th data-col="save">كمية التوفير</th>
               <th data-col="stock">الرصيد</th>
@@ -798,6 +803,44 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     let ordHideHours = 24;               // مهلة إخفاء الصنف بعد طلب التحويل (من إعدادات المشتريات)
     let ordSelBranch = null;      // آخر فرع اتحمّلت تحديداته
     const ordWhChoice = {};     // المخزن المختار لكل صف (id → {store,price,disc,net,av})
+    /* ═══ طلب لقرب الصلاحية ═══════════════════════════════════════
+       الكمية اللي عند فرع تاني وصلاحيتها قربت وهو مش هيبيعها قبل
+       التاريخ. القاعدة بتخصمها من صافي المطلوب أصلًا (زي الفائض)،
+       والخلية دي بتوضّح منين وليه. */
+    function expMonth(d){
+      if (!d) return '';
+      const p = String(d).split('-');
+      return p.length >= 2 ? p[1] + '-' + p[0] : String(d);
+    }
+
+    /* الملاحظة اللي بتروح للفرع المصدر — لازم تذكر التاريخ عشان يبعت
+       التشغيلة دي بالذات مش أي كمية. */
+    function expNote(r){
+      return 'مطلوب لقرب انتهاء الصلاحية — ينتهي ' + expMonth(r.exp_date)
+           + '. برجاء إرسال الكمية من هذه التشغيلة تحديدًا.';
+    }
+
+    async function expAsk(id){
+      const r = ordById[id]; if (!r || !r.exp_branch) return;
+      if (!canOrder) { alert('هذه العملية متاحة لحساب المشتريات فقط.'); return; }
+      const qty = Math.min(Number(r.exp_qty) || 0, Number(r.required) || 0) || Number(r.exp_qty);
+      if (!confirm('طلب تحويل من ' + r.exp_branch + '؟\n\n'
+          + r.itm_name + '\nالكمية: ' + qty + ' · تنتهي ' + expMonth(r.exp_date)
+          + '\n\n' + expNote(r))) return;
+      try {
+        const res = await fetch(REST + 'order_transfer_pending?on_conflict=branch,itm_code', {
+          method:'POST', headers:{ ...H, 'Content-Type':'application/json',
+            'Prefer':'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify({ branch: ordBranch, itm_code: r.itm_code,
+                                 requested_at: new Date().toISOString() }) });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        toast('اتسجّل طلب التحويل من ' + r.exp_branch + ' ✓');
+      } catch (e) {
+        alert(typeof sbFailMsg === 'function' ? sbFailMsg('تعذّر تسجيل الطلب')
+                                              : ('تعذّر تسجيل الطلب: ' + e.message));
+      }
+    }
+
     /* [اسم الفرع, عمود فائضه في purchase_orders_flat] — من جدول الفروع */
     const brList = () => BR_KEYS.map(k => [BR[k], 'surplus_' + k]);
 
@@ -904,7 +947,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       const surpOnly = document.getElementById('ord-surp-only').checked;
       // أعمدة الفائض بتتبني من الفروع — كانت تلاتة مكتوبة بالإيد
       const surpCols = BR_KEYS.map(k => 'surplus_' + k).join(',');
-      let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,net_required,send_qty,' + surpCols + ',surplus_other,best_store,best_price,best_disc,best_item_name,active_months,sale_bills,ex_archived'
+      let url = REST + 'purchase_orders_flat?select=id,itm_code,itm_name,unit,price,company,stock,rate,base_rate,required,net_required,send_qty,exp_branch,exp_qty,exp_date,' + surpCols + ',surplus_other,best_store,best_price,best_disc,best_item_name,active_months,sale_bills,ex_archived'
         + '&branch=eq.' + encodeURIComponent(ordBranch)
         + '&order=' + ((ordSortCol && ORD_SORT_MAP[ordSortCol]) ? (ORD_SORT_MAP[ordSortCol] + '.' + ordSortDir + '.nullslast') : 'required.desc,itm_name.asc')
         + '&limit=' + ORD_SIZE + '&offset=' + offset;
@@ -1155,6 +1198,18 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           const surCell = totalSur > 0
             ? '<span style="color:#15803d;font-weight:800;cursor:pointer;text-decoration:underline" title="اضغط لتفاصيل الفائض والتحويل" onclick="openTransfer(' + r.id + ')">' + totalSur + '</span>'
             : '<span style="color:var(--text-muted)">—</span>';
+
+          /* طلب لقرب الصلاحية — فرع تاني عنده رصيد صلاحيته قربت ومش
+             هيبيعه قبل التاريخ. الكمية دي **مخصومة أصلًا** من صافي
+             المطلوب في القاعدة، فالخلية دي بتوضّح سبب الخصم.
+             ⚠️ الفاضي معناه «مفيش مرشّح» **أو** «الصنف مش متربط بـeplus»
+                — الربط 61% بس، فمانقدرش نقول «مفيش صلاحية قريبة». */
+          const expCell = r.exp_branch
+            ? '<span class="exp-chip" title="' + esc(r.exp_branch) + ' عنده ' + r.exp_qty
+                + ' تنتهي ' + esc(expMonth(r.exp_date)) + ' — اضغط لطلب التحويل"'
+                + ' onclick="expAsk(' + r.id + ')">'
+                + esc(r.exp_branch) + ' <b>' + r.exp_qty + '</b> · ' + esc(expMonth(r.exp_date)) + '</span>'
+            : '<span style="color:var(--text-muted)">—</span>';
           const chosen = ordWhChoice[r.id] || (r.best_store ? { store: r.best_store, price: r.best_price, disc: r.best_disc, av: true } : null);
           if (chosen) ordWhChoice[r.id] = chosen;
           const cc = String(r.itm_code).replace(/'/g, "\\'");
@@ -1201,6 +1256,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
             + '<td data-col="sdisc" id="wh-disc-' + r.id + '">' + (chosen ? (chosen.disc == null ? 0 : chosen.disc) + '%' : '—') + '</td>'
             + '<td data-col="req" class="ord-req">' + r.required + '</td>'
             + '<td data-col="surplus">' + surCell + '</td>'
+            + '<td data-col="expiry">' + expCell + '</td>'
             + '<td data-col="rate">' + numv(r.base_rate) + '</td>'
             + '<td data-col="save">' + numv(r.rate) + '</td>'
             + '<td data-col="stock">' + numv(r.stock) + '</td>'
