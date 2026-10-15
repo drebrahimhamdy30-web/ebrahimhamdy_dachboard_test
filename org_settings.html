@@ -173,6 +173,33 @@
         </div>
       </div>
 
+      <!-- طلب الأصناف قريبة انتهاء الصلاحية -->
+      <div class="os-card">
+        <h3><i class="fas fa-hourglass-half"></i> طلب الأصناف قريبة انتهاء الصلاحية</h3>
+        <div style="font-size:.78rem;color:var(--text-secondary);margin-bottom:12px;line-height:1.7">
+          في شاشة <b>«طلبيات الأدوية»</b> يظهر عمود يقترح طلب الصنف من فرع آخر عنده رصيد تقترب صلاحيته
+          ولن يبيعه قبل التاريخ، بدلًا من شرائه من المخزن. تواريخ الصلاحية تُقرأ من eplus في كل فرع من سيرفره.
+          <br><b>نافذة الشهور</b> تحدّد ما يُعتبر «قريبًا»: الأصناف التي تنتهي خلالها فقط هي التي تُقترح.
+        </div>
+        <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end">
+          <label style="display:block">
+            <span style="display:block;font-size:.76rem;color:var(--text-muted);margin-bottom:4px">يُعتبر قريبًا خلال (شهر)</span>
+            <input type="number" id="exp-months" min="1" max="36" step="1" style="width:92px">
+          </label>
+          <label style="display:block">
+            <span style="display:block;font-size:.76rem;color:var(--text-muted);margin-bottom:4px">تُحدَّث التواريخ كل (ساعة)</span>
+            <input type="number" id="exp-hours" min="1" max="168" step="1" style="width:92px">
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;padding-bottom:6px;cursor:pointer">
+            <input type="checkbox" id="exp-enabled" style="width:18px;height:18px">
+            <span style="font-size:.8rem">المزامنة مُفعَّلة</span>
+          </label>
+          <button class="btn btn-primary" onclick="expSave()"><i class="fas fa-save"></i> حفظ</button>
+          <span id="exp-msg" class="os-msg"></span>
+        </div>
+        <div id="exp-state" style="font-size:.72rem;color:var(--text-muted);margin-top:10px;line-height:1.7"></div>
+      </div>
+
       <!-- فحص قيم الفروع في البيانات -->
       <div class="os-card">
         <h3><i class="fas fa-triangle-exclamation"></i> فحص قيم الفروع</h3>
@@ -540,10 +567,68 @@
       } catch(e){ msg.textContent = 'تعذّر الحفظ'; msg.style.color = 'var(--danger)'; }
     }
 
+
+    /* ═══ قرب انتهاء الصلاحية ═══════════════════════════════════════
+       رقمين في مكانين مختلفين: نافذة الشهور في purchase_settings،
+       وتوقيت المزامنة في sync_jobs. الكتابة بدالة واحدة على السيرفر
+       (set_expiry_settings) لأن sync_jobs مقفول قراءة فقط هنا —
+       والدالة بتعيد بناء الطلبيات فورًا عشان الرقم الجديد يبان. */
+    async function expLoad(){
+      try {
+        const [p, j] = await Promise.all([
+          fetch(REST+'purchase_settings?id=eq.1&select=expiry_months', { headers: await H() }).then(r=>r.json()),                                    // data-ok: صف واحد
+          fetch(REST+'sync_jobs?id=eq.item_expiry&select=interval_minutes,enabled,last_run_at,last_status', { headers: await H() }).then(r=>r.json()) // data-ok: صف واحد
+        ]);
+        document.getElementById('exp-months').value = (Array.isArray(p) && p[0]) ? p[0].expiry_months : 6;
+        var job = (Array.isArray(j) && j[0]) ? j[0] : null;
+        document.getElementById('exp-hours').value    = job ? Math.max(1, Math.round(job.interval_minutes / 60)) : 24;
+        document.getElementById('exp-enabled').checked = job ? !!job.enabled : false;
+        expState(job);
+      } catch(e){ document.getElementById('exp-state').textContent = 'تعذّر تحميل الإعدادات'; }
+    }
+
+    function expState(job){
+      var el = document.getElementById('exp-state');
+      if (!job){ el.innerHTML = 'مهمة المزامنة غير موجودة — طبّق migrate_141.'; return; }
+      var txt;
+      if (!job.last_run_at) txt = 'لم تُنفَّذ المزامنة بعد — ستبدأ تلقائيًا في أول دورة للمحرّك على جهاز الصيدلية.';
+      else {
+        var d = new Date(job.last_run_at);
+        var hrs = Math.floor((Date.now() - d.getTime()) / 3600000);
+        txt = 'آخر مزامنة: ' + d.toLocaleString('ar-EG', { timeZone:'Africa/Cairo', dateStyle:'medium', timeStyle:'short' })
+            + ' (منذ ' + hrs + ' ساعة)';
+        /* التواريخ اللي ماوصلتهاش مزامنة من 3 أيام بتتجاهل في الاقتراح،
+           فالتأخير مش تفصيلة شكلية — لازم يبان. */
+        if (hrs >= 72) txt += ' — <b style="color:var(--danger)">متأخرة: الاقتراحات متوقفة حتى تنجح مزامنة جديدة</b>';
+      }
+      el.innerHTML = txt;
+    }
+
+    async function expSave(){
+      var msg = document.getElementById('exp-msg');
+      msg.style.color = 'var(--text-muted)'; msg.textContent = 'جارٍ الحفظ وإعادة الحساب…';
+      try {
+        var r = await fetch(REST+'rpc/set_expiry_settings', { method:'POST', headers: await HW(),
+          body: JSON.stringify({ p_months:  parseInt(document.getElementById('exp-months').value, 10),
+                                 p_hours:   parseInt(document.getElementById('exp-hours').value, 10),
+                                 p_enabled: document.getElementById('exp-enabled').checked }) });
+        /* fetch مابيرميش على 401/403 — لازم فحص صريح وإلا الفشل يمر بصمت */
+        if (!r.ok){ var e = await r.text(); throw new Error(e); }
+        var out = await r.json();
+        msg.style.color = '#16a34a';
+        msg.textContent = 'تم الحفظ ✓ — ' + (out && out.candidates != null ? out.candidates : 0) + ' صنف مُقترَح حاليًا';
+        await expLoad();
+      } catch(e){
+        msg.style.color = 'var(--danger)';
+        msg.textContent = 'تعذّر الحفظ' + (String(e.message || '').indexOf('403') >= 0 ? ' — الصلاحية للمدير فقط' : '');
+      }
+    }
+
     load();
     loadBranchAudit();
     calcLoad();
     loadTransferSettings();
+    expLoad();
   </script>
 </body>
 </html>
