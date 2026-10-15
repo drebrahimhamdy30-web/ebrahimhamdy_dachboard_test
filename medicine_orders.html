@@ -120,9 +120,19 @@
     .et-del { background:none;color:var(--danger);font-size:0.9rem;padding:4px 6px; }
     .et-add { background:#16a34a;color:#fff; }
     /* الطلبيات */
-    .ord-bar { display:flex;align-items:center;gap:10px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:10px;padding-bottom:3px;scrollbar-width:thin; }
-    .ord-bar::-webkit-scrollbar { height:6px; } .ord-bar::-webkit-scrollbar-thumb { background:var(--surface-3);border-radius:6px; }
-    .ord-bar > * { flex:0 0 auto; }
+    /* صفّين مقصودين بدل سكرول أفقي: الفلاتر فوق والإجراءات تحت.
+       اللفّ لوحده كان بيسيب الأزرار تتخلط بالفلاتر حسب عرض الشاشة —
+       كل مقاس يطلع ترتيب مختلف. الصفّين بيثبّتوا التقسيمة. */
+    .ord-bar { display:flex;flex-direction:column;gap:9px;margin-bottom:10px; }
+    .ord-row { display:flex;align-items:center;gap:9px;row-gap:8px;flex-wrap:wrap; }
+    .ord-row > * { flex:0 0 auto; }
+    .ord-row-actions { padding-top:9px;border-top:1px solid var(--border); }
+    /* كل الخانات بنفس الارتفاع — غير كده السطر بيبان متكسّر */
+    .ord-row .form-input, .ord-row .form-select, .ord-row .cr-up-btn { height:34px; }
+    .ord-row .cr-up-btn { display:inline-flex;align-items:center;gap:6px; }
+    /* المفاتيح في مجموعة واحدة: لو الصف ضاق يلفّوا سوا مش واحد لوحده */
+    .ord-chks { display:flex;align-items:center;gap:12px;font-size:0.8rem;font-weight:700; }
+    .ord-chks input { width:16px;height:16px;accent-color:var(--primary); }
     .ord-branches { display:flex;gap:4px;flex-wrap:wrap; }
     .ord-br { border:1.5px solid var(--border);background:var(--surface);color:var(--text-secondary);border-radius:8px;padding:6px 14px;font-family:inherit;font-size:0.8rem;font-weight:700;cursor:pointer; }
     .ord-br.active { background:var(--primary);color:#fff;border-color:var(--primary); }
@@ -251,32 +261,38 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       <!-- ===== تبويب الطلبيات ===== -->
       <div id="tab-orders" style="display:none">
         <div class="ord-bar">
-          <div class="ord-branches" id="ordBranches">
-            <!-- بتتولد في renderBranchUi() -->
+          <div class="ord-row ord-row-filters">
+            <div class="ord-branches" id="ordBranches">
+              <!-- بتتولد في renderBranchUi() -->
+            </div>
+            <span id="ordBranchLabel" style="display:none;font-weight:800;color:var(--primary);font-size:0.9rem"></span>
+            <input type="text" id="ord-search" class="form-input" placeholder="🔍 بحث بالصنف أو الكود..." oninput="ordDebounce()" style="max-width:165px">
+            <select id="ord-wh" class="form-select" style="max-width:128px" onchange="ordPage=1;loadOrders()"><option value="">كل المخازن</option></select>
+            <button class="cr-up-btn" id="xc-btn" style="background:var(--surface-3);color:var(--text-primary)" onclick="xcOpen()" title="الشركات اللي بتتطلب لوحدها — بتختفي من الطلبيات"><i class="fas fa-ban"></i> استثناء شركات</button>
+            <input type="text" id="ord-bestsup" class="form-select" list="ord-bestsup-list" placeholder="أفضل مورّد..." style="max-width:132px" oninput="ordDebounce()" title="فلترة بأفضل مورّد (أقل سعر شراء من فواتير الشراء)">
+            <datalist id="ord-bestsup-list"></datalist>
+            <select id="ord-under" class="form-select" style="max-width:118px" onchange="ordPage=1;loadOrders()"><option value="on">تحت الطلب</option><option value="off">ليست تحت الطلب</option><option value="" selected>الكل</option></select>
+            <span style="display:flex;align-items:center;gap:3px;font-size:0.78rem;font-weight:700;white-space:nowrap">الرصيد
+              <select id="ord-stock-op" class="form-select" style="max-width:56px;padding:6px 4px" onchange="ordPage=1;loadOrders()"><option value="lte">≤</option><option value="gte">≥</option></select>
+              <input type="number" id="ord-stock-v" class="form-input" style="max-width:66px" placeholder="—" oninput="ordDebounce()"></span>
+            <span style="display:flex;align-items:center;gap:3px;font-size:0.78rem;font-weight:700;white-space:nowrap">مطلوب
+              <select id="ord-req-op" class="form-select" style="max-width:56px;padding:6px 4px" onchange="ordPage=1;loadOrders()"><option value="lte">≤</option><option value="gte">≥</option></select>
+              <input type="number" id="ord-req-v" class="form-input" style="max-width:66px" placeholder="—" oninput="ordDebounce()"></span>
+            <span class="ord-chks">
+              <label style="display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="ord-surp-only" onchange="ordPage=1;loadOrders()"> فائض فقط</label>
+              <label id="xc-show-wrap" style="display:none;align-items:center;gap:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="ord-show-excl" onchange="ordPage=1;loadOrders()"> إظهار المستثناة</label>
+            </span>
           </div>
-          <span id="ordBranchLabel" style="display:none;font-weight:800;color:var(--primary);font-size:0.9rem"></span>
-          <input type="text" id="ord-search" class="form-input" placeholder="🔍 بحث بالصنف أو الكود..." oninput="ordDebounce()" style="max-width:180px">
-          <select id="ord-wh" class="form-select" style="max-width:150px" onchange="ordPage=1;loadOrders()"><option value="">كل المخازن</option></select>
-          <button class="cr-up-btn" id="xc-btn" style="background:var(--surface-3);color:var(--text-primary)" onclick="xcOpen()" title="الشركات اللي بتتطلب لوحدها — بتختفي من الطلبيات"><i class="fas fa-ban"></i> استثناء شركات</button>
-          <label id="xc-show-wrap" style="display:none;align-items:center;gap:5px;font-size:0.8rem;font-weight:700;cursor:pointer;white-space:nowrap"><input type="checkbox" id="ord-show-excl" onchange="ordPage=1;loadOrders()" style="width:16px;height:16px;accent-color:var(--primary)"> إظهار المستثناة</label>
-          <input type="text" id="ord-bestsup" class="form-select" list="ord-bestsup-list" placeholder="أفضل مورّد..." style="max-width:150px" oninput="ordDebounce()" title="فلترة بأفضل مورّد (أقل سعر شراء من فواتير الشراء)">
-          <datalist id="ord-bestsup-list"></datalist>
-          <select id="ord-under" class="form-select" style="max-width:150px" onchange="ordPage=1;loadOrders()"><option value="on">تحت الطلب</option><option value="off">ليست تحت الطلب</option><option value="" selected>الكل</option></select>
-          <span style="display:flex;align-items:center;gap:3px;font-size:0.78rem;font-weight:700;white-space:nowrap">الرصيد
-            <select id="ord-stock-op" class="form-select" style="max-width:56px;padding:6px 4px" onchange="ordPage=1;loadOrders()"><option value="lte">≤</option><option value="gte">≥</option></select>
-            <input type="number" id="ord-stock-v" class="form-input" style="max-width:66px" placeholder="—" oninput="ordDebounce()"></span>
-          <span style="display:flex;align-items:center;gap:3px;font-size:0.78rem;font-weight:700;white-space:nowrap">مطلوب
-            <select id="ord-req-op" class="form-select" style="max-width:56px;padding:6px 4px" onchange="ordPage=1;loadOrders()"><option value="lte">≤</option><option value="gte">≥</option></select>
-            <input type="number" id="ord-req-v" class="form-input" style="max-width:66px" placeholder="—" oninput="ordDebounce()"></span>
-          <label style="display:flex;align-items:center;gap:5px;font-size:0.8rem;font-weight:700;cursor:pointer;white-space:nowrap"><input type="checkbox" id="ord-surp-only" onchange="ordPage=1;loadOrders()" style="width:16px;height:16px;accent-color:var(--primary)"> فائض فقط</label>
-          <button class="cr-up-btn" style="background:#16a34a" onclick="exportOrders()"><i class="fas fa-file-excel"></i> تصدير Excel</button>
-          <button class="cr-up-btn" id="ord-sup-btn" style="background:#0ea5e9" onclick="supOpen()"><i class="fas fa-link"></i> رابط المورّد</button>
-          <button class="cr-up-btn" id="ord-pharma-btn" style="background:#1d4ed8" onclick="phOpenList()"><i class="fas fa-cart-plus"></i> قائمة فارما</button>
-          <button class="cr-up-btn" id="ord-ph-refresh" style="background:#0d9488" onclick="phRefreshPrices()" title="يجيب سعر وخصم وكود أصناف فارما اللي في الفلتر الحالي — لحظيًا من صفحة كل صنف عندهم — وبعدها يعيد حساب الطلبية. المزامنة التلقائية بتلف الكتالوج في ~22 ساعة فالسعر اللي قدامك عمره ساعات"><i class="fas fa-cloud-arrow-down"></i> تحديث فارما</button>
-          <button class="cr-up-btn" id="ord-clear" style="display:none;background:#b91c1c" onclick="clearAllSelections()"><i class="fas fa-eraser"></i> مسح تحت الطلب (يوم جديد)</button>
-          <button class="cr-up-btn" id="ord-refresh" style="display:none" onclick="refreshOrders()"><i class="fas fa-rotate"></i> تحديث الطلبيات</button>
-          <button class="cr-up-btn" id="ord-fit-btn" style="background:var(--surface-3);color:var(--text-primary)" onclick="ordToggleFit()" title="تصغير كل الأعمدة على حجم النص"><i class="fas fa-text-width"></i> محاذاة على النص</button>
-          <button class="cr-up-btn" style="background:var(--surface-3);color:var(--text-primary)" onclick="ordResetLayout()" title="استرجاع الترتيب والعرض الافتراضي"><i class="fas fa-rotate-left"></i> استرجاع الأعمدة</button>
+          <div class="ord-row ord-row-actions">
+            <button class="cr-up-btn" style="background:#16a34a" onclick="exportOrders()"><i class="fas fa-file-excel"></i> تصدير Excel</button>
+            <button class="cr-up-btn" id="ord-sup-btn" style="background:#0ea5e9" onclick="supOpen()"><i class="fas fa-link"></i> رابط المورّد</button>
+            <button class="cr-up-btn" id="ord-pharma-btn" style="background:#1d4ed8" onclick="phOpenList()"><i class="fas fa-cart-plus"></i> قائمة فارما</button>
+            <button class="cr-up-btn" id="ord-ph-refresh" style="background:#0d9488" onclick="phRefreshPrices()" title="يجيب سعر وخصم وكود أصناف فارما اللي في الفلتر الحالي — لحظيًا من صفحة كل صنف عندهم — وبعدها يعيد حساب الطلبية. المزامنة التلقائية بتلف الكتالوج في ~22 ساعة فالسعر اللي قدامك عمره ساعات"><i class="fas fa-cloud-arrow-down"></i> تحديث فارما</button>
+            <button class="cr-up-btn" id="ord-clear" style="display:none;background:#b91c1c" onclick="clearAllSelections()"><i class="fas fa-eraser"></i> مسح تحت الطلب (يوم جديد)</button>
+            <button class="cr-up-btn" id="ord-refresh" style="display:none" onclick="refreshOrders()"><i class="fas fa-rotate"></i> تحديث الطلبيات</button>
+            <button class="cr-up-btn" id="ord-fit-btn" style="background:var(--surface-3);color:var(--text-primary)" onclick="ordToggleFit()" title="تصغير كل الأعمدة على حجم النص"><i class="fas fa-text-width"></i> محاذاة على النص</button>
+            <button class="cr-up-btn" style="background:var(--surface-3);color:var(--text-primary)" onclick="ordResetLayout()" title="استرجاع الترتيب والعرض الافتراضي"><i class="fas fa-rotate-left"></i> استرجاع الأعمدة</button>
+          </div>
         </div>
         <div class="cr-meta" id="ord-meta"></div>
         <div class="cr-wrap">
