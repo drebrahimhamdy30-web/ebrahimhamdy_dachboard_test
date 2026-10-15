@@ -105,7 +105,7 @@ begin
 
     v_sel := '';
     for c in
-      select column_name from information_schema.columns
+      select column_name, udt_name from information_schema.columns
        where table_schema = 'public' and table_name = 'purchase_orders_flat'
        order by ordinal_position
     loop
@@ -137,7 +137,12 @@ begin
         when c.column_name = 'exp_qty'        then 'ex.qty::int'
         when c.column_name = 'exp_date'       then 'ex.exp_date'
         when c.column_name = 'refreshed_at'   then 'now()'
-        else 'null'
+        /* ⚠️ `null` من غير نوع بيتقرا text، والدالة بترجّع
+           `setof purchase_orders_flat` فأي عمود مش text بيوقّعها وقت
+           التشغيل: «Returned type text does not match expected type
+           boolean in column 32». حصل أول ما اتضاف عمود excluded.
+           الكاست بيخلّي أي عمود جديد يعدّي من غير ما يلمس الدالة. */
+        else 'null::' || c.udt_name
       end;
     end loop;
     v_sel := ltrim(v_sel, ', ');
