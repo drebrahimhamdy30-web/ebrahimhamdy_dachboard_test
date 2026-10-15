@@ -1538,6 +1538,12 @@
     // ============== تاب أذون الصرف (Disbursement) =====================
     // ===================================================================
     var purchases=[];
+    /* فهرس الفواتير: 'فرع|كود' → [{ billNo, serial, supplier, date, qty }]
+       الملف المرفوع متقسّم بلوكات، كل بلوك فاتورة: سطر رأس (ملاحظات)
+       فيه المورّد والتاريخ والمسلسل، وبعده أسطر الأصناف، وآخره سطر
+       فيه «رقم فاتورة المورد». بنمسك الانتماء ده عشان التصدير يطلع
+       مرتّب بالفاتورة — كل فاتورة بتكون كرتونة عند الاستلام. */
+    var invoiceIndex={};
     var detectedSourceBranch=null;
     var branchesInFile=[];
     var disbType='all';
@@ -1576,10 +1582,21 @@
       reader.readAsArrayBuffer(file);
     }
 
+    /* تاريخ إكسل (رقم تسلسلي) → نص — من غير new Date() على قيمة
+       مجرّدة عشان ما نقعش في إزاحة المنطقة الزمنية */
+    function xlDate(v){
+      var n=parseFloat(v); if(!isFinite(n)||n<=0) return '';
+      var d=new Date(Date.UTC(1899,11,30)+Math.round(n)*86400000);
+      return d.toISOString().slice(0,10).split('-').reverse().join('/');
+    }
+
     function parsePurchases(rows, fileName){
       var items=[];
       var curSupplier='';
       var curBranch=null;
+      invoiceIndex={};
+      var curInv=null;        // الفاتورة اللي بنقرا أسطرها دلوقتي
+      var invPending=[];      // أصنافها — بتتختم برقم الفاتورة لما نوصل لسطر الذيل
       function joined(row){ return row.map(function(v){return v==null?'':String(v);}).join('\t'); }
       function detectBranch(row){
         for(var i=0;i<row.length;i++){
@@ -1599,8 +1616,24 @@
         var j=joined(row);
         var b=detectBranch(row);
         if(b) curBranch=b;
-        if(c1==='ملاحظات'){ curSupplier=(row[20]!=null?String(row[20]).trim():''); return; }
-        if(j.indexOf('الإجمالى')>-1 && j.indexOf('عدد الأصناف')>-1) return;
+        if(c1==='ملاحظات'){
+          curSupplier=(row[20]!=null?String(row[20]).trim():'');
+          /* أعمدة سطر الرأس: 20 المورّد · 22 التاريخ · 23 المسلسل */
+          curInv={ supplier:curSupplier, date:xlDate(row[22]),
+                   serial:(row[23]!=null?String(row[23]).trim():''), billNo:'' };
+          invPending=[];
+          return;
+        }
+        /* سطر الذيل: «رقم فاتورة المورد» في العمود 9 — وبييجي **بعد**
+           أصنافه، فبنختم بيه الأصناف اللي اتجمّعت من آخر رأس. */
+        if(j.indexOf('الإجمالى')>-1 && j.indexOf('عدد الأصناف')>-1){
+          if(curInv){
+            curInv.billNo = (row[9]!=null?String(row[9]).trim():'');
+            invPending.forEach(function(e){ e.billNo=curInv.billNo; });
+          }
+          curInv=null; invPending=[];
+          return;
+        }
         if(j.indexOf('****')>-1) return;
         if(typeof c1==='string' && (c1.indexOf('تم الإسترجاع')>-1 || c1==='آجل')) return;
         var name=row[16], code=row[17];
@@ -1608,8 +1641,16 @@
           var qty=parseFloat(row[11])||0;
           var totBuy=parseFloat(row[20])||0;
           if(qty<=0) return;
-          items.push({ code:String(code).trim(), name:String(name).trim(),
-            qty:qty, totBuy:totBuy, supplier:curSupplier, branch: curBranch||'unknown' });
+          var _code=String(code).trim(), _br=curBranch||'unknown';
+          items.push({ code:_code, name:String(name).trim(),
+            qty:qty, totBuy:totBuy, supplier:curSupplier, branch:_br });
+          if(curInv){
+            var _k=_br+'|'+_code;
+            var _e={ billNo:curInv.billNo, serial:curInv.serial,
+                     supplier:curInv.supplier, date:curInv.date, qty:qty };
+            (invoiceIndex[_k]=invoiceIndex[_k]||[]).push(_e);
+            invPending.push(_e);
+          }
         }
       });
       var mp={};
@@ -1643,6 +1684,7 @@
 
     function clearDisbFile(){
       purchases=[]; disbComputed=[]; disbManual={}; detectedSourceBranch=null; branchesInFile=[];
+      invoiceIndex={};
       document.getElementById('file-tag-wrap').innerHTML='';
       document.getElementById('file-input').value='';
       document.getElementById('disb-filters').style.display='none';
@@ -1978,6 +2020,26 @@
       XLSX.writeFile(wb, 'inventory_mgmt_'+currentTab+'_'+today+'.xlsx');
     }
 
+    /* توزيع كمية التحويل على فواتير الصنف.
+       الغالبية العظمى من الأصناف بتيجي في فاتورة واحدة (٠.٧٪ بس في
+       ملف الاستلام الواحد بتيجي في أكتر من فاتورة)، فالحالة دي
+       بتتقسّم بنسبة الكمية المشتراة من كل فاتورة، والأخيرة بتاخد
+       الباقي عشان المجموع يفضل مطابق بالظبط من غير فروق تقريب. */
+    function splitQtyOverInvoices(list, q){
+      if(!list || !list.length) return [];
+      if(list.length===1) return [{ inv:list[0], q:q }];
+      var tot=list.reduce(function(s,e){ return s+(e.qty||0); },0);
+      if(!(tot>0)) return [{ inv:list[0], q:q }];
+      var out=[], used=0;
+      for(var i=0;i<list.length;i++){
+        var share = (i===list.length-1) ? (q-used)
+                  : Math.round(q*(list[i].qty/tot)*100)/100;
+        used+=share;
+        if(share>0) out.push({ inv:list[i], q:Math.round(share*100)/100 });
+      }
+      return out;
+    }
+
     function exportDisb(){
       var from=document.getElementById('from-branch').value;
       var others=Object.keys(BRANCHES).filter(function(b){return b!==from;});
@@ -1988,19 +2050,62 @@
       });
       var wb=XLSX.utils.book_new();
       var added=false;
+
       others.forEach(function(b){
-        var data=[['الكود','الصنف','المورد','الكمية المطلوب تحويلها']];
+        /* نلمّ أسطر التحويل تحت فواتيرها الأصلية */
+        var groups={};   // مفتاح الفاتورة → { inv, lines[] }
         rows.forEach(function(r){
           var q=disbQtyTo(r,b);
-          if(q>0) data.push([r.code, r.name, r.suppliers.join('، '), q]);
+          if(!(q>0)) return;
+          var list=invoiceIndex[(r.branch||from)+'|'+r.code] || invoiceIndex[from+'|'+r.code] || [];
+          var parts=splitQtyOverInvoices(list, q);
+          if(!parts.length) parts=[{ inv:{billNo:'',serial:'',supplier:(r.suppliers||[]).join('، '),date:''}, q:q }];
+          parts.forEach(function(p){
+            var key=(p.inv.billNo||'')+'#'+(p.inv.serial||'');
+            if(!groups[key]) groups[key]={ inv:p.inv, lines:[] };
+            groups[key].lines.push({ code:r.code, name:r.name, q:p.q });
+          });
         });
-        if(data.length>1){
-          var ws=XLSX.utils.aoa_to_sheet(data);
-          ws['!cols']=[{wch:14},{wch:45},{wch:22},{wch:18}];
-          var name=('من '+BRANCHES[from]+' ← '+BRANCHES[b]).slice(0,31);
-          XLSX.utils.book_append_sheet(wb, ws, name); added=true;
-        }
+
+        var keys=Object.keys(groups);
+        if(!keys.length) return;
+        /* الترتيب برقم فاتورة المورد (رقمي لو ينفع) — ده اللي مكتوب
+           على الكرتونة. واللي من غير رقم بيروح الآخر. */
+        keys.sort(function(x,y){
+          var a=groups[x].inv, c=groups[y].inv;
+          if(!a.billNo && c.billNo) return 1;
+          if(a.billNo && !c.billNo) return -1;
+          var na=parseFloat(a.billNo), nc=parseFloat(c.billNo);
+          if(isFinite(na) && isFinite(nc) && na!==nc) return na-nc;
+          return String(a.billNo).localeCompare(String(c.billNo),'ar');
+        });
+
+        var data=[['رقم الفاتورة','المورد','التاريخ','الكود','الصنف','الكمية المطلوب تحويلها']];
+        var totalLines=0;
+        keys.forEach(function(k){
+          var g=groups[k];
+          g.lines.sort(function(x,y){ return String(x.name).localeCompare(String(y.name),'ar'); });
+          var ttl=g.inv.billNo
+            ? ('📦 فاتورة ' + g.inv.billNo + ' · ' + (g.inv.supplier||'—')
+               + (g.inv.date?(' · '+g.inv.date):'')
+               + (g.inv.serial?(' · مسلسل '+g.inv.serial):'')
+               + ' · ' + g.lines.length + ' صنف')
+            : ('📦 بدون رقم فاتورة · ' + g.lines.length + ' صنف');
+          data.push([ttl,'','','','','']);
+          g.lines.forEach(function(l){
+            data.push([g.inv.billNo||'', g.inv.supplier||'', g.inv.date||'', l.code, l.name, l.q]);
+            totalLines++;
+          });
+          data.push(['','','','','','']);
+        });
+        if(!totalLines) return;
+
+        var ws=XLSX.utils.aoa_to_sheet(data);
+        ws['!cols']=[{wch:16},{wch:20},{wch:12},{wch:14},{wch:45},{wch:20}];
+        var name=('من '+BRANCHES[from]+' ← '+BRANCHES[b]).slice(0,31);
+        XLSX.utils.book_append_sheet(wb, ws, name); added=true;
       });
+
       if(!added){ alert('لا توجد كميات للتحويل'); return; }
       var today=new Date().toISOString().slice(0,10);
       XLSX.writeFile(wb, 'اذن_صرف_'+from+'_'+today+'.xlsx');
