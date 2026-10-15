@@ -39,6 +39,26 @@
    يتطبّق على: السحابة **و** السيرفر الذاتي.
    ═══════════════════════════════════════════════════════════════════ */
 
+/* ── الجدول ──────────────────────────────────────────────────────
+   كان متعمول بالإيد على السحابة من غير ملف، فالسيرفر الذاتي ماكانش
+   عارف بيه خالص. مكانه هنا.
+   `branch` = **كود الفرع** الإنجليزي (mamora/san/bishr/seyouf) زي كل
+   جداول المزامنة — راجع migrate_143. */
+create table if not exists public.item_expiry (
+  branch    text        not null,
+  itm_code  text        not null,
+  exp_date  date        not null,
+  qty       numeric     not null,
+  synced_at timestamptz not null default now(),
+  primary key (branch, itm_code, exp_date)
+);
+
+comment on table public.item_expiry is
+  'الرصيد المتبقي لكل صنف×فرع×تاريخ صلاحية — لقطة من Item_Class_Store في eplus، بتتحدّث بمهمة sync_jobs.item_expiry.';
+
+revoke all on table public.item_expiry from public, anon;
+grant select, insert, update, delete on table public.item_expiry to authenticated, service_role;
+
 alter table public.purchase_orders_flat
   add column if not exists exp_branch text,
   add column if not exists exp_qty    integer,
