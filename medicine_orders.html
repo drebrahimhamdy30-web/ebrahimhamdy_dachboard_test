@@ -257,9 +257,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           <span id="ordBranchLabel" style="display:none;font-weight:800;color:var(--primary);font-size:0.9rem"></span>
           <input type="text" id="ord-search" class="form-input" placeholder="🔍 بحث بالصنف أو الكود..." oninput="ordDebounce()" style="max-width:180px">
           <select id="ord-wh" class="form-select" style="max-width:150px" onchange="ordPage=1;loadOrders()"><option value="">كل المخازن</option></select>
-          <select id="ord-company" class="form-select" style="max-width:150px" onchange="ordPage=1;loadOrders()"><option value="">كل الشركات</option></select>
           <button class="cr-up-btn" id="xc-btn" style="background:var(--surface-3);color:var(--text-primary)" onclick="xcOpen()" title="الشركات اللي بتتطلب لوحدها — بتختفي من الطلبيات"><i class="fas fa-ban"></i> استثناء شركات</button>
-          <label id="xc-show-wrap" style="display:none;align-items:center;gap:5px;font-size:0.8rem;font-weight:700;cursor:pointer;white-space:nowrap"><input type="checkbox" id="ord-show-excl" onchange="ordPage=1;loadOrdCompanies();loadOrders()" style="width:16px;height:16px;accent-color:var(--primary)"> إظهار المستثناة</label>
+          <label id="xc-show-wrap" style="display:none;align-items:center;gap:5px;font-size:0.8rem;font-weight:700;cursor:pointer;white-space:nowrap"><input type="checkbox" id="ord-show-excl" onchange="ordPage=1;loadOrders()" style="width:16px;height:16px;accent-color:var(--primary)"> إظهار المستثناة</label>
           <input type="text" id="ord-bestsup" class="form-select" list="ord-bestsup-list" placeholder="أفضل مورّد..." style="max-width:150px" oninput="ordDebounce()" title="فلترة بأفضل مورّد (أقل سعر شراء من فواتير الشراء)">
           <datalist id="ord-bestsup-list"></datalist>
           <select id="ord-under" class="form-select" style="max-width:150px" onchange="ordPage=1;loadOrders()"><option value="on">تحت الطلب</option><option value="off">ليست تحت الطلب</option><option value="" selected>الكل</option></select>
@@ -420,7 +419,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     <div class="cr-modal" style="max-width:620px">
       <div class="cr-modal-hd">
         <div style="font-weight:800;font-size:0.9rem">الشركات المستثناة
-          <span style="font-weight:600;font-size:.74rem;color:var(--text-muted)">المعلَّمة هنا لا تظهر في الطلبيات</span>
+          <span style="font-weight:600;font-size:.74rem;color:var(--text-muted)">نفس قائمة «شركاتي» في الكوزمو — المعلَّمة تُطلب هناك وتُستثنى هنا</span>
         </div>
         <span style="cursor:pointer;color:var(--text-muted);font-size:1.1rem" onclick="xcClose()">&times;</span>
       </div>
@@ -982,7 +981,6 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     function buildOrdQuery(offset) {
       const q = document.getElementById('ord-search').value.trim();
       const w = document.getElementById('ord-wh').value;
-      const co = document.getElementById('ord-company').value;
       const bsup = document.getElementById('ord-bestsup').value.trim();
       const surpOnly = document.getElementById('ord-surp-only').checked;
       // أعمدة الفائض بتتبني من الفروع — كانت تلاتة مكتوبة بالإيد
@@ -994,7 +992,6 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       if (q) { const e = encodeURIComponent(q); url += '&or=(itm_name.ilike.*' + e + '*,itm_code.eq.' + e + ')'; }
       if (w === '__none__') url += '&best_store=is.null';       // بدون مخزن متاح
       else if (w) url += '&best_store=eq.' + encodeURIComponent(w);
-      if (co) url += '&company=eq.' + encodeURIComponent(co);
       if (bsup) url += '&best_pur_store=ilike.*' + encodeURIComponent(bsup) + '*';
       if (surpOnly) url += '&surplus_other=gt.0';
       // إخفاء الأصناف اللي اتطلبت تحويل (لسه في المهلة)
@@ -1159,9 +1156,12 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     }
 
     /* ═══ الشركات المستثناة ═════════════════════════════════════════
-       الشركات اللي بقت تتطلب لوحدها (من شاشة الكوزمو) مالهاش لازمة
-       هنا. نفس شكل اختيار «شركاتي» بالظبط، بس بالعكس: المعلَّم =
-       مستثنى.
+       **نفس قايمة «شركاتي»** بتاعة شاشة الكوزمو (pinned_companies) —
+       مش قايمة تانية. الشركة اللي بتتطلب لوحدها هي هي اللي تتشال من
+       هنا، فالمعنى بيتقلب حسب الشاشة:
+         • الكوزمو → المعلَّم هو اللي **يظهر**
+         • الأدوية → المعلَّم هو اللي **يتشال**
+       فلتر «كل الشركات» اتشال خلاص — بقى الاختيار من هنا بس.
 
        الاستثناء **عمود في القاعدة** (purchase_orders_flat.excluded)
        مش فلتر في الرابط: اسم الشركة العربي بيبقى 9 حروف لكل حرف في
@@ -1185,7 +1185,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
 
     async function loadExcluded(){
       try {
-        const j = await (await fetch(REST + 'excluded_companies?select=company&order=company.asc', { headers: H })).json();   // data-ok: قائمة إعدادات قصيرة
+        const j = await (await fetch(REST + 'pinned_companies?select=company&order=sort_order.asc', { headers: H })).json();   // data-ok: قائمة إعدادات قصيرة
         EXCL = new Set(Array.isArray(j) ? j.map(x => x.company) : []);
       } catch (e) { EXCL = new Set(); }
       xcSyncBtn();
@@ -1228,29 +1228,17 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         /* دالة واحدة بتكتب القايمة وتعلّم العمود — فمفيش لحظة القايمة
            اتغيّرت والأرقام لسه قديمة. و fetch مابيرميش على 401/403
            فلازم فحص صريح وإلا فشل الصلاحية يعدّي بالصمت. */
-        const r = await fetch(REST + 'rpc/set_excluded_companies', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' },
+        const r = await fetch(REST + 'rpc/set_pinned_companies', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' },
           body: JSON.stringify({ p_list: [...xcDraft] }) });
         if (!r.ok) throw new Error('HTTP ' + r.status);
         EXCL = new Set(xcDraft);
         xcClose(); xcSyncBtn();
-        ordPage = 1; await loadOrdCompanies(); loadOrders();
+        ordPage = 1; loadOrders();
       } catch (e) {
         alert(typeof sbFailMsg === 'function' ? sbFailMsg('تعذّر حفظ القائمة') : 'تعذّر حفظ القائمة');
       } finally { btn.disabled = false; btn.innerHTML = old; }
     }
 
-    async function loadOrdCompanies() {
-      try {
-        const list = await (await fetch(REST + 'rpc/get_purchase_companies', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' })).json();
-        const sel = document.getElementById('ord-company');
-        /* المنسدلة تعرض اللي ينفع تشوفه بس — غير كده تختار شركة
-           مستثناة وتطلع صفر صنف من غير سبب ظاهر. */
-        const show = ordShowExcl();
-        const opts = (list || []).filter(c => show || !EXCL.has(c.company));
-        sel.innerHTML = '<option value="">كل الشركات</option>' + opts.map(c => '<option value="' + esc(c.company) + '">' + esc(c.company) + (EXCL.has(c.company) ? ' (مستثناة)' : '') + '</option>').join('');
-        if (sel.value && !opts.some(c => c.company === sel.value)) sel.value = '';
-      } catch (e) {}
-    }
     async function loadOrdBestSuppliers() {
       try {
         const list = await (await fetch(REST + 'rpc/get_order_best_suppliers', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' })).json();
@@ -1537,9 +1525,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         let base = REST + 'purchase_orders_flat?select=branch,itm_code,itm_name,best_item_name,send_qty,net_required,required'
           + '&best_store=eq.' + encodeURIComponent(store) + '&send_qty=gt.0'
           + '&order=itm_name.asc';
-        const co = document.getElementById('ord-company').value;
         const q  = document.getElementById('ord-search').value.trim();
-        if (co) base += '&company=eq.' + encodeURIComponent(co);
         if (q) { const e = encodeURIComponent(q); base += '&or=(itm_name.ilike.*' + e + '*,itm_code.eq.' + e + ')'; }
         if (EXCL.size && !ordShowExcl()) base += '&excluded=not.is.true';
         /* الفلاتر العددية بس — بلا فلتر «تحت الطلب» (أكواد فرع واحد) */
@@ -1684,7 +1670,6 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
 
     async function exportOrders() {
       const w = document.getElementById('ord-wh').value;
-      const co = document.getElementById('ord-company').value;
       const bsup = document.getElementById('ord-bestsup').value.trim();
       const q = document.getElementById('ord-search').value.trim();
       const surpOnly = document.getElementById('ord-surp-only').checked;
@@ -1694,7 +1679,6 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       let base = REST + 'purchase_orders_flat?select=best_store,itm_code,itm_name,best_item_name,send_qty,best_price,best_disc,company'
         + '&branch=eq.' + encodeURIComponent(ordBranch) + '&send_qty=gt.0&order=best_store.asc,itm_name.asc';
       base += w ? '&best_store=eq.' + encodeURIComponent(w) : '&best_store=not.is.null';
-      if (co) base += '&company=eq.' + encodeURIComponent(co);
       if (bsup) base += '&best_pur_store=ilike.*' + encodeURIComponent(bsup) + '*';
       if (surpOnly) base += '&surplus_other=gt.0';
       if (q) { const e = encodeURIComponent(q); base += '&or=(itm_name.ilike.*' + e + '*,itm_code.eq.' + e + ')'; }
@@ -1779,13 +1763,11 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     async function phOpenList() {
       const w = document.getElementById('ord-wh').value;
       if (w && !phIsPharma(w)) { /* الفلتر على مخزن تاني — بنجيب فارما برضه */ }
-      const co = document.getElementById('ord-company').value;
       const q  = document.getElementById('ord-search').value.trim();
       const surpOnly = document.getElementById('ord-surp-only').checked;
       let base = REST + 'purchase_orders_flat?select=itm_code,itm_name,best_item_name,net_required,best_price,best_disc'
         + '&branch=eq.' + encodeURIComponent(ordBranch) + '&send_qty=gt.0'
         + '&best_store=eq.' + encodeURIComponent(PH_STORE) + '&order=itm_name.asc';
-      if (co) base += '&company=eq.' + encodeURIComponent(co);
       if (surpOnly) base += '&surplus_other=gt.0';
       if (q) { const e = encodeURIComponent(q); base += '&or=(itm_name.ilike.*' + e + '*,itm_code.eq.' + e + ')'; }
       base += ordExtraFilters();
@@ -1882,13 +1864,11 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جارٍ تجميع الأصناف…';
       try {
         // 1) أصناف فارما في الفلتر الحالي — نفس استعلام «قائمة فارما»
-        const co = document.getElementById('ord-company').value;
         const q  = document.getElementById('ord-search').value.trim();
         const surpOnly = document.getElementById('ord-surp-only').checked;
         let base = REST + 'purchase_orders_flat?select=itm_code,itm_name,best_item_name,best_price,best_disc'
           + '&branch=eq.' + encodeURIComponent(ordBranch) + '&send_qty=gt.0'
           + '&best_store=eq.' + encodeURIComponent(PH_STORE) + '&order=itm_name.asc';
-        if (co) base += '&company=eq.' + encodeURIComponent(co);
         if (surpOnly) base += '&surplus_other=gt.0';
         if (q) { const e = encodeURIComponent(q); base += '&or=(itm_name.ilike.*' + e + '*,itm_code.eq.' + e + ')'; }
         base += ordExtraFilters();
@@ -2947,7 +2927,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       // loadMeta/loadMonths/loadPage اتشالوا من هنا — دول بتوع تبويب «معدل
       // الاستهلاك» وبيتحمّلوا أول ما يتفتح (showTab). اللي فاضل مشترك أو
       // بتاع «الطلبيات» وهو التبويب الافتراضي.
-      loadBranchReps(); loadOrdStores(); EXCL_READY = loadExcluded(); EXCL_READY.then(loadOrdCompanies); loadOrdBestSuppliers();
+      loadBranchReps(); loadOrdStores(); EXCL_READY = loadExcluded(); loadOrdBestSuppliers();
       ordSyncFitBtn();
       showTab('orders');   // الطلبيات هو التبويب الافتراضي عند فتح الشاشة
     })();
