@@ -288,6 +288,23 @@ select kind as "النوع", key as "الكائن" from _diff
 where حالة = 'زيادة على السيرفر' order by kind, key;
 
 \echo ''
+\echo '── ٤ب) 🔴 قيود فريدة زيادة على السيرفر — دي بتوقّف المزامنة ──'
+\echo '    (الحارس اتجاه واحد: بيسأل إيه الناقص، عمره ما يسأل إيه الزيادة.'
+\echo '     وقيد فريد زيادة مش اختلاف تجميلي — بيرفض صفوف السحابة الشرعية.)'
+-- حصلت فعلًا 2026-10-14→17: السحابة وسّعت crm_return_bill_day_uq ليشمل
+-- return_day، والسيرفر فضل عنده القديم crm_return_bill_uq من غير اليوم.
+-- فصفّين في السحابة يختلفوا في اليوم بس = مسموحين هناك ومتعارضين هنا،
+-- ومزامنة contract_return_matches وقفت ٣ أيام. وإحنا كنا بنقرا الانحراف
+-- وهو بيقول «عمود ناقص» — وده كان العرض مش المرض.
+select kind as "النوع", key as "الكائن",
+       left(pg_temp.nrm(srv_raw), 110) as "التعريف على السيرفر"
+from _diff
+where حالة = 'زيادة على السيرفر'
+  and kind in ('فهرس','قيد')
+  and (srv_raw ilike '%unique%' or srv_raw ilike '%primary key%')
+order by kind, key;
+
+\echo ''
 \echo '── ٥) مستثنى بقصد — معروض عشان ما يبقاش مخفي ──'
 select e.why as "السبب", count(*) as "عدد الكائنات",
        string_agg(distinct split_part(x.key, ':', 2), ', ' order by split_part(x.key, ':', 2)) as "أمثلة"
