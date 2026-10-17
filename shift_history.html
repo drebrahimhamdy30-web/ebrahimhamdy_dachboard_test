@@ -886,7 +886,7 @@ async function loadBalance(){
           </div>
         </div>
         ${L.lastClose?`<div style="font-size:.74rem;color:var(--muted);margin-bottom:10px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:7px 10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <span><i class="fas fa-lock" style="color:#0f766e"></i> الفترة مقفولة لحد <b>${L.lastClose.upto}</b> برصيد <b>${fmt(L.lastClose.balance)} ج</b>${L.lastClose.closed_by?` — ${esc(L.lastClose.closed_by)}`:''}.</span>
+          <span><i class="fas fa-lock" style="color:#0f766e"></i> الفترة مقفولة لحد <b>${closeUptoLabel(L.lastClose)}</b> برصيد <b>${fmt(L.lastClose.balance)} ج</b>${L.lastClose.closed_by?` — ${esc(L.lastClose.closed_by)}`:''}.</span>
           <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-weight:700;color:var(--accent)">
             <input type="checkbox" ${showPreClose?'checked':''} onchange="togglePreClose(this)"> عرض الحركات المغلقة
           </label>
@@ -1028,7 +1028,7 @@ function closesTable(closes, branch){
     <div class="tbl-wrap"><table>
       <thead><tr><th>مقفول لحد</th><th class="num">الرصيد</th><th>قفلها</th><th>وقت الإقفال</th><th>ملاحظة</th><th>الحالة</th>${isAdmin?'<th></th>':''}</tr></thead>
       <tbody>${closes.map(c=>`<tr>
-        <td style="font-weight:800">${c.upto}</td>
+        <td style="font-weight:800">${closeUptoLabel(c)}</td>
         <td class="num" style="font-weight:800">${fmt(c.balance)}</td>
         <td>${esc(c.closed_by||'—')}</td>
         <td style="color:var(--muted);font-size:.75rem;white-space:nowrap">${dt(c.closed_at)}</td>
@@ -1039,11 +1039,35 @@ function closesTable(closes, branch){
     </table></div></div>`;
 }
 
-// مودال الإقفال: بيجيب رصيد النظام من السيرفر لحد التاريخ المختار،
+/* نص «مقفول لحد»: لو الإقفال بنهاية يوم (الشكل القديم أو تاريخ قديم)
+   نعرض التاريخ بس؛ ولو جوّه اليوم نعرض الوقت كمان، عشان يبان إن
+   الإقفال عند **لحظة** مش يوم كامل. */
+function closeUptoLabel(c){
+  if(!c) return '';
+  if(!c.upto_at) return c.upto;
+  const d = new Date(c.upto_at);
+  const hhmm = d.toLocaleTimeString('ar-EG',
+    { timeZone:'Africa/Cairo', hour:'2-digit', minute:'2-digit' });
+  const dayEnd = d.toLocaleDateString('en-CA', { timeZone:'Africa/Cairo' });
+  /* نهاية اليوم بتتخزّن كأول لحظة في اليوم اللي بعده */
+  return (dayEnd !== c.upto) ? c.upto : (c.upto + ' — ' + hhmm);
+}
+
+// مودال الإقفال: بيجيب رصيد النظام من السيرفر لحد اللحظة المختارة،
 // والمحاسب يكتب الرصيد الفعلي — لو مختلف السيرفر بيرفض ويوضّح الفرق.
+/* ⚠️ لازم نحسب بنفس اللحظة اللي pos_close_period هيستعملها، وإلا
+   الرقم المعروض يختلف عن اللي السيرفر بيتحقق منه والإقفال يترفض:
+   تاريخ النهاردة = «لحد دلوقتي» · أي تاريخ قديم = نهاية يومه. */
 async function sysBalanceUpto(branch, upto){
-  const r=await fetch(SB_URL+'/rest/v1/rpc/pos_balance_upto',{method:'POST',headers:await shHeaders(),
-    body:JSON.stringify({p_branch:branch, p_upto:upto})});
+  const todayCairo = cairoDate();
+  const body = (upto === todayCairo)
+    ? { p_branch: branch, p_at: new Date().toISOString() }
+    : null;
+  const r = body
+    ? await fetch(SB_URL+'/rest/v1/rpc/pos_balance_at',{method:'POST',headers:await shHeaders(),
+        body:JSON.stringify(body)})
+    : await fetch(SB_URL+'/rest/v1/rpc/pos_balance_upto',{method:'POST',headers:await shHeaders(),
+        body:JSON.stringify({p_branch:branch, p_upto:upto})});
   if(!r.ok) throw new Error(await r.text());
   return +(await r.json())||0;
 }
@@ -1088,12 +1112,8 @@ function closePeriodModal(branch, curBalance){
     const err=document.getElementById('clsErr');
     err.style.display='none';
     if(actualRaw===''){ err.textContent='اكتب الرصيد الفعلي'; err.style.display='block'; return; }
-    /* الإقفال لحد اليوم الجاري مسموح، بس الحارس بيجمّد **اليوم كله**
-       لأنه بيقارن بالتاريخ — فأي وردية هتتقفل بعد كده النهاردة هتترفض.
-       تحذير صريح بدل منع أعمى. */
-    if(d === today && !confirm('سيتم إقفال الفترة حتى تاريخ اليوم (' + today + ').'
-      + '\n\nأي وردية تُغلق اليوم بعد هذه اللحظة سيتم رفضها حتى يفتح المدير الإقفال.'
-      + '\nيُرجى المتابعة فقط إذا كانت كل ورديات اليوم قد أُغلقت بالفعل.')) return;
+    /* ماعادش فيه تحذير: الإقفال بقى عند **لحظة** مش يوم كامل، فالوردية
+       الشغّالة (اللي هتتقفل بعد كده) مش بتتأثر. (migrate_139/140) */
     const btn=document.getElementById('clsSave'); btn.disabled=true; btn.textContent='جاري الإقفال...';
     try{
       const r=await fetch(SB_URL+'/rest/v1/rpc/pos_close_period',{method:'POST',headers:await shHeaders(),
