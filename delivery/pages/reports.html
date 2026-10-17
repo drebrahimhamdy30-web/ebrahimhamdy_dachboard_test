@@ -454,11 +454,17 @@ const STATUS_LABELS = { pending:'جاهز', picked:'في الطريق', delivere
 let REP = null;        // ناتج get_delivery_report — كل مؤشرات الشاشة محسوبة في القاعدة
 let ordLists = {};     // حالة كل قائمة طلبات (الصفحة الحالية + الإجمالي)
 
-// المستخدم والفرع (الأدمن يقدر يفلتر كل الفروع/فرع؛ غيره يتقيّد بفرعه)
+/* المستخدم والفرع. مين يشوف كل الفروع بيتحدّد من **شاشة الصلاحيات**
+   (العمود 🏬 لكل دور × شاشة) مش من لستة أدوار محفورة هنا — كان
+   role==='admin' بالظبط، فمشرف الجرد اللي اتداله «كل الفروع» على شاشة
+   التقارير كان لسه متقيّد بفرعه والفلتر مخفي عنه أصلًا.
+   بيبدأ false (الأضيق) وبيتقرا جوّه initBranchFilter قبل ما الفلتر يتبني. */
 const RUSER = (typeof getCurrentUser==='function') ? getCurrentUser() : {role:'',branch_id:null};
-const RIS_ADMIN = RUSER.role === 'admin';
+let RIS_ADMIN = RUSER.role === 'admin';
 let branchNameById = {};   // خريطة id→اسم الفرع (لجداول التقارير)
 async function initBranchFilter() {
+  try { RIS_ADMIN = await Session.seesAllBranches('reports'); }
+  catch (e) { RIS_ADMIN = RUSER.role === 'admin'; }
   const { data } = await db.from('branches').select('id,name').order('name');
   (data||[]).forEach(b => { branchNameById[b.id] = b.name; });
   const sel = document.getElementById('branchFilter');
