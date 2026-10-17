@@ -883,16 +883,36 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           + r.itm_name + '\nالكمية: ' + qty + ' · تنتهي ' + expMonth(r.exp_date)
           + '\n\n' + expNote(r))) return;
       try {
-        const res = await fetch(REST + 'order_transfer_pending?on_conflict=branch,itm_code', {
-          method:'POST', headers:{ ...H, 'Content-Type':'application/json',
-            'Prefer':'resolution=merge-duplicates,return=minimal' },
-          body: JSON.stringify({ branch: ordBranch, itm_code: r.itm_code,
-                                 requested_at: new Date().toISOString() }) });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        toast('اتسجّل طلب التحويل من ' + r.exp_branch + ' ✓');
+        /* ⚠️ الطلب الحقيقي هو ده — صف في `task` نوعه «تحويل»، وهو اللي
+           بيظهر في شاشة التحويلات. كان ناقص: الزرار كان بيكتب في
+           order_transfer_pending بس (دي مجرد علامة إخفاء مؤقت للصف من
+           الطلبيات) ويقول «اتسجّل» — فالصنف يختفي ومحدش يشوف طلب.
+           حصل فعلًا يوم 2026-10-17 مع صنفين (64049 و66148): اتخفوا من
+           الطلبيات ومالهمش أي صف في التحويلات.
+           الترتيب مقصود: الطلب الأول، والإخفاء بعده. */
+        const out = await sbTaskInsert({ type:'تحويل',
+          user: branchReps[ordBranch] || ordBranch,
+          target_branch: r.exp_branch,
+          item_code: r.itm_code, item: r.itm_name, qty: qty,
+          note: expNote(r) });
+        if (!out || !out.ok) throw new Error(out && out.status === 401
+          ? 'الجلسة انتهت — حدّث الصفحة' : 'فشل إرسال طلب التحويل');
+
+        /* إخفاء الصف من الطلبيات لحد ما التحويل يتم أو تنتهي المهلة */
+        try {
+          await fetch(REST + 'order_transfer_pending?on_conflict=branch,itm_code', {
+            method:'POST', headers:{ ...H, 'Content-Type':'application/json',
+              'Prefer':'resolution=merge-duplicates,return=minimal' },
+            body: JSON.stringify({ branch: ordBranch, itm_code: r.itm_code, qty: qty,
+                                   requested_at: new Date().toISOString() }) });
+          ordTransferPending.add(r.itm_code);
+        } catch (e) {}
+
+        toast('اتبعت طلب تحويل لـ' + r.exp_branch + ' ✓');
+        loadOrders();
       } catch (e) {
-        alert(typeof sbFailMsg === 'function' ? sbFailMsg('تعذّر تسجيل الطلب')
-                                              : ('تعذّر تسجيل الطلب: ' + e.message));
+        alert(typeof sbFailMsg === 'function' ? sbFailMsg(e.message || 'تعذّر إرسال الطلب')
+                                              : (e.message || 'تعذّر إرسال الطلب'));
       }
     }
 
