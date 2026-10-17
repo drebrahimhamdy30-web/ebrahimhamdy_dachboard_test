@@ -155,7 +155,7 @@ tr:last-child td{border-bottom:none;}
 <script src="session.js?v=20261011p"></script>
 <script src="branches.js?v=20260904d"></script>
 <script src="pages.js?v=20260904d"></script>
-<script src="brand.js?v=20260904c"></script>
+<script src="brand.js?v=20261017n"></script>
 <script>
 // توكن المستخدم لو موجود وصالح → الصفحة تشتغل كـauthenticated عشان الـRPCs المحروسة بالدور
 // (add_recon_txn / move_recon_txn). لو ناقص أو منتهي نرجع لمفتاح anon عشان العرض مايقعش.
@@ -226,12 +226,13 @@ const REASON_LABEL={supplier:'تحويل لمورد', customer_refund:'مرتج�
 const cairoDate = ms => new Date(ms==null?Date.now():ms)
   .toLocaleDateString('en-CA', { timeZone:'Africa/Cairo' });
 const today = cairoDate();
-/* أقصى تاريخ لإقفال الفترة = **أمس**. ما ينفعش تتحقق من رصيد يوم لسه
-   مخلصش، ولو اتقفلت الفترة لحد النهاردة فحارس الإقفال بيرفض **كل**
-   شيفت هيتقفل النهاردة («الفترة مقفولة لفرع … لحد …»). حصلت فعلًا
-   2026-10-17: الإقفال اتعمل ٣ الفجر بتاريخ نفس اليوم، فاتقفل الفرع
-   على نفسه. */
-const yesterday = cairoDate(Date.now() - 86400000);
+/* ⚠️ ماينفعش نقيّد الإقفال بـ«أمس»: المراجع بيقفل **الشيفتات اللي
+   اتقفلت فعلًا**، والمراجعة بتحصل آخر اليوم بعد ما شيفتات اليوم تخلص —
+   فالإقفال لحد اليوم نفسه سليم. ده اللي حصل في 09-29 و10-12 (اتقفلوا
+   ١١ بالليل وصفر شيفتات اتقفلت بعدهم).
+   المشكلة الحقيقية إن الحارس بيقارن **بالتاريخ** مش باللحظة: إقفال
+   الساعة ٣ الفجر بتاريخ نفس اليوم بيجمّد اليوم كله، فيمسك شيفتات
+   ماكانتش موجودة أصلًا وقت المراجعة. (حصل 2026-10-17.) */
 const weekAgo=new Date(Date.now()-6*86400000).toISOString().slice(0,10);
 document.getElementById('f-from').value=weekAgo;
 document.getElementById('f-to').value=today;
@@ -1055,7 +1056,7 @@ function closePeriodModal(branch, curBalance){
     <div style="font-weight:800;margin-bottom:2px"><i class="fas fa-lock" style="color:#0f766e"></i> إقفال الفترة — ${esc(branch)}</div>
     <div style="font-size:.72rem;color:var(--muted);margin-bottom:12px">بعد الإقفال مايتعدّلش أي حركة بتاريخ أقدم أو يساوي التاريخ ده — الأدمن بس يقدر يفتحه.</div>
     <label style="font-size:.75rem;font-weight:700;color:var(--muted)">مقفول لحد تاريخ</label>
-    <input type="date" id="clsDate" max="${yesterday}" value="${yesterday}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 10px">
+    <input type="date" id="clsDate" max="${today}" value="${today}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 10px">
     <div id="clsSys" style="font-size:.8rem;background:var(--light);border-radius:8px;padding:8px 10px;margin-bottom:10px">رصيد النظام: <b>...</b></div>
     <label style="font-size:.75rem;font-weight:700;color:var(--muted)">الرصيد الفعلي</label>
     <input type="number" id="clsActual" step="0.01" placeholder="اكتب الرصيد اللي معاك" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;margin:4px 0 10px">
@@ -1072,7 +1073,7 @@ function closePeriodModal(branch, curBalance){
   const sysBox=document.getElementById('clsSys');
   let sysVal=null;
   async function refreshSys(){
-    const d=document.getElementById('clsDate').value||yesterday;
+    const d=document.getElementById('clsDate').value||today;
     sysBox.innerHTML='رصيد النظام: <b>جاري الحساب...</b>';
     try{ sysVal=await sysBalanceUpto(branch,d);
       sysBox.innerHTML='رصيد النظام لحد '+d+': <b>'+fmt(sysVal)+' ج</b>';
@@ -1082,17 +1083,17 @@ function closePeriodModal(branch, curBalance){
   refreshSys();
 
   document.getElementById('clsSave').onclick=async()=>{
-    const d=document.getElementById('clsDate').value||yesterday;
+    const d=document.getElementById('clsDate').value||today;
     const actualRaw=document.getElementById('clsActual').value;
     const err=document.getElementById('clsErr');
     err.style.display='none';
-    /* الـmax بيمنع الاختيار من التقويم بس المتصفح ممكن يسمح بالكتابة،
-       والخطأ هنا بيقفل الفرع على نفسه — فالفحص متكرر بقصد. */
-    if(d > yesterday){
-      err.textContent='لا يمكن إقفال الفترة حتى تاريخ اليوم أو تاريخ لاحق — آخر تاريخ متاح هو '+yesterday+'.';
-      err.style.display='block'; return;
-    }
     if(actualRaw===''){ err.textContent='اكتب الرصيد الفعلي'; err.style.display='block'; return; }
+    /* الإقفال لحد اليوم الجاري مسموح، بس الحارس بيجمّد **اليوم كله**
+       لأنه بيقارن بالتاريخ — فأي وردية هتتقفل بعد كده النهاردة هتترفض.
+       تحذير صريح بدل منع أعمى. */
+    if(d === today && !confirm('سيتم إقفال الفترة حتى تاريخ اليوم (' + today + ').'
+      + '\n\nأي وردية تُغلق اليوم بعد هذه اللحظة سيتم رفضها حتى يفتح المدير الإقفال.'
+      + '\nيُرجى المتابعة فقط إذا كانت كل ورديات اليوم قد أُغلقت بالفعل.')) return;
     const btn=document.getElementById('clsSave'); btn.disabled=true; btn.textContent='جاري الإقفال...';
     try{
       const r=await fetch(SB_URL+'/rest/v1/rpc/pos_close_period',{method:'POST',headers:await shHeaders(),
