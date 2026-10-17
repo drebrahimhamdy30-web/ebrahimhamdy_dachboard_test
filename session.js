@@ -177,13 +177,13 @@ const Session = (function () {
         + 'align-items:center;justify-content:center;background:rgba(15,23,42,.72);'
         + 'font-family:Cairo,sans-serif;direction:rtl';
       d.innerHTML =
-        '<div style="background:#fff;color:#0f172a;max-width:340px;width:86%;padding:26px 22px;'
+        '<div style="background:#fff;color:var(--text-primary);max-width:340px;width:86%;padding:26px 22px;'
         + 'border-radius:16px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.35)">'
         + '<div style="font-size:38px;line-height:1;margin-bottom:12px">\u23F1\uFE0F</div>'
         + '<div style="font-weight:700;font-size:1.05rem;margin-bottom:6px">انتهت الجلسة</div>'
-        + '<div style="color:#64748b;font-size:.9rem;line-height:1.7;margin-bottom:18px">'
+        + '<div style="color:var(--text-secondary);font-size:.9rem;line-height:1.7;margin-bottom:18px">'
         + 'مدة الدخول خلصت، فالبيانات مش هتظهر.<br>سجّل دخول تاني وكمّل عادي.</div>'
-        + '<button id="_sxBtn" style="background:#0d9488;color:#fff;border:0;border-radius:10px;'
+        + '<button id="_sxBtn" style="background:var(--accent);color:#fff;border:0;border-radius:10px;'
         + 'padding:11px 26px;font-family:inherit;font-size:.95rem;font-weight:700;cursor:pointer">'
         + 'تسجيل الدخول</button></div>';
       const go = () => {
@@ -535,7 +535,7 @@ const Session = (function () {
           box = document.createElement('div');
           box.id = 'phalix-data-warn';
           box.setAttribute('dir', 'rtl');
-          box.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#b91c1c;' +
+          box.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:var(--danger-strong);' +
             'color:#fff;font-family:Cairo,system-ui,sans-serif;font-size:13px;font-weight:700;' +
             'padding:8px 14px;box-shadow:0 2px 10px rgba(0,0,0,.25);line-height:1.7;';
           box.innerHTML = '<span style="float:left;cursor:pointer;padding:0 6px" ' +

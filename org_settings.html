@@ -126,6 +126,19 @@
                الملاحظة ممكن يحتاجها بلون منبّه مختلف عن الهوية. -->
           <div class="os-color"><label>ملاحظات التحويل</label><div class="row"><input type="color" id="c-note" oninput="syncFromColor('note')"><input type="text" id="c-note-t" oninput="syncFromText('note')"></div></div>
         </div>
+        <div style="margin:14px 0 6px;font-size:0.78rem;color:var(--text-secondary);font-weight:700">ألوان الحالة</div>
+        <div style="font-size:0.74rem;color:var(--text-muted);margin-bottom:8px;line-height:1.7">
+          لون واحد لكل حالة — والدرجات (الغامق والخلفيات) تُشتق منه تلقائيًا
+          وتُطبَّق على كل الشاشات. اتركه فارغًا لاستخدام اللون الافتراضي.
+        </div>
+        <div class="os-colors">
+          <div class="os-color"><label>نجاح / تم</label><div class="row"><input type="color" id="c-ok" oninput="syncFromColor('ok')"><input type="text" id="c-ok-t" oninput="syncFromText('ok')"></div></div>
+          <div class="os-color"><label>خطر / مرفوض</label><div class="row"><input type="color" id="c-danger" oninput="syncFromColor('danger')"><input type="text" id="c-danger-t" oninput="syncFromText('danger')"></div></div>
+          <div class="os-color"><label>تنبيه / انتظار</label><div class="row"><input type="color" id="c-warn" oninput="syncFromColor('warn')"><input type="text" id="c-warn-t" oninput="syncFromText('warn')"></div></div>
+          <div class="os-color"><label>معلومة</label><div class="row"><input type="color" id="c-info" oninput="syncFromColor('info')"><input type="text" id="c-info-t" oninput="syncFromText('info')"></div></div>
+        </div>
+        <div id="pv-states" style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 2px"></div>
+
         <div style="margin:14px 0 6px;font-size:0.78rem;color:var(--text-secondary);font-weight:700">معاينة حيّة</div>
         <div id="pv-note" style="font-size:0.74rem;font-weight:700;margin-bottom:8px;">
           <i class="fas fa-triangle-exclamation"></i> مطلوب لقرب انتهاء الصلاحية —
@@ -286,7 +299,26 @@
       var nt = document.getElementById('c-note').value || d;
       document.getElementById('pv-note').style.color = nt;
       document.getElementById('pv-note-tag').style.background = nt;
+      previewStates();
       document.getElementById('pv-name').textContent = document.getElementById('f-name').value || 'المؤسسة';
+    }
+
+    /* شارات الحالة بنفس اشتقاق brand.js بالظبط — الخلفية lighten(.85)
+       والنص darken(.18). لو المعادلة اتغيّرت هناك لازم تتغيّر هنا،
+       عشان المعاينة ما تكدبش على المستخدم. */
+    var ST_PREVIEW = [
+      ['ok', 'تم', '#16a34a'], ['danger', 'مرفوض', '#dc2626'],
+      ['warn', 'قيد الانتظار', '#ca8a04'], ['info', 'معلومة', '#0891b2']
+    ];
+    function previewStates(){
+      var box = document.getElementById('pv-states');
+      if (!box) return;
+      box.innerHTML = ST_PREVIEW.map(function(x){
+        var el = document.getElementById('c-' + x[0]);
+        var base = (el && el.value) || x[2];
+        return '<span style="background:' + lighten(base, 0.85) + ';color:' + darken(base, 0.18) +
+               ';padding:3px 12px;border-radius:20px;font-size:0.76rem;font-weight:700">' + x[1] + '</span>';
+      }).join('');
     }
 
     // ===== الشعار =====
@@ -327,6 +359,12 @@
         // فاضي؟ نبدأ من الغامق — نفس الملاذ اللي الشاشة بتستعمله،
         // عشان الخانة ما تطلعش سودة وتوحي بلون مش موجود فعلًا.
         setColor('note', d.brand_note || d.brand_primary_dark || '#0f766e');
+        // الافتراضيات هي قيم tokens.css الحالية — فالخانة بتوري
+        // اللون الشغّال فعلًا، مش أسود.
+        setColor('ok',     d.color_ok     || '#16a34a');
+        setColor('danger', d.color_danger || '#dc2626');
+        setColor('warn',   d.color_warn   || '#ca8a04');
+        setColor('info',   d.color_info   || '#0891b2');
         renderBranches();
         preview();
       } catch(e){}
@@ -345,7 +383,7 @@
                   { headers: { apikey: SB_ANON_API, Authorization: 'Bearer ' + tok } });
         if (!r.ok) { el.textContent = 'تعذّر الفحص (' + r.status + ').'; return; }
         const rows = await r.json();
-        if (!rows.length) { el.innerHTML = '<span style="color:#16a34a;font-weight:700">✓ كل قيم الفروع في البيانات مفهومة</span>'; return; }
+        if (!rows.length) { el.innerHTML = '<span style="color:var(--ok);font-weight:700">✓ كل قيم الفروع في البيانات مفهومة</span>'; return; }
         const total = rows.reduce(function(a,b){ return a + Number(b.rows||0); }, 0);
         el.innerHTML = '<div style="margin-bottom:8px;color:var(--danger);font-weight:700">'
           + total + ' صف بقيمة فرع مش معروفة</div>'
@@ -413,6 +451,10 @@
         brand_primary_dark: norm(document.getElementById('c-dark-t').value),
         brand_primary_light: norm(document.getElementById('c-light-t').value),
         brand_note: norm(document.getElementById('c-note-t').value),
+        color_ok:     norm(document.getElementById('c-ok-t').value),
+        color_danger: norm(document.getElementById('c-danger-t').value),
+        color_warn:   norm(document.getElementById('c-warn-t').value),
+        color_info:   norm(document.getElementById('c-info-t').value),
         // الفروع مابقتش تتكتب هنا — مصدرها جدول branches (شاشة «الفروع»).
         updated_at: new Date().toISOString()
       };
