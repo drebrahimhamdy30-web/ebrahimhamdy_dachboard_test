@@ -19,6 +19,9 @@
     if (b.brand_primary)       { r.setProperty('--primary', b.brand_primary); r.setProperty('--accent', b.brand_primary); }
     if (b.brand_primary_dark)  { r.setProperty('--primary-dark', b.brand_primary_dark); r.setProperty('--accent-dark', b.brand_primary_dark); }
     if (b.brand_primary_light) r.setProperty('--primary-light', b.brand_primary_light);
+    /* لون ملاحظات التحويل. فاضي = الشاشة بترجع للون الهوية الغامق
+       عبر var(--note-color, var(--accent-dark)) — مش بترجع أحمر. */
+    if (b.brand_note)          r.setProperty('--note-color', b.brand_note);
 
     function els() {
       if (b.company_name) document.querySelectorAll('[data-org-name]').forEach(function (e) { e.textContent = b.company_name; });
