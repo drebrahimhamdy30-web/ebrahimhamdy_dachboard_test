@@ -28,6 +28,8 @@ GitHub، فاتشال من الملف **واتغيّر** — شيله من ال�
 | `trip-return-perf` | trigger `trg_trip_return_perf` على `trips` |
 | `eplus_proxy` | شاشات الـERP |
 | `pharma_sync` | `store_prices.html` |
+| `supplier_order` | `supplier.html` — رابط المورّد العام (بلا مفاتيح) |
+| `order_rating` | `rate.html` — رابط تقييم العميل العام (بلا مفاتيح) |
 | `driver-poll` / `driver-mark` / `create-driver` / `set-driver-active` / `change-password` | تطبيق السواقين |
 | `apk-publish` / `db-restore` / `pharma_search` / `pharma_probe` | أدوات إدارية |
 | `clever-action` / `swift-api` / `send-push` | مفيش مستدعي — مرشّحة للحذف |

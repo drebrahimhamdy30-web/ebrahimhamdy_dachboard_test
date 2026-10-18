@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>تقييم الخدمة</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+<!--
+  ════════════════════════════════════════════════════════
+  صفحة تقييم العميل — عامة بطبيعتها
+  ════════════════════════════════════════════════════════
+  ⚠️ **ممنوع يتحط أي مفتاح أو config.js هنا.** الصفحة دي بيفتحها العملاء
+     من بره المؤسسة، فأي مفتاح فيها = مفتاح مسرَّب. الوصول الوحيد عبر
+     Edge Function واحدة (order_rating) بتوكن في الرابط، وهي اللي عندها
+     صلاحيات القاعدة جوّه السيرفر. نفس نمط supplier.html.
+
+  العميل بيشوف: اسم المؤسسة وشعارها، الفرع، رقم الفاتورة، يوم التوصيل.
+  **مش بيشوف** اسمه ولا رقمه ولا المبلغ ولا اسم الصيدلي أو المندوب —
+  قرار المالك: التقييم على التجربة مش على الشخص.
+
+  التقييم مرة واحدة لكل رابط؛ الرابط صالح أيام محدودة من الإرسال.
+  ════════════════════════════════════════════════════════
+-->
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --txt:#111827; --muted:#6b7280;
+    --line:#e5e7eb; --brand:#0d9488; --brand-d:#0f766e; --ok:#15803d; --err:#b91c1c; --star:#f59e0b; --star-off:#d1d5db;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0f172a; --card:#1e293b; --txt:#f1f5f9; --muted:#94a3b8;
+           --line:#334155; --star-off:#475569; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:Cairo,system-ui,sans-serif;-webkit-text-size-adjust:100%}
+  header{background:var(--brand);color:#fff;padding:22px 16px 18px;text-align:center}
+  .logo{width:56px;height:56px;border-radius:14px;background:#fff;object-fit:contain;padding:6px;margin:0 auto 8px;display:block}
+  .logo.txt{display:flex;align-items:center;justify-content:center;color:var(--brand-d);font-weight:800;font-size:22px}
+  h1{margin:0;font-size:1.05rem;font-weight:800}
+  .sub{font-size:.8rem;opacity:.92;margin-top:4px}
+  .wrap{max-width:520px;margin:0 auto;padding:16px 16px 40px}
+  .q{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  .q .ttl{font-weight:800;font-size:.98rem;margin-bottom:2px}
+  .q .who{font-size:.78rem;color:var(--muted);margin-bottom:10px}
+  .rate{display:flex;gap:6px;justify-content:center;direction:ltr}
+  .rate button{font-size:36px;line-height:1;background:none;border:0;cursor:pointer;color:var(--star-off);padding:2px 3px;transition:transform .1s;font-family:inherit}
+  .rate button.on{color:var(--star)} .rate button:active{transform:scale(1.2)}
+  .lbl{text-align:center;font-size:.78rem;color:var(--muted);min-height:16px;margin-top:4px;font-weight:700}
+  textarea{width:100%;font-family:inherit;font-size:.9rem;border:1.5px solid var(--line);border-radius:10px;padding:10px;resize:none;height:84px;background:var(--card);color:var(--txt);outline:none}
+  textarea:focus{border-color:var(--brand)}
+  .send{width:100%;background:var(--brand);color:#fff;border:0;border-radius:12px;padding:14px;font-family:inherit;font-weight:800;font-size:1rem;cursor:pointer;margin-top:4px}
+  .send:disabled{opacity:.45;cursor:default}
+  .foot{padding:14px;text-align:center;font-size:.72rem;color:var(--muted)}
+  .msg{padding:40px 16px;text-align:center;font-weight:700}
+  .msg.err{color:var(--err)}
+  .done{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:36px 20px;text-align:center;margin-top:8px}
+  .done .big{font-size:3rem;line-height:1}
+  .done h2{margin:10px 0 6px;font-size:1.1rem}
+  .done p{margin:0;color:var(--muted);font-size:.88rem;line-height:1.8}
+  .fmsg{font-size:.8rem;font-weight:700;margin-top:8px;text-align:center;min-height:18px}
+  .fmsg.err{color:var(--err)}
+</style>
+</head>
+<body>
+
+<header>
+  <img class="logo" id="logo" alt="" style="display:none">
+  <div class="logo txt" id="logoTxt">★</div>
+  <h1 id="h-title">تقييم الخدمة</h1>
+  <div class="sub" id="h-sub">جارٍ التحميل…</div>
+</header>
+
+<div class="wrap">
+  <div id="body"><div class="msg">جارٍ التحميل…</div></div>
+</div>
+
+<div class="foot">لا يُعرض اسمك أو رقمك للصيدلي أو مندوب التوصيل · <span id="f-org"></span></div>
+
+<script>
+/* عنوان الدالة — مش سر: نفس عنوان المشروع الظاهر في أي صفحة عامة.
+   المفتاح هو اللي سر، وهو **مش هنا**. */
+var FN = 'https://supabase.ebrahimhamdy.com/functions/v1/order_rating';
+
+var TOKEN = new URLSearchParams(location.search).get('t') || '';
+var LBL = ['', 'سيئ', 'مقبول', 'جيد', 'جيد جدًا', 'ممتاز'];
+var PICK = { e: 0, d: 0 };
+var SENDING = false;
+
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function el(id){ return document.getElementById(id); }
+
+function applyOrg(o){
+  if (!o) return;
+  if (o.color) {
+    document.documentElement.style.setProperty('--brand', o.color);
+    document.documentElement.style.setProperty('--brand-d', o.color_dark || o.color);
+  }
+  if (o.name) { el('h-title').textContent = o.name; el('f-org').textContent = o.name; document.title = 'تقييم الخدمة — ' + o.name; }
+  if (o.logo) {
+    var img = el('logo');
+    img.onload = function(){ img.style.display = ''; el('logoTxt').style.display = 'none'; };
+    img.src = o.logo;
+  }
+}
+
+function fmtDay(iso){
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleDateString('ar-EG', { weekday:'long', day:'numeric', month:'long', timeZone:'Africa/Cairo' }); }
+  catch (e) { return ''; }
+}
+
+function renderForm(d){
+  el('h-sub').textContent = [d.branch ? 'فرع ' + d.branch : '', d.bill_no ? 'فاتورة ' + d.bill_no : '', fmtDay(d.delivered_at)].filter(Boolean).join(' · ');
+  el('body').innerHTML =
+    '<div class="q"><div class="ttl">كيف كان تعامل الصيدلي معك؟</div><div class="who">الذي استقبل طلبك</div>' +
+      stars('e') + '<div class="lbl" id="lbl-e"></div></div>' +
+    '<div class="q"><div class="ttl">كيف كان تعامل مندوب التوصيل؟</div><div class="who">الذي أوصل الطلب إليك</div>' +
+      stars('d') + '<div class="lbl" id="lbl-d"></div></div>' +
+    '<div class="q"><div class="ttl">ملاحظة إضافية <span style="color:var(--muted);font-weight:600;font-size:.78rem">(اختياري)</span></div>' +
+      '<textarea id="cmt" maxlength="600" placeholder="ما الذي أعجبك أو تود تحسينه؟"></textarea></div>' +
+    '<button class="send" id="send" disabled onclick="submitRating()">إرسال التقييم</button>' +
+    '<div class="fmsg" id="fmsg"></div>';
+}
+function stars(k){
+  var h = '<div class="rate" data-k="' + k + '">';
+  for (var i = 1; i <= 5; i++) h += '<button type="button" aria-label="' + i + '" onclick="pick(\'' + k + '\',' + i + ',this)">★</button>';
+  return h + '</div>';
+}
+function pick(k, n, btn){
+  PICK[k] = n;
+  var g = btn.parentElement;
+  [].forEach.call(g.children, function(x, i){ x.classList.toggle('on', i < n); });
+  el('lbl-' + k).textContent = LBL[n];
+  el('send').disabled = !(PICK.e && PICK.d);
+}
+
+function renderState(state, d){
+  el('h-sub').textContent = [d.branch ? 'فرع ' + d.branch : '', d.bill_no ? 'فاتورة ' + d.bill_no : ''].filter(Boolean).join(' · ');
+  if (state === 'rated') {
+    el('body').innerHTML = '<div class="done"><div class="big">🙏</div><h2>شكرًا لك</h2><p>وصلنا تقييمك وسيساعدنا على تحسين الخدمة.<br>تم إغلاق هذا الرابط.</p></div>';
+  } else {
+    el('body').innerHTML = '<div class="done"><div class="big">⌛</div><h2>انتهت صلاحية الرابط</h2><p>رابط التقييم صالح لأيام محدودة من إرساله.<br>شكرًا لتعاملك معنا.</p></div>';
+  }
+}
+
+async function load(){
+  if (!/^[0-9a-f]{32}$/.test(TOKEN)) { el('h-sub').textContent = ''; el('body').innerHTML = '<div class="msg err">رابط غير صالح.</div>'; return; }
+  try {
+    var r = await fetch(FN + '?t=' + encodeURIComponent(TOKEN));
+    var d = await r.json();
+    if (!r.ok) { el('h-sub').textContent = ''; el('body').innerHTML = '<div class="msg err">' + esc(d.error || 'تعذّر فتح الرابط') + '</div>'; return; }
+    applyOrg(d.org);
+    if (d.state === 'open') renderForm(d); else renderState(d.state, d);
+  } catch (e) {
+    el('h-sub').textContent = '';
+    el('body').innerHTML = '<div class="msg err">تعذّر الاتصال. تأكد من الإنترنت وأعد المحاولة.</div>';
+  }
+}
+
+async function submitRating(){
+  if (SENDING || !(PICK.e && PICK.d)) return;
+  SENDING = true;
+  var b = el('send'); b.disabled = true; b.textContent = 'جارٍ الإرسال…';
+  var m = el('fmsg'); m.className = 'fmsg'; m.textContent = '';
+  try {
+    var r = await fetch(FN + '?t=' + encodeURIComponent(TOKEN), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ e: PICK.e, d: PICK.d, c: (el('cmt').value || '').trim() })
+    });
+    var d = await r.json();
+    if (r.ok && d.ok) { renderState('rated', {}); return; }
+    if (r.status === 409) { renderState('rated', {}); return; }
+    if (r.status === 403) { renderState('expired', {}); return; }
+    m.className = 'fmsg err'; m.textContent = d.error || 'تعذّر الإرسال، حاول مرة أخرى.';
+  } catch (e) {
+    m.className = 'fmsg err'; m.textContent = 'تعذّر الاتصال. تأكد من الإنترنت وأعد المحاولة.';
+  }
+  SENDING = false; b.disabled = false; b.textContent = 'إرسال التقييم';
+}
+
+load();
+</script>
+</body>
+</html>
