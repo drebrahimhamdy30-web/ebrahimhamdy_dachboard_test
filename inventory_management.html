@@ -193,7 +193,11 @@
                 <input type="number" id="min-surplus" value="1" min="1" step="1" oninput="onFilterChange()">
               </div>
               <div class="mini-field">
-                <span class="filter-label">أهم كام صنف <span class="help-ic">؟<span class="tip">اعرض أهم هذا العدد من الأصناف احتياجًا للتحويل — الأقل أيام تغطية (قلة الرصيد + كثرة المعدل) أولاً. سيبها فاضية لعرض الكل.</span></span></span>
+                <span class="filter-label">أيام الخطر <span class="help-ic">؟<span class="tip">المدة المتوقعة حتى التحويل القادم. الترتيب يكون بحجم المبيعات التي ستُفقد خلالها: (المعدل اليومي × هذه الأيام) − الرصيد. الصنف الذي يكفي هذه المدة ينزل لأسفل حتى لو كان نقصه الشهري كبيراً.</span></span></span>
+                <input type="number" id="risk-days" value="7" min="1" step="1" oninput="onFilterChange()">
+              </div>
+              <div class="mini-field">
+                <span class="filter-label">أهم كام صنف <span class="help-ic">؟<span class="tip">اعرض أهم هذا العدد من الأصناف — الأكبر فيما سيُفقد من مبيعات خلال «أيام الخطر» أولاً. سيبها فاضية لعرض الكل.</span></span></span>
                 <input type="number" id="transfer-topn" value="" min="1" step="1" placeholder="الكل" oninput="onFilterChange()">
               </div>
             </div>
@@ -397,6 +401,7 @@
         needDays: document.getElementById('need-days').value,
         overNeedDays: (document.getElementById('over-need-days')||{}).value,
         minSurplus: document.getElementById('min-surplus').value,
+        riskDays: (document.getElementById('risk-days')||{}).value,
         missingMinStock: document.getElementById('missing-min-stock').value,
         missingMinAvg: document.getElementById('missing-min-avg').value,
         targetBranch: document.getElementById('target-branch').value,
@@ -423,6 +428,7 @@
         if(s.needDays!=null)    document.getElementById('need-days').value=s.needDays;
         if(s.overNeedDays!=null && document.getElementById('over-need-days')) document.getElementById('over-need-days').value=s.overNeedDays;
         if(s.minSurplus!=null)  document.getElementById('min-surplus').value=s.minSurplus;
+        if(s.riskDays!=null && document.getElementById('risk-days')) document.getElementById('risk-days').value=s.riskDays;
         if(s.missingMinStock!=null) document.getElementById('missing-min-stock').value=s.missingMinStock;
         if(s.missingMinAvg!=null)   document.getElementById('missing-min-avg').value=s.missingMinAvg;
         if(s.targetBranch){
@@ -666,12 +672,27 @@
        بس. الاحتياج والأولوية بيفضلوا على معدل الشراء (coverQty). */
     function coverQtySur(branchObj, days){ return (branchObj.sdaily||0) * days; }
 
-    // أولوية الاحتياج للتحويل: أيام التغطية = الرصيد ÷ المعدل اليومي.
-    // أقل = أهم (قلة الرصيد + كثرة المعدل). معدل صفر = آخر الأولوية.
+    /* أيام التغطية = الرصيد ÷ المعدل اليومي. أقل = أقرب للنفاد.
+       ⚠️ مابقتش معيار الترتيب الأساسي — بقت **فاصل التعادل** بس.
+       السبب: أي صنف رصيده صفر بياخد صفر مهما كان معدله، فالـ٣٧٤ صنف
+       الصفر كانوا بياخدوا نفس الدرجة ويقعدوا فوق كلهم — وصنف بيبيع
+       ٠٫٢ في الشهر كان بيتفوّق على «ماسك نيبولايزر اطفال» (رصيد ٢،
+       معدل ٧٤٫٦) فنزل للمركز ٣٧٦ يعني صفحة ١٣ ومحدش شافه. */
     function transferUrgency(b){
       var daily=(b&&b.daily)||0;
       if(daily<=0) return Infinity;
       return (b.stock||0)/daily;
+    }
+
+    /* معيار الترتيب: **حجم النقص** = (المعدل اليومي × أيام الاحتياج) − الرصيد.
+       الأكبر أولاً — ده اللي بيقيس المبيعات اللي هتضيع فعلًا، ويفكّ
+       التعادل بين أصناف الرصيد الصفر (قرار المالك 2026-10-18:
+       «خليه للنقص عشان منخسرش مبيعات»).
+       بنرجّع الرقم **خام** مش زي neededQty اللي بتقرّب وتحطّ حد أدنى ١ —
+       التقريب ده بيسوّي بين فروق حقيقية عند الترتيب. */
+    function transferShortfall(b, needDays){
+      if(!b) return 0;
+      return coverQty(b, needDays) - (b.stock||0);
     }
 
     function branchSurplus(branchObj){
@@ -870,8 +891,25 @@
           var hasSurplus=others.some(function(b){ return branchSurplus(it[b]) > 0; });
           if(hasSurplus) rows.push(it);
         });
-        // الأكثر احتياجًا أولاً (أقل أيام تغطية = قلة الرصيد + كثرة المعدل) ثم أهم N
-        rows.sort(function(a,b){ return transferUrgency(a[target]) - transferUrgency(b[target]); });
+        /* الترتيب بالنقص على **المدى القصير** (أيام الخطر) مش على فترة
+           الاحتياج الشهرية — عشان المعيار يقيس المبيعات اللي هتتخسر
+           فعلًا قبل التحويل الجاي.
+
+           ⚠️ ليه مش النقص على ٣٠ يوم: ده بيقيس **حجم** النقص بس مش
+           **قُربه**، فصنف عنده ٣٣٢ علبة وبيبيع ٨٢٧ في الشهر (تغطية
+           ١٢ يوم، مش في خطر) كان بيتصدّر على صنف فاضل منه ٢ وهيخلص
+           بكرة. بالقياس على بيانات حقيقية: ١٩ من أول ٣٠ صنف كانت
+           تغطيتهم أكتر من أسبوع، و٣٧٦ صنف على وش النفاد كان منهم ٤ بس
+           في الصفحة الأولى. (قرار المالك 2026-10-18)
+
+           الكمية المحوّلة فاضلة على فترة الاحتياج زي ما هي — التغيير
+           في الترتيب بس. وعند التساوي: الأقرب للنفاد الأول. */
+        var _riskDays = parseFloat((document.getElementById('risk-days')||{}).value)||7;
+        rows.sort(function(a,b){
+          var d = transferShortfall(b[target], _riskDays) - transferShortfall(a[target], _riskDays);
+          if(d) return d;
+          return transferUrgency(a[target]) - transferUrgency(b[target]);
+        });
         var topN=parseInt(document.getElementById('transfer-topn').value,10);
         if(topN>0) rows=rows.slice(0, topN);
       } else if(currentTab==='missing'){
