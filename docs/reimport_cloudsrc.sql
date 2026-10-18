@@ -28,6 +28,7 @@
 do $$
 declare
   names text[];
+  parts text[];
   n_before int;
   n_after  int;
 begin
@@ -58,6 +59,26 @@ begin
     execute 'drop schema if exists cloudsrc cascade';
     execute 'create schema cloudsrc';
     execute 'import foreign schema public from server cloud into cloudsrc';
+
+    -- 🔴 IMPORT FOREIGN SCHEMA **بيتخطّى الأقسام** عن قصد (بيستورد الأب
+    --    وبس). والمزامنة بتشتغل على الجداول اللي ليها نظير في الجسر
+    --    **بالاسم**، والأب المقسّم مستثنى عندها (relkind='p') — فالنتيجة
+    --    إن أقسام branch_stock مابتتزامنش خالص، **في صمت**.
+    --    اتكشف 2026-10-18: branch_stock_seyouf فاضي (0 من 6093)، وبشر
+    --    ومعمورة وسان فيهم بيانات من جسر قديم كان بيسمّيهم صريح —
+    --    يعني مش بيتفضوا، بس **بيقدموا** ومحدش بيعرف.
+    --    فبنستوردهم بالاسم بعد الاستيراد العام. LIMIT TO بتسمح بالأقسام.
+    select array_agg(x.nm order by x.nm) into parts
+    from dblink('cloud',
+      'select c.relname from pg_class c
+         join pg_namespace n on n.oid = c.relnamespace
+        where n.nspname = ''public'' and c.relispartition') as x(nm text);
+
+    if coalesce(array_length(parts, 1), 0) > 0 then
+      execute format('import foreign schema public limit to (%s) from server cloud into cloudsrc',
+                     (select string_agg(quote_ident(y), ', ') from unnest(parts) y));
+      raise notice '  + % قسم اتستوردوا بالاسم (IMPORT بيتخطّاهم)', array_length(parts, 1);
+    end if;
   exception when others then
     -- لو الاستيراد الكامل فشل (نوع عمود مش مدعوم مثلًا)، نرجع للمجموعة
     -- القديمة بدل ما نسيب الجسر مكسور — بس نقول بصوت عالي.
