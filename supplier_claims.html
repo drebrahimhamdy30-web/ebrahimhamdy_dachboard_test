@@ -139,8 +139,8 @@
         <div class="card-h ret"><span><i class="fas fa-rotate-left"></i> المرتجعات المفتوحة <span class="code" id="retCnt"></span> <span class="code">(على فاتورة + شراء عام)</span></span>
           <span class="code"><input type="checkbox" id="allRet" onclick="toggleAll('ret',this.checked)"> تحديد الكل</span></div>
         <div class="scroll"><table>
-          <thead><tr><th></th><th>التاريخ</th><th>المصدر</th><th>الصنف</th><th>الكمية</th><th>القيمة</th><th>رقم الفاتورة</th><th>سبب المرتجع</th></tr></thead>
-          <tbody id="retBody"><tr><td colspan="8" class="empty">—</td></tr></tbody>
+          <thead><tr><th></th><th>تاريخ المرتجع</th><th>المصدر</th><th>الصنف</th><th>الكمية</th><th>القيمة</th><th>رقم الفاتورة</th><th>مين عمله</th><th>سبب المرتجع</th></tr></thead>
+          <tbody id="retBody"><tr><td colspan="9" class="empty">—</td></tr></tbody>
         </table></div>
       </div>
     </div>
@@ -249,6 +249,17 @@
     const f2 = n => (n==null?'0.00':Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}));
     function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
     function dOnly(s){ if(!s) return '—'; try{ return new Date(s).toLocaleDateString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',year:'numeric'}); }catch(e){ return s; } }
+    /* ⚠️ من نص الطابع مباشرة — من غير new Date(). eplus بيخزّن وقت
+       القاهرة حرفيًا في عمود بلا منطقة زمنية، وأي تحويل بيزحزحه. */
+    function dtRaw(s){
+      if(!s) return '';
+      var m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+      if(!m) return '';
+      var h = +m[4], ap = h < 12 ? 'ص' : 'م';
+      h = h % 12 || 12;
+      return m[3] + '/' + m[2] + '/' + m[1] + ' ' + h + ':' + m[5] + ' ' + ap;
+    }
+    function tOnly(s){ var d = dtRaw(s); return d ? d.split(' ').slice(1).join(' ') : ''; }
     function today(){ const d=new Date(),p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
     function showMsg(t,ok){ const m=document.getElementById('msg'); m.textContent=t; m.className='msg '+(ok?'ok':'err'); }
 
@@ -295,11 +306,12 @@
         : '<tr><td colspan="4" class="empty">لا فواتير مفتوحة بالفلتر</td></tr>';
       document.getElementById('retBody').innerHTML = CUR.ret.length ? CUR.ret.map((x,i)=>`<tr id="ret${i}">
         <td><input type="checkbox" data-k="ret" data-i="${i}" onchange="rowTog('ret',${i},this.checked)"></td>
-        <td>${dOnly(x.date)}</td><td><span class="src ${x.kind==='bill'?'b':'g'}">${x.kind==='bill'?'على فاتورة':'شراء عام'}</span></td>
+        <td>${dOnly(x.date)}${x.ts?`<br><span class="code">${tOnly(x.ts)}</span>`:''}</td><td><span class="src ${x.kind==='bill'?'b':'g'}">${x.kind==='bill'?'على فاتورة':'شراء عام'}</span>${x.kind==='bill'&&x.inv_date?`<br><span class="code" title="تاريخ الفاتورة الأصلية">فاتورة ${dOnly(x.inv_date)}</span>`:''}</td>
         <td><span class="name">${esc(x.name)}</span><br><span class="code">${esc(x.code)}</span></td>
         <td class="num">${f0(x.qty)}</td><td class="num" style="font-weight:700">${f0(x.val)}</td><td class="num">${esc(x.bill_no||'—')}</td>
+        <td>${x.by?esc(x.by):'<span class="code">—</span>'}</td>
         <td><select class="reason" data-i="${i}" onchange="calc()"><option>غير مطلوب</option><option>لم يصل</option><option>تالف</option></select></td></tr>`).join('')
-        : '<tr><td colspan="8" class="empty">لا مرتجعات مفتوحة بالفلتر</td></tr>';
+        : '<tr><td colspan="9" class="empty">لا مرتجعات مفتوحة بالفلتر</td></tr>';
       document.getElementById('allInv').checked=false; document.getElementById('allRet').checked=false;
       document.getElementById('localVal').value=0; document.getElementById('discPct').value=0;
       calc();
