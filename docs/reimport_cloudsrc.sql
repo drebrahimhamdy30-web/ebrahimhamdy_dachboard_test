@@ -28,33 +28,62 @@
 do $$
 declare
   names text[];
-  n int;
+  n_before int;
+  n_after  int;
 begin
-  -- الأسماء الموجودة دلوقتي — بنرجّع نفس المجموعة بالظبط
-  select array_agg(c.relname order by c.relname) into names
+  -- 🔴 النسخة الأولى كانت بترجّع **نفس مجموعة الجداول الموجودة** بالظبط،
+  --    فالجدول الجديد على السحابة عمره ما يدخل الجسر — والمزامنة
+  --    مش شايفة له نظير فبتسيبه **فاضي**.
+  --    اتكشف 2026-10-18: purchase_invoices و purchase_invoice_items و
+  --    purchase_vendors موجودين على السيرفر وفاضيين تمامًا (0 صف)،
+  --    والسحابة فيها 20802 و 201438 و 768. والشاشة بتفتح وتقول
+  --    «مفيش بيانات» — مش رسالة خطأ، فمحدش بيشك.
+  --    يعني عملت أداة للمشكلة دي بالظبط وحافظت على العيب جوّاها.
+  -- الحل: نستورد **كل** جداول public من السحابة، مش اللي كان موجود.
+
+  select array_agg(c.relname order by c.relname), count(*)
+    into names, n_before
   from pg_class c join pg_namespace ns on ns.oid = c.relnamespace
   where ns.nspname = 'cloudsrc' and c.relkind = 'f';
 
-  n := coalesce(array_length(names, 1), 0);
-  if n = 0 then
-    raise exception 'مفيش جداول أجنبية في cloudsrc — حاجة غلط، مش هلمس حاجة.';
-  end if;
-  raise notice 'هعيد بناء % جدول في الجسر.', n;
-
-  -- drop + import في معاملة واحدة: لو الاستيراد وقع، القديم يرجع
-  execute format('drop schema cloudsrc cascade');
-  execute 'create schema cloudsrc';
-  execute format(
-    'import foreign schema public limit to (%s) from server cloud into cloudsrc',
-    (select string_agg(quote_ident(x), ', ') from unnest(names) x));
-
-  -- أرضية تعقّل: لازم نفس العدد يرجع
-  if (select count(*) from pg_class c join pg_namespace ns on ns.oid = c.relnamespace
-      where ns.nspname = 'cloudsrc' and c.relkind = 'f') <> n then
-    raise exception 'رجع عدد مختلف بعد الاستيراد — بترجع المعاملة.';
+  n_before := coalesce(n_before, 0);
+  if n_before = 0 then
+    raise notice 'الجسر فاضي — أول بناء.';
+  else
+    raise notice 'الجسر فيه % جدول دلوقتي.', n_before;
   end if;
 
-  raise notice '✓ الجسر اتبنى من الأول — % جدول.', n;
+  -- drop + import في معاملة واحدة: لو الاستيراد وقع، القديم يرجع كامل
+  begin
+    execute 'drop schema if exists cloudsrc cascade';
+    execute 'create schema cloudsrc';
+    execute 'import foreign schema public from server cloud into cloudsrc';
+  exception when others then
+    -- لو الاستيراد الكامل فشل (نوع عمود مش مدعوم مثلًا)، نرجع للمجموعة
+    -- القديمة بدل ما نسيب الجسر مكسور — بس نقول بصوت عالي.
+    raise notice '⚠️ الاستيراد الكامل فشل: %', left(sqlerrm, 120);
+    if n_before = 0 then raise; end if;
+    execute 'drop schema if exists cloudsrc cascade';
+    execute 'create schema cloudsrc';
+    execute format('import foreign schema public limit to (%s) from server cloud into cloudsrc',
+                   (select string_agg(quote_ident(x), ', ') from unnest(names) x));
+    raise notice '⚠️ رجعنا للمجموعة القديمة (% جدول) — الجداول الجديدة لسه مش في الجسر.', n_before;
+  end;
+
+  select count(*) into n_after
+  from pg_class c join pg_namespace ns on ns.oid = c.relnamespace
+  where ns.nspname = 'cloudsrc' and c.relkind = 'f';
+
+  -- أرضية تعقّل: المفروض يزيد أو يفضل زي ما هو، مايقلّش
+  if n_after < n_before then
+    raise exception 'الجسر رجع % جدول بعد ما كان % — بترجع المعاملة.', n_after, n_before;
+  end if;
+  if n_after < 50 then
+    raise exception 'الجسر فيه % جدول بس — رقم غير معقول، بترجع المعاملة.', n_after;
+  end if;
+
+  raise notice '✓ الجسر اتبنى من الأول — % جدول (كان %، الفرق %).',
+    n_after, n_before, n_after - n_before;
 end $$;
 
 select c.relname as "الجدول", count(a.attname) as "الأعمدة"
