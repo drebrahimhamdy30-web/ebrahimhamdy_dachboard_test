@@ -142,6 +142,12 @@
     .sm-d-ok  { color:#16a34a; font-weight:900; }
     .sm-table tfoot td { padding:12px 11px; font-size:0.9rem; font-weight:900; background:var(--surface-3); border-top:2.5px solid var(--primary); }
     .sm-hint { font-size:0.73rem; color:var(--text-muted); font-weight:600; }
+    .sm-post { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px; padding-top:12px; border-top:1.5px solid var(--border); }
+    .sm-post > span { font-size:0.82rem; }
+    .sm-table tr.sm-partial td { background:#fffbeb; }
+    .sm-table tr.sm-partial:hover td { background:#fef3c7; }
+    .sm-miss { color:#a16207; font-weight:800; font-size:0.74rem; }
+    .sm-cov { background:#eff6ff; color:#1d4ed8; border-radius:999px; padding:3px 10px; font-size:0.72rem; font-weight:800; white-space:nowrap; }
   </style>
 </head>
 <body>
@@ -345,6 +351,13 @@
       </div>
 
       <div id="sm-body"></div>
+
+      <div class="sm-post" id="sm-postbar" style="display:none;">
+        <span id="sm-postinfo"></span>
+        <button class="btn btn-success btn-sm" id="sm-postbtn" onclick="postShiftWindows()" style="margin-right:auto;">
+          <i class="fas fa-check-double"></i> ترحيل الورديات المحددة
+        </button>
+      </div>
 
       <div class="sm-hint" style="margin-top:10px;line-height:1.7">
         القيمة الفعلية = مجموع حركات انستاباي في البنك داخل الوردية &nbsp;·&nbsp;
@@ -818,13 +831,22 @@
     // ===== مطابقة ورديات انستاباي =====
     /* كان بيتعمل يدوي: فلترة انستاباي والبص بالعين على كل وردية هل
        الموظف قفلها بالقيمة الصح. الزر ده بيعمل المقارنة على السيرفر
-       (get_instapay_shift_match — migrate_142).
+       (get_instapay_shift_match — migrate_142/143).
 
        نافذة الوردية = من إقفال اللي قبلها (نفس الفرع) لحد إقفالها.
+
+       ⚠️ حركات انستاباي بتتسحب **يدويًا** برفع كشف الحساب، فآخر وردية
+       ممكن تكون حركاتها لسه مااتسحبتش. الدالة بترجّع `coverage_at`
+       (آخر حركة متسحوبة) و`covered` لكل وردية — وغير المغطّاة بتتعرض
+       «ناقص» بدل رقم الفرق و**مش داخلة الإجماليات**، عشان ما تطلعش
+       اتهام غلط لموظف.
 
        ⚠️ «غير المرحّل فقط» بيفلتر **عرض** الورديات اللي لسه فيها حركة
        مامتراجعتش — القيمة الفعلية نفسها بتتحسب على **كل** حركات
        النافذة، وإلا أول ما تترحّل حركة واحدة يبان فرق وهمي. */
+    let SM_ROWS = [];
+    const SM_SEL = new Set();
+
     function openShiftMatch() {
       document.getElementById('sm-modal').style.display = 'flex';
       runShiftMatch();
@@ -846,7 +868,7 @@
       try { return new Date(iso).toLocaleDateString('en-CA',
         { timeZone:'Africa/Cairo' }); } catch (e) { return ''; }
     }
-    function smSigned(v, cls) {
+    function smSigned(v) {
       const n = +v || 0;
       return '<td class="sm-num ' + (n ? 'sm-d-bad' : 'sm-d-ok') + '">'
         + (n > 0 ? '+' : (n < 0 ? '−' : '')) + fmt(Math.abs(n)) + '</td>';
@@ -857,6 +879,7 @@
       const st   = document.getElementById('sm-status');
       body.innerHTML = '<div style="text-align:center;padding:34px;color:var(--text-muted);">⏳ جاري الحساب…</div>';
       st.textContent = '';
+      SM_ROWS = []; SM_SEL.clear(); smPostBar();
 
       const days    = +document.getElementById('sm-days').value || 7;
       const pending = document.getElementById('sm-pending').checked;
@@ -867,46 +890,126 @@
           + escHtml((r && r.error) || 'فشل الحساب') + '</div>';
         return;
       }
-      const rows = r.rows || [], t = r.totals || {};
-      if (!rows.length) {
+      SM_ROWS = r.rows || [];
+      const t = r.totals || {}, unc = +r.uncovered || 0;
+
+      const cov = r.coverage_at
+        ? '<span class="sm-cov" title="آخر حركة انستاباي موجودة في السيستم">'
+          + 'الكشف محمَّل حتى ' + escHtml(smDayMon(r.coverage_at) + ' ' + smTime(r.coverage_at)) + '</span>'
+        : '';
+      st.innerHTML = (SM_ROWS.length
+        ? ((+t.bad) ? '<b style="color:#dc2626">' + t.bad + '</b> وردية بها فرق من ' + (t.shifts || 0)
+                    : '<b style="color:#16a34a">كل الورديات مطابقة</b> (' + (t.shifts || 0) + ')')
+        : '') + ' &nbsp; ' + cov;
+
+      if (!SM_ROWS.length) {
         body.innerHTML = '<div class="imp-ok"><i class="fas fa-circle-check"></i> لا توجد ورديات مطابِقة للفلتر الحالي.</div>';
         return;
       }
 
-      st.innerHTML = (+t.bad)
-        ? '<b style="color:#dc2626">' + t.bad + '</b> وردية بها فرق من ' + (t.shifts || 0)
-        : '<b style="color:#16a34a">كل الورديات مطابقة</b> (' + (t.shifts || 0) + ')';
+      const warn = unc
+        ? '<div class="imp-warn"><i class="fas fa-triangle-exclamation"></i> '
+          + unc + ' وردية أُغلقت بعد آخر حركة محمَّلة — حركاتها لم تُسحب بالكامل بعد، '
+          + 'فلا يظهر لها فرق ولا تدخل الإجمالي. ارفع كشف حساب أحدث ثم أعد المقارنة.</div>'
+        : '';
 
       /* اسم الفرع بيظهر **بس** لو فيه أكتر من فرع في النتيجة — دلوقتي
          انستاباي مسجّلة في فرع واحد، فعمود زيادة ميزنش الشاشة. */
-      const multi = new Set(rows.map(x => x.branch)).size > 1;
+      const multi = new Set(SM_ROWS.map(x => x.branch)).size > 1;
 
-      body.innerHTML =
-        '<div class="table-wrap"><table class="sm-table"><thead><tr>'
+      body.innerHTML = warn
+        + '<div class="table-wrap"><table class="sm-table"><thead><tr>'
+        + '<th style="width:34px;text-align:center"><input type="checkbox" id="sm-all" onchange="smToggleAll(this)" title="تحديد كل الورديات المغطّاة"></th>'
         + '<th>تاريخ ووقت الوردية</th>'
         + '<th style="text-align:left">القيمة الفعلية</th>'
         + '<th style="text-align:left">القيمة المحسوبة</th>'
         + '<th style="text-align:left">الفرق</th>'
         + '</tr></thead><tbody>'
-        + rows.map(function (x) {
-            const diff = +x.diff || 0;
+        + SM_ROWS.map(function (x, i) {
+            const diff = +x.diff || 0, ok = x.covered !== false;
             // لو الوردية كلها في نفس اليوم مانكررش التاريخ في الطرفين
             const same = smDay(x.from_at) === smDay(x.to_at);
             const span = smDayMon(x.from_at) + ' ' + smTime(x.from_at) + ' ← '
                        + (same ? '' : smDayMon(x.to_at) + ' ') + smTime(x.to_at);
-            return '<tr' + (diff ? ' class="sm-bad"' : '') + '>'
+            const cls = !ok ? ' class="sm-partial"' : (diff ? ' class="sm-bad"' : '');
+            return '<tr' + cls + '>'
+              + '<td style="text-align:center">'
+                + (ok ? '<input type="checkbox" class="sm-chk" data-i="' + i + '" onchange="smToggle(this)"'
+                        + (SM_SEL.has(x.shift_id) ? ' checked' : '') + '>'
+                      : '<i class="fas fa-hourglass-half" style="color:#a16207" title="الكشف لم يصل لنهاية هذه الوردية"></i>')
+              + '</td>'
               + '<td>' + (multi ? '<b>' + escHtml(x.branch || '') + '</b> · ' : '') + escHtml(span) + '</td>'
               + '<td class="sm-num">' + fmt(+x.actual || 0) + '</td>'
               + '<td class="sm-num">' + fmt(+x.declared || 0) + '</td>'
-              + smSigned(diff)
+              + (ok ? smSigned(diff)
+                    : '<td class="sm-num"><span class="sm-miss" title="حركات هذه الوردية لم تُسحب بالكامل بعد">ناقص</span></td>')
               + '</tr>';
           }).join('')
         + '</tbody><tfoot><tr>'
-        + '<td>الإجمالي — ' + (t.shifts || 0) + ' وردية</td>'
+        + '<td></td><td>الإجمالي — ' + (t.shifts || 0) + ' وردية'
+        + (unc ? ' <span class="sm-miss">(+' + unc + ' ناقصة)</span>' : '') + '</td>'
         + '<td class="sm-num">' + fmt(+t.actual || 0) + '</td>'
         + '<td class="sm-num">' + fmt(+t.declared || 0) + '</td>'
         + smSigned(+t.diff || 0)
         + '</tr></tfoot></table></div>';
+      smPostBar();
+    }
+
+    // ===== تحديد وترحيل ورديات كاملة =====
+    /* بدل تحديد حركة حركة: المراجع يحدّد الورديات اللي خلّص مراجعتها
+       والسيرفر يرحّل كل حركات نوافذها (bank_post_shift_windows —
+       نفس ختم وحراسة bank_post). الوردية غير المغطّاة مالهاش خانة
+       تحديد أصلًا، والسيرفر كمان بيرفضها. */
+    function smToggle(cb) {
+      const x = SM_ROWS[+cb.dataset.i]; if (!x) return;
+      if (cb.checked) SM_SEL.add(x.shift_id); else SM_SEL.delete(x.shift_id);
+      smPostBar();
+    }
+    function smToggleAll(cb) {
+      document.querySelectorAll('.sm-chk').forEach(function (c) {
+        c.checked = cb.checked;
+        const x = SM_ROWS[+c.dataset.i]; if (!x) return;
+        if (cb.checked) SM_SEL.add(x.shift_id); else SM_SEL.delete(x.shift_id);
+      });
+      smPostBar();
+    }
+    function smPostBar() {
+      const bar = document.getElementById('sm-postbar');
+      if (!bar) return;
+      if (!SM_SEL.size) { bar.style.display = 'none'; return; }
+      const sel = SM_ROWS.filter(x => SM_SEL.has(x.shift_id));
+      const tx  = sel.reduce((s, x) => s + (+x.pending_n || 0), 0);
+      const bad = sel.filter(x => (+x.diff || 0) !== 0).length;
+      bar.style.display = 'flex';
+      document.getElementById('sm-postinfo').innerHTML =
+        '<b>' + sel.length + '</b> وردية · <b>' + tx + '</b> حركة غير مرحّلة'
+        + (bad ? ' · <span style="color:#dc2626;font-weight:800">منها ' + bad + ' بها فرق</span>' : '');
+    }
+    async function postShiftWindows() {
+      const ids = [...SM_SEL];
+      if (!ids.length) return;
+      const sel = SM_ROWS.filter(x => SM_SEL.has(x.shift_id));
+      const tx  = sel.reduce((s, x) => s + (+x.pending_n || 0), 0);
+      const bad = sel.filter(x => (+x.diff || 0) !== 0).length;
+      if (!confirm('ترحيل ' + tx + ' حركة من ' + ids.length + ' وردية؟'
+        + (bad ? '\n\nتنبيه: ' + bad + ' من الورديات المحددة بها فرق.' : '')
+        + '\n\nلا يمكن التراجع.')) return;
+
+      const btn = document.getElementById('sm-postbtn');
+      const orig = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الترحيل…';
+      const r = await rpc('bank_post_shift_windows', { p_shift_ids: ids });
+      btn.disabled = false; btn.innerHTML = orig;
+
+      if (!r || r.success === false) {
+        alert('❌ ' + ((r && r.error) || 'فشل الترحيل'));
+        return;
+      }
+      alert('✅ تم ترحيل ' + (r.posted || 0) + ' حركة من ' + (r.shifts || 0) + ' وردية'
+        + ((+r.skipped) ? ' · تم تخطي ' + r.skipped + ' وردية (كشفها غير مكتمل)' : ''));
+      SM_SEL.clear();
+      await loadAll();        // الجدول الرئيسي ورا المودال
+      await runShiftMatch();  // وإعادة المقارنة بالحالة الجديدة
     }
 
     // ===== رصيد البداية =====
