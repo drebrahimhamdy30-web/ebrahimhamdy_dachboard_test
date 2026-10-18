@@ -192,6 +192,12 @@
                  padding-inline-start:8px;color:#fff;font-size:.68rem;font-weight:800;min-width:34px; }
     .bo-sr.none .fl { background:var(--danger); }
     .bo-sr .am { font-size:.78rem;font-weight:800;font-variant-numeric:tabular-nums;color:var(--text-secondary); }
+    .bo-sr.pick { cursor:pointer;border-radius:8px;padding:2px 4px;margin-inline:-4px; }
+    .bo-sr.pick:hover { background:var(--surface-2); }
+    .bo-sr.on { background:var(--brand-light); }
+    .bo-sr.on .nm { color:var(--accent-dark); }
+    .bo-sr.on .nm i { font-size:.7rem;opacity:.7; }
+    .bo-sr:not(.on) .fl { opacity:.92; }
     table.bo-t { width:100%;min-width:0;border-collapse:collapse;font-size:.79rem; }
     table.bo-t thead th { background:var(--thead);padding:10px 8px;font-weight:800;font-size:.71rem;
       color:var(--text-secondary);border-bottom:2px solid var(--border);white-space:nowrap;text-align:center; }
@@ -384,11 +390,11 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         <div class="bo-bar2">
           <div class="bo-r">
             <label class="bo-f n"><span>عدد الأصناف</span><input type="number" id="bo-n" value="100" min="1" max="1000" onchange="boLoad()"></label>
-            <label class="bo-f n"><span>شهور الاستهلاك</span><input type="number" id="bo-m" value="2" min="0.5" max="12" step="0.5" onchange="boLoad()"></label>
+            <label class="bo-f n"><span>شهور الاستهلاك</span><input type="number" id="bo-m" value="1" min="0.5" max="12" step="0.5" onchange="boLoad()"></label>
             <label class="bo-f"><span>الترتيب</span>
               <select id="bo-sort" style="width:168px" onchange="boLoad()">
-                <option value="value">بالقيمة (معدل × سعر)</option>
-                <option value="rate">بالمعدل (عدد القطع)</option></select></label>
+                <option value="rate" selected>بالمعدل (عدد القطع)</option>
+                <option value="value">بالقيمة (معدل × سعر)</option></select></label>
             <label class="bo-f"><span>تقريب الكمية</span>
               <select id="bo-round" style="width:112px" onchange="boLoad()">
                 <option value="near">لأقرب رقم</option><option value="up">لفوق</option></select></label>
@@ -1324,7 +1330,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
        الحساب كله في القاعدة (get_bulk_order): الترتيب على كل الأصناف
        والقص على الـN لازم يحصلوا هناك، وإلا سقف الـ1000 صف بيقص قبل
        الترتيب ونطلّع «أعلى 100» من عيّنة عشوائية. */
-    let BO = null;
+    let BO = null, BO_SUP = null;   // BO_SUP = المورّد المختار من الشارت
 
     async function boLoad(){
       const tb = document.getElementById('bo-tb');
@@ -1337,6 +1343,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
                                  p_round:  document.getElementById('bo-round').value }) });
         if (!r.ok) throw new Error('HTTP ' + r.status);
         BO = await r.json();
+        BO_SUP = null;   // قايمة جديدة = فلتر قديم مالوش معنى
         boRender();
       } catch (e) {
         BO = null;
@@ -1345,6 +1352,9 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       }
     }
 
+    /* للسمات داخل HTML — أسماء المورّدين فيها مسافات وممكن اقتباس */
+    function escAttr(x){ return String(x==null?'':x).replace(/&/g,'&amp;').replace(/"/g,'&quot;')
+      .replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     function boN(x){ return Math.round(Number(x)||0).toLocaleString('en-US'); }
     function boN2(x){ return (Number(x)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 
@@ -1354,16 +1364,29 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     }
     function boSupRow(nm, n, v, mx, none){
       const pct = Math.max(4, Math.round(v / mx * 100));
-      return '<div class="bo-sr' + (none ? ' none' : '') + '"><div class="nm">' + esc(nm) + '</div>'
+      /* غير المتاح مش مورّد — مايتفلترش بيه */
+      const on  = (!none && BO_SUP === nm);
+      return '<div class="bo-sr' + (none ? ' none' : ' pick') + (on ? ' on' : '') + '"'
+           + (none ? '' : ' data-sup="' + escAttr(nm) + '" title="اضغط لعرض أصناف ' + escAttr(nm) + ' بس"') + '>'
+           + '<div class="nm">' + esc(nm) + (on ? ' <i class="fas fa-circle-xmark"></i>' : '') + '</div>'
            + '<div class="tr"><div class="fl" style="width:' + pct + '%">' + n + ' صنف</div></div>'
            + '<div class="am">' + boN(v) + '</div></div>';
+    }
+
+    /* مستمع واحد على الحاوية بدل مستمع لكل صف */
+    function boSupClick(e){
+      const row = e.target.closest('.bo-sr[data-sup]'); if (!row) return;
+      const nm = row.getAttribute('data-sup');
+      BO_SUP = (BO_SUP === nm) ? null : nm;   // الضغط تاني بيلغي الفلتر
+      boRender();
     }
 
     function boRender(){
       if (!BO) return;
       const q = (document.getElementById('bo-q').value || '').trim().toLowerCase();
-      const all = BO.rows || [];
-      const rows = q ? all.filter(x => String(x.n||'').toLowerCase().includes(q) || String(x.c||'').includes(q)) : all;
+      let rows = BO.rows || [];
+      if (BO_SUP) rows = rows.filter(x => x.st === BO_SUP);
+      if (q) rows = rows.filter(x => String(x.n||'').toLowerCase().includes(q) || String(x.c||'').includes(q));
 
       /* ⚠️ الكروت على **كل** النتيجة مش على المعروض بعد البحث —
          الإجمالي اللي هتفاوض بيه مايتغيّرش لما تدوّر على صنف. */
@@ -1383,7 +1406,9 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       let sh = sups.map(s => boSupRow(s.n, s.i, Number(s.v)||0, mx, false)).join('');
       if (BO.unavailable_count)
         sh += boSupRow('مفيش مورّد متاح', BO.unavailable_count, Number(BO.unavailable_sale)||0, mx, true);
-      document.getElementById('bo-sups').innerHTML = sh;
+      const supBox = document.getElementById('bo-sups');
+      supBox.innerHTML = sh;
+      supBox.onclick = boSupClick;
 
       const btn = document.getElementById('bo-unav');
       btn.innerHTML = '<i class="fas fa-ban"></i> الأصناف غير المتاحة (' + (BO.unavailable_count||0) + ')';
@@ -1406,7 +1431,10 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
 
       const fc = rows.reduce((a,x) => a + (Number(x.cost)||0), 0);
       const fv = rows.reduce((a,x) => a + (Number(x.sale)||0), 0);
-      document.getElementById('bo-flbl').textContent = q ? ('نتيجة البحث (' + rows.length + ' صنف)') : ('الإجمالي (' + rows.length + ' صنف)');
+      document.getElementById('bo-flbl').textContent =
+          BO_SUP ? ('أصناف ' + BO_SUP + ' (' + rows.length + ' صنف)')
+        : q      ? ('نتيجة البحث (' + rows.length + ' صنف)')
+                 : ('الإجمالي (' + rows.length + ' صنف)');
       document.getElementById('bo-f1').textContent = boN(fc);
       document.getElementById('bo-f2').textContent = boN(fv);
     }
@@ -1430,16 +1458,21 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       if (!BO || !(BO.rows||[]).length) { alert('لا توجد بيانات — اضغط «إعادة الحساب» أولًا.'); return; }
       /* بزيادة الكمية وسعر الشراء والمورّد على اللي اتطلب — من غيرهم
          المخزن مش هيعرف يراجع الطلبية. */
+      /* لو فيه فلتر مورّد، الإكسل بيطلع لنفس اللي قدامك — عشان
+         تبعت لكل مورّد قايمته هو. */
+      const src  = BO_SUP ? BO.rows.filter(x => x.st === BO_SUP) : BO.rows;
       const head = ['الكود','الصنف','الشركة','المعدل/شهر','الكمية','سعر البيع','المورّد','الخصم %','سعر الشراء','إجمالي الشراء','إجمالي البيع'];
-      const body = BO.rows.map(x => [x.c, x.n, x.co||'', x.r, x.qty, x.p, x.st, x.d, x.nt, x.cost, x.sale]);
-      const cost = BO.rows.reduce((a,x)=>a+(Number(x.cost)||0),0);
-      const sale = BO.rows.reduce((a,x)=>a+(Number(x.sale)||0),0);
+      const body = src.map(x => [x.c, x.n, x.co||'', x.r, x.qty, x.p, x.st, x.d, x.nt, x.cost, x.sale]);
+      const cost = src.reduce((a,x)=>a+(Number(x.cost)||0),0);
+      const sale = src.reduce((a,x)=>a+(Number(x.sale)||0),0);
+      const pcs  = src.reduce((a,x)=>a+(Number(x.qty)||0),0);
       body.push([]);
-      body.push(['الإجمالي','','','', BO.pieces, '', '', '', '', Math.round(cost), Math.round(sale)]);
+      body.push(['الإجمالي','','','', pcs, '', '', '', '', Math.round(cost), Math.round(sale)]);
       const ws = XLSX.utils.aoa_to_sheet([head].concat(body));
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'طلبية مجمعة');
-      XLSX.writeFile(wb, 'bulk_order_' + BO.months + 'm_' + new Date().toISOString().slice(0,10) + '.xlsx');
+      XLSX.utils.book_append_sheet(wb, ws, (BO_SUP || 'طلبية مجمعة').slice(0,28));
+      XLSX.writeFile(wb, 'bulk_order_' + (BO_SUP ? BO_SUP.replace(/\s+/g,'_') + '_' : '')
+        + BO.months + 'm_' + new Date().toISOString().slice(0,10) + '.xlsx');
     }
 
     async function loadExcluded(){
