@@ -290,6 +290,8 @@ function fmtLogDetails(d){
 }
 
 let allOrders=[], filtered=[], currentPage=1, pageSize=50, orderTrip={};
+// أعمدة الطلب المستخدمة فقط (بدون source_data/items/route_polyline التقيلة) — تخفيف الحمولة
+const ORDER_COLS='id,customer_name,customer_phone,customer_address,branch_id,amount,status,notes,created_at,updated_at,bill_no,bill_type,bill_status,cust_code,total_bill_net,additional_expenses,count_of_items,current_customer_balance,cust_region,deliveryman,employee_name,money_with_deliveryman,bill_date,picked_at,delivered_at,payment_method,driver_notes,staff_notes,postpone_reason,cancelled_reason,attempt_count,collected_amount,driver_id,assigned_at,completed_at,postpone_time,last_activated_at,collected_approved,delivery_lat,delivery_lng,expected_minutes,actual_minutes,perf_rating,distance_meters,dispatch_type,driver_message,driver_message_at,driver_message_seen_at,sla_minutes,sla_actual_minutes,sla_rating,region_locked,fail_lat,fail_lng,fail_distance_meters,is_gift,gift_title,prep_done_at,prep_hold,prep_hold_started_at,prep_hold_seconds,prep_excluded_at,prep_excluded_by,had_failed_attempt,extra_collection,extra_collection_note,driver_call_number';
 let searchMode=false, searchRows=[], searchTimer=null;
 let sortCol='bill_date', sortDir=-1, statusFilter='', currentUser=null;
 
@@ -323,7 +325,7 @@ async function loadAll(){
     const activeBranch=document.getElementById('branchFilter')?.value;
     // نبني نفس الاستعلام (بنفس الفلاتر) في كل دفعة — لأن استعلام PostgREST يُنفَّذ مرة واحدة
     const buildQ=()=>{
-      let q=db.from('orders').select('*').order('created_at',{ascending:false});
+      let q=db.from('orders').select(ORDER_COLS).order('created_at',{ascending:false});
       if(dFrom){ const f=new Date(dFrom+'T00:00:00'); f.setDate(f.getDate()-1); q=q.gte('created_at', f.toISOString()); }
       if(dTo){ const t=new Date(dTo+'T23:59:59'); t.setDate(t.getDate()+1); q=q.lte('created_at', t.toISOString()); }
       if(activeBranch){ q=q.eq('branch_id',activeBranch); }
@@ -342,15 +344,9 @@ async function loadAll(){
       if(data.length<CHUNK) break;
       if(off+CHUNK>=MAX_ROWS){ console.warn('orders: بلغنا سقف '+MAX_ROWS+' صف — ضيّق المدى الزمني'); }
     }
-    // ربط كل طلب برحلته (order → trip) على دفعات
-    orderTrip={};
-    const oids=allOrders.map(o=>o.id);
-    // 50 مش 150: الرد بيرجّع الاستعلام كله في هيدر Content-Location، و150
-    // معرّف (~6 كيلوبايت) كانوا بيكسروا الوسيط بـ502. docs/server_nginx.md
-    for(let i=0;i<oids.length;i+=50){
-      const {data:to}=await db.from('trip_orders').select('order_id,trip_id').in('order_id',oids.slice(i,i+50));
-      (to||[]).forEach(r=>{orderTrip[r.order_id]=r.trip_id;});
-    }
+    // رابط الرحلة بقى لحظي للصفحة الظاهرة بس (renderTable → hydrateTripLinks)
+    // بدل تحميل روابط كل طلبات المدى — توفير عشرات النداءات المتتالية.
+    // orderTrip كاش دائم: undefined=لسه ماتجابش، null=مفيش رحلة، نص=رقم الرحلة.
     updateCounts();
     populateDriverFilter();
     applyFilters();
@@ -445,7 +441,7 @@ async function runSearch(){
   searchMode=true; currentPage=1; showLoad(true);
   try{
     const build=()=>{
-      let q=db.from('orders').select('*').order('created_at',{ascending:false});
+      let q=db.from('orders').select(ORDER_COLS).order('created_at',{ascending:false});
       if(billQ) q=q.eq('bill_no', billQ);
       if(codeQ) q=q.eq('cust_code', codeQ);
       const ab=document.getElementById('branchFilter')?.value;
@@ -461,12 +457,7 @@ async function runSearch(){
       searchRows=searchRows.concat(data);
       if(data.length<1000) break;
     }
-    const oids=searchRows.map(o=>o.id);
-    // نفس السبب: دفعات 50 بدل 150 (docs/server_nginx.md)
-    for(let i=0;i<oids.length;i+=50){
-      const {data:to}=await db.from('trip_orders').select('order_id,trip_id').in('order_id',oids.slice(i,i+50));
-      (to||[]).forEach(r=>{orderTrip[r.order_id]=r.trip_id;});
-    }
+    // رابط الرحلة لحظي للصفحة الظاهرة بس (hydrateTripLinks) — مش لكل نتائج البحث
     applyFilters();
   }catch(e){ console.error(e); }
   showLoad(false);
@@ -547,10 +538,34 @@ function renderTable(){
       <td data-label="وقت التوصيل" style="white-space:nowrap;font-size:.7rem">${fmDate(o.delivered_at)}</td>
       <td data-label="أداء الطيار" style="font-size:.68rem;white-space:nowrap" title="${o.perf_rating&&o.expected_minutes?`فعلي ${o.actual_minutes} / متوقع ${o.expected_minutes} د`:''}">${o.perf_rating?`<span style="color:${o.perf_rating==='ممتاز'?'#16a34a':o.perf_rating==='متأخر'?'#dc2626':'#ca8a04'};font-weight:700">${o.perf_rating}</span>`:'—'}</td>
       <td data-label="أداء الفرع" style="font-size:.68rem;white-space:nowrap" title="${o.sla_rating&&o.sla_minutes?`فعلي ${o.sla_actual_minutes} / المسموح ${o.sla_minutes} د`:''}">${o.sla_rating?`<span style="color:${o.sla_rating==='ممتاز'?'#16a34a':o.sla_rating==='متأخر'?'#dc2626':'#ca8a04'};font-weight:700">${o.sla_rating}</span>`:'—'}</td>
-      <td data-label="الرحلة">${orderTrip[o.id]?`<button class="btn btn-outline btn-sm" onclick="openTripOrders('${orderTrip[o.id]}')" style="font-size:.62rem;padding:.18rem .45rem">🗺️ الرحلة</button>`:'—'}</td>
+      <td data-label="الرحلة" data-oid="${o.id}">${tripCellHtml(o)}</td>
       <td data-label="تفاصيل"><button class="btn btn-outline btn-sm" onclick="openDetail('${o.id}')" style="font-size:.62rem;padding:.18rem .45rem">تفاصيل</button></td>
     </tr>`;
   }).join('');
+  hydrateTripLinks(page);
+}
+
+function tripCellHtml(o){
+  const t=orderTrip[o.id];
+  if(t===undefined) return '<span style="color:#cbd5e1">…</span>'; // لسه بيتحمّل
+  if(!t) return '—';                                              // مفيش رحلة
+  return `<button class="btn btn-outline btn-sm" onclick="openTripOrders('${t}')" style="font-size:.62rem;padding:.18rem .45rem">🗺️ الرحلة</button>`;
+}
+
+// تحميل رابط الرحلة للصفحة الظاهرة بس (≤50) في نداء واحد، وتحديث خلايا العمود
+async function hydrateTripLinks(page){
+  const ids=page.map(o=>o.id).filter(id=>orderTrip[id]===undefined);
+  if(!ids.length) return;
+  try{
+    const {data}=await db.from('trip_orders').select('order_id,trip_id').in('order_id',ids);
+    const found={};
+    (data||[]).forEach(r=>{ found[r.order_id]=r.trip_id; });
+    ids.forEach(id=>{ orderTrip[id] = found[id]||null; });
+    page.forEach(o=>{
+      const cell=document.querySelector(`#ordersBody td[data-oid="${o.id}"]`);
+      if(cell) cell.innerHTML=tripCellHtml(o);
+    });
+  }catch(e){ console.error(e); }
 }
 
 function renderPagination(){
