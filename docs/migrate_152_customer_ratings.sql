@@ -287,7 +287,7 @@ end $fn$;
 create or replace function public.rating_batch_tick()
 returns jsonb language plpgsql security definer set search_path = public, pg_temp as $fn$
 declare v_y date := (now() at time zone 'Africa/Cairo')::date - 1;
-        v_h int  := extract(hour from now() at time zone 'Africa/Cairo')::int;
+        v_h int  := extract(hour from (now() at time zone 'Africa/Cairo'))::int;
         s public.rating_settings%rowtype;
 begin
   perform public.require_app_role(array['admin','manager']);
