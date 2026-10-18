@@ -915,6 +915,8 @@ let unclosedLoading=false; // بيتحمّل دلوقتي؟ (عشان مانعر
 let currentPopupDriverId=null;
 let knownRegions=new Set();
 let regionInfo={}; // name → {min, fee, below} حسب فرع العرض الحالي (لأسعار المناطق + تنبيه الحد الأدنى)
+// أعمدة الطلب المستخدمة فقط (بدون source_data/items/route_polyline التقيلة) — تخفيف تحميل التوزيع (كل 30ث)
+const DISP_ORDER_COLS='id,customer_name,customer_phone,customer_address,branch_id,amount,status,notes,created_at,updated_at,bill_no,bill_type,bill_status,cust_code,total_bill_net,additional_expenses,count_of_items,current_customer_balance,cust_region,deliveryman,employee_name,money_with_deliveryman,bill_date,picked_at,delivered_at,payment_method,driver_notes,staff_notes,postpone_reason,cancelled_reason,attempt_count,collected_amount,driver_id,assigned_at,completed_at,postpone_time,last_activated_at,collected_approved,delivery_lat,delivery_lng,expected_minutes,actual_minutes,perf_rating,distance_meters,dispatch_type,driver_message,driver_message_at,driver_message_seen_at,sla_minutes,sla_actual_minutes,sla_rating,region_locked,fail_lat,fail_lng,fail_distance_meters,is_gift,gift_title,prep_done_at,prep_hold,prep_hold_started_at,prep_hold_seconds,prep_excluded_at,prep_excluded_by,had_failed_attempt,extra_collection,extra_collection_note,driver_call_number';
 let selectedOrders=new Set(),currentFilter='all',filterDriver=null;
 let currentUser=getCurrentUser();
 if(!currentUser) window.location.href='../auth.html';
@@ -1072,7 +1074,7 @@ async function loadAll(){
     // بدل ما تشتغل واحدة ورا التانية. التبعية الوحيدة: رحلات ← أوردرات الرحلات ← الطلبات المرتبطة.
     let driversQ=db.from('drivers').select('*,branches!drivers_branch_id_fkey(name)').eq('is_active',true).order('full_name');
     let tripsQ=db.from('trips').select('*').in('status',['active','pending_complete']).order('created_at',{ascending:false});
-    let actQ=db.from('orders').select('*').in('status',['pending','postponed','assigned','picked']).order('created_at',{ascending:false});
+    let actQ=db.from('orders').select(DISP_ORDER_COLS).in('status',['pending','postponed','assigned','picked']).order('created_at',{ascending:false});
     let regQ=db.from('regions').select('name,branch_id,min_order_amount,delivery_fee,below_min_fee').eq('is_active',true);
     let dsQ=branchId?db.from('dispatch_settings').select('*').eq('branch_id',branchId):null;
     if(branchId){ driversQ=driversQ.eq('branch_id',branchId); tripsQ=tripsQ.eq('branch_id',branchId); actQ=actQ.eq('branch_id',branchId); }
@@ -1091,7 +1093,7 @@ async function loadAll(){
     let rrData=[];
     const activeTripIds=activeTrips.map(t=>t.id);
     if(activeTripIds.length){
-      const rrR=await db.from('trip_orders').select('*').in('trip_id',activeTripIds);
+      const rrR=await db.from('trip_orders').select('trip_id,order_id').in('trip_id',activeTripIds);
       rrData=rrR.data||[];
     }
     tripOrdersMap={};
@@ -1101,12 +1103,15 @@ async function loadAll(){
     if(tripOrderIds.length){
       // دفعات 50: القايمة بتتحط في الرابط، والرد بيرجّعها في هيدر
       // Content-Location — القوايم الطويلة بتكسر الوسيط بـ502.
-      // شوف docs/server_nginx.md
+      // شوف docs/server_nginx.md — بس الدفعات دلوقتي بالتوازي (Promise.all) مش ورا بعض + أعمدة خفيفة
+      const _chunks=[];
       for(let i=0;i<tripOrderIds.length;i+=50){
-        let lq=db.from('orders').select('*').in('id',tripOrderIds.slice(i,i+50));
+        let lq=db.from('orders').select(DISP_ORDER_COLS).in('id',tripOrderIds.slice(i,i+50));
         if(branchId) lq=lq.eq('branch_id',branchId);
-        const lR=await lq; linkedRows=linkedRows.concat(lR.data||[]);
+        _chunks.push(lq);
       }
+      const _res=await Promise.all(_chunks);
+      _res.forEach(r=>{ linkedRows=linkedRows.concat(r.data||[]); });
     }
     { const _seen=new Set(); allOrders=[];
       (actR.data||[]).concat(linkedRows).forEach(o=>{ if(o && !_seen.has(o.id)){ _seen.add(o.id); allOrders.push(o); } }); }
@@ -2114,7 +2119,7 @@ async function doOrderSearch(){
   if(!billActive && !codeActive){ orderSearchResults=null; renderOrders(); return; }
   try{
     const branchId=currentUser?.role==='admin'?activeBranchId:(currentUser?.branch_id||null);
-    let q=db.from('orders').select('*').order('created_at',{ascending:false}).limit(200);
+    let q=db.from('orders').select(DISP_ORDER_COLS).order('created_at',{ascending:false}).limit(200);
     if(branchId) q=q.eq('branch_id',branchId);
     const _bp=billQ.replace(/[%(),]/g,''), _cp=codeQ.replace(/[%(),]/g,'');
     if(billActive) q=q.ilike('bill_no','%'+_bp+'%');
