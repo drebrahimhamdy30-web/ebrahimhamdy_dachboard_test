@@ -58,15 +58,35 @@ psql_q() { $DOCKER exec -i "$CID" psql -U "$DB_USER" -d postgres -tAc "$1"; }
 
 # ── فحص: آخر مزامنة نجحت إمتى ──────────────────────────────────────
 if [ "$CHECK" = 1 ]; then
+  # كل الأسئلة تحت على **التشغيل الأخير** بمُعرّفه، مش على نافذة زمنية.
+  LASTRUN="coalesce(run_id, ran_at::text) =
+            (select coalesce(run_id, ran_at::text)
+               from public.cloud_sync_log order by id desc limit 1)"
   echo "آخر مزامنة:"
   psql_q "select '  ' || to_char(max(ran_at) at time zone 'Africa/Cairo','YYYY-MM-DD HH24:MI')
-                || '  ·  ' || mode || '  ·  ' || count(*) || ' جدول'
+                || '  ·  ' || max(mode) || '  ·  ' || count(*) || ' جدول'
+          from public.cloud_sync_log where $LASTRUN" 2>/dev/null \
+    || echo "  مفيش سجل — المزامنة ماشتغلتش ولا مرة"
+
+  echo "مشاكل التشغيل ده:"
+  probs="$(psql_q "select '  ' || tbl || ' [' || status || ']: ' || left(detail,70)
+                   from public.cloud_sync_log
+                   where $LASTRUN and status not in ('ok','skip')
+                   order by tbl" 2>/dev/null)"
+  [ -n "$probs" ] && echo "$probs" || echo "  ✓ مفيش"
+
+  # skip = مقصود. بنعرضه هادي عشان ماينفخش عدّاد الفشل.
+  psql_q "select '  (متجاهَل بقصد: ' || string_agg(tbl, ', ' order by tbl) || ')'
           from public.cloud_sync_log
-          where ran_at > (select max(ran_at) from public.cloud_sync_log) - interval '1 hour'
-          group by mode" 2>/dev/null || echo "  مفيش سجل — المزامنة ماشتغلتش ولا مرة"
-  echo "آخر 5 مشاكل:"
-  psql_q "select '  ' || to_char(ran_at at time zone 'Africa/Cairo','MM-DD HH24:MI') || '  ' || tbl || ': ' || left(detail,60)
-          from public.cloud_sync_log where status <> 'ok' order by ran_at desc limit 5" 2>/dev/null
+          where $LASTRUN and status = 'skip' having count(*) > 0" 2>/dev/null
+
+  echo "مشاكل تشغيلات أقدم (اتصلحت؟):"
+  old="$(psql_q "select '  ' || to_char(ran_at at time zone 'Africa/Cairo','MM-DD HH24:MI')
+                        || '  ' || tbl || ': ' || left(detail,60)
+                 from public.cloud_sync_log
+                 where not ($LASTRUN) and status not in ('ok','skip')
+                 order by ran_at desc limit 5" 2>/dev/null)"
+  [ -n "$old" ] && echo "$old" || echo "  ✓ مفيش"
   exit 0
 fi
 
@@ -131,11 +151,21 @@ if [ -f "$DRIFT_SQL" ]; then
 fi
 
 # فشل جدول واحد مابيوقّفش السكربت (بيتسجّل في اللوج) — بس لازم نتكلم عنه
+# 🔴 عيبان كانوا مخلّيين السطر ده يكدب في الاتجاهين (اتكشف 2026-10-18):
+#    ١) نافذة ساعتين بدل التشغيل الواحد: ٤ تشغيلات فيهم نفس الـskip
+#       الحميد = «٥ جداول فشلوا»، والرقم مالوش معنى.
+#    ٢) status <> 'ok' كان بيحسب skip فشل — والـskip قرار **مقصود**
+#       (view · مفيش أعمدة مشتركة). فالسكربت بيرجّع exit 1 **كل تشغيل**،
+#       وcutover.sh:119 بيوقف عند المزامنة الأخيرة على فشل كاذب.
+#    الفشل الحقيقي: fail · missing · cols_lost.
 fails="$(psql_q "select count(*) from public.cloud_sync_log
-                 where ran_at > now() - interval '2 hours' and status <> 'ok'" | tr -d ' ')"
+                 where coalesce(run_id, ran_at::text) =
+                       (select coalesce(run_id, ran_at::text)
+                          from public.cloud_sync_log order by id desc limit 1)
+                   and status not in ('ok','skip')" | tr -d ' ')"
 if [ "${fails:-0}" != "0" ]; then
   NOTABLE=1
-  echo "⚠️ $fails جدول فشلوا — شوف: $0 --check"
+  echo "⚠️ $fails جدول فشلوا في التشغيل ده — شوف: $0 --check"
   exit 1
 fi
 echo "✓ تمام"

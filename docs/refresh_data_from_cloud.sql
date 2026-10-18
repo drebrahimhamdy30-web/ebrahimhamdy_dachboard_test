@@ -67,6 +67,18 @@ create table if not exists public.cloud_sync_log (
   detail      text
 );
 
+-- ═══ مُعرّف التشغيل ═══
+-- 🔴 كل المستهلكين كانوا بيسألوا «آخر ساعتين» بدل «آخر تشغيل»، فأربع
+--    تشغيلات فيهم نفس الـskip الحميد بقوا «5 جداول فشلوا» (2026-10-18).
+--    ran_at لوحده مش مفتاح كافي: لو تشغيل عمل commit في وسطه، now()
+--    بتتغيّر وصفوف نفس التشغيل تتفرّق. فبنختم كل تشغيل بمُعرّف واحد.
+alter table public.cloud_sync_log add column if not exists run_id text;
+alter table public.cloud_sync_log
+  alter column run_id set default current_setting('app.sync_run', true);
+select set_config('app.sync_run',
+                  to_char(now(), 'YYYYMMDD"T"HH24MISS') || '-' ||
+                  substr(md5(random()::text), 1, 6), false) as _run;
+
 do $sync$
 declare
   -- ترتيب تفضيل عمود الوقت: الأول اللي بيتحدّث مع أي تعديل
@@ -96,7 +108,23 @@ declare
   v_done   int := 0;
   v_skip   int := 0;
   v_fail   int := 0;
+  v_views  text[] := '{}';
 begin
+  -- ═══ نوع الكائن الحقيقي من السحابة ═══
+  -- الاستيراد بيحوّل الجدول والـview لنفس النوع (f) في cloudsrc، فالحكم
+  -- تحت كان بالبادئة v_ — فحص بالاسم بدل الحالة. السحابة نفسها عارفة،
+  -- فبنسألها مرة واحدة ونحكم بالحقيقة. ولو الرابط وقع نرجع للبادئة.
+  begin
+    select coalesce(array_agg(x.nm), '{}') into v_views
+      from dblink('cloud',
+        'select c.relname from pg_class c
+           join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = ''public'' and c.relkind in (''v'',''m'')') as x(nm text);
+  exception when others then
+    raise notice '⚠️ مقدرتش أسأل السحابة عن نوع الكائنات (%) — هنحكم بالبادئة v_',
+      left(sqlerrm, 60);
+  end;
+
   -- بيوقف التريجرات وفحص المفاتيح الأجنبية أثناء التحميل.
   -- من غيره ترتيب الجداول بيوقع الإدخال، والتريجرات بتعيد حساب
   -- حاجات المفروض تيجي من السحابة زي ما هي.
@@ -130,11 +158,13 @@ begin
     -- (view بروفة الترحيل) — ولو تحذير زي ده فضل يطلع كل يوم على حاجة
     -- مش محتاجة، بنتعلّم نتجاهل التحذير وساعتها بيضيع الهدف منه.
     -- بيتسجّل في اللوج برضه، بس بدرجة أهدى.
-    -- ⚠️ الاعتماد على البادئة v_ هشّ، بس مفيش طريقة نعرف من cloudsrc
-    --    إن الأصل view: الاستيراد بيحوّل الجدول والـview لنفس النوع (f).
-    if r.t ~ '^v_' then
+    -- النوع بييجي من السحابة فوق (v_views)؛ البادئة بقت احتياطي بس.
+    if r.t = any (v_views) or (cardinality(v_views) = 0 and r.t ~ '^v_') then
       insert into public.cloud_sync_log(mode, tbl, status, detail)
-        values (v_mode, r.t, 'skip', 'يشبه view (بادئة v_) — المزامنة مابتعملش views، وده عادي');
+        values (v_mode, r.t, 'skip',
+                case when r.t = any (v_views)
+                     then 'view على السحابة — المزامنة مابتعملش views، وده عادي'
+                     else 'يشبه view (بادئة v_) — المزامنة مابتعملش views، وده عادي' end);
     else
       insert into public.cloud_sync_log(mode, tbl, status, detail)
         values (v_mode, r.t, 'missing', 'موجود على السحابة ومش موجود محليًا — محتاج ترحيل يعمل الجدول');
@@ -288,12 +318,23 @@ end $seq$;
 select tbl as "الجدول", rows_before as "قبل", rows_after as "بعد",
        rows_after - rows_before as "الفرق", seconds as "ثواني", detail as "بعمود"
 from public.cloud_sync_log
-where ran_at > now() - interval '2 hours' and status = 'ok'
+where run_id = current_setting('app.sync_run', true) and status = 'ok'
   and rows_after is distinct from rows_before
 order by abs(rows_after - rows_before) desc nulls last;
 
 \echo ''
-\echo '════ فشل (لو فيه) ════'
-select tbl as "الجدول", detail as "السبب"
+\echo '════ فشل حقيقي (لو فيه) ════'
+-- skip = قرار مقصود (view · مفيش أعمدة مشتركة)، مش فشل. لو حسبناه فشل
+-- بيطلع إنذار كاذب كل تشغيل — وده بيعلّم الناس يتجاهلوا الإنذارات.
+select tbl as "الجدول", status as "الحالة", detail as "السبب"
 from public.cloud_sync_log
-where ran_at > now() - interval '2 hours' and status <> 'ok';
+where run_id = current_setting('app.sync_run', true)
+  and status not in ('ok','skip')
+order by case status when 'cols_lost' then 1 when 'fail' then 2 else 3 end, tbl;
+
+\echo ''
+\echo '════ متجاهَل بقصد ════'
+select count(*) || ' كائن (' || string_agg(tbl, ', ' order by tbl) || ')' as "skip"
+from public.cloud_sync_log
+where run_id = current_setting('app.sync_run', true) and status = 'skip'
+having count(*) > 0;

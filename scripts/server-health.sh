@@ -172,14 +172,17 @@ if [ -n "$CID" ]; then
   # ── جداول فشلت في آخر مزامنة ───────────────────────────────────
   # فحص عمر المزامنة بيقول إنها **اشتغلت** — مش إنها **نجحت**. وده
   # الفرق اللي خلّى ٧ جداول تفشل والفحص يقول ✓ (2026-09-29).
-  # بنستثني الملاحظات الحميدة (views — المزامنة مابتنقلش views وده عادي).
-  # وبنعدّ **آخر تشغيلة** بس مش آخر ٣٠ ساعة: فشل اتصلح خلاص كان
+  # بنعدّ **آخر تشغيلة** بس مش آخر ٣٠ ساعة: فشل اتصلح خلاص كان
   # هيفضل يصرخ يوم كامل، وده إنذار كاذب — ونفس العيب اللي بنصلّحه.
+  # ⚠️ وكان بيستثني الحميد بمطابقة **نص** الرسالة ('%وده عادي%') — ودي
+  #    بتتكسر أول ما نعدّل صياغة، وكانت فاتت skip التانية («مفيش أعمدة
+  #    مشتركة»). الاستثناء بقى بالـstatus: skip قرار مقصود مش فشل.
   sf=$(docker exec -i "$CID" psql -U supabase_admin -d postgres -tAc \
       "select count(*) from public.cloud_sync_log
-        where ran_at = (select max(ran_at) from public.cloud_sync_log)
-          and status <> 'ok'
-          and coalesce(detail,'') not like '%وده عادي%'" 2>/dev/null | tr -d ' ')
+        where coalesce(run_id, ran_at::text) =
+              (select coalesce(run_id, ran_at::text)
+                 from public.cloud_sync_log order by id desc limit 1)
+          and status not in ('ok','skip')" 2>/dev/null | tr -d ' ')
   if [ "${sf:-0}" != "0" ]; then
     fail syncfail "$sf جدول فشل في المزامنة — شغّل sync-from-cloud.sh --check"
   else ok "كل الجداول اتزامنت"; fi
