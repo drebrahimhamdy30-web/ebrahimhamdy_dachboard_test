@@ -125,6 +125,23 @@
     .imp-table th { text-align:right; padding:6px 8px; background:var(--surface-3); font-size:0.7rem; }
     .imp-table td { padding:6px 8px; border-bottom:1px solid var(--surface-3); }
     .imp-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:14px; }
+
+    /* مطابقة ورديات انستاباي */
+    /* الوزن مكتوب بكلاسين عشان ما يعتمدش على ترتيب التعريف:
+       .imp-box فيه max-width:560px، ولو اتحرّك بعدينا كان هيغلب. */
+    .imp-box.sm-box { max-width:900px; }
+    .sm-bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px; padding-bottom:12px; border-bottom:1.5px solid var(--border); }
+    .sm-table { width:100%; border-collapse:collapse; }
+    .sm-table th { background:var(--primary); color:#fff; padding:9px 11px; font-size:0.72rem; font-weight:700; text-align:right; white-space:nowrap; }
+    .sm-table td { padding:9px 11px; font-size:0.82rem; border-bottom:1px solid var(--surface-3); white-space:nowrap; }
+    .sm-table tbody tr:hover td { background:var(--surface-3); }
+    .sm-table tr.sm-bad td { background:#fef2f2; }
+    .sm-table tr.sm-bad:hover td { background:#fee2e2; }
+    .sm-num { font-weight:800; font-variant-numeric:tabular-nums; text-align:left; direction:ltr; }
+    .sm-d-bad { color:#dc2626; font-weight:900; }
+    .sm-d-ok  { color:#16a34a; font-weight:900; }
+    .sm-table tfoot td { padding:12px 11px; font-size:0.9rem; font-weight:900; background:var(--surface-3); border-top:2.5px solid var(--primary); }
+    .sm-hint { font-size:0.73rem; color:var(--text-muted); font-weight:600; }
   </style>
 </head>
 <body>
@@ -140,6 +157,10 @@
             <i class="fas fa-file-excel"></i> رفع كشف الحساب
           </button>
           <input type="file" id="stmt-file" accept=".xls,.xlsx,.csv" style="display:none" onchange="onStatementFile(this)">
+          <button class="btn" style="background:#e0e7ff;color:#3730a3;" onclick="openShiftMatch()"
+                  title="يقارن حركات انستاباي بما سجّله الموظف في إقفال كل وردية">
+            <i class="fas fa-scale-balanced"></i> مطابقة الورديات
+          </button>
           <button class="btn btn-primary" onclick="loadAll()"><i class="fas fa-sync-alt"></i> تحديث</button>
         </div>
       </div>
@@ -298,6 +319,37 @@
       <div class="imp-actions">
         <button class="btn" style="background:var(--surface-3);color:var(--text-secondary);" onclick="closeImport()">إلغاء</button>
         <button class="btn btn-primary" id="imp-confirm" onclick="confirmImport()"><i class="fas fa-check"></i> إضافة</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- مطابقة ورديات انستاباي -->
+  <div class="imp-overlay" id="sm-modal" onclick="if(event.target===this)closeShiftMatch()">
+    <div class="imp-box sm-box">
+      <div class="imp-title">
+        <i class="fas fa-scale-balanced" style="color:var(--accent)"></i> مطابقة ورديات انستاباي
+        <button class="btn btn-sm" style="margin-right:auto;background:var(--surface-3);color:var(--text-secondary);"
+                onclick="closeShiftMatch()" title="إغلاق"><i class="fas fa-times"></i></button>
+      </div>
+
+      <div class="sm-bar">
+        <select id="sm-days" class="form-select" style="width:auto;" onchange="runShiftMatch()">
+          <option value="7" selected>آخر ٧ أيام</option>
+          <option value="14">آخر ١٤ يوم</option>
+          <option value="30">آخر ٣٠ يوم</option>
+        </select>
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.8rem;font-weight:700;cursor:pointer;">
+          <input type="checkbox" id="sm-pending" checked onchange="runShiftMatch()"> غير المرحّل فقط
+        </label>
+        <span class="sm-hint" id="sm-status"></span>
+      </div>
+
+      <div id="sm-body"></div>
+
+      <div class="sm-hint" style="margin-top:10px;line-height:1.7">
+        القيمة الفعلية = مجموع حركات انستاباي في البنك داخل الوردية &nbsp;·&nbsp;
+        القيمة المحسوبة = المسجَّل في إقفال الوردية &nbsp;·&nbsp;
+        الفرق = الفعلية − المحسوبة (السالب يعني أن المسجَّل أكبر مما وصل البنك)
       </div>
     </div>
   </div>
@@ -761,6 +813,100 @@
       }
       btn.disabled = false;
       btn.innerHTML = '<i class="fas fa-check"></i> ترحيل المحدد';
+    }
+
+    // ===== مطابقة ورديات انستاباي =====
+    /* كان بيتعمل يدوي: فلترة انستاباي والبص بالعين على كل وردية هل
+       الموظف قفلها بالقيمة الصح. الزر ده بيعمل المقارنة على السيرفر
+       (get_instapay_shift_match — migrate_142).
+
+       نافذة الوردية = من إقفال اللي قبلها (نفس الفرع) لحد إقفالها.
+
+       ⚠️ «غير المرحّل فقط» بيفلتر **عرض** الورديات اللي لسه فيها حركة
+       مامتراجعتش — القيمة الفعلية نفسها بتتحسب على **كل** حركات
+       النافذة، وإلا أول ما تترحّل حركة واحدة يبان فرق وهمي. */
+    function openShiftMatch() {
+      document.getElementById('sm-modal').style.display = 'flex';
+      runShiftMatch();
+    }
+    function closeShiftMatch() {
+      document.getElementById('sm-modal').style.display = 'none';
+    }
+
+    // كل العرض بتوقيت القاهرة صراحةً — مش بتوقيت جهاز المستخدم
+    function smTime(iso) {
+      try { return new Date(iso).toLocaleTimeString('en-GB',
+        { timeZone:'Africa/Cairo', hour:'2-digit', minute:'2-digit' }); } catch (e) { return ''; }
+    }
+    function smDayMon(iso) {
+      try { return new Date(iso).toLocaleDateString('en-GB',
+        { timeZone:'Africa/Cairo', day:'2-digit', month:'2-digit' }); } catch (e) { return ''; }
+    }
+    function smDay(iso) {
+      try { return new Date(iso).toLocaleDateString('en-CA',
+        { timeZone:'Africa/Cairo' }); } catch (e) { return ''; }
+    }
+    function smSigned(v, cls) {
+      const n = +v || 0;
+      return '<td class="sm-num ' + (n ? 'sm-d-bad' : 'sm-d-ok') + '">'
+        + (n > 0 ? '+' : (n < 0 ? '−' : '')) + fmt(Math.abs(n)) + '</td>';
+    }
+
+    async function runShiftMatch() {
+      const body = document.getElementById('sm-body');
+      const st   = document.getElementById('sm-status');
+      body.innerHTML = '<div style="text-align:center;padding:34px;color:var(--text-muted);">⏳ جاري الحساب…</div>';
+      st.textContent = '';
+
+      const days    = +document.getElementById('sm-days').value || 7;
+      const pending = document.getElementById('sm-pending').checked;
+      const r = await rpc('get_instapay_shift_match', { p_days: days, p_pending_only: pending });
+
+      if (!r || r.success === false) {
+        body.innerHTML = '<div class="imp-warn"><i class="fas fa-triangle-exclamation"></i> '
+          + escHtml((r && r.error) || 'فشل الحساب') + '</div>';
+        return;
+      }
+      const rows = r.rows || [], t = r.totals || {};
+      if (!rows.length) {
+        body.innerHTML = '<div class="imp-ok"><i class="fas fa-circle-check"></i> لا توجد ورديات مطابِقة للفلتر الحالي.</div>';
+        return;
+      }
+
+      st.innerHTML = (+t.bad)
+        ? '<b style="color:#dc2626">' + t.bad + '</b> وردية بها فرق من ' + (t.shifts || 0)
+        : '<b style="color:#16a34a">كل الورديات مطابقة</b> (' + (t.shifts || 0) + ')';
+
+      /* اسم الفرع بيظهر **بس** لو فيه أكتر من فرع في النتيجة — دلوقتي
+         انستاباي مسجّلة في فرع واحد، فعمود زيادة ميزنش الشاشة. */
+      const multi = new Set(rows.map(x => x.branch)).size > 1;
+
+      body.innerHTML =
+        '<div class="table-wrap"><table class="sm-table"><thead><tr>'
+        + '<th>تاريخ ووقت الوردية</th>'
+        + '<th style="text-align:left">القيمة الفعلية</th>'
+        + '<th style="text-align:left">القيمة المحسوبة</th>'
+        + '<th style="text-align:left">الفرق</th>'
+        + '</tr></thead><tbody>'
+        + rows.map(function (x) {
+            const diff = +x.diff || 0;
+            // لو الوردية كلها في نفس اليوم مانكررش التاريخ في الطرفين
+            const same = smDay(x.from_at) === smDay(x.to_at);
+            const span = smDayMon(x.from_at) + ' ' + smTime(x.from_at) + ' ← '
+                       + (same ? '' : smDayMon(x.to_at) + ' ') + smTime(x.to_at);
+            return '<tr' + (diff ? ' class="sm-bad"' : '') + '>'
+              + '<td>' + (multi ? '<b>' + escHtml(x.branch || '') + '</b> · ' : '') + escHtml(span) + '</td>'
+              + '<td class="sm-num">' + fmt(+x.actual || 0) + '</td>'
+              + '<td class="sm-num">' + fmt(+x.declared || 0) + '</td>'
+              + smSigned(diff)
+              + '</tr>';
+          }).join('')
+        + '</tbody><tfoot><tr>'
+        + '<td>الإجمالي — ' + (t.shifts || 0) + ' وردية</td>'
+        + '<td class="sm-num">' + fmt(+t.actual || 0) + '</td>'
+        + '<td class="sm-num">' + fmt(+t.declared || 0) + '</td>'
+        + smSigned(+t.diff || 0)
+        + '</tr></tfoot></table></div>';
     }
 
     // ===== رصيد البداية =====
