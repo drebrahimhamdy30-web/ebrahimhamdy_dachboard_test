@@ -24,7 +24,7 @@
 #   .\diag_return_audit.ps1 -Branch san -Out C:\temp\audit.txt
 
 param(
-  [string]$ConfigPath = "C:\ProgramData\phalix\sync_engine.json",
+  [string]$ConfigPath = "",
   [string]$Branch     = "mamora",
   [string]$Out        = "$env:TEMP\diag_return_audit.txt"
 )
@@ -33,6 +33,20 @@ $ErrorActionPreference = "Stop"
 
 $lines = New-Object System.Collections.Generic.List[string]
 function Say($m){ Write-Host $m; $lines.Add($m) }
+
+# المسار بيختلف حسب الجهاز: المهمة المجدولة على جهاز الصيدلية بتستعمل
+# C:\phalix\sync_engine.json، وتعليق sync_engine.ps1 بيقول ProgramData.
+# فبندوّر في الاتنين بدل ما السكربت يقف.
+if (-not $ConfigPath) {
+  foreach ($p in @("C:\phalix\sync_engine.json", "C:\ProgramData\phalix\sync_engine.json")) {
+    if (Test-Path $p) { $ConfigPath = $p; break }
+  }
+}
+if (-not $ConfigPath -or -not (Test-Path $ConfigPath)) {
+  Write-Host "مالقيتش ملف الإعدادات. جرّب: .\diag_return_audit.ps1 -ConfigPath <المسار>"
+  exit 1
+}
+Write-Host "الإعدادات: $ConfigPath"
 
 try { $cfg = Get-Content $ConfigPath -Raw | ConvertFrom-Json }
 catch { Write-Host "تعذّر قراءة الإعدادات: $ConfigPath"; exit 1 }
