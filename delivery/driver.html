@@ -480,6 +480,8 @@ function custPhonesDrv(raw){
 
 let currentUser=null, driverRecord=null, settings=null;
 let allTrips=[], tripOrders={}, currentTripId=null;
+// أعمدة الطلب المستخدمة فقط (بدون source_data/items/route_polyline التقيلة) — تخفيف الحمولة على الموبايل
+const DRV_ORDER_COLS='id,customer_name,customer_phone,customer_address,branch_id,amount,status,notes,created_at,updated_at,bill_no,bill_type,bill_status,cust_code,total_bill_net,additional_expenses,count_of_items,current_customer_balance,cust_region,deliveryman,employee_name,money_with_deliveryman,bill_date,picked_at,delivered_at,payment_method,driver_notes,staff_notes,postpone_reason,cancelled_reason,attempt_count,collected_amount,driver_id,assigned_at,completed_at,postpone_time,last_activated_at,collected_approved,delivery_lat,delivery_lng,expected_minutes,actual_minutes,perf_rating,distance_meters,dispatch_type,driver_message,driver_message_at,driver_message_seen_at,sla_minutes,sla_actual_minutes,sla_rating,region_locked,fail_lat,fail_lng,fail_distance_meters,is_gift,gift_title,prep_done_at,prep_hold,prep_hold_started_at,prep_hold_seconds,prep_excluded_at,prep_excluded_by,had_failed_attempt,extra_collection,extra_collection_note,driver_call_number';
 let attRecord=null, attTimerInterval=null;
 
 // ===== SOUND SYSTEM =====
@@ -1134,17 +1136,25 @@ const {data:trips}=await db.from('trips').select('*')
     const completedTrips=(trips||[]).filter(t=>t.status==='completed').slice(0,3);
     allTrips=activeTrip?[activeTrip,...completedTrips]:completedTrips;
 
-    for(const trip of allTrips){
-      const {data:toData}=await db.from('trip_orders').select('order_id').eq('trip_id',trip.id);
-      const ids=(toData||[]).map(x=>x.order_id);
-      if(ids.length){
-        const {data:orders}=await db.from('orders').select('*').in('id',ids);
-        tripOrders[trip.id]=orders||[];
-      }else tripOrders[trip.id]=[];
+    // روابط كل الرحلات + طلباتها في نداءين بدل حلقة متتالية لكل رحلة
+    tripOrders={};
+    allTrips.forEach(t=>{ tripOrders[t.id]=[]; });
+    const _tripIds=allTrips.map(t=>t.id);
+    if(_tripIds.length){
+      const {data:toAll}=await db.from('trip_orders').select('trip_id,order_id').in('trip_id',_tripIds);
+      const _ids=[...new Set((toAll||[]).map(r=>r.order_id).filter(Boolean))];
+      const _byId={};
+      if(_ids.length){
+        const _chunks=[];
+        for(let i=0;i<_ids.length;i+=50) _chunks.push(db.from('orders').select(DRV_ORDER_COLS).in('id',_ids.slice(i,i+50)));
+        const _res=await Promise.all(_chunks);
+        _res.forEach(r=>(r.data||[]).forEach(o=>{ _byId[o.id]=o; }));
+      }
+      (toAll||[]).forEach(r=>{ const o=_byId[r.order_id]; if(o && tripOrders[r.trip_id]) tripOrders[r.trip_id].push(o); });
     }
 
     if(!activeTrip){
-      const {data:directOrders}=await db.from('orders').select('*')
+      const {data:directOrders}=await db.from('orders').select(DRV_ORDER_COLS)
         .eq('driver_id',driverRecord.id).in('status',['assigned','picked']);
       if(directOrders?.length){
         const fakeTrip={id:'direct',status:'active',created_at:new Date().toISOString(),driver_id:driverRecord.id};
