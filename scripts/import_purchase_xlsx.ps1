@@ -58,7 +58,10 @@ function Parse-Xlsx([string]$file){
       if($s1 -eq 'ملاحظات'){ $curPth = $arr.GetValue($r,24); $lineNo=0; continue }
       $code = if($cols -ge 18){ $arr.GetValue($r,18) } else { $null }
       $name = if($cols -ge 17){ "$($arr.GetValue($r,17))".Trim() } else { '' }
-      if($branch -and $curPth -ne $null -and $code -ne $null -and $name -ne '' -and ($code -is [double] -or "$code" -match '^\d+$')){
+      # ⚠️ الكود «صفر» مش كود — صنف مش مكوّد في eplus. بيترفض هنا وعلى السيرفر
+      #    كمان (migrate_146)، لأنه كان بيخلط تكاليف منتجات مختلفة تحت كود واحد.
+      $codeS = if($code -is [double]){ "$([int64]$code)" } else { "$code".Trim() }
+      if($branch -and $curPth -ne $null -and $code -ne $null -and $name -ne '' -and ($code -is [double] -or "$code" -match '^\d+$') -and $codeS -notmatch '^0+$'){
         $lineNo++
         # عمود 15 = ت.صلاحية كرقم إكسل تسلسلي (ممكن يكون فاضي لأصناف بلا صلاحية)
         $expRaw = if($cols -ge 15){ $arr.GetValue($r,15) } else { $null }
