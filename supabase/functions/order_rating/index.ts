@@ -24,7 +24,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 
    الاستعمال:
      GET  ?t=<token>                          → بيانات الرابط وحالته
-     POST ?t=<token> {e:1..5, d:1..5, c:""}   → حفظ التقييم
+     POST ?t=<token> {e,d,s:1..5, c:""}      → حفظ التقييم (صيدلي · مندوب · سرعة)
 
    ── مسار رقم الفاتورة (رابط ثابت لكل فرع، migrate_154) ──────────────
      GET  ?b=<حرف الفرع>                      → اسم الفرع والهوية
@@ -166,16 +166,16 @@ Deno.serve(async (req) => {
     if (state === "rated") return res({ error: "تم إرسال التقييم من هذا الرابط بالفعل." }, 409);
     if (state !== "open") return res({ error: "انتهت صلاحية هذا الرابط." }, 403);
 
-    let body: { e?: unknown; d?: unknown; c?: unknown };
+    let body: { e?: unknown; d?: unknown; s?: unknown; c?: unknown };
     try { body = await req.json(); } catch { return res({ error: "بيانات غير صالحة" }, 400); }
 
-    const e = star(body.e), d = star(body.d);
-    if (!e || !d) return res({ error: "من فضلك اختر تقييم الصيدلي ومندوب التوصيل (1 إلى 5)" }, 400);
+    const e = star(body.e), d = star(body.d), sp = star(body.s);
+    if (!e || !d || !sp) return res({ error: "من فضلك اختر تقييم الصيدلي ومندوب التوصيل وسرعة التوصيل (1 إلى 5)" }, 400);
     const c = typeof body.c === "string" ? body.c.trim().slice(0, 600) : null;
 
     /* الكتابة مشروطة بإن الرابط لسه مفتوح — ضد الضغط مرتين في نفس اللحظة */
     const { data: upd, error: upErr } = await db.from("order_rating_links")
-      .update({ employee_stars: e, driver_stars: d, comment: c || null,
+      .update({ employee_stars: e, driver_stars: d, speed_stars: sp, comment: c || null,
                 rated_at: new Date().toISOString(), status: "rated" })
       .eq("id", row.id).eq("status", "sent").is("rated_at", null)
       .select("id");

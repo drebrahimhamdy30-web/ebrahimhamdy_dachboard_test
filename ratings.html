@@ -43,7 +43,7 @@
   .card .hd .sub{color:var(--muted);font-weight:600;font-size:12px}
   .card .bd{padding:12px 14px}
   .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px;margin-bottom:10px}
-  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}
+  .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:12px}
   @media(max-width:800px){.kpis{grid-template-columns:repeat(2,1fr)}}
   .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;position:relative;overflow:hidden}
   .kpi::before{content:"";position:absolute;inset-inline-start:0;top:0;bottom:0;width:4px;background:var(--teal)}
@@ -138,6 +138,7 @@
       <div class="kpi"><div class="lbl">تقييمات وصلت</div><div class="val" id="k-rated">—</div></div>
       <div class="kpi"><div class="lbl">متوسط الصيادلة</div><div class="val" id="k-emp">—</div></div>
       <div class="kpi"><div class="lbl">متوسط مندوبي التوصيل</div><div class="val" id="k-drv">—</div></div>
+      <div class="kpi"><div class="lbl">⚡ متوسط سرعة التوصيل</div><div class="val" id="k-spd">—</div></div>
     </div>
     <div class="toolbar">
       <span class="flabel">الترتيب</span>
@@ -317,6 +318,7 @@ async function loadRank(){
     + (k.rated_bill ? ' <small>· + ' + num(k.rated_bill) + ' برقم الفاتورة</small>' : '');
   el('k-emp').innerHTML = (k.avg_employee != null ? (+k.avg_employee).toFixed(1) : '—') + ' <small>/ 5</small>';
   el('k-drv').innerHTML = (k.avg_driver != null ? (+k.avg_driver).toFixed(1) : '—') + ' <small>/ 5</small>';
+  el('k-spd').innerHTML = (k.avg_speed != null ? (+k.avg_speed).toFixed(1) : '—') + ' <small>/ 5</small>';
   renderRank();
 }
 function renderRank(){
@@ -330,7 +332,8 @@ function renderRank(){
       const cls = x.n < 5 ? 'thin' : x.n < 15 ? 'mid' : '';
       const cnt = x.n === 1 ? 'تقييم واحد' : x.n === 2 ? 'تقييمان' : x.n <= 10 ? x.n + ' تقييمات' : x.n + ' تقييم';
       const bill = x.n_bill ? ` <span title="تقييمات جاءت برقم الفاتورة (رابط الفرع الثابت)">· ${x.n_bill} بالفاتورة</span>` : '';
-      return `<div class="row ${cls}"><div class="no">${i + 1}</div><div class="nm" title="${esc(x.name)}">${esc(x.name || '—')}<small>${esc(x.branch || '')}</small></div><div class="bar"><i style="width:${Math.max(4, Math.round(100 * x.avg / 5))}%"></i></div><div class="val"><b>${(+x.avg).toFixed(1)}</b> <span>· ${cnt}</span>${bill}</div></div>`;
+      const spd = x.avg_speed != null ? ` <span title="متوسط تقييم سرعة التوصيل">· ⚡ ${(+x.avg_speed).toFixed(1)}</span>` : '';
+      return `<div class="row ${cls}"><div class="no">${i + 1}</div><div class="nm" title="${esc(x.name)}">${esc(x.name || '—')}<small>${esc(x.branch || '')}</small></div><div class="bar"><i style="width:${Math.max(4, Math.round(100 * x.avg / 5))}%"></i></div><div class="val"><b>${(+x.avg).toFixed(1)}</b> <span>· ${cnt}</span>${bill}${spd}</div></div>`;
     }).join('');
   };
   draw(RANK.employees, 'rankEmp');
@@ -346,7 +349,7 @@ async function loadComments(){
   } catch (e) { el('cBody').innerHTML = ''; el('cPager').innerHTML = ''; el('cEmpty').style.display = ''; el('cEmpty').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; return; }
   const rows = d.rows || [];
   el('cEmpty').style.display = rows.length ? 'none' : ''; el('cEmpty').textContent = 'لا توجد تقييمات في هذه الفترة.';
-  el('cBody').innerHTML = rows.map(r => `<tr><td>${fmtDT(r.rated_at)}${r.source === 'bill' ? '<div><span class="pill gr" title="العميل دخل برقم الفاتورة من رابط الفرع الثابت">بالفاتورة</span></div>' : ''}</td><td class="mono">${esc(r.bill_no || '')}</td><td>${esc(r.branch || '')}</td><td>${esc(r.employee_name || '—')}<div>${stars(r.employee_stars)}</div></td><td>${esc(r.driver_name || '—')}<div>${stars(r.driver_stars)}</div></td><td>${r.comment ? esc(r.comment) : '<span class="pill gr">بدون تعليق</span>'}</td></tr>`).join('');
+  el('cBody').innerHTML = rows.map(r => `<tr><td>${fmtDT(r.rated_at)}${r.source === 'bill' ? '<div><span class="pill gr" title="العميل دخل برقم الفاتورة من رابط الفرع الثابت">بالفاتورة</span></div>' : ''}</td><td class="mono">${esc(r.bill_no || '')}</td><td>${esc(r.branch || '')}</td><td>${esc(r.employee_name || '—')}<div>${stars(r.employee_stars)}</div></td><td>${esc(r.driver_name || '—')}<div>${stars(r.driver_stars)}</div>${r.speed_stars ? '<div title="سرعة التوصيل">⚡ ' + stars(r.speed_stars) + '</div>' : ''}</td><td>${r.comment ? esc(r.comment) : '<span class="pill gr">بدون تعليق</span>'}</td></tr>`).join('');
   renderPager(d.total || 0);
 }
 function renderPager(total){

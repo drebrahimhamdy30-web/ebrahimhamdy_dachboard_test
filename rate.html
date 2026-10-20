@@ -93,7 +93,8 @@ var TOKEN = new URLSearchParams(location.search).get('t') || '';
 /* رابط ثابت لكل فرع: ?b=<حرف الفرع> — العميل يدخل رقم الفاتورة أو يصوّر الباركود */
 var LETTER = (new URLSearchParams(location.search).get('b') || '').trim().toLowerCase();
 var LBL = ['', 'سيئ', 'مقبول', 'جيد', 'جيد جدًا', 'ممتاز'];
-var PICK = { e: 0, d: 0 };
+var PICK = { e: 0, d: 0, s: 0 };
+var LBL_S = ['', 'بطيء جدًا', 'بطيء', 'مقبول', 'سريع', 'سريع جدًا'];
 var SENDING = false;
 
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
@@ -121,13 +122,15 @@ function fmtDay(iso){
 function renderForm(d){
   el('h-sub').textContent = [d.branch ? 'فرع ' + d.branch : '', d.bill_no ? 'فاتورة ' + d.bill_no : '', fmtDay(d.delivered_at)].filter(Boolean).join(' · ');
   el('body').innerHTML =
-    '<div class="q"><div class="ttl">كيف كان تعامل الصيدلي معك؟</div><div class="who">الذي استقبل طلبك</div>' +
+    '<div class="q"><div class="ttl">💊 كيف كان تعامل الصيدلي معك؟</div><div class="who">الذي استقبل طلبك</div>' +
       stars('e') + '<div class="lbl" id="lbl-e"></div></div>' +
-    '<div class="q"><div class="ttl">كيف كان تعامل مندوب التوصيل؟</div><div class="who">الذي أوصل الطلب إليك</div>' +
+    '<div class="q"><div class="ttl">🛵 كيف كان تعامل مندوب التوصيل؟</div><div class="who">الذي أوصل الطلب إليك</div>' +
       stars('d') + '<div class="lbl" id="lbl-d"></div></div>' +
-    '<div class="q"><div class="ttl">ملاحظة إضافية <span style="color:var(--muted);font-weight:600;font-size:.78rem">(اختياري)</span></div>' +
+    '<div class="q"><div class="ttl">⚡ ما رأيك في سرعة التوصيل؟</div><div class="who">من وقت الطلب حتى وصوله إليك</div>' +
+      stars('s') + '<div class="lbl" id="lbl-s"></div></div>' +
+    '<div class="q"><div class="ttl">💬 ملاحظة إضافية <span style="color:var(--muted);font-weight:600;font-size:.78rem">(اختياري)</span></div>' +
       '<textarea id="cmt" maxlength="600" placeholder="ما الذي أعجبك أو تود تحسينه؟"></textarea></div>' +
-    '<button class="send" id="send" disabled onclick="submitRating()">إرسال التقييم</button>' +
+    '<button class="send" id="send" disabled onclick="submitRating()">إرسال التقييم ✅</button>' +
     '<div class="fmsg" id="fmsg"></div>';
 }
 function stars(k){
@@ -139,8 +142,8 @@ function pick(k, n, btn){
   PICK[k] = n;
   var g = btn.parentElement;
   [].forEach.call(g.children, function(x, i){ x.classList.toggle('on', i < n); });
-  el('lbl-' + k).textContent = LBL[n];
-  el('send').disabled = !(PICK.e && PICK.d);
+  el('lbl-' + k).textContent = (k === 's' ? LBL_S : LBL)[n];
+  el('send').disabled = !(PICK.e && PICK.d && PICK.s);
 }
 
 function renderState(state, d){
@@ -157,8 +160,8 @@ var BRANCH = '';
 function renderLookup(){
   el('body').innerHTML =
     '<div class="q lk">' +
-      '<div class="ttl">أهلًا بيك، سعداء بتقييمك لخدمتنا</div>' +
-      '<p>التقييم يخص آخر طلب وصل حضرتك، وده بيساعدنا في تطوير الخدمة بشكل مستمر.<br>اكتب <b>رقم الفاتورة</b> أو قم بتصوير الريسيت لآخر فاتورة.</p>' +
+      '<div class="ttl">👋 أهلًا بيك، سعداء بتقييمك لخدمتنا</div>' +
+      '<p>⭐ التقييم يخص آخر طلب وصل حضرتك، وده بيساعدنا في تطوير الخدمة بشكل مستمر.<br>🧾 اكتب <b>رقم الفاتورة</b> أو قم بتصوير الريسيت لآخر فاتورة.</p>' +
       '<input id="bill" inputmode="numeric" pattern="[0-9]*" maxlength="12" placeholder="رقم الفاتورة" autocomplete="off">' +
       '<button class="send" id="go" onclick="submitLookup()" style="margin-top:10px">متابعة</button>' +
       '<div class="or">أو</div>' +
@@ -263,14 +266,14 @@ async function load(){
 }
 
 async function submitRating(){
-  if (SENDING || !(PICK.e && PICK.d)) return;
+  if (SENDING || !(PICK.e && PICK.d && PICK.s)) return;
   SENDING = true;
   var b = el('send'); b.disabled = true; b.textContent = 'جارٍ الإرسال…';
   var m = el('fmsg'); m.className = 'fmsg'; m.textContent = '';
   try {
     var r = await fetch(FN + '?t=' + encodeURIComponent(TOKEN), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ e: PICK.e, d: PICK.d, c: (el('cmt').value || '').trim() })
+      body: JSON.stringify({ e: PICK.e, d: PICK.d, s: PICK.s, c: (el('cmt').value || '').trim() })
     });
     var d = await r.json();
     if (r.ok && d.ok) { renderState('rated', {}); return; }
@@ -280,7 +283,7 @@ async function submitRating(){
   } catch (e) {
     m.className = 'fmsg err'; m.textContent = 'تعذّر الاتصال. تأكد من الإنترنت وأعد المحاولة.';
   }
-  SENDING = false; b.disabled = false; b.textContent = 'إرسال التقييم';
+  SENDING = false; b.disabled = false; b.textContent = 'إرسال التقييم ✅';
 }
 
 load();
