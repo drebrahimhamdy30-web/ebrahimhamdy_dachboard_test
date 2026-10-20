@@ -25,6 +25,12 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
    الاستعمال:
      GET  ?t=<token>                          → بيانات الرابط وحالته
      POST ?t=<token> {e:1..5, d:1..5, c:""}   → حفظ التقييم
+
+   ── مسار رقم الفاتورة (رابط ثابت لكل فرع، migrate_154) ──────────────
+     GET  ?b=<حرف الفرع>                      → اسم الفرع والهوية
+     POST ?b=<حرف الفرع> {bill:"1491547"}     → يلاقي الطلب المُوصَّل ويرجّع
+                                                توكن جديد تكمّل به الصفحة
+     الحد وحالات الرفض جوّه rating_bill_resolve (20 محاولة/ساعة/IP).
    ═══════════════════════════════════════════════════════════════════ */
 
 const CORS = {
@@ -57,10 +63,60 @@ function star(v: unknown): number | null {
   return Number.isInteger(n) && n >= 1 && n <= 5 ? n : null;
 }
 
+async function orgInfo() {
+  const { data: org } = await db.from("org_settings")
+    .select("company_name,logo_url,brand_primary,brand_primary_dark").eq("id", 1).maybeSingle();
+  return {
+    name: org?.company_name || "الصيدلية",
+    logo: org?.logo_url || "",
+    color: org?.brand_primary || "#0d9488",
+    color_dark: org?.brand_primary_dark || "#0f766e",
+  };
+}
+
+/* IP العميل خلف البوابة — للحد من محاولات تخمين أرقام الفواتير */
+function clientIp(req: Request): string | null {
+  const h = req.headers;
+  const v = h.get("cf-connecting-ip") || h.get("x-real-ip") || (h.get("x-forwarded-for") || "").split(",")[0].trim();
+  return v || null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
-  const token = new URL(req.url).searchParams.get("t") || "";
+  const url = new URL(req.url);
+  const letter = (url.searchParams.get("b") || "").trim().toLowerCase();
+
+  /* ── مسار رقم الفاتورة ─────────────────────────────────────────── */
+  if (letter) {
+    if (!/^[a-z]$/.test(letter)) return res({ error: "رابط غير صالح" }, 400);
+    const { data: br } = await db.from("branches").select("name").eq("letter", letter).eq("is_active", true).maybeSingle();
+    if (!br) return res({ error: "رابط غير صالح" }, 404);
+
+    if (req.method === "GET") {
+      return res({ org: await orgInfo(), branch: br.name, state: "lookup" });
+    }
+    if (req.method === "POST") {
+      let body: { bill?: unknown };
+      try { body = await req.json(); } catch { return res({ error: "بيانات غير صالحة" }, 400); }
+      const bill = String(body.bill ?? "").replace(/[^0-9]/g, "");
+      if (bill.length < 3 || bill.length > 12) return res({ error: "من فضلك أدخل رقم الفاتورة كما هو مطبوع على الإيصال" }, 400);
+
+      const { data, error } = await db.rpc("rating_bill_resolve", { p_letter: letter, p_bill: bill, p_ip: clientIp(req) });
+      if (error) return res({ error: "خطأ في الخادم" }, 500);
+      const r = (data || {}) as { state?: string; token?: string; bill_no?: string; delivered_at?: string; branch?: string };
+      switch (r.state) {
+        case "open":          return res({ state: "open", token: r.token, bill_no: r.bill_no, delivered_at: r.delivered_at, branch: r.branch });
+        case "rated":         return res({ state: "rated", bill_no: bill, branch: br.name });
+        case "not_delivered": return res({ error: "سيتاح التقييم بعد وصول الطلب إليك." }, 409);
+        case "throttled":     return res({ error: "محاولات كثيرة. حاول مرة أخرى بعد قليل." }, 429);
+        default:              return res({ error: "لم نجد فاتورة بهذا الرقم في فرع " + br.name + ". تأكد من الرقم المطبوع على الإيصال." }, 404);
+      }
+    }
+    return res({ error: "طريقة غير مدعومة" }, 405);
+  }
+
+  const token = url.searchParams.get("t") || "";
   /* 32 حرف hex — بنرفض أي شكل تاني من غير ما نلمس القاعدة أصلًا */
   if (!/^[0-9a-f]{32}$/.test(token)) return res({ error: "رابط غير صالح" }, 400);
 
@@ -75,19 +131,14 @@ Deno.serve(async (req) => {
   if (!row) return res({ error: "رابط غير صالح" }, 404);
 
   /* الهوية والفرع — بيرجعوا مع كل حالة عشان الصفحة تتلوّن حتى لو منتهي */
-  const [{ data: org }, { data: br }] = await Promise.all([
-    db.from("org_settings").select("company_name,logo_url,brand_primary,brand_primary_dark").eq("id", 1).maybeSingle(),
+  const [org, { data: br }] = await Promise.all([
+    orgInfo(),
     row.branch_id
       ? db.from("branches").select("name").eq("id", row.branch_id).maybeSingle()
       : Promise.resolve({ data: null }),
   ]);
   const base = {
-    org: {
-      name: org?.company_name || "الصيدلية",
-      logo: org?.logo_url || "",
-      color: org?.brand_primary || "#0d9488",
-      color_dark: org?.brand_primary_dark || "#0f766e",
-    },
+    org,
     branch: br?.name || "",
     bill_no: row.bill_no || "",
     delivered_at: row.delivered_at,

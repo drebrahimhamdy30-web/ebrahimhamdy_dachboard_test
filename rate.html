@@ -57,6 +57,16 @@
   .done p{margin:0;color:var(--muted);font-size:.88rem;line-height:1.8}
   .fmsg{font-size:.8rem;font-weight:700;margin-top:8px;text-align:center;min-height:18px}
   .fmsg.err{color:var(--err)}
+  /* مسار رقم الفاتورة */
+  .lk p{margin:0 0 12px;font-size:.9rem;line-height:1.8;color:var(--txt)}
+  .lk input{width:100%;font-family:inherit;font-size:1.25rem;font-weight:800;letter-spacing:1px;text-align:center;direction:ltr;
+            border:1.5px solid var(--line);border-radius:12px;padding:12px;background:var(--card);color:var(--txt);outline:none}
+  .lk input:focus{border-color:var(--brand)}
+  .alt{width:100%;background:var(--card);color:var(--brand-d);border:1.5px solid var(--brand);border-radius:12px;padding:12px;
+       font-family:inherit;font-weight:800;font-size:.95rem;cursor:pointer;margin-top:10px}
+  .alt:disabled{opacity:.5}
+  .or{text-align:center;color:var(--muted);font-size:.78rem;font-weight:700;margin:10px 0 0}
+  .hint{font-size:.76rem;color:var(--muted);text-align:center;margin-top:8px;line-height:1.7}
 </style>
 </head>
 <body>
@@ -80,6 +90,8 @@
 var FN = 'https://supabase.ebrahimhamdy.com/functions/v1/order_rating';
 
 var TOKEN = new URLSearchParams(location.search).get('t') || '';
+/* رابط ثابت لكل فرع: ?b=<حرف الفرع> — العميل يدخل رقم الفاتورة أو يصوّر الباركود */
+var LETTER = (new URLSearchParams(location.search).get('b') || '').trim().toLowerCase();
 var LBL = ['', 'سيئ', 'مقبول', 'جيد', 'جيد جدًا', 'ممتاز'];
 var PICK = { e: 0, d: 0 };
 var SENDING = false;
@@ -140,7 +152,103 @@ function renderState(state, d){
   }
 }
 
+/* ═══ مسار رقم الفاتورة ═══════════════════════════════════════════ */
+var BRANCH = '';
+function renderLookup(){
+  el('body').innerHTML =
+    '<div class="q lk">' +
+      '<div class="ttl">تقييم الصيدلي ومندوب التوصيل</div>' +
+      '<p>برجاء كتابة <b>رقم الفاتورة</b> المطبوع على الإيصال، أو تصوير الباركود الموجود أسفله.</p>' +
+      '<input id="bill" inputmode="numeric" pattern="[0-9]*" maxlength="12" placeholder="رقم الفاتورة" autocomplete="off">' +
+      '<button class="send" id="go" onclick="submitLookup()" style="margin-top:10px">متابعة</button>' +
+      '<div class="or">أو</div>' +
+      '<button class="alt" id="scanBtn" onclick="document.getElementById(\'photo\').click()">📷 تصوير الإيصال</button>' +
+      '<input type="file" id="photo" accept="image/*" capture="environment" style="display:none" onchange="onPhoto(this)">' +
+      '<div class="hint">وجّه الكاميرا على الباركود أسفل الإيصال وسيُقرأ الرقم تلقائيًا.</div>' +
+      '<div class="fmsg" id="lmsg"></div>' +
+    '</div>';
+  el('bill').addEventListener('keydown', function(e){ if (e.key === 'Enter') submitLookup(); });
+  el('bill').addEventListener('input', function(){ this.value = this.value.replace(/[^0-9]/g, ''); });
+}
+function lmsg(t, isErr){ var m = el('lmsg'); if (!m) return; m.className = 'fmsg' + (isErr ? ' err' : ''); m.textContent = t || ''; }
+
+async function submitLookup(){
+  var bill = (el('bill').value || '').replace(/[^0-9]/g, '');
+  if (bill.length < 3) { lmsg('أدخل رقم الفاتورة كما هو مطبوع على الإيصال.', true); return; }
+  var b = el('go'); b.disabled = true; b.textContent = 'جارٍ البحث…'; lmsg('');
+  try {
+    var r = await fetch(FN + '?b=' + encodeURIComponent(LETTER), { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ bill: bill }) });
+    var d = await r.json();
+    if (r.ok && d.state === 'open' && d.token) { TOKEN = d.token; await load(); return; }
+    if (r.ok && d.state === 'rated') { renderState('rated', { branch: d.branch || BRANCH, bill_no: d.bill_no }); return; }
+    lmsg(d.error || 'تعذّر العثور على الفاتورة.', true);
+  } catch (e) { lmsg('تعذّر الاتصال. تأكد من الإنترنت وأعد المحاولة.', true); }
+  b.disabled = false; b.textContent = 'متابعة';
+}
+
+/* قراءة الباركود من صورة الإيصال — المكتبة بتتحمّل عند أول استعمال بس */
+var ZX_READY = null;
+function loadZXing(){
+  if (ZX_READY) return ZX_READY;
+  ZX_READY = new Promise(function(resolve, reject){
+    if (window.ZXing) return resolve();
+    var s = document.createElement('script');
+    s.src = 'https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js';
+    s.onload = function(){ resolve(); }; s.onerror = function(){ ZX_READY = null; reject(new Error('lib')); };
+    document.head.appendChild(s);
+  });
+  return ZX_READY;
+}
+async function onPhoto(inp){
+  var f = inp.files && inp.files[0]; if (!f) return;
+  var btn = el('scanBtn'); btn.disabled = true; btn.textContent = 'جارٍ قراءة الباركود…'; lmsg('');
+  try {
+    await loadZXing();
+    var img = await new Promise(function(res, rej){ var i = new Image(); i.onload = function(){ res(i); }; i.onerror = rej; i.src = URL.createObjectURL(f); });
+    var txt = decodeBarcode(img);
+    var m = txt && txt.match(/(\d{4,12})(?!.*\d)/);
+    if (m) { el('bill').value = m[1]; lmsg('تمت قراءة رقم الفاتورة: ' + m[1]); submitLookup(); }
+    else lmsg('لم نتمكن من قراءة الباركود. حاول تصويره أقرب وبإضاءة أوضح، أو اكتب رقم الفاتورة.', true);
+  } catch (e) { lmsg('تعذّر تشغيل القارئ. اكتب رقم الفاتورة.', true); }
+  btn.disabled = false; btn.textContent = '📷 تصوير الإيصال'; inp.value = '';
+}
+/* تجريب الصورة كاملة ثم بتكبير ودورانات — صور الموبايل بتيجي مايلة ومضغوطة */
+function decodeBarcode(img){
+  var hints = new Map(); hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+  var reader = new ZXing.MultiFormatReader(); reader.setHints(hints);
+  var w0 = img.naturalWidth, h0 = img.naturalHeight;
+  var maxSide = 1600, base = Math.min(1, maxSide / Math.max(w0, h0));
+  var scales = [base, base * 2], rots = [0, 90, 270, 180];
+  for (var si = 0; si < scales.length; si++) for (var ri = 0; ri < rots.length; ri++) {
+    var sc = scales[si], rot = rots[ri];
+    var w = Math.round(w0 * sc), h = Math.round(h0 * sc);
+    var c = document.createElement('canvas'); c.width = rot % 180 ? h : w; c.height = rot % 180 ? w : h;
+    var x = c.getContext('2d'); x.translate(c.width / 2, c.height / 2); x.rotate(rot * Math.PI / 180); x.drawImage(img, -w / 2, -h / 2, w, h);
+    var src = new ZXing.HTMLCanvasElementLuminanceSource(c);
+    var bins = [new ZXing.HybridBinarizer(src), new ZXing.GlobalHistogramBinarizer(src)];
+    for (var bi = 0; bi < bins.length; bi++) {
+      try { return reader.decode(new ZXing.BinaryBitmap(bins[bi]), hints).getText(); } catch (e) {}
+    }
+  }
+  return null;
+}
+
+async function loadBranch(){
+  try {
+    var r = await fetch(FN + '?b=' + encodeURIComponent(LETTER));
+    var d = await r.json();
+    if (!r.ok) { el('h-sub').textContent = ''; el('body').innerHTML = '<div class="msg err">' + esc(d.error || 'رابط غير صالح') + '</div>'; return; }
+    applyOrg(d.org); BRANCH = d.branch || '';
+    el('h-sub').textContent = BRANCH ? 'فرع ' + BRANCH : '';
+    renderLookup();
+  } catch (e) {
+    el('h-sub').textContent = '';
+    el('body').innerHTML = '<div class="msg err">تعذّر الاتصال. تأكد من الإنترنت وأعد المحاولة.</div>';
+  }
+}
+
 async function load(){
+  if (!TOKEN && /^[a-z]$/.test(LETTER)) return loadBranch();
   if (!/^[0-9a-f]{32}$/.test(TOKEN)) { el('h-sub').textContent = ''; el('body').innerHTML = '<div class="msg err">رابط غير صالح.</div>'; return; }
   try {
     var r = await fetch(FN + '?t=' + encodeURIComponent(TOKEN));
