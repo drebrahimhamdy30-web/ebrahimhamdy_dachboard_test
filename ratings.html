@@ -6,24 +6,24 @@
 <title>تقييم العملاء</title>
 <!--
   ════════════════════════════════════════════════════════════════
-  تقييم العملاء للصيادلة ومندوبي التوصيل
+  تقييم العملاء للصيادلة ومندوبي التوصيل — النظام: رابط ثابت لكل فرع
   ════════════════════════════════════════════════════════════════
-  أربع تبويبات:
-    • الترتيب   — للكل اللي عندهم الشاشة (الصيادلة بيشوفوا الأعلى والأقل).
-                  المتوسط **وعدد التقييمات جنب كل اسم**، من غير حد أدنى
-                  (قرار المالك: نوضّح العدد بدل ما نخبّي الأسماء القليلة).
-    • التعليقات — الإدارة فقط (أو الصيادلة لو الإعداد مفعّل). مقسّمة 50/صفحة.
-    • روابط اليوم — اللي بيبعت (أدمن/مدير أو دور عنده «تعديل» على الشاشة).
-                  زر «نسخ الرسالة» بينادي rating_link_copy: التوكن بيتولّد
-                  لحظتها والصف بيتعلّم «نُسخت» ومايتنسخش تاني.
-    • الإعدادات — الأدمن.
-  كل الفلاتر فورية. كل البيانات من RPCs بترجّع jsonb (مش setof) فمفيش قص
-  عند 1000. الحراسة الحقيقية على السيرفر (migrate_152) — الإخفاء هنا للواجهة.
+  العميل بيوصله رابط الفرع في رسالة ما بعد الطلب، يكتب رقم الفاتورة أو
+  يصوّر الإيصال، ويقيّم الصيدلي والمندوب وسرعة التوصيل (rate.html).
+  الشاشة دي بتعرض النتيجة:
+    • الترتيب   — المؤشرات (نسبة التقييم من طلبات التوصيل، المتوسطات مع
+                  التغيّر عن الفترة السابقة) + التقييمات يومًا بيوم + توزيع
+                  النجوم + الفروع + ترتيب الصيادلة والمندوبين بنجوم واتجاه
+                  آخر 4 أسابيع. كله من rating_overview (نداء واحد، jsonb).
+    • التعليقات — الإدارة (أو الصيادلة لو الإعداد مفعّل). 50/صفحة.
+    • الإعدادات — الأدمن: صلاحية الرابط بعد فتحه، ورؤية الصيادلة للتعليقات.
+  مفيش دفعة يومية ولا روابط بتتبعت (migrate_156) — الدوال فاضلة مقفولة.
+  الحراسة الحقيقية على السيرفر؛ الإخفاء هنا للواجهة.
   ════════════════════════════════════════════════════════════════
 -->
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
-  :root{--teal:#0d9488;--teal-d:#0f766e;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--bg:#f1f5f9;--card:#fff;--green:#059669;--red:#dc2626;--amber:#f59e0b;--wa:#25D366}
+  :root{--teal:#0d9488;--teal-d:#0f766e;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--bg:#f1f5f9;--card:#fff;--green:#059669;--red:#dc2626;--amber:#f59e0b}
   *{box-sizing:border-box} body{font-family:'Cairo',sans-serif;margin:0;background:var(--bg);color:var(--ink);padding:16px}
   .wrap{max-width:1340px;margin:0 auto}
   header.rpt{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;border-bottom:2px solid var(--teal);padding-bottom:10px;margin-bottom:12px}
@@ -35,37 +35,65 @@
   .tabs{display:flex;gap:7px;margin-bottom:12px;flex-wrap:wrap}
   .tab{font-size:14px;font-weight:700;padding:8px 20px;border:1px solid var(--line);border-radius:9px;background:#fff;cursor:pointer}
   .tab.active{background:var(--teal);color:#fff;border-color:var(--teal)}
-  .tab .cnt{font-size:11px;background:#fee2e2;color:#991b1b;border-radius:99px;padding:0 7px;margin-inline-start:4px}
-  .tab.active .cnt{background:#fff;color:var(--teal-d)}
   .pane{display:none} .pane.active{display:block}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:14px}
-  .card .hd{padding:10px 14px;border-bottom:1px solid var(--line);font-weight:800;font-size:13.5px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .card .hd .sub{color:var(--muted);font-weight:600;font-size:12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+  .card h3{font-size:13.5px;margin:0;padding:10px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .card h3 .sub{color:var(--muted);font-weight:600;font-size:11.5px}
   .card .bd{padding:12px 14px}
   .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px;margin-bottom:10px}
-  .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:12px}
-  @media(max-width:800px){.kpis{grid-template-columns:repeat(2,1fr)}}
-  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;position:relative;overflow:hidden}
-  .kpi::before{content:"";position:absolute;inset-inline-start:0;top:0;bottom:0;width:4px;background:var(--teal)}
-  .kpi .lbl{color:var(--muted);font-size:12px;font-weight:700;margin-bottom:3px}
-  .kpi .val{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--teal-d)} .kpi .val small{font-size:12px;color:var(--muted);font-weight:600}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  /* ── المؤشرات ── */
+  .kpis{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr 1fr;gap:10px;margin-bottom:12px}
+  @media(max-width:1000px){.kpis{grid-template-columns:1fr 1fr}}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 16px;display:flex;gap:12px;align-items:center;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+  .kpi .ic{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;background:#f0fdfa;flex:0 0 auto}
+  .kpi .lbl{color:var(--muted);font-size:12px;font-weight:700}
+  .kpi .val{font-size:26px;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums}
+  .kpi .val small{font-size:12px;color:var(--muted);font-weight:600}
+  .kpi .st{color:var(--amber);font-size:13px;letter-spacing:1px;line-height:1} .st .off{color:#e2e8f0}
+  .kpi .sub{font-size:11.5px;color:var(--muted);font-weight:600;margin-top:2px}
+  .kpi.hero{background:linear-gradient(135deg,var(--teal-d),var(--teal));color:#fff;border:0}
+  .kpi.hero .lbl,.kpi.hero .sub,.kpi.hero .val small{color:rgba(255,255,255,.82)}
+  .ring{width:52px;height:52px;border-radius:50%;background:conic-gradient(#fff 0 var(--p,0%),rgba(255,255,255,.25) var(--p,0%) 100%);display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .ring b{width:38px;height:38px;border-radius:50%;background:var(--teal-d);display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:800;color:#fff}
+  .delta{display:inline-block;font-size:11px;font-weight:800;border-radius:99px;padding:1px 8px;background:#dcfce7;color:#166534;margin-inline-start:6px;vertical-align:middle}
+  .delta.dn{background:#fee2e2;color:#991b1b} .delta.eq{background:#f1f5f9;color:#475569}
+  /* ── الرسوم ── */
+  .charts{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:12px;margin-bottom:12px}
+  @media(max-width:1000px){.charts{grid-template-columns:1fr}}
+  .ch{padding:10px 14px 8px;position:relative}
+  .ch svg{width:100%;height:150px;display:block;overflow:visible}
+  .dist{display:grid;grid-template-columns:auto 1fr auto;gap:6px 10px;align-items:center;font-size:12.5px;padding:8px 14px 12px}
+  .dist .s{color:var(--amber);white-space:nowrap;letter-spacing:1px}
+  .dist .bar{height:12px;background:#f1f5f9;border-radius:6px;overflow:hidden}
+  .dist .bar i{display:block;height:100%;background:var(--teal);border-radius:6px}
+  .dist .n{font-weight:800;font-variant-numeric:tabular-nums;color:var(--muted);min-width:34px;text-align:left;direction:ltr}
+  .br{padding:8px 14px 12px;display:grid;gap:8px}
+  .brrow{display:grid;grid-template-columns:100px 1fr auto;gap:10px;align-items:center;font-size:12.5px}
+  .brrow .b{height:10px;background:#f1f5f9;border-radius:6px;overflow:hidden} .brrow .b i{display:block;height:100%;background:var(--teal);border-radius:6px}
+  .brrow .v{font-weight:800;font-variant-numeric:tabular-nums} .brrow .v small{color:var(--muted);font-weight:600}
+  .tip{position:absolute;background:#0f172a;color:#fff;font-size:11.5px;font-weight:700;padding:5px 9px;border-radius:7px;pointer-events:none;display:none;white-space:nowrap;z-index:5}
+  /* ── الترتيب ── */
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   @media(max-width:900px){.grid2{grid-template-columns:1fr}}
-  .rank h3{font-size:13.5px;margin:0;padding:10px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
-  .rank h3 .sub{color:var(--muted);font-weight:600;font-size:11.5px}
-  .rank .list{padding:6px 14px 10px}
-  .row{display:grid;grid-template-columns:24px 130px 1fr 120px;gap:8px;align-items:center;padding:6px 0;border-bottom:1px dashed #eef2f7;font-size:13px}
-  .row .no{color:var(--muted);font-weight:800;text-align:center}
-  .row .nm{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .row .nm small{display:block;color:var(--muted);font-weight:600;font-size:11px}
-  .bar{height:18px;background:#f1f5f9;border-radius:6px;overflow:hidden}
-  .bar i{display:block;height:100%;background:var(--teal);border-radius:6px}
-  .row .val{font-weight:800;font-variant-numeric:tabular-nums;font-size:12.5px;white-space:nowrap}
-  .row .val b{font-size:14px} .row .val span{color:var(--muted);font-weight:600}
-  .row.thin .bar i{opacity:.35} .row.mid .bar i{opacity:.65}
-  .legend{display:flex;gap:14px;padding:8px 14px;font-size:11.5px;color:var(--muted);align-items:center;flex-wrap:wrap;border-top:1px solid var(--line)}
-  .legend i{display:inline-block;width:26px;height:10px;background:var(--teal);border-radius:3px;vertical-align:middle;margin-inline-end:4px}
-  .legend i.a{opacity:.35}.legend i.b{opacity:.65}
+  .list{padding:4px 14px 8px}
+  .row{display:grid;grid-template-columns:28px 38px 1fr auto;gap:10px;align-items:center;padding:9px 0;border-bottom:1px dashed #eef2f7}
+  .row:last-child{border-bottom:0}
+  .no{width:26px;height:26px;border-radius:50%;background:#f1f5f9;color:var(--muted);font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center}
+  .no.g{background:#fef3c7;color:#92400e} .no.s{background:#e2e8f0;color:#334155} .no.b{background:#fde8d8;color:#9a3412}
+  .av{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#ccfbf1,#99f6e4);color:var(--teal-d);font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center}
+  .nm{min-width:0} .nm .n{font-weight:800;font-size:13.5px;line-height:1.35}
+  .nm .meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:3px;font-size:11.5px;color:var(--muted);font-weight:600}
+  .chip{display:inline-block;font-size:10.5px;font-weight:800;border-radius:99px;padding:1px 8px;white-space:nowrap}
+  .chip.gr{background:#f1f5f9;color:#475569} .chip.bl{background:#e0f2fe;color:#075985} .chip.tl{background:#ccfbf1;color:#0f766e}
+  .sc{text-align:left;direction:ltr;white-space:nowrap}
+  .sc .st{color:var(--amber);font-size:15px;letter-spacing:1px;line-height:1}
+  .sc .v{font-weight:800;font-size:15px;margin-left:6px;vertical-align:middle;font-variant-numeric:tabular-nums}
+  .sc .spd{font-size:11.5px;color:var(--muted);font-weight:700;margin-top:2px;direction:rtl}
+  .sc .trend{display:inline-block;width:46px;height:14px;vertical-align:middle;margin-left:6px}
+  .legend{display:flex;gap:14px;padding:8px 14px;font-size:11.5px;color:var(--muted);align-items:center;flex-wrap:wrap;border-top:1px solid var(--line);background:#fafbfc}
+  .empty{padding:28px;text-align:center;color:var(--muted);font-size:13px} .empty .big{font-size:34px;margin-bottom:4px}
+  .err{padding:14px;color:var(--red);font-weight:700;font-size:13px}
+  /* ── التعليقات ── */
   table.t{width:100%;border-collapse:collapse;font-size:13px}
   table.t th{background:#f8fafc;color:#475569;font-weight:700;padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);font-size:12px;white-space:nowrap}
   table.t td{padding:9px 10px;border-bottom:1px solid #eef2f7;vertical-align:top}
@@ -73,32 +101,18 @@
   .tblwrap{overflow-x:auto}
   .stars{color:var(--amber);letter-spacing:1px;font-size:13px;white-space:nowrap} .stars .off{color:#d1d5db}
   .pill{display:inline-block;font-size:11px;font-weight:800;border-radius:99px;padding:2px 9px;white-space:nowrap}
-  .pill.b{background:#e0f2fe;color:#075985}.pill.g{background:#dcfce7;color:#166534}.pill.r{background:#fee2e2;color:#991b1b}.pill.y{background:#fef3c7;color:#92400e}.pill.gr{background:#f1f5f9;color:#475569}
-  .btn{font-weight:800;font-size:12.5px;border:0;border-radius:8px;padding:7px 12px;cursor:pointer;white-space:nowrap}
-  .btn.wa{background:var(--wa);color:#fff} .btn.wa:hover{background:#1ebe5b}
-  .btn.ghost{background:#fff;border:1px solid var(--line);color:#475569}
-  .btn.teal{background:var(--teal);color:#fff}
-  .mono{font-variant-numeric:tabular-nums;direction:ltr;display:inline-block;unicode-bidi:isolate}
-  .dim td{color:var(--muted)}
-  .empty{padding:24px;text-align:center;color:var(--muted);font-size:13px}
-  .err{padding:14px;color:var(--red);font-weight:700;font-size:13px}
+  .pill.r{background:#fee2e2;color:#991b1b}.pill.gr{background:#f1f5f9;color:#475569}
   .pager{display:flex;gap:4px;align-items:center;justify-content:center;padding:10px;flex-wrap:wrap;font-size:12.5px}
   .pager button{padding:4px 9px;font-size:12.5px} .pager button.on{background:var(--teal);color:#fff;border-color:var(--teal)}
   .pager .info{color:var(--muted);font-weight:700;margin-inline-start:8px}
-  .set{display:grid;grid-template-columns:1fr 200px;gap:10px 14px;align-items:center;max-width:760px}
+  /* ── الإعدادات ── */
+  .set{display:grid;grid-template-columns:1fr 200px;gap:10px 14px;align-items:center;max-width:720px}
   .set label{font-size:13px;font-weight:700} .set label small{display:block;color:var(--muted);font-weight:600;font-size:11.5px}
   .set input[type=number]{text-align:center;font-weight:800}
-  .set .full{grid-column:1/-1}
-  .set textarea{width:100%;min-height:90px;resize:vertical;font-size:12.5px;line-height:1.7}
+  .btn{font-weight:800;font-size:12.5px;border:0;border-radius:8px;padding:7px 12px;cursor:pointer;white-space:nowrap} .btn.teal{background:var(--teal);color:#fff}
   .note{margin-top:10px;font-size:12px;color:var(--muted);background:#fff;border:1px dashed var(--line);border-radius:10px;padding:10px 14px;line-height:1.8}
-  /* مودال الرسالة */
-  .ov{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:50;padding:16px}
-  .ov.on{display:flex}
-  .modal{background:#fff;border-radius:14px;max-width:520px;width:100%;padding:16px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
-  .modal h3{margin:0 0 8px;font-size:15px}
-  .modal textarea{width:100%;height:170px;resize:none;font-size:13px;line-height:1.8;background:#e7fbe9;border-color:#bbf7d0}
-  .modal .acts{display:flex;gap:8px;justify-content:flex-start;margin-top:10px;align-items:center;flex-wrap:wrap}
-  .modal .ok{color:var(--green);font-weight:800;font-size:12.5px}
+  .links{display:grid;grid-template-columns:120px 1fr;gap:6px 12px;align-items:center;font-size:12.5px;max-width:720px}
+  .links code{direction:ltr;display:inline-block;background:#f8fafc;border:1px solid var(--line);border-radius:6px;padding:2px 8px;font-size:12px}
   #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 18px;border-radius:10px;font-weight:700;font-size:13px;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.25);display:none;max-width:90vw}
   #toast.err{background:var(--red)}
 </style>
@@ -127,33 +141,36 @@
   <div class="tabs" id="tabs">
     <button class="tab active" data-tk="rank" onclick="showTab('rank')">📊 الترتيب</button>
     <button class="tab" data-tk="comments" onclick="showTab('comments')" id="tab-comments">💬 التعليقات</button>
-    <button class="tab" data-tk="links" onclick="showTab('links')" id="tab-links">🔗 روابط اليوم <span class="cnt" id="pendCnt" style="display:none">0</span></button>
     <button class="tab" data-tk="settings" onclick="showTab('settings')" id="tab-settings">⚙ الإعدادات</button>
   </div>
 
   <!-- ═══ الترتيب ═══ -->
   <div class="pane active" id="pane-rank">
     <div class="kpis">
-      <div class="kpi"><div class="lbl">روابط أُرسلت في الفترة</div><div class="val" id="k-sent">—</div></div>
-      <div class="kpi"><div class="lbl">تقييمات وصلت</div><div class="val" id="k-rated">—</div></div>
-      <div class="kpi"><div class="lbl">متوسط الصيادلة</div><div class="val" id="k-emp">—</div></div>
-      <div class="kpi"><div class="lbl">متوسط مندوبي التوصيل</div><div class="val" id="k-drv">—</div></div>
-      <div class="kpi"><div class="lbl">⚡ متوسط سرعة التوصيل</div><div class="val" id="k-spd">—</div></div>
+      <div class="kpi hero"><div class="ring" id="ring"><b id="k-pct">—</b></div><div><div class="lbl">نسبة التقييم</div><div class="val" id="k-rated">—</div><div class="sub">العملاء الذين قيّموا من إجمالي طلبات التوصيل في الفترة</div></div></div>
+      <div class="kpi"><div class="ic">⭐</div><div><div class="lbl">المتوسط العام</div><div class="val" id="k-all">—</div><div class="st" id="s-all"></div></div></div>
+      <div class="kpi"><div class="ic">💊</div><div><div class="lbl">الصيادلة</div><div class="val" id="k-emp">—</div><div class="st" id="s-emp"></div></div></div>
+      <div class="kpi"><div class="ic">🛵</div><div><div class="lbl">مندوبو التوصيل</div><div class="val" id="k-drv">—</div><div class="st" id="s-drv"></div></div></div>
+      <div class="kpi"><div class="ic">⚡</div><div><div class="lbl">سرعة التوصيل</div><div class="val" id="k-spd">—</div><div class="st" id="s-spd"></div></div></div>
     </div>
+
+    <div class="charts">
+      <div class="card"><h3>📈 التقييمات يومًا بيوم <span class="sub" id="dailySub">عدد التقييمات · المتوسط اليومي عند التحويم</span></h3><div class="ch"><svg id="line" viewBox="0 0 600 150" preserveAspectRatio="none"></svg><div class="tip" id="tip"></div></div></div>
+      <div class="card"><h3>🌟 توزيع النجوم <span class="sub">الأسئلة الثلاثة معًا</span></h3><div class="dist" id="dist"></div></div>
+      <div class="card"><h3>🏪 الفروع <span class="sub">المتوسط العام · عدد التقييمات</span></h3><div class="br" id="branches"></div></div>
+    </div>
+
     <div class="toolbar">
       <span class="flabel">الترتيب</span>
-      <select id="sortSel">
-        <option value="top">الأعلى تقييمًا</option>
-        <option value="low">الأقل تقييمًا</option>
-        <option value="n">الأكثر تقييمات</option>
-      </select>
+      <select id="sortSel"><option value="top">الأعلى تقييمًا</option><option value="low">الأقل تقييمًا</option><option value="n">الأكثر تقييمات</option></select>
       <span class="flabel" style="margin-inline-start:auto" id="rankInfo"></span>
     </div>
     <div class="grid2">
-      <div class="card rank"><h3>👩‍⚕️ الصيادلة <span class="sub">المتوسط · عدد التقييمات</span></h3><div class="list" id="rankEmp"><div class="empty">جارٍ التحميل…</div></div></div>
-      <div class="card rank"><h3>🛵 مندوبو التوصيل <span class="sub">المتوسط · عدد التقييمات</span></h3><div class="list" id="rankDrv"><div class="empty">جارٍ التحميل…</div></div></div>
+      <div class="card"><h3>💊 الصيادلة <span class="sub">المتوسط · عدد التقييمات · الاتجاه</span></h3><div class="list" id="rankEmp"></div>
+        <div class="legend"><span><span class="chip gr">أقل من 5</span></span><span><span class="chip bl">5 إلى 14</span></span><span><span class="chip tl">15 فأكثر</span></span><span style="margin-inline-start:auto">الخط الصغير = اتجاه آخر 4 أسابيع.</span></div></div>
+      <div class="card"><h3>🛵 مندوبو التوصيل <span class="sub">المتوسط · عدد التقييمات · السرعة · الاتجاه</span></h3><div class="list" id="rankDrv"></div>
+        <div class="legend"><span>⚡ السرعة = متوسط تقييم العملاء لسرعة التوصيل في طلبات المندوب.</span></div></div>
     </div>
-    <div class="card"><div class="legend"><span><i class="a"></i> أقل من 5 تقييمات</span><span><i class="b"></i> 5 إلى 14</span><span><i></i> 15 فأكثر</span><span style="margin-inline-start:auto">كلما زاد عدد التقييمات زاد تشبّع اللون، والعدد مكتوب بجانب كل اسم.</span></div></div>
   </div>
 
   <!-- ═══ التعليقات ═══ -->
@@ -172,114 +189,63 @@
     </div>
   </div>
 
-  <!-- ═══ روابط اليوم ═══ -->
-  <div class="pane" id="pane-links">
-    <div class="toolbar">
-      <span id="batchInfo" style="font-size:12.5px;color:var(--muted);font-weight:600">—</span>
-      <span style="margin-inline-start:auto;display:flex;gap:6px;align-items:center" id="genBox">
-        <input type="date" id="genDate" title="يوم التوصيل الذي تُولَّد له الدفعة">
-        <button class="btn ghost" onclick="generateNow()">⟳ توليد الدفعة الآن</button>
-      </span>
-    </div>
-    <div class="card">
-      <div class="hd">بانتظار الإرسال <span class="sub" id="pendSub"></span><span class="pill y" style="margin-inline-start:auto" id="validPill"></span></div>
-      <div class="tblwrap"><table class="t"><thead><tr><th>#</th><th>العميل</th><th>الهاتف</th><th>الفاتورة</th><th>الفرع</th><th>وُصِّل</th><th>يغطّي</th><th></th></tr></thead><tbody id="pendBody"></tbody></table></div>
-      <div id="pendEmpty" class="empty" style="display:none">لا توجد روابط بانتظار الإرسال.</div>
-    </div>
-    <div class="card">
-      <div class="hd">نُسخت خلال اليومين الماضيين <span class="sub" id="sentSub"></span></div>
-      <div class="tblwrap"><table class="t"><thead><tr><th>#</th><th>العميل</th><th>الهاتف</th><th>الفاتورة</th><th>الفرع</th><th>نسخها</th><th>الحالة</th><th></th></tr></thead><tbody id="sentBody"></tbody></table></div>
-      <div id="sentEmpty" class="empty" style="display:none">لم يُنسخ أي رابط بعد.</div>
-    </div>
-    <div class="note">الدفعة تُولَّد تلقائيًا كل يوم من طلبات أمس المُوصَّلة: أقل عدد طلبات يغطّي كل صيدلي وكل مندوب عمل أمس، مع استبعاد العميل الذي أُرسل له مؤخرًا. الضغط على «نسخ الرسالة» ينسخ نصًا جاهزًا فيه رابط هذا العميل، ويُعلّم الصف فلا يُنسخ مرة أخرى. الرابط غير المُرسل يسقط تلقائيًا بعد مدة محددة في الإعدادات.</div>
-  </div>
-
   <!-- ═══ الإعدادات ═══ -->
   <div class="pane" id="pane-settings">
     <div class="card"><div class="bd">
       <div class="set">
-        <label>تقييمات مستهدفة لكل شخص يوميًا<small>طلب لكل صيدلي ولكل مندوب اشتغل أمس</small></label><input type="number" id="s_per" min="1" max="10">
-        <label>فترة راحة العميل (يوم)<small>لا يُرسل للعميل نفسه قبل انقضائها</small></label><input type="number" id="s_cool" min="1" max="365">
-        <label>صلاحية الرابط (يوم)<small>من لحظة النسخ/الإرسال</small></label><input type="number" id="s_valid" min="1" max="30">
-        <label>سقوط الرابط غير المُرسل بعد (يوم)<small>يُستبدل تلقائيًا في الدفعة التالية</small></label><input type="number" id="s_drop" min="1" max="30">
-        <label>ساعة توليد الدفعة اليومية<small>بتوقيت القاهرة (0–23)</small></label><input type="number" id="s_hour" min="0" max="23">
+        <label>صلاحية الرابط بعد فتحه (يوم)<small>من لحظة إدخال رقم الفاتورة</small></label><input type="number" id="s_valid" min="1" max="30">
         <label>الصيادلة يرون التعليقات النصية<small>الافتراضي: لا، للإدارة فقط</small></label><select id="s_see"><option value="false">لا</option><option value="true">نعم</option></select>
-        <label class="full">رابط صفحة التقييم<small>يُلحق به التوكن مباشرة — يختلف بين بيئة التجربة والإنتاج</small></label>
-        <input class="full" id="s_base" style="direction:ltr;text-align:left">
-        <label class="full">صيغ التحية (سطر لكل صيغة)<small>المتغيرات: {n} اسم العميل الأول · {org} المؤسسة · {b} الفرع · {inv} الفاتورة · {days} الصلاحية</small></label>
-        <textarea class="full" id="s_g"></textarea>
-        <label class="full">صيغ طلب التقييم (سطر لكل صيغة)<small>الرابط يُضاف تلقائيًا بعد هذا الجزء</small></label>
-        <textarea class="full" id="s_b"></textarea>
-        <label class="full">صيغ الخاتمة (سطر لكل صيغة)</label>
-        <textarea class="full" id="s_t"></textarea>
       </div>
       <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
         <button class="btn teal" id="saveBtn" onclick="saveSettings()">حفظ الإعدادات</button>
         <span id="sMsg" style="font-size:12.5px;font-weight:700"></span>
       </div>
     </div></div>
-    <div class="note">كلما زادت الصيغ زاد اختلاف الرسائل بين العملاء. النظام يختار تركيبة (تحية · طلب · خاتمة) لكل رابط، ومع اسم العميل ورقم الفاتورة والرابط الفريد لا تتكرر الرسالة نفسها من الرقم نفسه.</div>
-  </div>
-</div>
-
-<!-- مودال الرسالة المنسوخة -->
-<div class="ov" id="ov" onclick="if(event.target===this)closeModal()">
-  <div class="modal">
-    <h3 id="mTitle">الرسالة جاهزة</h3>
-    <textarea id="mText" readonly></textarea>
-    <div class="acts">
-      <button class="btn wa" onclick="copyModal()">📋 نسخ مرة أخرى</button>
-      <button class="btn ghost" onclick="closeModal()">إغلاق</button>
-      <span class="ok" id="mOk"></span>
-    </div>
+    <div class="card" style="margin-top:12px"><h3>🔗 روابط الفروع <span class="sub">تُوضع في رسالة ما بعد الطلب — الرابط ثابت لكل فرع</span></h3><div class="bd"><div class="links" id="branchLinks"></div></div></div>
+    <div class="note">العميل يفتح رابط فرعه، يكتب رقم الفاتورة من الإيصال أو يصوّر الباركود أسفله، فتفتح له صفحة التقييم. تقييم واحد لكل فاتورة، و20 محاولة بحث في الساعة لكل جهاز.</div>
   </div>
 </div>
 <div id="toast"></div>
 
-<script src="config.js?v=20261018"></script>
-<script src="session.js?v=20261018"></script>
-<script src="branches.js?v=20261018"></script>
-<script src="pages.js?v=20261018"></script>
-<script src="brand.js?v=20261018"></script>
+<script src="config.js?v=20261021"></script>
+<script src="session.js?v=20261021"></script>
+<script src="branches.js?v=20261021"></script>
+<script src="pages.js?v=20261021"></script>
+<script src="brand.js?v=20261021"></script>
 <script>
 const SB = PHALIX_CONFIG.supabaseUrl;
 let CAN_EDIT = false, IS_ADMIN = false, ROLE = '', SEES_ALL = false, BRANCH_ID = '';
-let TAB = 'rank', SETTINGS = null, LAST_BOARD = null;
+let TAB = 'rank', SETTINGS = null, OV = null;
 let C_PAGE = 1; const C_LIMIT = 50;
-let _deb = null;
 
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function el(id){ return document.getElementById(id); }
 function toast(t, isErr){ const d = el('toast'); d.textContent = t; d.className = isErr ? 'err' : ''; d.style.display = 'block'; clearTimeout(d._t); d._t = setTimeout(() => d.style.display = 'none', isErr ? 4000 : 2500); }
 function fmtDT(iso){ if (!iso) return ''; try { return new Date(iso).toLocaleString('ar-EG', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Africa/Cairo' }); } catch (e) { return ''; } }
-function fmtT(iso){ if (!iso) return ''; try { return new Date(iso).toLocaleTimeString('ar-EG', { hour:'2-digit', minute:'2-digit', timeZone:'Africa/Cairo' }); } catch (e) { return ''; } }
-function fmtD(iso){ if (!iso) return ''; try { return new Date(iso).toLocaleDateString('ar-EG', { day:'2-digit', month:'2-digit', timeZone:'Africa/Cairo' }); } catch (e) { return ''; } }
-function relDay(d){ const t = cairoDate(0), y = cairoDate(-1); return d === t ? 'اليوم' : d === y ? 'أمس' : d; }
-function stars(n){ n = +n || 0; let h = ''; for (let i = 1; i <= 5; i++) h += i <= n ? '★' : '<span class="off">★</span>'; return '<span class="stars">' + h + '</span>'; }
 function num(n){ return n == null ? '—' : (+n).toLocaleString('en-US'); }
+function f1(n){ return n == null ? '—' : (+n).toFixed(1); }
+function starsHtml(avg){ const n = Math.round(+avg || 0); let h = ''; for (let i = 1; i <= 5; i++) h += i <= n ? '★' : '<span class="off">★</span>'; return h; }
+function stars(n){ return '<span class="stars">' + starsHtml(n) + '</span>'; }
 function cairoDate(offsetDays){
-  // تاريخ القاهرة كـYYYY-MM-DD — مش تاريخ المتصفح
   const now = new Date(Date.now() + (offsetDays || 0) * 864e5);
   const p = new Intl.DateTimeFormat('en-CA', { timeZone:'Africa/Cairo', year:'numeric', month:'2-digit', day:'2-digit' }).formatToParts(now);
   const g = k => p.find(x => x.type === k).value;
   return g('year') + '-' + g('month') + '-' + g('day');
 }
+const CNT = n => n === 1 ? 'تقييم واحد' : n === 2 ? 'تقييمان' : n <= 10 ? n + ' تقييمات' : n + ' تقييم';
+const CHIP = n => n < 5 ? 'gr' : n < 15 ? 'bl' : 'tl';
+const INIT = name => { const w = String(name || '').replace(/^(د|أ|م)\s+/, '').trim().split(/\s+/); return (w[0] || '').slice(0, 2); };
 
-/* ── RPC: كل الدوال بترجّع jsonb (كائن واحد) ── */
+/* كل الدوال بترجّع jsonb (كائن واحد) — مفيش قص عند 1000 */
 async function rpc(fn, body){
   const r = await fetch(SB + '/rest/v1/rpc/' + fn, { method:'POST', headers: await Session.headers(), body: JSON.stringify(body || {}) });
   let d = null; try { d = await r.json(); } catch (e) {}
-  if (!r.ok) {
-    const msg = (d && (d.message || d.error || d.hint)) || ('خطأ ' + r.status);
-    const e = new Error(msg); e.status = r.status; throw e;
-  }
+  if (!r.ok) { const e = new Error((d && (d.message || d.error || d.hint)) || ('خطأ ' + r.status)); e.status = r.status; throw e; }
   return d;
 }
 
-/* ── الفترة ── */
 function period(){
-  const v = el('perSel').value;
-  const today = cairoDate(0);
+  const v = el('perSel').value, today = cairoDate(0);
   if (v === 'custom') return { from: el('dFrom').value || today, to: el('dTo').value || today };
   if (v === 'd30') return { from: cairoDate(-30), to: today };
   if (v === 'd90') return { from: cairoDate(-90), to: today };
@@ -289,7 +255,6 @@ function period(){
 }
 function branchParam(){ return SEES_ALL ? (el('brSel').value || null) : null; }
 
-/* ── التبويبات ── */
 function showTab(t){
   TAB = t;
   document.querySelectorAll('#tabs .tab').forEach(b => b.classList.toggle('active', b.dataset.tk === t));
@@ -297,177 +262,155 @@ function showTab(t){
   refresh();
 }
 function refresh(){
-  if (TAB === 'rank') loadRank();
+  if (TAB === 'rank') loadOverview();
   else if (TAB === 'comments') { C_PAGE = 1; loadComments(); }
-  else if (TAB === 'links') loadBoard();
   else if (TAB === 'settings') loadSettings();
 }
 
-/* ── الترتيب ── */
-let RANK = null;
-async function loadRank(){
+/* ═══ الترتيب ═══ */
+async function loadOverview(){
   const p = period();
   el('rankInfo').textContent = 'من ' + p.from + ' إلى ' + p.to;
-  try {
-    RANK = await rpc('rating_dashboard', { p_from: p.from, p_to: p.to, p_branch_id: branchParam() });
-  } catch (e) { el('rankEmp').innerHTML = el('rankDrv').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; return; }
-  const k = RANK.kpis || {};
-  el('k-sent').textContent = num(k.sent);
-  const pct = k.sent ? Math.round(100 * (k.rated || 0) / k.sent) : null;
-  el('k-rated').innerHTML = num(k.rated) + (pct != null ? ' <small>· استجابة ' + pct + '%</small>' : '')
-    + (k.rated_bill ? ' <small>· + ' + num(k.rated_bill) + ' برقم الفاتورة</small>' : '');
-  el('k-emp').innerHTML = (k.avg_employee != null ? (+k.avg_employee).toFixed(1) : '—') + ' <small>/ 5</small>';
-  el('k-drv').innerHTML = (k.avg_driver != null ? (+k.avg_driver).toFixed(1) : '—') + ' <small>/ 5</small>';
-  el('k-spd').innerHTML = (k.avg_speed != null ? (+k.avg_speed).toFixed(1) : '—') + ' <small>/ 5</small>';
-  renderRank();
+  try { OV = await rpc('rating_overview', { p_from: p.from, p_to: p.to, p_branch_id: branchParam() }); }
+  catch (e) { el('rankEmp').innerHTML = el('rankDrv').innerHTML = '<div class="err">' + esc(e.message) + '</div>'; return; }
+  renderKpis(); renderDaily(); renderDist(); renderBranches(); renderRank();
+}
+function delta(cur, prev){
+  if (cur == null || prev == null) return '';
+  const d = +cur - +prev; if (Math.abs(d) < 0.05) return '<span class="delta eq">=</span>';
+  return `<span class="delta ${d > 0 ? '' : 'dn'}" title="مقارنة بالفترة السابقة">${d > 0 ? '▲' : '▼'} ${Math.abs(d).toFixed(1)}</span>`;
+}
+function renderKpis(){
+  const k = OV.kpis || {}, pv = OV.prev || {};
+  const pct = k.rate_pct;
+  el('k-pct').textContent = pct != null ? Math.round(pct) + '%' : '—';
+  el('ring').style.setProperty('--p', (pct != null ? Math.min(100, pct) : 0) + '%');
+  el('k-rated').innerHTML = num(k.rated) + ' <small>من ' + num(k.delivered_orders) + ' طلب موصّل</small>';
+  [['all','avg_all'],['emp','avg_employee'],['drv','avg_driver'],['spd','avg_speed']].forEach(([id, key]) => {
+    el('k-' + id).innerHTML = f1(k[key]) + delta(k[key], pv[key]);
+    el('s-' + id).innerHTML = k[key] != null ? starsHtml(k[key]) : '';
+  });
+}
+function renderDaily(){
+  const rows = OV.daily || [], svg = el('line'), tip = el('tip');
+  if (!rows.length) { svg.innerHTML = '<text x="300" y="80" text-anchor="middle" font-size="13" fill="#94a3b8" font-family="Cairo">لا توجد تقييمات في هذه الفترة</text>'; return; }
+  const W = 600, H = 150, px = 8, py = 14, max = Math.max(5, ...rows.map(r => r.n));
+  const x = i => rows.length === 1 ? W / 2 : px + i * (W - 2 * px) / (rows.length - 1);
+  const y = v => H - py - (v / max) * (H - 2 * py);
+  let g = '';
+  const steps = [0, Math.ceil(max / 2), max];
+  steps.forEach(v => { g += `<line x1="${px}" x2="${W - px}" y1="${y(v)}" y2="${y(v)}" stroke="#eef2f7"/><text x="${W - px + 2}" y="${y(v) + 4}" font-size="9" fill="#94a3b8" font-family="Cairo">${v}</text>`; });
+  const pts = rows.map((r, i) => `${x(i)},${y(r.n)}`).join(' ');
+  if (rows.length > 1) {
+    g += `<path d="M${x(0)},${y(0)} L${pts.replace(/ /g, ' L')} L${x(rows.length - 1)},${y(0)} Z" fill="#0d9488" opacity=".12"/>`;
+    g += `<polyline points="${pts}" fill="none" stroke="#0d9488" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  }
+  rows.forEach((r, i) => { g += `<circle cx="${x(i)}" cy="${y(r.n)}" r="9" fill="transparent" data-i="${i}"/><circle cx="${x(i)}" cy="${y(r.n)}" r="${i === rows.length - 1 ? 4 : 2.5}" fill="#fff" stroke="#0d9488" stroke-width="2" pointer-events="none"/>`; });
+  const last = rows[rows.length - 1];
+  g += `<text x="${x(rows.length - 1) - 6}" y="${y(last.n) - 9}" font-size="11" font-weight="800" fill="#0f766e" font-family="Cairo" text-anchor="end">${last.n} تقييم</text>`;
+  svg.innerHTML = g;
+  svg.onmousemove = e => {
+    const t = e.target.closest('circle[data-i]'); if (!t) { tip.style.display = 'none'; return; }
+    const r = rows[+t.dataset.i];
+    tip.textContent = `${r.d} · ${CNT(r.n)} · المتوسط ${f1(r.avg)}`;
+    const b = svg.getBoundingClientRect(); tip.style.display = 'block';
+    tip.style.left = (e.clientX - b.left - 70) + 'px'; tip.style.top = (e.clientY - b.top - 36) + 'px';
+  };
+  svg.onmouseleave = () => tip.style.display = 'none';
+}
+function renderDist(){
+  const d = OV.dist || {}; const total = [5,4,3,2,1].reduce((s, k) => s + (+d[k] || 0), 0);
+  if (!total) { el('dist').innerHTML = '<div class="empty" style="grid-column:1/-1;padding:16px">لا توجد تقييمات</div>'; return; }
+  el('dist').innerHTML = [5,4,3,2,1].map((k, i) => { const n = +d[k] || 0; return `<span class="s">${'★'.repeat(k)}</span><div class="bar"><i style="width:${Math.round(100 * n / total)}%;opacity:${1 - i * .15}"></i></div><span class="n">${num(n)}</span>`; }).join('');
+}
+function renderBranches(){
+  const rows = OV.branches || [];
+  if (!rows.length) { el('branches').innerHTML = '<div class="empty" style="padding:16px">لا توجد تقييمات</div>'; return; }
+  el('branches').innerHTML = rows.map(b => `<div class="brrow"><span title="${esc(b.name)}">${esc(b.name)}</span><div class="b"><i style="width:${Math.round(100 * (+b.avg || 0) / 5)}%"></i></div><span class="v">${f1(b.avg)} <small>· ${num(b.n)}</small></span></div>`).join('');
+}
+function trendSvg(tr){
+  const vals = (tr || []).filter(v => v != null).map(Number);
+  if (vals.length < 2) return '';
+  const pts = vals.map((v, i) => `${1 + i * (44 / (vals.length - 1))},${13 - ((v - 1) / 4) * 12}`).join(' ');
+  const up = vals[vals.length - 1] >= vals[0];
+  return `<svg class="trend" viewBox="0 0 46 14" title="اتجاه آخر 4 أسابيع"><polyline points="${pts}" fill="none" stroke="${up ? '#0d9488' : '#dc2626'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
 function renderRank(){
-  if (!RANK) return;
+  if (!OV) return;
   const s = el('sortSel').value;
   const sorter = (a, b) => s === 'low' ? (a.avg - b.avg) || (b.n - a.n) : s === 'n' ? (b.n - a.n) || (b.avg - a.avg) : (b.avg - a.avg) || (b.n - a.n);
-  const draw = (list, id) => {
+  const draw = (list, id, isDrv) => {
     const rows = (list || []).slice().sort(sorter);
-    if (!rows.length) { el(id).innerHTML = '<div class="empty">لا توجد تقييمات في هذه الفترة.</div>'; return; }
+    if (!rows.length) { el(id).innerHTML = `<div class="empty"><div class="big">⭐</div>لا توجد تقييمات في هذه الفترة بعد.</div>`; return; }
     el(id).innerHTML = rows.map((x, i) => {
-      const cls = x.n < 5 ? 'thin' : x.n < 15 ? 'mid' : '';
-      const cnt = x.n === 1 ? 'تقييم واحد' : x.n === 2 ? 'تقييمان' : x.n <= 10 ? x.n + ' تقييمات' : x.n + ' تقييم';
-      const bill = x.n_bill ? ` <span title="تقييمات جاءت برقم الفاتورة (رابط الفرع الثابت)">· ${x.n_bill} بالفاتورة</span>` : '';
-      const spd = x.avg_speed != null ? ` <span title="متوسط تقييم سرعة التوصيل">· ⚡ ${(+x.avg_speed).toFixed(1)}</span>` : '';
-      return `<div class="row ${cls}"><div class="no">${i + 1}</div><div class="nm" title="${esc(x.name)}">${esc(x.name || '—')}<small>${esc(x.branch || '')}</small></div><div class="bar"><i style="width:${Math.max(4, Math.round(100 * x.avg / 5))}%"></i></div><div class="val"><b>${(+x.avg).toFixed(1)}</b> <span>· ${cnt}</span>${bill}${spd}</div></div>`;
+      const medal = s === 'top' ? (i === 0 ? 'g' : i === 1 ? 's' : i === 2 ? 'b' : '') : '';
+      return `<div class="row"><div class="no ${medal}">${i + 1}</div><div class="av">${esc(INIT(x.name))}</div>` +
+        `<div class="nm"><div class="n">${esc(x.name || '—')}</div><div class="meta">${esc(x.branch || '')} <span class="chip ${CHIP(x.n)}">${CNT(x.n)}</span></div></div>` +
+        `<div class="sc"><span class="st">${starsHtml(x.avg)}</span><span class="v">${f1(x.avg)}</span>${trendSvg(x.trend)}${isDrv && x.avg_speed != null ? `<div class="spd">⚡ السرعة ${f1(x.avg_speed)}</div>` : ''}</div></div>`;
     }).join('');
   };
-  draw(RANK.employees, 'rankEmp');
-  draw(RANK.drivers, 'rankDrv');
+  draw(OV.employees, 'rankEmp', false);
+  draw(OV.drivers, 'rankDrv', true);
 }
 
-/* ── التعليقات (50/صفحة، الإجمالي على كل المفلتر) ── */
+/* ═══ التعليقات (50/صفحة) ═══ */
 async function loadComments(){
-  const p = period();
-  let d;
-  try {
-    d = await rpc('rating_comments', { p_from: p.from, p_to: p.to, p_branch_id: branchParam(), p_who: el('cWho').value, p_max_stars: +el('cMax').value, p_limit: C_LIMIT, p_offset: (C_PAGE - 1) * C_LIMIT });
-  } catch (e) { el('cBody').innerHTML = ''; el('cPager').innerHTML = ''; el('cEmpty').style.display = ''; el('cEmpty').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; return; }
+  const p = period(); let d;
+  try { d = await rpc('rating_comments', { p_from: p.from, p_to: p.to, p_branch_id: branchParam(), p_who: el('cWho').value, p_max_stars: +el('cMax').value, p_limit: C_LIMIT, p_offset: (C_PAGE - 1) * C_LIMIT }); }
+  catch (e) { el('cBody').innerHTML = ''; el('cPager').innerHTML = ''; el('cEmpty').style.display = ''; el('cEmpty').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; return; }
   const rows = d.rows || [];
   el('cEmpty').style.display = rows.length ? 'none' : ''; el('cEmpty').textContent = 'لا توجد تقييمات في هذه الفترة.';
-  el('cBody').innerHTML = rows.map(r => `<tr><td>${fmtDT(r.rated_at)}${r.source === 'bill' ? '<div><span class="pill gr" title="العميل دخل برقم الفاتورة من رابط الفرع الثابت">بالفاتورة</span></div>' : ''}</td><td class="mono">${esc(r.bill_no || '')}</td><td>${esc(r.branch || '')}</td><td>${esc(r.employee_name || '—')}<div>${stars(r.employee_stars)}</div></td><td>${esc(r.driver_name || '—')}<div>${stars(r.driver_stars)}</div>${r.speed_stars ? '<div title="سرعة التوصيل">⚡ ' + stars(r.speed_stars) + '</div>' : ''}</td><td>${r.comment ? esc(r.comment) : '<span class="pill gr">بدون تعليق</span>'}</td></tr>`).join('');
+  el('cBody').innerHTML = rows.map(r => `<tr><td>${fmtDT(r.rated_at)}</td><td style="direction:ltr;text-align:right">${esc(r.bill_no || '')}</td><td>${esc(r.branch || '')}</td><td>${esc(r.employee_name || '—')}<div>${stars(r.employee_stars)}</div></td><td>${esc(r.driver_name || '—')}<div>${stars(r.driver_stars)}</div>${r.speed_stars ? '<div title="سرعة التوصيل">⚡ ' + stars(r.speed_stars) + '</div>' : ''}</td><td>${r.comment ? esc(r.comment) : '<span class="pill gr">بدون تعليق</span>'}</td></tr>`).join('');
   renderPager(d.total || 0);
 }
 function renderPager(total){
-  const pages = Math.max(1, Math.ceil(total / C_LIMIT));
-  if (C_PAGE > pages) C_PAGE = pages;
+  const pages = Math.max(1, Math.ceil(total / C_LIMIT)); if (C_PAGE > pages) C_PAGE = pages;
   if (pages <= 1) { el('cPager').innerHTML = total ? `<span class="info">${total} تقييم</span>` : ''; return; }
   const btn = (p, t, on) => `<button class="${on ? 'on' : ''}" onclick="goPage(${p})" ${p < 1 || p > pages ? 'disabled' : ''}>${t}</button>`;
   let h = btn(1, '«') + btn(C_PAGE - 1, '‹');
-  const win = new Set([1, pages, C_PAGE - 1, C_PAGE, C_PAGE + 1].filter(x => x >= 1 && x <= pages));
-  let last = 0;
+  const win = new Set([1, pages, C_PAGE - 1, C_PAGE, C_PAGE + 1].filter(x => x >= 1 && x <= pages)); let last = 0;
   [...win].sort((a, b) => a - b).forEach(p => { if (p - last > 1) h += '<span>…</span>'; h += btn(p, p, p === C_PAGE); last = p; });
   h += btn(C_PAGE + 1, '›') + btn(pages, '»') + `<span class="info">صفحة ${C_PAGE} من ${pages} · ${total} تقييم</span>`;
   el('cPager').innerHTML = h;
 }
 function goPage(p){ C_PAGE = p; loadComments(); el('pane-comments').scrollIntoView({ behavior:'smooth', block:'start' }); }
 
-/* ── روابط اليوم ── */
-async function loadBoard(){
-  let d;
-  try { d = await rpc('rating_links_board', { p_branch_id: branchParam() }); }
-  catch (e) { el('pendBody').innerHTML = ''; el('pendEmpty').style.display = ''; el('pendEmpty').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; return; }
-  LAST_BOARD = d;
-  const lb = d.last_batch;
-  el('batchInfo').textContent = lb && lb.date
-    ? `آخر دفعة: ليوم ${lb.date} · تولّدت ${fmtDT(lb.generated_at)} · ${lb.inserted} رابط · تغطية ${lb.drivers_covered}/${lb.drivers} مندوب و ${lb.employees_covered}/${lb.employees} صيدلي`
-    : 'لم تُولَّد أي دفعة بعد.';
-  if (SETTINGS) el('validPill').textContent = 'صلاحية الرابط ' + SETTINGS.link_valid_days + ' أيام من النسخ';
-  const pend = d.pending || [], sent = d.sent || [];
-  el('pendCnt').textContent = pend.length; el('pendCnt').style.display = pend.length ? '' : 'none';
-  el('pendSub').textContent = pend.length ? pend.length + ' رابط' : '';
-  el('pendEmpty').style.display = pend.length ? 'none' : ''; el('pendEmpty').textContent = 'لا توجد روابط بانتظار الإرسال.';
-  el('pendBody').innerHTML = pend.map((r, i) => `<tr id="pr-${r.id}"><td>${i + 1}</td><td>${esc(r.customer_name || '—')}</td><td class="mono">${esc(r.phone_masked || '')}</td><td class="mono">${esc(r.bill_no || '')}</td><td>${esc(r.branch || '')}</td><td>${relDay(r.batch_date)} ${fmtT(r.delivered_at)}</td><td><span class="pill b" title="${r.covers_employee ? 'يغطّي هذا الصيدلي' : ''}">👩‍⚕️ ${esc(r.employee_name || '—')}</span> <span class="pill g" title="${r.covers_driver ? 'يغطّي هذا المندوب' : ''}">🛵 ${esc(r.driver_name || '—')}</span></td><td><button class="btn wa" onclick="copyLink(${r.id}, this)">📋 نسخ الرسالة</button></td></tr>`).join('');
-  el('sentSub').textContent = sent.length ? sent.length : '';
-  el('sentEmpty').style.display = sent.length ? 'none' : '';
-  el('sentBody').innerHTML = sent.map((r, i) => {
-    const st = r.status === 'rated' ? '<span class="pill g">قيّم ✓</span>' : r.status === 'expired' ? '<span class="pill gr">انتهى</span>' : r.opened_at ? '<span class="pill b">فُتح</span>' : '<span class="pill y">نُسخت</span>';
-    const act = r.status === 'sent' ? `<button class="btn ghost" onclick="resetLink(${r.id})">↩ إرجاع</button>` : '';
-    return `<tr class="dim"><td>${i + 1}</td><td>${esc(r.customer_name || '—')}</td><td class="mono">${esc(r.phone_masked || '')}</td><td class="mono">${esc(r.bill_no || '')}</td><td>${esc(r.branch || '')}</td><td>${esc(r.sent_by || '—')} · ${fmtDT(r.sent_at)}</td><td>${st}</td><td>${act}</td></tr>`;
-  }).join('');
-}
-
-async function copyLink(id, btn){
-  btn.disabled = true; btn.textContent = '…';
-  let d;
-  try { d = await rpc('rating_link_copy', { p_id: id }); }
-  catch (e) { toast(e.message, true); btn.disabled = false; btn.textContent = '📋 نسخ الرسالة'; loadBoard(); return; }
-  const ok = await writeClipboard(d.message);
-  openModal(d.message, ok);
-  if (ok) toast('تم نسخ الرسالة، الصقها في واتساب للعميل');
-  loadBoard();
-}
-async function writeClipboard(t){
-  try { await navigator.clipboard.writeText(t); return true; } catch (e) {}
-  try { const ta = document.createElement('textarea'); ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove(); return ok; } catch (e) { return false; }
-}
-function openModal(msg, copied){
-  el('mText').value = msg; el('mOk').textContent = copied ? 'تم النسخ ✓' : 'لم يتم النسخ تلقائيًا — اضغط «نسخ مرة أخرى» أو حدّد النص';
-  el('mTitle').textContent = copied ? 'الرسالة جاهزة ونُسخت' : 'الرسالة جاهزة';
-  el('ov').classList.add('on');
-  if (!copied) { el('mText').focus(); el('mText').select(); }
-}
-async function copyModal(){ const ok = await writeClipboard(el('mText').value); el('mOk').textContent = ok ? 'تم النسخ ✓' : 'تعذّر النسخ — حدّد النص وانسخه يدويًا'; }
-function closeModal(){ el('ov').classList.remove('on'); }
-
-async function resetLink(id){
-  if (!confirm('إرجاع هذا الرابط إلى «بانتظار الإرسال»؟ الرابط الذي نُسخ سيتوقف عن العمل.')) return;
-  try { await rpc('rating_link_reset', { p_id: id }); toast('تم الإرجاع'); } catch (e) { toast(e.message, true); }
-  loadBoard();
-}
-async function generateNow(){
-  const d = el('genDate').value || cairoDate(-1);
-  try {
-    const r = await rpc('rating_generate_batch', { p_date: d });
-    toast(r.already ? 'دفعة هذا اليوم مولَّدة بالفعل' : `تولّد ${r.inserted} رابط (تغطية ${r.drivers_covered}/${r.drivers} مندوب · ${r.employees_covered}/${r.employees} صيدلي)`);
-  } catch (e) { toast(e.message, true); }
-  loadBoard();
-}
-
-/* ── الإعدادات ── */
+/* ═══ الإعدادات ═══ */
 async function loadSettings(){
   try { SETTINGS = await rpc('rating_settings_get'); } catch (e) { el('sMsg').textContent = e.message; el('sMsg').style.color = 'var(--red)'; return; }
   const s = SETTINGS;
-  el('s_per').value = s.per_person_daily; el('s_cool').value = s.customer_cooldown_days; el('s_valid').value = s.link_valid_days;
-  el('s_drop').value = s.unsent_drop_days; el('s_hour').value = s.batch_hour; el('s_see').value = String(!!s.pharmacists_see_comments);
-  el('s_base').value = s.link_base || '';
-  el('s_g').value = (s.msg_greetings || []).join('\n'); el('s_b').value = (s.msg_bodies || []).join('\n'); el('s_t').value = (s.msg_tails || []).join('\n');
-  const ro = !IS_ADMIN;
-  ['s_per','s_cool','s_valid','s_drop','s_hour','s_see','s_base','s_g','s_b','s_t'].forEach(id => el(id).disabled = ro);
+  el('s_valid').value = s.link_valid_days; el('s_see').value = String(!!s.pharmacists_see_comments);
+  const ro = !IS_ADMIN; ['s_valid','s_see'].forEach(id => el(id).disabled = ro);
   el('saveBtn').style.display = ro ? 'none' : '';
   el('sMsg').textContent = ro ? 'العرض فقط — التعديل للأدمن.' : (s.updated_by ? 'آخر تعديل: ' + s.updated_by + ' · ' + fmtDT(s.updated_at) : '');
   el('sMsg').style.color = 'var(--muted)';
+  // روابط الفروع: الرابط الثابت = نفس صفحة التقييم + حرف الفرع
+  try {
+    const r = await fetch(SB + '/rest/v1/branches?select=name,letter&is_active=eq.true&order=sort_order', { headers: await Session.headers() });   // data-ok: جدول الفروع (4 صفوف)
+    const rows = r.ok ? await r.json() : [];
+    const base = (s.link_base || '').replace(/\?t=$/, '');
+    el('branchLinks').innerHTML = rows.map(b => `<span>${esc(b.name)}</span><code>${esc(base)}?b=${esc(b.letter || '?')}</code>`).join('');
+  } catch (e) {}
 }
-const lines = v => String(v || '').split('\n').map(x => x.trim()).filter(Boolean);
 async function saveSettings(){
-  const p = { per_person_daily: +el('s_per').value, customer_cooldown_days: +el('s_cool').value, link_valid_days: +el('s_valid').value,
-              unsent_drop_days: +el('s_drop').value, batch_hour: +el('s_hour').value, pharmacists_see_comments: el('s_see').value === 'true',
-              link_base: el('s_base').value.trim(), msg_greetings: lines(el('s_g').value), msg_bodies: lines(el('s_b').value), msg_tails: lines(el('s_t').value) };
+  const p = { link_valid_days: +el('s_valid').value, pharmacists_see_comments: el('s_see').value === 'true' };
   el('saveBtn').disabled = true;
   try { SETTINGS = await rpc('rating_settings_set', { p }); toast('تم حفظ الإعدادات'); loadSettings(); }
   catch (e) { el('sMsg').textContent = e.message; el('sMsg').style.color = 'var(--red)'; }
   el('saveBtn').disabled = false;
 }
 
-/* ── الإقلاع ── */
+/* ═══ الإقلاع ═══ */
 async function init(){
   try { const u = await Session.require({ page: 'ratings' }); if (!u) return; } catch (e) {}
   IS_ADMIN = Session.isAdmin(); ROLE = Session.role();
   try { const c = await Session.can('ratings.html'); CAN_EDIT = !!(c && c.edit); } catch (e) { CAN_EDIT = IS_ADMIN; }
   try { SEES_ALL = await Session.seesAllBranches('ratings'); } catch (e) { SEES_ALL = IS_ADMIN; }
-  if (IS_ADMIN || ROLE === 'manager') SEES_ALL = true;   // زي jwt_all_branches على السيرفر
+  if (IS_ADMIN || ROLE === 'manager') SEES_ALL = true;
   BRANCH_ID = Session.branchId ? Session.branchId() : '';
 
-  // إخفاء واجهة فقط — الحراسة الحقيقية في الدوال
-  if (!CAN_EDIT) el('tab-links').style.display = 'none';
   if (!IS_ADMIN) el('tab-settings').style.display = 'none';
   if (!(IS_ADMIN || ROLE === 'manager' || CAN_EDIT)) el('tab-comments').style.display = 'none';
-  if (!(IS_ADMIN || ROLE === 'manager')) el('genBox').style.display = 'none';
-  el('genDate').value = cairoDate(-1);
 
   if (SEES_ALL) {
     try {
@@ -478,19 +421,14 @@ async function init(){
       el('brSel').style.display = '';
     } catch (e) {}
   }
-
-  // فلاتر فورية
   el('brSel').onchange = refresh;
   el('perSel').onchange = () => { el('customRange').style.display = el('perSel').value === 'custom' ? 'inline-flex' : 'none'; if (el('perSel').value !== 'custom') refresh(); };
   el('dFrom').onchange = el('dTo').onchange = refresh;
   el('sortSel').onchange = renderRank;
   el('cWho').onchange = el('cMax').onchange = () => { C_PAGE = 1; loadComments(); };
 
-  try { SETTINGS = await rpc('rating_settings_get'); } catch (e) {}
   try { if (Session.guardTabs) await Session.guardTabs('ratings'); } catch (e) {}
-  loadRank();
-  // عدّاد الروابط المعلّقة في التبويب حتى قبل فتحه
-  if (CAN_EDIT) { rpc('rating_links_board', { p_branch_id: branchParam() }).then(d => { const n = (d.pending || []).length; el('pendCnt').textContent = n; el('pendCnt').style.display = n ? '' : 'none'; }).catch(() => {}); }
+  loadOverview();
 }
 init();
 </script>
