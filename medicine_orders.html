@@ -614,7 +614,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         <div class="et-note" style="line-height:1.8">
           يُنشأ الرابط لأصناف <b>المخزن المحدَّد في الفلتر</b> بنفس شروط البحث الحالية، وبالكميات الموجودة في عمود <b>«الكمية المرسلة»</b> في الجدول — الصنف اللي كميته صفر لا يُرسل. يفتحه المورّد من أي متصفح
           ويحدد المتاح لديه، فيصلك الرد هنا. <b>لا يدخل أي صنف إلى «تحت الطلب» إلا بعد ضغطك على «اعتماد».</b>
-          <br>الرابط يعرض الكود والاسم والكمية فقط — <b>بدون أسعار أو خصومات</b> — وصلاحيته 7 أيام.
+          <br>الرابط يعرض الكود والاسم والكمية فقط — <b>بدون أسعار أو خصومات</b> — وصلاحيته 7 أيام.<br><b>ابن سينا وفارما اوفر سيز</b> يُنشأ لهما رابط منفصل لكل فرع، لأن الطلب لديهما بحساب مستقل لكل صيدلية.
         </div>
         <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <button class="btn btn-primary" onclick="supCreate()"><i class="fas fa-link"></i> إنشاء الرابط</button>
@@ -1809,6 +1809,50 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           من السيرفر تاني. وفلتر «تحت الطلب» **مابينطبقش** عليه لأنه
           مربوط بأكواد الفرع المعروض بس — وبنقول ده في الشاشة. */
 
+
+    /* ═══ رابط لكل فرع ═════════════════════════════════════════════
+       المخازن اللي الطلب عندها أونلاين بحساب لكل صيدلية (ابن سينا
+       وفارما) بتاخد رابط منفصل لكل فرع بدل رابط واحد بتبويبات —
+       الموظف بيقعد على حساب الفرع فمحتاج قائمته هو بس.
+
+       العلم من `stores.link_per_branch` مش مكتوب في الكود، عشان
+       تغييره يبقى إعداد مش نشر. */
+    let STORE_PB = new Set();
+    async function loadStoreFlags(){
+      try {
+        const j = await (await fetch(REST + 'stores?select=name,link_per_branch&link_per_branch=is.true',
+                                     { headers: H })).json();   // data-ok: جدول مخازن قصير
+        STORE_PB = new Set(Array.isArray(j) ? j.map(x => x.name) : []);
+      } catch (e) { STORE_PB = new Set(); }
+    }
+
+    /* كارت رابط واحد — نفس الشكل للحالتين */
+    function supCard(store, branch, url, n, edited, days){
+      const waText = 'طلب لـ ' + store + (branch ? ' — ' + branch : '')
+                   + ' — قائمة الطلب، برجاء تحديد المتاح:\n' + url;
+      const uid = 'supu-' + Math.random().toString(36).slice(2, 9);
+      return '<div style="border:1px solid var(--border);border-radius:10px;padding:9px 11px;margin-bottom:7px">'
+        + '<div style="margin-bottom:6px">'
+        + '<span style="background:var(--accent,#0d9488);color:#fff;padding:3px 12px;border-radius:20px;font-weight:800;font-size:.82rem">'
+        + esc(branch || store) + '</span>'
+        + ' <span style="font-size:.76rem;color:var(--text-secondary);font-weight:700">'
+        + n + ' صنف' + (edited ? ' · <span style="color:#b45309">' + edited + ' بكمية معدَّلة</span>' : '')
+        + ' · صالح ' + days + ' أيام</span></div>'
+        + '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
+        + '<input id="' + uid + '" class="form-select" style="flex:1;min-width:240px;font-size:.75rem" readonly value="' + escAttr(url) + '">'
+        + '<button class="btn btn-sm btn-primary" onclick="supCopyId(\'' + uid + '\')"><i class="fas fa-copy"></i> نسخ</button>'
+        + '<a class="btn btn-sm" style="background:#25d366;color:#fff;text-decoration:none;padding:6px 12px;border-radius:8px;font-weight:700"'
+        + ' target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(waText) + '">'
+        + '<i class="fab fa-whatsapp"></i> واتساب</a></div></div>';
+    }
+
+    async function supCopyId(id){
+      const el = document.getElementById(id); if (!el) return;
+      const ok = await phCopy(el.value);
+      if (!ok) { el.select(); alert('انسخ الرابط يدويًا'); }
+      else document.getElementById('sup-msg').innerHTML = '<span class="msg-ok">تم نسخ الرابط ✓</span>';
+    }
+
     async function supCreate() {
       const store = document.getElementById('ord-wh').value;
       const msg   = document.getElementById('sup-msg');
@@ -1859,6 +1903,33 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         const perBr = {};
         items.forEach(x => { perBr[x.branch] = (perBr[x.branch] || 0) + 1; });
         const payload = items.map(x => ({ branch: x.branch, code: x.code, name: x.name, qty: x.qty }));
+
+        const under0 = document.getElementById('ord-under').value;
+        const warn = (under0 !== '' ? ' <span style="color:#b45309">فلتر «تحت الطلب» لم يُطبَّق على الرابط.</span>' : '')
+                   + ' <span style="color:var(--danger)">انسخها الآن، فلن تظهر مرة أخرى.</span>';
+
+        /* المخازن اللي الطلب عندها أونلاين بحساب لكل صيدلية: رابط
+           لكل فرع. الفروع اللي مالهاش أصناف مابيتعملهاش رابط. */
+        if (STORE_PB.has(store)) {
+          const brs = brOrder.filter(b => perBr[b]);
+          let cards = '';
+          for (const b of brs) {
+            const sub = payload.filter(x => x.branch === b);
+            const ed  = items.filter(x => x.branch === b && x._ed).length;
+            const rb = await fetch(REST + 'rpc/supplier_link_create', {
+              method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ p_branch: b, p_store: store, p_items: sub, p_days: 7 }) });
+            if (!rb.ok) throw new Error(await rb.text());
+            const ob = await rb.json();
+            cards += supCard(store, b, SUP_PAGE + '?t=' + ob.token, sub.length, ed, 7);
+          }
+          document.getElementById('sup-new').innerHTML =
+              '<div class="et-note" style="margin-bottom:8px"><b>' + esc(store) + '</b> — رابط منفصل لكل فرع ('
+            + brs.length + ' روابط)، لأن الطلب عندهم بحساب لكل صيدلية.' + warn + '</div>' + cards;
+          msg.innerHTML = '';
+          await supList();
+          return;
+        }
 
         const r = await fetch(REST + 'rpc/supplier_link_create', {
           method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
@@ -3226,7 +3297,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       // loadMeta/loadMonths/loadPage اتشالوا من هنا — دول بتوع تبويب «معدل
       // الاستهلاك» وبيتحمّلوا أول ما يتفتح (showTab). اللي فاضل مشترك أو
       // بتاع «الطلبيات» وهو التبويب الافتراضي.
-      loadBranchReps(); loadOrdStores(); EXCL_READY = loadExcluded(); loadOrdBestSuppliers();
+      loadBranchReps(); loadOrdStores(); loadStoreFlags(); EXCL_READY = loadExcluded(); loadOrdBestSuppliers();
       ordSyncFitBtn();
       showTab('orders');   // الطلبيات هو التبويب الافتراضي عند فتح الشاشة
     })();
