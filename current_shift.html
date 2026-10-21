@@ -94,6 +94,9 @@
   .sumtbl th.visa,.sumtbl td.visa{background:#f5f3ff;color:#7c3aed}
   .chips{display:flex;gap:6px;flex-wrap:wrap;padding:9px 14px;border-top:1px solid var(--line);align-items:center}
   .chips .lbl{font-size:12px;color:var(--muted);font-weight:700}
+  /* الصف طلع برّه كارت الملخّص عشان يبان للكل كفلتر — محتاج إطاره بنفسه */
+  .card-chips{background:var(--card);border:1px solid var(--line);border-top:1px solid var(--line);
+              border-radius:10px;margin-bottom:10px}
   .epaid{font-weight:800;color:#7c3aed} .epaid.auto{color:var(--red);font-weight:600;opacity:.8}
   @media(max-width:760px){body{padding:10px}.kpi{min-width:100%}}
 </style>
@@ -320,7 +323,11 @@ function render(){
   const startTxt = SHIFT.shift_start ? new Date(SHIFT.shift_start).toLocaleString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
   const users=(SHIFT.users||[]).map(esc).join('، ')||'—';
   const byCh={}; const chS=new Set(); TXN.filter(t=>t.kind==='فيزا').forEach(t=>{const c=t.channel||'—'; byCh[c]=byCh[c]||{t:0,n:0}; const val=paidOf(t); if(isManual(t)){ const k=c+'|m:'+val; if(chS.has(k)) return; chS.add(k);} byCh[c].t+=val; byCh[c].n++;});
-  const chips=Object.entries(byCh).sort((a,b)=>b[1].t-a[1].t).map(([c,v])=>`<span class="vch ${chFilter===c?'on':''}" data-ch="${esc(c)}">${esc(c)} <b>${fmt(v.t)}</b> (${v.n})</span>`).join('')||'<span class="vch">—</span>';
+  /* فلتر القنوات بيظهر للكل — هو أداة فرز مش رقم. اللي بيتحجب عن غير
+     المصرَّح له هو **مبلغ** كل قناة، والعدد بيفضل عشان الفلتر يبان نافع. */
+  const chips=Object.entries(byCh).sort((a,b)=>b[1].t-a[1].t).map(([c,v])=>
+    `<span class="vch ${chFilter===c?'on':''}" data-ch="${esc(c)}">${esc(c)} ${CAN_TOTALS?'<b>'+fmt(v.t)+'</b> ':''}(${v.n})</span>`
+  ).join('')||'<span class="vch">—</span>';
   document.getElementById('content').innerHTML = `
     <div class="meta">
       <div class="it"><span class="k">النقطة</span><b>${esc(SHIFT.point)}</b></div>
@@ -344,10 +351,11 @@ function render(){
           <td class="visa" id="k-visa">${fmt(k.visa)}</td>
         </tr></tbody>
       </table></div>
-      <div class="chips" id="vchs"><span class="lbl">الفيزا بالقنوات (للمطابقة مع البنك):</span> ${chips}</div>
     </div>
     <div class="note">✏️ لو معاملة اتحفظت كاش وهي فيزا: غيّر «الحساب» في صفّها → بتتحوّل فيزا والصافي يتعدّل (تصحيح للعرض، مش بيتحفظ في eplus).</div>`}
     ${reviewBar()}
+    <div class="chips card-chips" id="vchs"><span class="lbl">${CAN_TOTALS
+      ? 'الفيزا بالقنوات (للمطابقة مع البنك):' : 'فلترة بالقناة:'}</span> ${chips}</div>
     <div class="toolbar">
       <input type="search" id="q" placeholder="🔎 بحث بالطرف / الملاحظة / المستخدم…">
       <span class="flabel">النوع:</span>
