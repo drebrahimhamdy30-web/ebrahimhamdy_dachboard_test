@@ -614,7 +614,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         <div class="et-note" style="line-height:1.8">
           يُنشأ الرابط لأصناف <b>المخزن المحدَّد في الفلتر</b> بنفس شروط البحث الحالية، وبالكميات الموجودة في عمود <b>«الكمية المرسلة»</b> في الجدول — الصنف اللي كميته صفر لا يُرسل. يفتحه المورّد من أي متصفح
           ويحدد المتاح لديه، فيصلك الرد هنا. <b>لا يدخل أي صنف إلى «تحت الطلب» إلا بعد ضغطك على «اعتماد».</b>
-          <br>الرابط يعرض الكود والاسم والكمية فقط — <b>بدون أسعار أو خصومات</b> — وصلاحيته 7 أيام.<br><b>ابن سينا وفارما اوفر سيز</b> يُنشأ لهما رابط منفصل لكل فرع، لأن الطلب لديهما بحساب مستقل لكل صيدلية.
+          <br>الرابط يعرض الكود والاسم والكمية فقط — <b>بدون أسعار أو خصومات</b> — وصلاحيته 7 أيام.<br><b>ابن سينا وفارما اوفر سيز</b> يُنشأ الرابط لهما <b>للفرع المحدَّد في الشاشة وحده</b>، لأن الطلب لديهما بحساب مستقل لكل صيدلية.
         </div>
         <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <button class="btn btn-primary" onclick="supCreate()"><i class="fas fa-link"></i> إنشاء الرابط</button>
@@ -1908,24 +1908,27 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         const warn = (under0 !== '' ? ' <span style="color:#b45309">فلتر «تحت الطلب» لم يُطبَّق على الرابط.</span>' : '')
                    + ' <span style="color:var(--danger)">انسخها الآن، فلن تظهر مرة أخرى.</span>';
 
-        /* المخازن اللي الطلب عندها أونلاين بحساب لكل صيدلية: رابط
-           لكل فرع. الفروع اللي مالهاش أصناف مابيتعملهاش رابط. */
+        /* المخازن اللي الطلب عندها أونلاين بحساب لكل صيدلية: الرابط
+           **للفرع المفتوح في الشاشة بس** — الموظف قاعد على حساب
+           الفرع ده، فأي صنف من فرع تاني في نفس الرابط غلط. */
         if (STORE_PB.has(store)) {
-          const brs = brOrder.filter(b => perBr[b]);
-          let cards = '';
-          for (const b of brs) {
-            const sub = payload.filter(x => x.branch === b);
-            const ed  = items.filter(x => x.branch === b && x._ed).length;
-            const rb = await fetch(REST + 'rpc/supplier_link_create', {
-              method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ p_branch: b, p_store: store, p_items: sub, p_days: 7 }) });
-            if (!rb.ok) throw new Error(await rb.text());
-            const ob = await rb.json();
-            cards += supCard(store, b, SUP_PAGE + '?t=' + ob.token, sub.length, ed, 7);
+          const sub = payload.filter(x => x.branch === ordBranch);
+          if (!sub.length) {
+            msg.innerHTML = '<span class="msg-err">لا توجد أصناف لهذا المخزن في فرع ' + esc(ordBranch)
+                          + '. اختر الفرع من الشريط أعلى الشاشة.</span>';
+            return;
           }
+          const ed = items.filter(x => x.branch === ordBranch && x._ed).length;
+          const rb = await fetch(REST + 'rpc/supplier_link_create', {
+            method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ p_branch: ordBranch, p_store: store, p_items: sub, p_days: 7 }) });
+          if (!rb.ok) throw new Error(await rb.text());
+          const ob = await rb.json();
           document.getElementById('sup-new').innerHTML =
-              '<div class="et-note" style="margin-bottom:8px"><b>' + esc(store) + '</b> — رابط منفصل لكل فرع ('
-            + brs.length + ' روابط)، لأن الطلب عندهم بحساب لكل صيدلية.' + warn + '</div>' + cards;
+              '<div class="et-note" style="margin-bottom:8px"><b>' + esc(store) + '</b> — الرابط لفرع <b>'
+            + esc(ordBranch) + '</b> وحده، لأن الطلب عندهم بحساب مستقل لكل صيدلية.'
+            + ' لباقي الفروع بدّل الفرع من الشريط وأنشئ رابطًا آخر.' + warn + '</div>'
+            + supCard(store, ordBranch, SUP_PAGE + '?t=' + ob.token, sub.length, ed, 7);
           msg.innerHTML = '';
           await supList();
           return;
