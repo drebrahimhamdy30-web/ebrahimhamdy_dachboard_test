@@ -263,10 +263,21 @@
     function today(){ const d=new Date(),p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
     function showMsg(t,ok){ const m=document.getElementById('msg'); m.textContent=t; m.className='msg '+(ok?'ok':'err'); }
 
+    /* ⚠️ بتوكن المستخدم مش بمفتاح anon: دوال الشاشة بقت مغلّفة بحارس
+       نطاق الفروع (migrate_155) اللي بيقرا الدور والفرع من التوكن —
+       ومع anon الدور فاضي فالنداء بيترفض أصلًا. */
     async function rpc(fn, body){
-      try{ const r=await fetch(SB_URL_API+'/rest/v1/rpc/'+fn,{ method:'POST',
-        headers:{'Content-Type':'application/json', apikey:SB_ANON_API, Authorization:'Bearer '+SB_ANON_API }, body:JSON.stringify(body||{}) });
-        if(!r.ok) return null; return await r.json(); }catch(e){ return null; }
+      let r, out=null;
+      try{
+        r = await fetch(SB_URL_API+'/rest/v1/rpc/'+fn,{ method:'POST',
+              headers: await sbH({'Content-Type':'application/json'}), body:JSON.stringify(body||{}) });
+        try{ out = await r.json(); }catch(e){ out = null; }
+      }catch(e){ return { error:'تعذّر الاتصال بالخادم' }; }
+      if(r.ok) return out;
+      /* ⚠️ رسالة الحارس لازم توصل للمستخدم: «هذه المطالبة تخص فرعًا
+         آخر» أو «حسابك غير مربوط بفرع». الرد الفاضي كان بيبان
+         «تعذّر التحميل» فالسبب الحقيقي يضيع. */
+      return { error: (out && (out.message || out.hint)) || ('تعذّر التحميل ('+r.status+')') };
     }
     async function rpcAuth(fn, body){
       const tok = (typeof Session!=='undefined' && Session.bearer) ? await Session.bearer() : SB_ANON_API;
@@ -490,9 +501,28 @@
 
     async function init(){
       const sel=document.getElementById('brSel');
-      sel.innerHTML = Object.keys(BR).map(c=>`<option value="${c}">${BR[c]}</option>`).join('');
+      /* نطاق الفروع: كل موظف يشوف فرعه إلا اللي دوره «كل الفروع».
+         ⚠️ المصدر الوحيد Session.seesAllBranches — ممنوع أي شاشة تعمل
+         فحصها بنفسها (الفخ ده وقعنا فيه ٣ مرات في يوم). والحارس
+         الحقيقي على السيرفر؛ ده تضييق للواجهة عشان ما يبانش للمستخدم
+         فروع نداؤها هيترفض. */
+      let seesAll = false, myCode = null;
+      try{ seesAll = (typeof Session!=='undefined' && Session.seesAllBranches)
+             ? await Session.seesAllBranches('supplier_claims') : false; }catch(e){ seesAll = false; }
+      if(!seesAll){
+        try{ myCode = (typeof Branches!=='undefined' && Branches.toCode)
+               ? Branches.toCode(Session.branch()) : null; }catch(e){ myCode = null; }
+      }
+      const codes = (!seesAll && myCode && BR[myCode]) ? [myCode] : Object.keys(BR);
+      sel.innerHTML = codes.map(c=>`<option value="${c}">${BR[c]}</option>`).join('');
       document.getElementById('histBr').innerHTML = sel.innerHTML;
-      document.getElementById('rvBr').innerHTML = '<option value="">كل الفروع</option>' + sel.innerHTML;
+      /* «كل الفروع» في تبويب المراجعة مالهاش معنى لمن يرى فرعًا واحدًا */
+      document.getElementById('rvBr').innerHTML =
+        (seesAll ? '<option value="">كل الفروع</option>' : '') + sel.innerHTML;
+      if(!seesAll){
+        [sel, document.getElementById('histBr'), document.getElementById('rvBr')]
+          .forEach(s=>{ if(s && codes.length===1){ s.disabled = true; s.title = 'فرعك فقط'; } });
+      }
       document.getElementById('fromD').value='2026-09-01'; document.getElementById('toD').value=today();
       try{ const p=(typeof Session!=='undefined'&&Session.can)?await Session.can('supplier_claims.html'):{edit:true}; canEdit=!!(p&&p.edit); }catch(e){ canEdit=false; }
       if(!canEdit) document.getElementById('closeBtn').style.display='none';
