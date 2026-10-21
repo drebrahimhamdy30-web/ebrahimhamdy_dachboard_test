@@ -97,13 +97,38 @@ async function loadBranches(){
 const CHANNELS = ['instapay','paymob 1','paymob 7','orange cash','fawry313','fawry 6008','vodafon cash'];
 const fmt = n => (n<0?'−':'') + Math.abs(Math.round(Number(n)||0)).toLocaleString('en-US');
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+/* ⚠️ بتوكن المستخدم مش بمفتاح anon: الدوال دي بترجّع إجماليات الشيفت،
+   والحارس على السيرفر بيقرا دور المستخدم من التوكن — بمفتاح anon الدور
+   بيبقى فاضي فالحارس مابيشتغلش، وأي حد معاه المفتاح كان يقدر يناديها. */
 async function rpc(fn, body){
   try{ const r=await fetch(SB_URL_API+'/rest/v1/rpc/'+fn,{ method:'POST',
-    headers:{'Content-Type':'application/json', apikey:SB_ANON_API, Authorization:'Bearer '+SB_ANON_API}, body:JSON.stringify(body||{}) });
+    headers:await sbH({'Content-Type':'application/json'}), body:JSON.stringify(body||{}) });
     if(!r.ok) return null; return await r.json(); }catch(e){ return null; }
 }
 let BRANCH='', POINTS=[], CUR=null, SHIFT=null, TXN=[], chFilter=null, typeFilter=null, userFilter=null;
 let VIEW='shift', SLsc=null, SLcashier=null;  // VIEW: shift | log | detail
+
+/* صلاحية «الإجماليات ونسخ الحركات» (migrate_151) — بند في شاشة
+   الصلاحيات، مش هاردكود بالدور. ممنوعة افتراضيًا لغير الأدمن:
+   الموظف يشوف حركاته من غير مجاميع، وما ينسخهاش لإكسل فيجمّعها.
+   ⚠️ الإخفاء هنا للواجهة؛ الأرقام نفسها مابتوصلش المتصفح أصلًا لأن
+   get_current_shift بيشيلها من الرد. */
+let CAN_TOTALS = true;
+
+/* منع النسخ: الهدف إن الموظف ما ينقلش الحركات لإكسل ويجمّعها.
+   ⚠️ ده احتكاك مش جدار — الأرقام ظاهرة على الشاشة فتقدر تتكتب بالإيد
+   أو تتصوّر. اللي بيتقفل هنا هو الطريق السهل (تحديد → نسخ → لصق). */
+function lockCopy(){
+  const st=document.createElement('style');
+  st.textContent='.tablecard,.tablecard *{user-select:none;-webkit-user-select:none;-ms-user-select:none}';
+  document.head.appendChild(st);
+  document.addEventListener('copy', e=>{
+    if(e.target && e.target.closest && e.target.closest('input,select,textarea')) return;  // الكتابة في الفلاتر تفضل طبيعية
+    e.preventDefault();
+  });
+  document.addEventListener('contextmenu', e=>{ if(e.target.closest('.tablecard')) e.preventDefault(); });
+  document.addEventListener('dragstart',  e=>{ if(e.target.closest('.tablecard')) e.preventDefault(); });
+}
 
 function roleDefaultPoint(points){
   let role=''; try{ role=(typeof Session!=='undefined'&&Session.role)?Session.role():''; }catch(e){}
@@ -122,6 +147,9 @@ async function visiblePoints(points){
   return out;
 }
 async function init(){
+  try{ if(typeof Session!=='undefined' && Session.tabAllowed)
+         CAN_TOTALS = await Session.tabAllowed('current_shift','totals'); }catch(e){ CAN_TOTALS = true; }
+  if(!CAN_TOTALS) lockCopy();
   await loadBranches();
   let bid='', bname='', seesAll=false;
   try{ bid=(typeof Session!=='undefined'&&Session.branchId)?Session.branchId():''; }catch(e){}
@@ -196,6 +224,7 @@ function render(){
       <div class="it"><span class="k">عدد المعاملات</span><b>${TXN.length}</b></div>
       <div class="users" title="${users}">👤 ${users}</div>
     </div>
+    ${!CAN_TOTALS ? '' : `
     <div class="sumcard">
       <div class="sumtbl"><table>
         <thead><tr>
@@ -213,7 +242,7 @@ function render(){
       </table></div>
       <div class="chips" id="vchs"><span class="lbl">الفيزا بالقنوات (للمطابقة مع البنك):</span> ${chips}</div>
     </div>
-    <div class="note">✏️ لو معاملة اتحفظت كاش وهي فيزا: غيّر «الحساب» في صفّها → بتتحوّل فيزا والصافي يتعدّل (تصحيح للعرض، مش بيتحفظ في eplus).</div>
+    <div class="note">✏️ لو معاملة اتحفظت كاش وهي فيزا: غيّر «الحساب» في صفّها → بتتحوّل فيزا والصافي يتعدّل (تصحيح للعرض، مش بيتحفظ في eplus).</div>`}
     <div class="toolbar">
       <input type="search" id="q" placeholder="🔎 بحث بالطرف / الملاحظة / المستخدم…">
       <span class="flabel">النوع:</span>
@@ -236,8 +265,11 @@ function drawRows(){
   const rows=TXN.filter((t,i)=>{ t._i=i;
     return (!typeFilter||t.kind===typeFilter) && (!chFilter||t.channel===chFilter) && (!userFilter||t.user_name===userFilter) &&
       (!q||((t.from||'')+' '+(t.to||'')+' '+(t.party||'')+' '+(t.visa_no||'')+' '+(t.notes||'')+' '+(t.user_name||'')).toLowerCase().includes(q)); });
+  /* ⚠️ «مجموع المعروض» ده إجمالي كمان — وأسهل واحد كمان لأنه بيتجمّع
+     حسب الفلتر. لازم يختفي مع باقي الإجماليات، مش العدد. */
   const sum=rows.reduce((a,t)=>a+(t.kind==='صرف'?-1:1)*(+t.amount),0);
-  document.getElementById('shown').textContent='المعروض: '+rows.length+' · مجموع: '+fmt(sum)+' ج';
+  document.getElementById('shown').textContent =
+    'المعروض: '+rows.length + (CAN_TOTALS ? ' · مجموع: '+fmt(sum)+' ج' : '');
   document.getElementById('tb').innerHTML = rows.map(t=>{
     const cls=t.kind==='صرف'?'out':(t.kind==='فيزا'?'visa':(t.kind==='توريد'?'in':'cash')); const iv=(t.kind==='فيزا');
     const editable=(t.kind==='كاش'||t.kind==='فيزا');
