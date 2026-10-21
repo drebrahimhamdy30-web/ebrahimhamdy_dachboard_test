@@ -247,6 +247,21 @@ async function loadShift(){
 }
 // معاملة فيزا «مكتوبة يدويًا» (قيمة مدفوع مميّزة) مقابل أوتوماتيك (أخدت القيمة)
 function isManual(t){ return (t.manual===true) || (t.manual==null && Number(t.visa_no)>1); }
+/* ⚠️ قراءة رقم كتبه المستخدم بالعربي.
+   input[type=number] بيرجّع "" لأي إدخال المتصفح مش فاهمه — الأرقام
+   الهندية (٢٥) أو الفاصلة العربية (٢٥٫٥) أو الفاصلة العادية (25,5) —
+   فالقيمة كانت بترجع لأصلها **من غير أي رسالة**، والمستخدم يفتكر إن
+   الشاشة رافضة التعديل. الخانة بقت نصّية وإحنا بنطبّع الرقم بنفسنا. */
+const AR_DIGITS = { '٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9',
+                    '۰':'0','۱':'1','۲':'2','۳':'3','۴':'4','۵':'5','۶':'6','۷':'7','۸':'8','۹':'9' };
+function toNum(s){
+  const v = String(s==null?'':s)
+    .replace(/[٠-٩۰-۹]/g, d => AR_DIGITS[d])
+    .replace(/[٫،,]/g, '.')
+    .replace(/[^\d.]/g, '')
+    .trim();
+  return v === '' ? NaN : parseFloat(v);
+}
 function paidOf(t){ return (t.paid!=null)? +t.paid : +t.amount; }
 function kpis(){
   const cash=TXN.filter(t=>t.kind==='كاش').reduce((a,t)=>a+ +t.amount,0);
@@ -394,7 +409,7 @@ function drawRows(){
     const acct = editable
       ? `<select class="e eacct" data-i="${t._i}" ${lock?'disabled':''}><option value="" ${!iv?'selected':''}>— كاش</option>${CHANNELS.map(c=>`<option ${t.channel===c?'selected':''}>${esc(c)}</option>`).join('')}</select>`
       : esc(t.channel||'—');
-    const paidCell = iv ? `<input class="e epaid${isManual(t)?'':' auto'}" data-i="${t._i}" type="number" value="${paidOf(t)}" style="width:82px" ${lock?'disabled':''}>` : '';
+    const paidCell = iv ? `<input class="e epaid${isManual(t)?'':' auto'}" data-i="${t._i}" type="text" inputmode="decimal" value="${paidOf(t)}" style="width:82px" ${lock?'disabled':''}>` : '';
     /* الكاش والصرف والتوريد مالهمش مراجعة — الفيزا بس هي اللي ممكن
        تكون اتسجّلت والفلوس ما وصلتش. */
     const rvCell = !isReviewable(t) ? '<span class="dash">—</span>'
@@ -414,8 +429,16 @@ function drawRows(){
     render();
   });
   document.querySelectorAll('.epaid').forEach(inp=>inp.onchange=()=>{
-    const t=TXN[+inp.dataset.i]; const v=parseFloat(inp.value);
-    if(isFinite(v)&&v>1){ t.paid=v; t.manual=true; } else { t.paid=+t.amount; t.manual=false; }
+    const t=TXN[+inp.dataset.i]; const v=toNum(inp.value);
+    /* ⚠️ كان الشرط `v>1`، فأي قيمة جنيه أو أقل كانت بترجع لقيمة النظام
+       بصمت — سحبة بـ١ ج أو ٠.٥ ج مستحيل تتكتب. الصفر والأقل من جنيه
+       قيم مشروعة؛ اللي بيرجّع للأصل هو الخانة الفاضية بس. */
+    if(isFinite(v) && v>=0){
+      t.paid = v;
+      t.manual = Math.abs(v - (+t.amount||0)) > 0.005;   // مساوية لقيمة النظام = مش يدوية
+    } else {
+      t.paid = +t.amount; t.manual = false;              // فاضية = رجوع للأصل
+    }
     render();
   });
 }
