@@ -40,6 +40,32 @@
   .usel:focus{outline:none;border-color:var(--teal)}
   .shown{margin-inline-start:auto;font-size:12.5px;font-weight:700;color:var(--teal-d);background:#f0fdfa;border:1px solid #99f6e4;border-radius:8px;padding:6px 12px}
   .note{font-size:11.5px;color:var(--teal-d);background:#ccfbf1;border:1px solid #99f6e4;border-radius:7px;padding:5px 11px;margin-bottom:10px}
+  /* ── مراجعة الفيزا ── */
+  .rvbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);
+         border-inline-start:4px solid #8b5cf6;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:13px}
+  .rvbar .ttl{font-weight:800}
+  .rvbar .cnt{font-weight:800;color:#6b21a8;font-variant-numeric:tabular-nums}
+  .rvbar .prog{flex:1;min-width:120px;height:8px;background:#ede9fe;border-radius:99px;overflow:hidden}
+  .rvbar .prog i{display:block;height:100%;background:#7c3aed;border-radius:99px;transition:width .25s}
+  .rvbar .rest{color:var(--muted);font-weight:700}
+  .rvbar .done{color:var(--green);font-weight:800}
+  .rvbar .vtot{margin-inline-start:auto;font-weight:700;color:#6b21a8;background:#f5f3ff;
+               border:1px solid #ddd6fe;border-radius:8px;padding:5px 12px}
+  .rvbar .vtot b{font-size:15px;font-weight:800;font-variant-numeric:tabular-nums}
+  th.rv,td.rv{width:124px}
+  .btn-rv{font-family:inherit;font-size:12px;font-weight:700;padding:5px 14px;border:1px solid #c4b5fd;
+          border-radius:8px;background:#f5f3ff;color:#6b21a8;cursor:pointer;white-space:nowrap}
+  .btn-rv:hover{background:#7c3aed;color:#fff;border-color:#7c3aed}
+  .btn-rv[disabled]{opacity:.5;cursor:default}
+  .rv-ok{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;color:var(--green);white-space:nowrap}
+  .rv-ok .who{color:var(--muted);font-weight:600;font-size:10.5px}
+  .btn-unlock{font-family:inherit;font-size:10.5px;font-weight:700;padding:2px 8px;border:1px solid var(--line);
+              border-radius:6px;background:#fff;color:var(--muted);cursor:pointer;margin-inline-start:6px}
+  .btn-unlock:hover{border-color:var(--red);color:var(--red)}
+  tr.locked{background:#f0fdf4 !important}
+  tr.locked td{color:#065f46}
+  tr.locked .e{border-color:transparent;background:transparent;color:#065f46;font-weight:700;appearance:none;-webkit-appearance:none}
+  .dash{color:var(--line)}
   .tablecard{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:auto}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{padding:7px 9px;text-align:center;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -114,6 +140,8 @@ let VIEW='shift', SLsc=null, SLcashier=null;  // VIEW: shift | log | detail
    ⚠️ الإخفاء هنا للواجهة؛ الأرقام نفسها مابتوصلش المتصفح أصلًا لأن
    get_current_shift بيشيلها من الرد. */
 let CAN_TOTALS = true;
+let IS_ADMIN = false;        // فكّ قفل المراجعة للأدمن فقط
+let pendOnly = false;        // فلتر «غير المراجَع فقط»
 
 /* منع النسخ: الهدف إن الموظف ما ينقلش الحركات لإكسل ويجمّعها.
    ⚠️ ده احتكاك مش جدار — الأرقام ظاهرة على الشاشة فتقدر تتكتب بالإيد
@@ -149,6 +177,7 @@ async function visiblePoints(points){
 async function init(){
   try{ if(typeof Session!=='undefined' && Session.tabAllowed)
          CAN_TOTALS = await Session.tabAllowed('current_shift','totals'); }catch(e){ CAN_TOTALS = true; }
+  try{ IS_ADMIN = (typeof Session!=='undefined' && Session.isAdmin) ? Session.isAdmin() : false; }catch(e){ IS_ADMIN = false; }
   if(!CAN_TOTALS) lockCopy();
   await loadBranches();
   let bid='', bname='', seesAll=false;
@@ -197,7 +226,20 @@ async function loadShift(){
   VIEW='shift';
   SHIFT = await rpc('get_current_shift',{p_branch:BRANCH, p_cashier:CUR});
   if(!SHIFT){ document.getElementById('content').innerHTML='<div class="state">تعذّر التحميل.</div>'; return; }
-  TXN = (SHIFT.transactions||[]).map(t=>({...t}));  // نسخة قابلة للتعديل
+  /* الحركة المُراجَعة بتسترجع قيمتها المؤكَّدة من المراجعة مش من eplus:
+     التصحيح اللي الموظف عمله قبل ما يضغط «تم» اتحفظ عندنا، وde eplus
+     لسه شايف الأصل. من غير ده القفل يرجّع الرقم القديم بعد أول تحديث. */
+  TXN = (SHIFT.transactions||[]).map(t=>{
+    const x = {...t};
+    if(x.rv){
+      if(x.rv.channel){ x.kind = 'فيزا'; x.channel = x.rv.channel; }
+      if(x.rv.paid != null){
+        x.paid = +x.rv.paid;
+        if(Math.abs(x.paid - (+x.amount||0)) > 0.005) x.manual = true;
+      }
+    }
+    return x;
+  });
   render();
 }
 // معاملة فيزا «مكتوبة يدويًا» (قيمة مدفوع مميّزة) مقابل أوتوماتيك (أخدت القيمة)
@@ -211,6 +253,68 @@ function kpis(){
   const op=Number(SHIFT.opening)||0;
   return { cash, visa, sarf, tran, net: op+cash+tran-sarf, op };
 }
+/* ── مراجعة الفيزا ───────────────────────────────────────────────
+   موظف الشيفت بيأكّد إن المعاملة وصلت فعلًا (المحفظة استلمت أو السحب
+   على الماكينة تم). الضغط على «تم» بيحفظ القيمة والقناة عندنا ويقفل
+   السطر. ⚠️ قبل كده كان تعديل «الحساب»/«قيمة المدفوع» للعرض بس
+   وبيضيع مع أول تحديث — القفل من غير حفظ مالوش معنى. */
+const isReviewable = t => t.kind === 'فيزا' && t.fh_id != null;
+/* ⚠️ الإجمالي ده **مجموع عمود «قيمة المدفوع»** زي ما هو معروض (طلب
+   المالك) — مش زي «إجمالي الفيزا» في جدول الملخّص اللي بيوحّد
+   المعاملات اليدوية المتكررة بنفس القيمة. فالرقمان ممكن يختلفوا. */
+const visaPaidTotal = () => TXN.filter(t=>t.kind==='فيزا').reduce((a,t)=>a+paidOf(t),0);
+
+function reviewBar(){
+  const v = TXN.filter(isReviewable);
+  const ok = v.filter(t=>t.rv).length;
+  const pct = v.length ? (ok/v.length*100) : 100;
+  return `<div class="rvbar">
+    <span class="ttl">✅ مراجعة الفيزا</span>
+    <span class="cnt">${ok} من ${v.length}</span>
+    <span class="prog"><i style="width:${pct.toFixed(0)}%"></i></span>
+    <span class="rest">${v.length && ok===v.length ? '<b class="done">اكتملت المراجعة ✓</b>'
+      : (v.length ? 'باقي ' + (v.length-ok) + ' معاملة' : 'لا توجد معاملات فيزا')}</span>
+    <span class="vtot">إجمالي قيمة المدفوع (فيزا) <b>${fmt(visaPaidTotal())}</b> ج</span>
+    ${v.length ? `<button class="chip ${pendOnly?'active':''}" id="pendBtn">غير المراجَع فقط</button>` : ''}
+  </div>`;
+}
+
+/* ⚠️ rpc() العادية بترجّع null عند الفشل فرسالة السيرفر بتضيع — والمراجعة
+   رسايلها مهمة («تمت مراجعتها بالفعل»، «غير مصرّح»). الكتابة ليها نداء
+   بيقرا جسم الخطأ. */
+async function rpcWrite(fn, body){
+  let r, out = null;
+  try{
+    r = await fetch(SB_URL_API+'/rest/v1/rpc/'+fn, { method:'POST',
+          headers: await sbH({'Content-Type':'application/json'}), body: JSON.stringify(body||{}) });
+    try{ out = await r.json(); }catch(e){ out = null; }
+  }catch(e){ return { success:false, error:'تعذّر الاتصال بالخادم' }; }
+  if(r.ok && out && out.success === true) return out;
+  return { success:false, error: (out && (out.message || out.hint || out.error)) || ('فشل العملية ('+r.status+')') };
+}
+
+async function reviewTxn(i){
+  const t = TXN[i]; if(!t || t.rv) return;
+  const btn = document.querySelector('.btn-rv[data-i="'+i+'"]');
+  if(btn){ btn.disabled = true; btn.textContent = '…'; }
+  const r = await rpcWrite('review_shift_txn', { p_branch:BRANCH, p_fh_id:t.fh_id,
+                                                 p_paid: paidOf(t), p_channel: t.channel || null });
+  if(r.success !== true){
+    alert(r.error);
+    if(btn){ btn.disabled = false; btn.textContent = 'تم ✓'; }
+    return;
+  }
+  t.rv = { by:r.reviewed_by, at:r.reviewed_at, paid:paidOf(t), channel:t.channel||null };
+  render();
+}
+async function unreviewTxn(i){
+  const t = TXN[i]; if(!t || !t.rv) return;
+  if(!confirm('فكّ قفل المراجعة لهذه الحركة؟')) return;
+  const r = await rpcWrite('unreview_shift_txn', { p_branch:BRANCH, p_fh_id:t.fh_id });
+  if(r.success !== true){ alert(r.error); return; }
+  delete t.rv; render();
+}
+
 function render(){
   const k=kpis();
   const startTxt = SHIFT.shift_start ? new Date(SHIFT.shift_start).toLocaleString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
@@ -243,6 +347,7 @@ function render(){
       <div class="chips" id="vchs"><span class="lbl">الفيزا بالقنوات (للمطابقة مع البنك):</span> ${chips}</div>
     </div>
     <div class="note">✏️ لو معاملة اتحفظت كاش وهي فيزا: غيّر «الحساب» في صفّها → بتتحوّل فيزا والصافي يتعدّل (تصحيح للعرض، مش بيتحفظ في eplus).</div>`}
+    ${reviewBar()}
     <div class="toolbar">
       <input type="search" id="q" placeholder="🔎 بحث بالطرف / الملاحظة / المستخدم…">
       <span class="flabel">النوع:</span>
@@ -252,8 +357,11 @@ function render(){
       <span class="shown" id="shown"></span>
     </div>
     <div class="tablecard"><table><thead><tr>
+      <th class="rv">المراجعة</th>
       <th>الوقت</th><th>النوع</th><th>قيمة المدفوع</th><th>القيمة</th><th class="r">من</th><th class="r">الى</th><th class="r">المستخدم</th><th>الجهاز</th><th>الحساب</th><th class="r">ملاحظات</th>
     </tr></thead><tbody id="tb"></tbody></table></div>`;
+  const pb=document.getElementById('pendBtn');
+  if(pb) pb.onclick=()=>{ pendOnly=!pendOnly; render(); };
   document.querySelectorAll('.vch[data-ch]').forEach(c=>c.onclick=()=>{ chFilter=(chFilter===c.dataset.ch?null:c.dataset.ch); render(); });
   document.querySelectorAll('.chip.tp').forEach(c=>c.onclick=()=>{ typeFilter=(typeFilter===c.dataset.t?null:c.dataset.t); drawRows(); document.querySelectorAll('.chip.tp').forEach(x=>x.classList.toggle('active',x.dataset.t===typeFilter)); });
   document.getElementById('q').oninput=drawRows;
@@ -263,6 +371,7 @@ function render(){
 function drawRows(){
   const q=(document.getElementById('q').value||'').trim().toLowerCase();
   const rows=TXN.filter((t,i)=>{ t._i=i;
+    if(pendOnly && !(isReviewable(t) && !t.rv)) return false;
     return (!typeFilter||t.kind===typeFilter) && (!chFilter||t.channel===chFilter) && (!userFilter||t.user_name===userFilter) &&
       (!q||((t.from||'')+' '+(t.to||'')+' '+(t.party||'')+' '+(t.visa_no||'')+' '+(t.notes||'')+' '+(t.user_name||'')).toLowerCase().includes(q)); });
   /* ⚠️ «مجموع المعروض» ده إجمالي كمان — وأسهل واحد كمان لأنه بيتجمّع
@@ -272,18 +381,25 @@ function drawRows(){
     'المعروض: '+rows.length + (CAN_TOTALS ? ' · مجموع: '+fmt(sum)+' ج' : '');
   document.getElementById('tb').innerHTML = rows.map(t=>{
     const cls=t.kind==='صرف'?'out':(t.kind==='فيزا'?'visa':(t.kind==='توريد'?'in':'cash')); const iv=(t.kind==='فيزا');
+    const lock=!!t.rv;
     const editable=(t.kind==='كاش'||t.kind==='فيزا');
     const acct = editable
-      ? `<select class="e eacct" data-i="${t._i}"><option value="" ${!iv?'selected':''}>— كاش</option>${CHANNELS.map(c=>`<option ${t.channel===c?'selected':''}>${esc(c)}</option>`).join('')}</select>`
+      ? `<select class="e eacct" data-i="${t._i}" ${lock?'disabled':''}><option value="" ${!iv?'selected':''}>— كاش</option>${CHANNELS.map(c=>`<option ${t.channel===c?'selected':''}>${esc(c)}</option>`).join('')}</select>`
       : esc(t.channel||'—');
-    const paidCell = iv ? `<input class="e epaid${isManual(t)?'':' auto'}" data-i="${t._i}" type="number" value="${paidOf(t)}" style="width:82px">` : '';
-    return `<tr><td>${esc(t.time)}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
+    const paidCell = iv ? `<input class="e epaid${isManual(t)?'':' auto'}" data-i="${t._i}" type="number" value="${paidOf(t)}" style="width:82px" ${lock?'disabled':''}>` : '';
+    /* الكاش والصرف والتوريد مالهمش مراجعة — الفيزا بس هي اللي ممكن
+       تكون اتسجّلت والفلوس ما وصلتش. */
+    const rvCell = !isReviewable(t) ? '<span class="dash">—</span>'
+      : lock ? `<span class="rv-ok">✓ تمت<span class="who">${esc(t.rv.by||'')}${t.rv.at?' · '+esc(t.rv.at):''}</span></span>`
+               + (IS_ADMIN ? `<button class="btn-unlock" onclick="unreviewTxn(${t._i})">فتح</button>` : '')
+      : `<button class="btn-rv" data-i="${t._i}" onclick="reviewTxn(${t._i})">تم ✓</button>`;
+    return `<tr class="${lock?'locked':''}"><td class="rv">${rvCell}</td><td>${esc(t.time)}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
       `<td>${paidCell}</td>`+
       `<td class="num ${t.kind==='صرف'?'neg':'pos'}">${t.kind==='صرف'?'−':''}${fmt(t.amount)}</td>`+
       `<td class="r">${esc(t.from||'—')}</td><td class="r">${esc(t.to||'—')}</td>`+
       `<td class="r">${esc(t.user_name||'—')}</td><td class="dev">${esc(t.computer||'—')}</td>`+
       `<td class="${iv?'visa':''}">${acct}</td><td class="notes">${esc(t.notes||'')}</td></tr>`;
-  }).join('') || '<tr><td colspan="10" class="state">لا توجد حركات مطابقة.</td></tr>';
+  }).join('') || '<tr><td colspan="11" class="state">لا توجد حركات مطابقة.</td></tr>';
   document.querySelectorAll('.eacct').forEach(s=>s.onchange=()=>{
     const t=TXN[+s.dataset.i]; const v=s.value;
     if(v){ t.kind='فيزا'; t.channel=v; if(t.paid==null) t.paid=+t.amount; if(t.manual==null) t.manual=false; } else { t.kind='كاش'; t.channel=''; }
