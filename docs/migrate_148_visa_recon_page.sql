@@ -9,7 +9,9 @@
    والمحافظ لكل الفروع.
    ============================================================ */
 insert into app_pages (key, file, title, section, sort_order, is_active)
-values ('visa_recon', 'visa_recon.html', 'مطابقة خزنة visa', 'الحسابات والخزينة', 636, true)
+/* ⚠️ 636 كان محجوز لـ«حسابات الموردين ٢» — رقمين متساويين معناهم ترتيب
+   عشوائي بينهم في القائمة. 639 = آخر القسم بلا تصادم. */
+values ('visa_recon', 'visa_recon.html', 'مطابقة خزنة visa', 'الحسابات والخزينة', 639, true)
 on conflict (key) do update
   set file = excluded.file, title = excluded.title,
       section = excluded.section, sort_order = excluded.sort_order, is_active = true;
