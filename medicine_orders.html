@@ -328,6 +328,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
             <span id="ordBranchLabel" style="display:none;font-weight:800;color:var(--primary);font-size:0.9rem"></span>
             <input type="text" id="ord-search" class="form-input" placeholder="🔍 بحث بالصنف أو الكود..." oninput="ordDebounce()" style="max-width:165px">
             <select id="ord-wh" class="form-select" style="max-width:128px" onchange="ordPage=1;loadOrders()"><option value="">كل المخازن</option></select>
+            <select id="ord-company" class="form-select" style="max-width:140px" onchange="ordPage=1;loadOrders()"><option value="">كل الشركات</option></select>
             <button class="cr-up-btn" id="xc-btn" style="background:var(--surface-3);color:var(--text-primary)" onclick="xcOpen()" title="الشركات اللي بتتطلب لوحدها — بتختفي من الطلبيات"><i class="fas fa-ban"></i> استثناء شركات</button>
             <input type="text" id="ord-bestsup" class="form-select" list="ord-bestsup-list" placeholder="أفضل مورّد..." style="max-width:132px" oninput="ordDebounce()" title="فلترة بأفضل مورّد (أقل سعر شراء من فواتير الشراء)">
             <datalist id="ord-bestsup-list"></datalist>
@@ -340,7 +341,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
               <input type="number" id="ord-req-v" class="form-input" style="max-width:66px" placeholder="—" oninput="ordDebounce()"></span>
             <span class="ord-chks">
               <label style="display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="ord-surp-only" onchange="ordPage=1;loadOrders()"> فائض فقط</label>
-              <label id="xc-show-wrap" style="display:none;align-items:center;gap:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="ord-show-excl" onchange="ordPage=1;loadOrders()"> إظهار المستثناة</label>
+              <label id="xc-show-wrap" style="display:none;align-items:center;gap:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="ord-show-excl" onchange="ordPage=1;loadOrdCompanies();loadOrders()"> إظهار المستثناة</label>
             </span>
           </div>
           <div class="ord-row ord-row-actions">
@@ -1149,6 +1150,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       /* الشركات المستثناة: العمود محسوب في القاعدة، و`not.is.true`
          بيمسك الـnull كمان (صف اتبنى قبل أول تعليم). */
       if (EXCL.size && !ordShowExcl()) s += '&excluded=not.is.true';
+      const co = document.getElementById('ord-company').value;
+      if (co) s += '&company=eq.' + encodeURIComponent(co);
       if (under === 'on') s += ordSelCodes.size ? '&itm_code=in.(' + ordInList() + ')' : '&itm_code=eq.__none__';
       else if (under === 'off' && ordSelCodes.size) s += '&itm_code=not.in.(' + ordInList() + ')';
       return s;
@@ -1475,6 +1478,27 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         + BO.months + 'm_' + new Date().toISOString().slice(0,10) + '.xlsx');
     }
 
+    /* فلتر عرض بالشركة. منفصل تمامًا عن قائمة الاستثناء: الاستثناء
+       بيشيل الشركة من الطلبية كلها، وده بيضيّق المعروض مؤقتًا.
+       الشركات المستثناة مابتظهرش في المنسدلة إلا لو «إظهار
+       المستثناة» شغّال — غير كده تختار شركة وتطلع صفر صنف. */
+    async function loadOrdCompanies(){
+      try {
+        const list = await (await fetch(REST + 'rpc/get_purchase_companies', { method:'POST',
+          headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' })).json();
+        const sel = document.getElementById('ord-company');
+        const keep = sel.value;
+        const show = ordShowExcl();
+        const opts = (Array.isArray(list) ? list : []).filter(c => show || !EXCL.has(c.company));
+        sel.innerHTML = '<option value="">كل الشركات</option>'
+          + opts.map(c => '<option value="' + escAttr(c.company) + '">' + esc(c.company)
+              + (EXCL.has(c.company) ? ' (مستثناة)' : '') + '</option>').join('');
+        /* الاختيار الحالي يفضل لو لسه موجود — إعادة البناء مالهاش
+           داعي تلغي فلتر المستخدم. */
+        if (keep && opts.some(c => c.company === keep)) sel.value = keep;
+      } catch (e) {}
+    }
+
     async function loadExcluded(){
       try {
         const j = await (await fetch(REST + 'pinned_companies?select=company&order=sort_order.asc', { headers: H })).json();   // data-ok: قائمة إعدادات قصيرة
@@ -1525,7 +1549,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         if (!r.ok) throw new Error('HTTP ' + r.status);
         EXCL = new Set(xcDraft);
         xcClose(); xcSyncBtn();
-        ordPage = 1; loadOrders();
+        ordPage = 1; await loadOrdCompanies(); loadOrders();
       } catch (e) {
         alert(typeof sbFailMsg === 'function' ? sbFailMsg('تعذّر حفظ القائمة') : 'تعذّر حفظ القائمة');
       } finally { btn.disabled = false; btn.innerHTML = old; }
@@ -1871,6 +1895,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
         const q  = document.getElementById('ord-search').value.trim();
         if (q) { const e = encodeURIComponent(q); base += '&or=(itm_name.ilike.*' + e + '*,itm_code.eq.' + e + ')'; }
         if (EXCL.size && !ordShowExcl()) base += '&excluded=not.is.true';
+        const co = document.getElementById('ord-company').value;
+        if (co) base += '&company=eq.' + encodeURIComponent(co);
         /* الفلاتر العددية بس — بلا فلتر «تحت الطلب» (أكواد فرع واحد) */
         const sOp = document.getElementById('ord-stock-op').value, sV = document.getElementById('ord-stock-v').value.trim();
         const rOp = document.getElementById('ord-req-op').value,   rV = document.getElementById('ord-req-v').value.trim();
@@ -3300,7 +3326,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       // loadMeta/loadMonths/loadPage اتشالوا من هنا — دول بتوع تبويب «معدل
       // الاستهلاك» وبيتحمّلوا أول ما يتفتح (showTab). اللي فاضل مشترك أو
       // بتاع «الطلبيات» وهو التبويب الافتراضي.
-      loadBranchReps(); loadOrdStores(); loadStoreFlags(); EXCL_READY = loadExcluded(); loadOrdBestSuppliers();
+      loadBranchReps(); loadOrdStores(); loadStoreFlags();
+      EXCL_READY.then(loadOrdCompanies);   // المنسدلة بتفلتر بالمستثنى فمحتاجاه جاهز EXCL_READY = loadExcluded(); loadOrdBestSuppliers();
       ordSyncFitBtn();
       showTab('orders');   // الطلبيات هو التبويب الافتراضي عند فتح الشاشة
     })();
