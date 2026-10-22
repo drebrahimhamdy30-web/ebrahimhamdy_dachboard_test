@@ -776,6 +776,7 @@ window.addEventListener('DOMContentLoaded', async()=>{
      على التوكن القديم — فبنحدّثه كل ٩ دقايق وإلا الاشتراك بيموت
      بعد ساعة من غير ما حد ياخد باله. */
   setInterval(rtAuth, 9 * 60 * 1000);
+  startLocationStream();   // بثّ موقع الطيار أثناء الرحلة (كل دقيقة)
 });
 
 async function loadDriver(){
@@ -1234,6 +1235,36 @@ function getMyLocation(){
       tryGet(false, 10000, (loc2)=> resolve(loc2||null));
     });
   });
+}
+
+// ═══════════════ بثّ الموقع الحي أثناء الرحلة ═══════════════
+// طول ما الطيار في رحلة جارية، نبعت موقعه كل دقيقة لجدول driver_locations
+// (بتوكن الطيار — authenticated) عشان شاشة التوزيع تشوفه لحظيًا وهو بيتحرّك.
+// أثناء الرحلة بس توفيرًا للبطارية والباقة؛ بيقف تلقائيًا لما الرحلة تخلص.
+let _locStreamTimer=null,_locStreamBusy=false;
+function driverOnTrip(){
+  try{ return (allTrips||[]).some(t=>['active','pending_complete'].includes(t.status)); }
+  catch(_){ return false; }
+}
+async function pushMyLocationOnce(){
+  if(_locStreamBusy||!driverRecord||!driverOnTrip()) return;   // أثناء الرحلة بس
+  _locStreamBusy=true;
+  try{
+    const loc=await getMyLocation();
+    if(loc&&loc.lat){
+      await db.from('driver_locations').upsert({
+        driver_id:driverRecord.id,
+        lat:loc.lat,lng:loc.lng,acc:loc.acc||null,
+        reported_at:new Date().toISOString()
+      });
+    }
+  }catch(_){}
+  finally{ _locStreamBusy=false; }
+}
+function startLocationStream(){
+  if(_locStreamTimer) return;
+  pushMyLocationOnce();                                     // بثّة فورية لو في رحلة
+  _locStreamTimer=setInterval(pushMyLocationOnce,60000);   // وبعدها كل دقيقة
 }
 
 // يفحص موقع الاستلام. يرجّع:

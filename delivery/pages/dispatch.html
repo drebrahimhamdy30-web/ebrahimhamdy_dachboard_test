@@ -4317,7 +4317,7 @@ async function sendMessage(){
 }
 
 // ===== موقع الطيار الحالي (on-demand عبر Realtime) =====
-let _locCh=null,_locMap=null,_locMarker=null,_locTimer=null,_locResponded=false;
+let _locCh=null,_locMap=null,_locMarker=null,_locTimer=null,_locResponded=false,_locPollTimer=null,_locLastTs=0;
 
 async function showDriverLocation(driverId){
   if(!driverId){showToast('اختر طيار أولاً');return;}
@@ -4354,6 +4354,10 @@ async function showDriverLocation(driverId){
     if(status==='SUBSCRIBED') _locCh.send({type:'broadcast',event:'request',payload:{}});
   });
 
+  // بثّ حي: الطيار (ويب/تطبيق) بيحدّث موقعه في driver_locations أثناء الرحلة،
+  // فبنقرا الصف كل 15ث ونحرّك الماركر. أحدث من دقيقتين = «بثّ حي».
+  startLocPoll(driverId);
+
   clearTimeout(_locTimer);
   _locTimer=setTimeout(()=>{
     if(!_locResponded){
@@ -4386,12 +4390,31 @@ function placeLoc(lat,lng,acc,ts,isLast){
   document.getElementById('loc-meta').textContent=(acc?`الدقة ~${Math.round(acc)} متر · `:'')+(when?`الوقت ${when}`:'');
   const g=document.getElementById('loc-gmaps');
   g.href=`https://www.google.com/maps?q=${lat},${lng}`; g.style.display='inline';
+  _locLastTs=ts?new Date(ts).getTime():Date.now();
+}
+
+// بوّل موقع الطيار من driver_locations (البثّ الحي) ويحرّك الماركر لو فيه أحدث
+function startLocPoll(driverId){
+  clearInterval(_locPollTimer);
+  _locPollTimer=setInterval(async()=>{
+    try{
+      const {data}=await db.from('driver_locations').select('lat,lng,acc,reported_at').eq('driver_id',driverId).maybeSingle();
+      if(data&&data.lat){
+        const ts=data.reported_at?new Date(data.reported_at).getTime():0;
+        if(ts>_locLastTs){
+          const fresh=(Date.now()-ts)<120000;   // أحدث من دقيقتين = بثّ حي
+          if(fresh){ _locResponded=true; clearTimeout(_locTimer); }
+          placeLoc(data.lat,data.lng,data.acc,data.reported_at,!fresh);
+        }
+      }
+    }catch(_){}
+  },15000);
 }
 
 function cleanupLocCh(){ if(_locCh){ try{db.removeChannel(_locCh);}catch(_){} _locCh=null; } }
 function closeLocModal(){
   document.getElementById('locModal').classList.remove('open');
-  clearTimeout(_locTimer); cleanupLocCh();
+  clearTimeout(_locTimer); clearInterval(_locPollTimer); cleanupLocCh();
   if(_locMap){_locMap.remove();_locMap=null;_locMarker=null;}
 }
 
