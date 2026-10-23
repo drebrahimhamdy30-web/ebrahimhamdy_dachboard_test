@@ -497,6 +497,18 @@
             </div>
             <button class="btn btn-primary" onclick="loadStaleReport()"><i class="fas fa-search"></i> بحث</button>
             <button class="btn btn-secondary" onclick="exportStaleReportToExcel()"><i class="fas fa-file-excel"></i> تصدير إكسل</button>
+            <!-- الوارد الجديد: صنف رصيده كله من آخر فاتورة شراء خلال المدة دي.
+                 الفلترة محلية فبتتطبّق فورًا من غير نداء جديد للسيرفر. -->
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:nowrap;">
+              <label class="modal-label" style="margin:0;display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap;">
+                <input type="checkbox" id="stale-hide-new" checked onchange="onStaleNewFilter()"
+                       style="width:16px;height:16px;cursor:pointer;">
+                إخفاء الوارد الجديد
+              </label>
+              <input type="number" id="stale-new-days" class="form-input" value="14" min="1" max="180"
+                     oninput="onStaleNewFilter()" style="width:62px;text-align:center;">
+              <span style="font-size:0.8rem;color:var(--text-muted);">يوم</span>
+            </div>
             <div style="flex:1;min-width:190px;max-width:280px;">
               <label class="modal-label" style="margin-bottom:4px;">بحث في النتائج</label>
               <input type="text" id="stale-search-input" class="form-input"
@@ -509,10 +521,10 @@
           <div class="table-wrap">
             <table class="report-table">
               <thead>
-                <tr><th>كود</th><th>الاسم عربي</th><th>الاسم إنجليزي</th><th>آخر جرد</th><th>الرصيد</th><th>إجراء</th></tr>
+                <tr><th>كود</th><th>الاسم عربي</th><th>الاسم إنجليزي</th><th>آخر جرد</th><th>آخر وارد</th><th>الرصيد</th><th>إجراء</th></tr>
               </thead>
               <tbody id="stale-report-body">
-                <tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">اكتب عدد الشهور واضغط بحث</td></tr>
+                <tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">اكتب عدد الشهور واضغط بحث</td></tr>
               </tbody>
             </table>
           </div>
@@ -2146,11 +2158,42 @@
     /* ⚠️ دالة مش متغيّر: currentStaleData بيتشال منه الصنف بعد جرده
        (في مكانين)، فأي نسخة مفلترة محفوظة كانت هتفضل عارضة صنف
        اتجرد خلاص. الحساب عند الرسم بيخلّيها متّسقة دايمًا. */
+    /* ── الوارد الجديد ────────────────────────────────────────────
+       الصنف اللي كان مصفّر ودخل امبارح كان بيطلع «لم يُجرد» وهو مكانش
+       فيه حاجة تتجرد. القياس: نص القايمة تقريبًا وارد حديث.
+       المعيار (قرار المالك): آخر فاتورة شراء خلال N يوم **و** الرصيد
+       الحالي ≤ كمية الفاتورة دي — يعني الرصيد كله من الوارد ده.
+       ⚠️ الصنف اللي مالوش فاتورة عندنا (last_in فاضي) **مابيتشالش** —
+       مانقدرش نثبت إنه جديد، والأسلم يفضل في القايمة. وكمان الوارد
+       بتحويل من فرع تاني مش فاتورة شراء فمش هيتعرف. */
+    function staleNewDays(){
+      const el = document.getElementById('stale-new-days');
+      const v  = el ? parseInt(el.value, 10) : 14;
+      return (isFinite(v) && v > 0) ? v : 14;
+    }
+    function staleIsNew(it){
+      if (!it || !it.last_in || it.last_qty == null) return false;
+      const d = String(it.last_in).slice(0, 10);            // YYYY-MM-DD
+      if (d < jardDaysAgo(staleNewDays())) return false;    // أقدم من النافذة
+      const qty = parseFloat(it.sto_qty_big);
+      return isFinite(qty) && qty <= Number(it.last_qty) + 1e-9;
+    }
+    function staleHideNew(){
+      const el = document.getElementById('stale-hide-new');
+      return el ? el.checked : true;
+    }
+    function onStaleNewFilter(){
+      staleCurrentPage = 1;      // أي تغيير في الفلتر يرجّع لأول صفحة
+      renderStaleTable();
+    }
+
     function staleRows(){
-      if (!staleSearch) return currentStaleData;
+      const hide = staleHideNew();
+      const base = hide ? currentStaleData.filter(it => !staleIsNew(it)) : currentStaleData;
+      if (!staleSearch) return base;
       const q = staleNorm(staleSearch);
-      if (!q) return currentStaleData;
-      return currentStaleData.filter(function(it){
+      if (!q) return base;
+      return base.filter(function(it){
         return staleNorm(it.code).indexOf(q) >= 0
             || staleNorm(it.itm_name_ar).indexOf(q) >= 0
             || staleNorm(it.itm_name_en).indexOf(q) >= 0;
@@ -2177,9 +2220,15 @@
       const range = (staleFrom && staleTo)
         ? ' — مفيش ليها جرد في الفترة من ' + staleFrom + ' إلى ' + staleTo + ' (أو لم تُجرد أبدًا)'
         : '';
-      summary.textContent = (shown === total)
+      /* ⚠️ عدد المخفي لازم يبان: الإخفاء الصامت بيخلّي المستخدم يفتكر
+         إن القايمة كلها كده. */
+      const newCount = currentStaleData.filter(staleIsNew).length;
+      const hidden = staleHideNew() && newCount
+        ? ' · 🆕 مخفي ' + newCount + ' وارد جديد (آخر ' + staleNewDays() + ' يوم)'
+        : '';
+      summary.textContent = ((shown === total)
         ? '📦 عدد الأصناف: ' + total + range
-        : '🔍 ظهر ' + shown + ' من ' + total + ' صنف' + range;
+        : '🔍 ظهر ' + shown + ' من ' + total + ' صنف' + range) + hidden;
     }
 
     function openStaleReport() { showScreen('reports'); showReport('stale'); }
@@ -2208,7 +2257,7 @@
       const dTo   = document.getElementById('stale-to-input').value || jardToday();
       const body   = document.getElementById('stale-report-body');
       const summary = document.getElementById('stale-summary');
-      body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري البحث...</td></tr>';
+      body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">⏳ جاري البحث...</td></tr>';
       summary.textContent = '';
       staleCurrentPage = 1;
       staleFrom = dFrom; staleTo = dTo;
@@ -2229,14 +2278,14 @@
         renderStaleSummary();
 
         if (!currentStaleData.length) {
-          body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--success,#16a34a);padding:20px;">✅ كل الأصناف اتجردت خلال المدة المحددة</td></tr>';
+          body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--success,#16a34a);padding:20px;">✅ كل الأصناف اتجردت خلال المدة المحددة</td></tr>';
           updateStalePagination();
           return;
         }
 
         renderStaleTable();
       } catch(e) {
-        body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--danger);padding:20px;">❌ فشل تحميل التقرير</td></tr>';
+        body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--danger);padding:20px;">❌ فشل تحميل التقرير</td></tr>';
       }
     }
 
@@ -2264,8 +2313,8 @@
       if (!rows.length) {
         // نفرّق «الفلتر مالقاش» عن «كل حاجة اتجردت» — مش نفس الرسالة
         body.innerHTML = currentStaleData.length
-          ? '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">مفيش صنف مطابق للبحث</td></tr>'
-          : '<tr><td colspan="6" style="text-align:center;color:var(--success,#16a34a);padding:20px;">✅ كل الأصناف اتجردت خلال المدة المحددة</td></tr>';
+          ? '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">مفيش صنف مطابق للبحث</td></tr>'
+          : '<tr><td colspan="7" style="text-align:center;color:var(--success,#16a34a);padding:20px;">✅ كل الأصناف اتجردت خلال المدة المحددة</td></tr>';
         updateStalePagination();
         return;
       }
@@ -2279,13 +2328,22 @@
           lastCategoryKey = cat.key;
           const catTr = document.createElement('tr');
           catTr.className = 'category-header-row';
-          catTr.innerHTML = `<td colspan="6">${cat.label}</td>`;
+          catTr.innerHTML = `<td colspan="7">${cat.label}</td>`;
           body.appendChild(catTr);
         }
 
         let lastAudited = 'لم يُجرد أبدًا';
         if (item.last_audited) {
           try { lastAudited = new Date(item.last_audited).toLocaleDateString('ar-EG'); } catch(e) {}
+        }
+        /* آخر وارد: التاريخ + الكمية، وبادج لو الصنف وارد جديد.
+           التاريخ من eplus محلي (قاهرة) فبيتعرض زي ما هو من غير تحويل. */
+        let lastInTxt = '—', newBadge = '';
+        if (item.last_in) {
+          const p = String(item.last_in).slice(0, 10).split('-');
+          lastInTxt = p.length === 3 ? (p[2] + '/' + p[1]) : String(item.last_in).slice(0, 10);
+          if (item.last_qty != null) lastInTxt += ' <span style="color:var(--text-muted);font-size:0.72rem;">· ' + item.last_qty + '</span>';
+          if (staleIsNew(item)) newBadge = ' <span style="background:#fef3c7;color:#92400e;border-radius:6px;padding:1px 6px;font-size:0.68rem;font-weight:700;">🆕 وارد جديد</span>';
         }
 
         let balCell, actionCell;
@@ -2312,6 +2370,7 @@
           <td data-label="الاسم عربي">${item.itm_name_ar || '---'}</td>
           <td data-label="الاسم إنجليزي">${item.itm_name_en || '---'}</td>
           <td data-label="آخر جرد" style="${!item.last_audited ? 'color:var(--danger,#dc2626);font-weight:700;' : ''}">${lastAudited}</td>
+          <td data-label="آخر وارد" style="white-space:nowrap;">${lastInTxt}${newBadge}</td>
           ${balCell}
           ${actionCell}
         `;
@@ -2497,7 +2556,10 @@
         'الكود': item.code || '---',
         'الاسم عربي': item.itm_name_ar || '---',
         'الاسم إنجليزي': item.itm_name_en || '---',
-        'آخر جرد': item.last_audited ? new Date(item.last_audited).toLocaleDateString('ar-EG') : 'لم يُجرد أبدًا'
+        'آخر جرد': item.last_audited ? new Date(item.last_audited).toLocaleDateString('ar-EG') : 'لم يُجرد أبدًا',
+        'آخر وارد': item.last_in ? String(item.last_in).slice(0, 10) : '',
+        'كمية آخر وارد': item.last_qty != null ? item.last_qty : '',
+        'وارد جديد': staleIsNew(item) ? 'نعم' : ''
       }));
 
       const wb = XLSX.utils.book_new();

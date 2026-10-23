@@ -32,12 +32,16 @@ global.document = {
   querySelector: () => null, querySelectorAll: () => [],
   addEventListener(){}, createElement: el, body: el(), documentElement: el()
 };
-global.window = { addEventListener(){}, location:{ href:'', search:'' }, matchMedia:()=>({matches:false,addEventListener(){}}) };
+global.window = { addEventListener(){}, location:{ href:'', search:'' }, matchMedia:()=>({matches:false,addEventListener(){}}),
+  scrollTo(){}, scrollBy(){}, setTimeout:(f,t)=>setTimeout(f,t), clearTimeout:t=>clearTimeout(t), open(){}, print(){} };
 global.location = { href:'http://x/medicine_orders.html', search:'', origin:'http://x', pathname:'/medicine_orders.html' };
 global.navigator = { clipboard:{ writeText:async()=>{} }, userAgent:'node' };
 global.localStorage = { getItem:()=>null, setItem(){}, removeItem(){} };
 global.fetch = () => Promise.resolve({ ok:true, status:200, json:()=>Promise.resolve([]), text:()=>Promise.resolve('[]'), headers:{ get:()=>null } });
-global.Session = { role:()=>'admin', bearer:async()=>'t', seesAllBranches:()=>true, branch:()=>'المعمورة', getAll:async()=>[], user:()=>({}) };
+global.Session = { role:()=>'admin', bearer:async()=>'t', seesAllBranches:async()=>true, branch:()=>'المعمورة',
+  getAll:async()=>[], user:()=>({}), fullName:()=>'سموك', username:()=>'smoke', isAdmin:()=>true,
+  is:()=>true, branchId:()=>'b1', can:async()=>({view:true,edit:true}), tabAllowed:async()=>true,
+  headers:async()=>({}), rpcAll:async()=>[], count:async()=>0 };
 global.Branches = { all:()=>[{name:'المعمورة'},{name:'سان ستيفانو'},{name:'سيدى بشر'},{name:'السيوف'}],
   codeMap:()=>({mamora:'المعمورة',san:'سان ستيفانو',bishr:'سيدى بشر',seyouf:'السيوف'}),
   keys:()=>['mamora','san','bishr','seyouf'], names:()=>['المعمورة','سان ستيفانو','سيدى بشر','السيوف'],
@@ -46,6 +50,12 @@ global.XLSX = { utils:{}, writeFile(){} };
 global.SB_URL_API = 'http://x'; global.SB_ANON_API = 'k'; global.PHALIX_CONFIG = { supabaseUrl:'http://x' };
 global.sbH = async () => ({}); global.sbTaskInsert = async () => ({ok:true}); global.sbFailMsg = m => m;
 global.alert = () => {}; global.confirm = () => false;
+/* دوال api.js اللي الشاشات بتناديها عند الإقلاع — من غيرها الفحص
+   بيقع على شاشات زي inventory بـ«checkAuth is not defined» ومابيوصلش
+   لكود الشاشة نفسه. */
+global.checkAuth = async () => ({ username:'smoke', role:'admin', branch:'المعمورة' });
+global.sbJardRpc = async () => [];
+global.sbRpc = async () => ([]);
 
 let failed = null;
 process.on('unhandledRejection', e => { failed = e; });
