@@ -25,7 +25,9 @@
 param(
   [string]$Server     = "localhost,1433",
   [string]$User       = "phalix_writer",
-  [string]$Password   = "",
+  # SecureString عشان الباسورد ما يتسجّلش في تاريخ أوامر PowerShell
+  # على السيرفر. لو ما اتمررش، السكربت بيسأل عنه مخفي.
+  [System.Security.SecureString]$Password,
   [decimal]$NewPerc   = 15,      # النسبة الجديدة على حصة الشركة
   [int]$OwnerCustId   = 359,     # العميل المالك للعقود (ابو قير معتمد)
   [switch]$Apply
@@ -37,9 +39,12 @@ $log = Join-Path $PSScriptRoot "update_contract_percent.log"
 function L($m){ $line = "{0}  {1}" -f (Get-Date -Format 'HH:mm:ss'), $m
                 Add-Content -Path $log -Value $line -Encoding UTF8; Write-Host $line }
 
-if (-not $Password) { L "وقّف: مرّر -Password باسورد phalix_writer."; exit 1 }
+if (-not $Password) { $Password = Read-Host "باسورد phalix_writer" -AsSecureString }
+$pwPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+             [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Password))
+if ([string]::IsNullOrWhiteSpace($pwPlain)) { L "وقّف: الباسورد فاضي."; exit 1 }
 
-$cn = New-Object System.Data.SqlClient.SqlConnection("Server=$Server;Database=Genius;User ID=$User;Password=$Password;Connect Timeout=20")
+$cn = New-Object System.Data.SqlClient.SqlConnection("Server=$Server;Database=Genius;User ID=$User;Password=$pwPlain;Connect Timeout=20")
 try { $cn.Open(); L "متصل بـ$Server كـ$User" } catch { L "فشل الاتصال: $($_.Exception.Message)"; exit 1 }
 
 $COLS = @('cc_local_items_disc','cc_imported_items_disc','cc_local_made_items_disc',

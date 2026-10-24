@@ -97,7 +97,7 @@ try {
   $cn.Close()
   L ""
   L "تمام. الخطوة الجاية (عرض بس، مفيش تعديل):"
-  L "   .\update_contract_percent.ps1 -Password '<الباسورد>'"
+  L "   .\update_contract_percent.ps1"
 } catch {
   L "❌ التحقق فشل: $($_.Exception.Message)"
   L "   لو الرسالة 'Login failed' يبقى المهمة ماشتغلتش كـSYSTEM — ابعتلي ناتج osql فوق."
