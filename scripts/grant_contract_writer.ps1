@@ -12,19 +12,25 @@
 #
 # السكربت ده **مابيعدّلش أي بيانات**. التعديل في سكربت تاني.
 
-# ====== املا الباسورد ده بس ======
-$WriterPwd = "ضع_باسورد_قوي_هنا"
-$Server    = "localhost,1433"
-# =================================
+# الباسورد **بارامتر مش مكتوب في الملف**: الملف ده في مجلد ريبو عام،
+# ولو اتكتب جواه ممكن يتعمله commit بالغلط ويتنشر. لو ما مررتهوش
+# السكربت هيسألك عنه بشكل مخفي.
+param(
+  [string]$Server = "localhost,1433",
+  [System.Security.SecureString]$WriterPassword
+)
 
 $ErrorActionPreference = "Stop"
+if (-not $WriterPassword) { $WriterPassword = Read-Host "باسورد phalix_writer الجديد" -AsSecureString }
+$WriterPwd = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+               [Runtime.InteropServices.Marshal]::SecureStringToBSTR($WriterPassword))
+if ([string]::IsNullOrWhiteSpace($WriterPwd)) { Write-Host "وقّف: الباسورد فاضي."; exit 1 }
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $log = Join-Path $PSScriptRoot "grant_contract_writer.log"
 function L($m){ $line = "{0}  {1}" -f (Get-Date -Format 'HH:mm:ss'), $m
                 Add-Content -Path $log -Value $line -Encoding UTF8; Write-Host $line }
 Remove-Item $log -ErrorAction SilentlyContinue
 
-if ($WriterPwd -eq "ضع_باسورد_قوي_هنا") { L "وقّف: املا الباسورد الأول في أول السكربت."; exit 1 }
 
 try {
   $cn = New-Object System.Data.SqlClient.SqlConnection("Server=$Server;Database=master;Integrated Security=SSPI;Connect Timeout=20")
