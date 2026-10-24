@@ -102,6 +102,41 @@
   .sparkx{ display:flex; gap:4px; margin-top:6px; font-size:.63rem; color:var(--text-muted); font-weight:700; }
   .sparkx span{ flex:1; text-align:center; overflow:hidden; white-space:nowrap; }
   .note{ margin-top:10px; font-size:.75rem; font-weight:700; line-height:1.7; }
+
+  /* ── تبويبان: الوضع الحالي / الفرق عند كل تقفيلة ── */
+  .tabs2{ display:flex; gap:6px; margin:14px 0 2px; border-bottom:1.5px solid var(--border); }
+  .tab2{ font-size:.84rem; font-weight:800; padding:10px 20px; border:none; background:none;
+         cursor:pointer; font-family:inherit; color:var(--text-muted);
+         border-bottom:2.5px solid transparent; margin-bottom:-1.5px; }
+  .tab2.on{ color:var(--teal); border-bottom-color:var(--teal); }
+
+  .shbar{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:14px 0; }
+  .shbar select{ font-family:inherit; font-size:.78rem; padding:6px 11px; border:1.5px solid var(--border);
+                 border-radius:8px; background:var(--surface); color:var(--text-primary); }
+  .shbar label{ font-size:.75rem; font-weight:700; display:flex; align-items:center; gap:7px; cursor:pointer; }
+
+  .stats{ display:grid; grid-template-columns:repeat(3,1fr); gap:11px; margin-bottom:16px; }
+  @media(max-width:760px){ .stats{ grid-template-columns:1fr; } }
+  .st{ border:1.5px solid var(--border); border-radius:11px; padding:13px 16px; }
+  .st .k{ font-size:.7rem; color:var(--text-muted); font-weight:700; }
+  .st .v{ font-size:1.5rem; font-weight:900; margin-top:5px; font-variant-numeric:tabular-nums; direction:ltr; }
+  .st .s{ font-size:.68rem; color:var(--text-muted); font-weight:700; margin-top:3px; }
+
+  .shwrap{ border:1.5px solid var(--border); border-radius:11px; overflow:auto; max-height:560px; }
+  table.sx{ width:100%; min-width:0; border-collapse:separate; border-spacing:0; }
+  table.sx th{ position:sticky; top:0; z-index:1; background:var(--surface-3); padding:9px 11px;
+               font-size:.69rem; font-weight:800; color:var(--text-secondary); text-align:right; white-space:nowrap; }
+  table.sx th.n, table.sx td.n{ text-align:left; direction:ltr; font-variant-numeric:tabular-nums; }
+  table.sx td{ padding:8px 11px; border-top:1px solid var(--surface-3); font-size:.78rem; white-space:nowrap; }
+  table.sx tr:first-child td{ border-top:none; }
+  .t-dim{ color:var(--text-muted); font-weight:600; }
+  .dpill{ display:inline-block; min-width:74px; text-align:center; border-radius:7px; padding:3px 9px;
+          font-size:.76rem; font-weight:900; font-variant-numeric:tabular-nums; direction:ltr; }
+  .dpill.up{ background:rgba(220,38,38,.1); color:var(--bad); }
+  .dpill.dn{ background:rgba(22,163,74,.1); color:var(--ok); }
+  .dpill.z{ color:var(--text-muted); font-weight:700; background:none; }
+  tr.moved{ background:rgba(220,38,38,.035); }
+  tr.moved td:first-child{ box-shadow:inset 3px 0 0 var(--bad); }
 </style>
 </head>
 <body>
@@ -122,8 +157,14 @@
         </div>
       </div>
 
+      <div class="tabs2">
+        <button class="tab2 on" id="tab-now"   onclick="switchTab('now')">الوضع الحالي</button>
+        <button class="tab2"    id="tab-shift" onclick="switchTab('shift')">الفرق عند كل تقفيلة</button>
+      </div>
+
       <div class="brs" id="brs"><div class="empty" style="grid-column:1/-1">جارٍ التحميل…</div></div>
       <div id="detail"></div>
+      <div id="shiftview" style="display:none"></div>
     </div>
   </div>
 
@@ -176,7 +217,8 @@
       }
       DATA = d.branches || [];
       if(CUR >= DATA.length) CUR = 0;
-      renderCards(); renderDetail();
+      renderCards();
+      if(TAB === 'shift') loadShiftHistory(); else renderDetail();
       const st = DATA.map(b=>b.synced_at).filter(Boolean).sort().pop();
       const el = document.getElementById('stamp');
       el.className = 'chip' + (st ? '' : ' warn');
@@ -195,7 +237,95 @@
             : `<span class="gap" style="color:${col}">${ok ? 'مطابق' : f0(b.gap)}</span>`}
         </div>`; }).join('') : '<div class="empty" style="grid-column:1/-1">لا توجد فروع</div>';
     }
-    window.pick = i => { CUR = i; TREND = false; renderCards(); renderDetail(); };
+    window.pick = i => { CUR = i; TREND = false; renderCards();
+      if(TAB === 'shift') loadShiftHistory(); else renderDetail(); };
+
+    /* ── تبويب «الفرق عند كل تقفيلة» ──────────────────────────────
+       التقفيلة هي اللحظة الوحيدة اللي الجانبين بيتقاسوا فيها مع بعض:
+       الموظف بيكتب أرصدة المحافظ ساعتها بنفسه. فأي تحرّك في الفرق
+       بين تقفيلتين = حصل في الشيفت ده بالتحديد. */
+    let TAB = 'now', SHROWS = [], SHDAYS = 14, SHONLY = false;
+
+    window.switchTab = t => {
+      TAB = t;
+      document.getElementById('tab-now').classList.toggle('on', t === 'now');
+      document.getElementById('tab-shift').classList.toggle('on', t === 'shift');
+      document.getElementById('detail').style.display    = t === 'now'   ? '' : 'none';
+      document.getElementById('shiftview').style.display = t === 'shift' ? '' : 'none';
+      if(t === 'shift') loadShiftHistory(); else renderDetail();
+    };
+
+    async function loadShiftHistory(){
+      const b = DATA[CUR]; if(!b) return;
+      const el = document.getElementById('shiftview');
+      el.innerHTML = '<div class="empty flat">جارٍ الحساب…</div>';
+      const d = await rpc('get_visa_shift_history', { p_branch: b.code || b.branch, p_days: SHDAYS });
+      if(d.success === false){ el.innerHTML = '<div class="empty" style="color:var(--bad)">'+esc(d.error)+'</div>'; return; }
+      SHROWS = d.rows || [];
+      renderShift();
+    }
+
+    function renderShift(){
+      const b = DATA[CUR] || {};
+      const el = document.getElementById('shiftview');
+      const bar = `<div class="shbar">
+        <select id="shdays" onchange="SHDAYS=+this.value; loadShiftHistory()">
+          ${[7,14,30].map(n=>`<option value="${n}" ${SHDAYS===n?'selected':''}>آخر ${n} يوم</option>`).join('')}
+        </select>
+        <label><input type="checkbox" ${SHONLY?'checked':''} onchange="SHONLY=this.checked; renderShift()"
+               style="width:15px;height:15px"> اللي حرّك الفرق بس</label>
+      </div>`;
+
+      if(!SHROWS.length){
+        el.innerHTML = bar + `<div class="empty">لا توجد تقفيلات لفرع ${esc(b.branch||'')} في هذه الفترة.
+          <br><span style="font-size:.72rem">التبويب ده بيعتمد على إغلاق الورديات — الفرع اللي لسه مش على نظام التقفيلات مايظهرش فيه.</span></div>`;
+        return;
+      }
+
+      const moved = SHROWS.filter(r => Number(r.delta) !== 0 && r.delta != null);
+      const first = SHROWS[SHROWS.length-1], last = SHROWS[0];
+      const net   = Number(last.gap) - Number(first.gap);
+      const rows  = SHONLY ? moved : SHROWS;
+
+      el.innerHTML = bar + `
+        <div class="stats">
+          <div class="st"><div class="k">تقفيلات في الفترة</div><div class="v">${SHROWS.length}</div>
+            <div class="s">${esc(first.closed_at.slice(5,16))} ← ${esc(last.closed_at.slice(5,16))}</div></div>
+          <div class="st"><div class="k">حرّكت الفرق</div>
+            <div class="v" style="color:${moved.length?'var(--bad)':'var(--ok)'}">${moved.length}</div>
+            <div class="s">${SHROWS.length-moved.length} تقفيلة الفرق فيها ثابت</div></div>
+          <div class="st"><div class="k">صافي تحرّك الفرق</div>
+            <div class="v" style="color:${Math.abs(net)<1?'var(--ok)':'var(--bad)'}">${net>0?'+':''}${f2(net)}</div>
+            <div class="s">من ${f0(first.gap)} إلى ${f0(last.gap)}</div></div>
+        </div>
+        <div class="shwrap"><table class="sx">
+          <thead><tr>
+            <th>التقفيلة</th><th>الموظف</th>
+            <th class="n">خزنة visa</th><th class="n">المحافظ</th><th class="n">باي موب</th>
+            <th class="n">انستاباي</th><th class="n">مجموع المصادر</th><th class="n">الفرق</th><th class="n">التغيّر</th>
+          </tr></thead>
+          <tbody>${rows.map(r=>{
+            const dv = r.delta == null ? null : Number(r.delta);
+            const mv = dv !== null && dv !== 0;
+            const pill = dv === null ? '<span class="dpill z">—</span>'
+                       : dv === 0    ? '<span class="dpill z">ثابت</span>'
+                       : `<span class="dpill ${dv>0?'up':'dn'}">${dv>0?'+':''}${f2(dv)}</span>`;
+            return `<tr class="${mv?'moved':''}">
+              <td>${esc(r.closed_at.slice(5,16))}</td>
+              <td class="${mv?'':'t-dim'}">${esc(r.employee||'—')}</td>
+              <td class="n t-dim">${f2(r.visa)}</td>
+              <td class="n t-dim">${f2(r.wallets)}</td>
+              <td class="n t-dim">${f2(r.paymob)}</td>
+              <td class="n t-dim">${f2(r.insta)}</td>
+              <td class="n t-dim">${f2(r.src_total)}</td>
+              <td class="n" style="font-weight:800">${f2(r.gap)}</td>
+              <td class="n">${pill}</td></tr>`;
+          }).join('')}</tbody>
+        </table></div>
+        <div class="note" style="color:var(--text-muted)">
+          كل صف محسوب في <b>لحظة التقفيلة نفسها</b>: رصيد الخزنة وقتها + أرقام المحافظ اللي الموظف كتبها
+          + غير المحصّل من الماكينات + انستاباي غير المرحّل ساعتها.</div>`;
+    }
 
     /* ⚠️ فرق بين «مفيش حاجة معلّقة ✓» و«مفيش بيانات أصلًا». السيوف لسه
        مالوش ورديات ولا ماكينات، فعلامة ✓ هناك طمأنة كاذبة. */
