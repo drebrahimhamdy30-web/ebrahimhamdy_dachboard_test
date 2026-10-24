@@ -20,8 +20,10 @@ $ErrorActionPreference = "Continue"
 # **نص** مش مصفوفة، و[0] ساعتها بيدي أول **حرف** ('C') مش أول عنصر.
 $candidates = @(@(
   $ConfigPath,
+  "C:\phalix\sync_engine.json",                    # ← مكانه الفعلي على الماستر
   "C:\ProgramData\phalix\sync_engine.json",
-  "$env:USERPROFILE\.phalix\sync_engine.json"
+  "$env:USERPROFILE\.phalix\sync_engine.json",
+  "C:\Windows\system32\config\systemprofile\.phalix\sync_engine.json"
 ) | Where-Object { $_ -and (Test-Path $_) })
 
 if (-not $candidates) { Write-Host "مش لاقي ملف إعدادات المزامنة."; exit 1 }
