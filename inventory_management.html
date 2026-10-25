@@ -176,6 +176,15 @@
                 <i class="fas fa-search field-icon"></i>
                 <input type="text" id="search-input" placeholder="ابحث باسم الصنف أو الكود..." oninput="onFilterChange()">
               </div>
+              <!-- فلتر الشركات — تبويب «ناقص من فرع» فقط.
+                   ٥١٣ شركة في المخزون، فقائمة منسدلة عادية غير عملية:
+                   خانة كتابة باقتراحات (datalist) تضيّق وأنت بتكتب. -->
+              <div class="search-box" id="company-box" style="display:none;flex:0 1 280px">
+                <i class="fas fa-industry field-icon"></i>
+                <input type="text" id="company-filter" list="company-list" autocomplete="off"
+                       placeholder="كل الشركات — اكتب جزءًا من الاسم" oninput="onCompanyInput()">
+                <datalist id="company-list"></datalist>
+              </div>
               <div class="type-toggle" id="type-toggle">
                 <button class="type-btn active" data-type="all" onclick="setItemType('all', this)">🧫 الكل</button>
                 <button class="type-btn"        data-type="med" onclick="setItemType('med', this)">💊 أدوية</button>
@@ -469,6 +478,41 @@
     var hasCalculated=false;
     var itemType='all';
 
+    /* ── فلتر الشركات (تبويب «ناقص من فرع») ──────────────────────
+       خانة نصية فبتتطبّق بـdebounce زي البحث، مش على كل حرف. */
+    var companyTimer=null;
+    function onCompanyInput(){
+      clearTimeout(companyTimer);
+      companyTimer=setTimeout(onFilterChange, 280);
+    }
+    /* الاقتراحات من أصناف المخزون المحمّلة فعلًا — مش قائمة ثابتة.
+       ⚠️ بتقرا stockSummary.items مباشرةً: مفيش متغيّر عام للأصناف،
+       buildItemsMap() بترجّع خريطة جديدة كل مرة. */
+    function buildCompanyList(){
+      var dl=document.getElementById('company-list'); if(!dl) return;
+      var seen={}, out=[];
+      (stockSummary.items||[]).forEach(function(item){
+        var co=String(item.co||'').trim();
+        if(co && !seen[co]){ seen[co]=1; out.push(co); }
+      });
+      out.sort(function(a,b){ return a.localeCompare(b,'ar'); });
+      dl.innerHTML = out.map(function(co){
+        return '<option value="'+co.replace(/"/g,'&quot;')+'"></option>';
+      }).join('');
+      COMPANY_SET = seen;
+    }
+    var COMPANY_SET = {};
+    /* ⚠️ لو المكتوب اسم شركة كامل → مطابقة **بالحرف**، وإلا احتواء.
+       السبب: «فارما» جوّه «نيوفارما» — فالاختيار من القائمة لازم
+       يدّي الشركة دي بالظبط، والكتابة الجزئية تفضل مرنة. */
+    function companyMatches(it){
+      var q=(document.getElementById('company-filter')||{}).value;
+      q=(q||'').trim();
+      if(!q) return true;
+      var co=(it.company||'').trim();
+      return COMPANY_SET[q] ? (co===q) : (co.indexOf(q)>=0);
+    }
+
     function onFilterChange(){
       currentPage=1;
       saveSettings();
@@ -559,6 +603,7 @@
 
       dataLoaded=true;
       stockLoaded=true;
+      buildCompanyList();          // اقتراحات فلتر الشركات
       computeBranchUpdates();
       renderBranchUpdates();
 
@@ -939,6 +984,7 @@
         var minOtherStock = parseFloat(document.getElementById('missing-min-stock').value)||0;
         var minOtherAvg   = parseFloat(document.getElementById('missing-min-avg').value)||0;
         base.forEach(function(it){
+          if(!companyMatches(it)) return;
           var inTarget = it[target2].has && it[target2].stock>0;
           if(inTarget) return;
           var inOthers = others2.some(function(b){
@@ -1108,6 +1154,17 @@
       // صف البحث + نوع الأصناف: يظهر فقط في الأصناف (مش في تغيّرات الأسعار)
       var searchRow = document.querySelector('#stock-toolbar .search-row');
       if(searchRow) searchRow.style.display = isPC ? 'none' : 'flex';
+
+      /* فلتر الشركات في «ناقص من فرع» بس — والخروج من التبويب بيفضّيه
+         عشان ما يفلترش تبويب تاني من ورا المستخدم. */
+      var coBox = document.getElementById('company-box');
+      if(coBox){
+        coBox.style.display = isMissing ? 'block' : 'none';
+        if(!isMissing){
+          var ci=document.getElementById('company-filter');
+          if(ci && ci.value){ ci.value=''; }
+        }
+      }
 
       var mainCalc = document.getElementById('main-calc-btn');
       if(mainCalc) mainCalc.style.display = (isDisb || isPC || isOver || isLookup) ? 'none' : 'inline-flex';
