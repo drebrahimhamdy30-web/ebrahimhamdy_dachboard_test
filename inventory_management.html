@@ -148,6 +148,7 @@
         <button class="tab-btn" data-tab="transfer" onclick="switchTab('transfer', this)">🔄 تحويل بين الفروع</button>
         <button class="tab-btn" data-tab="missing" onclick="switchTab('missing', this)">📭 ناقص من فرع</button>
         <button class="tab-btn" data-tab="pricechanges" onclick="switchTab('pricechanges', this)">📈 تغيّرات الأسعار</button>
+        <button class="tab-btn" data-tab="pricechanges_eplus" onclick="switchTab('pricechanges_eplus', this)">💱 تغيّرات الأسعار (eplus)</button>
         <button class="tab-btn" data-tab="disbursement" onclick="switchTab('disbursement', this)">📋 أذون الصرف</button>
         <button class="tab-btn" data-tab="overstock" onclick="switchTab('overstock', this)">📦 مخزون زائد</button>
         <button class="tab-btn" data-tab="lookup" onclick="switchTab('lookup', this)">🔍 بحث في المخزون</button>
@@ -1125,6 +1126,8 @@
         renderDisbContainer();
       } else if(tab==='pricechanges'){
         loadPriceChanges();
+      } else if(tab==='pricechanges_eplus'){
+        loadEplusPC();
       } else if(tab==='overstock'){
         overPage=1; renderOverstock();
       } else if(tab==='lookup'){
@@ -1136,7 +1139,7 @@
       }
     }
     function updateTabUI(){
-      var titles={lookup:'بحث في المخزون', prices:'فرق الأسعار بين الفروع', transfer:'التحويل بين الفروع', missing:'أصناف ناقصة من فرع', pricechanges:'تغيّرات الأسعار', disbursement:'أذون صرف التحويل', overstock:'مخزون زائد (Over Stock)'};
+      var titles={lookup:'بحث في المخزون', prices:'فرق الأسعار بين الفروع', transfer:'التحويل بين الفروع', missing:'أصناف ناقصة من فرع', pricechanges:'تغيّرات الأسعار', pricechanges_eplus:'تغيّرات الأسعار (eplus)', disbursement:'أذون صرف التحويل', overstock:'مخزون زائد (Over Stock)'};
       document.getElementById('result-title').textContent=titles[currentTab]||'';
 
       var isPrices   = (currentTab==='prices');
@@ -1146,8 +1149,9 @@
       var isDisb     = (currentTab==='disbursement');
       var isOver     = (currentTab==='overstock');
       var isLookup   = (currentTab==='lookup');
+      var isEPC      = (currentTab==='pricechanges_eplus');
 
-      document.getElementById('stock-toolbar').style.display = isDisb ? 'none' : 'block';
+      document.getElementById('stock-toolbar').style.display = (isDisb||isEPC) ? 'none' : 'block';
       document.getElementById('disb-toolbar').style.display  = isDisb ? 'block' : 'none';
       document.getElementById('panel-title-text').textContent = isDisb ? 'أذون الصرف — توزيع المشتريات' : (isPC ? 'تغيّرات الأسعار — للمراجعة' : (isOver ? 'مخزون زائد — فائض عن فترة التوفير' : (isLookup ? 'بحث في المخزون — تفاصيل الصنف في كل فرع' : 'بحث وفلتر')));
 
@@ -1167,7 +1171,7 @@
       }
 
       var mainCalc = document.getElementById('main-calc-btn');
-      if(mainCalc) mainCalc.style.display = (isDisb || isPC || isOver || isLookup) ? 'none' : 'inline-flex';
+      if(mainCalc) mainCalc.style.display = (isDisb || isPC || isOver || isLookup || isEPC) ? 'none' : 'inline-flex';
 
       var needWrap = document.getElementById('need-config-wrap');
       if(needWrap) needWrap.style.display = isTransfer ? 'flex' : 'none';
@@ -1182,7 +1186,7 @@
 
       var excelBtn = document.getElementById('excel-btn');
       if(excelBtn){
-        if(isPrices || isPC || isOver || isLookup){ excelBtn.style.display='none'; }
+        if(isPrices || isPC || isOver || isLookup || isEPC){ excelBtn.style.display='none'; }
         else if(isDisb){ excelBtn.style.display='inline-flex'; excelBtn.innerHTML='<i class="fas fa-file-excel"></i> تصدير أذون الصرف'; excelBtn.disabled = disbWithQty()===0; }
         else { excelBtn.style.display='inline-flex'; excelBtn.innerHTML='<i class="fas fa-file-excel"></i> Excel'; excelBtn.disabled=false; }
       }
@@ -1315,6 +1319,136 @@
         renderPriceChanges();
         alert('❌ تعذّر حفظ المراجعة — حاول مرة أخرى');
       }
+    }
+
+    // =============== تبويب تغيّرات الأسعار (eplus) ===============
+    var eplusPC=[], eplusHidden=[];
+    var ePcF={from:'',to:'',branch:'',usr:'',rev:'pending',dir:'',q:'',page:1};
+    var EPC_PER=40;
+    function ePcEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function ePcDefFrom(){ var d=new Date(); d.setDate(d.getDate()-7); return d.toISOString().slice(0,10); }
+    function ePcRev(r){ return r.reviewed===true||r.reviewed==='t'||r.reviewed===1||r.reviewed==='true'; }
+    function ePcP(o,n){ o=parseFloat(o); n=parseFloat(n); return (!o||isNaN(o))?0:Math.round((n-o)/o*1000)/10; }
+    function ePcN2(v){ var n=parseFloat(v); return isNaN(n)?'—':n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+    function ePcFmtDate(v){ if(!v)return '—'; var p=String(v).split('T'); return p[0].split('-').reverse().join('/')+' '+(p[1]||'').slice(0,5); }
+    function eplusUsers(){ var s={}; eplusPC.forEach(function(r){ if(r.usr)s[r.usr]=1; }); return Object.keys(s).sort(function(a,b){return a.localeCompare(b,'ar');}); }
+
+    async function loadEplusPC(){
+      if(!ePcF.from) ePcF.from=ePcDefFrom();
+      document.getElementById('result-container').innerHTML='<div class="loading-overlay">⏳ جاري تحميل تغيّرات الأسعار (eplus)...</div>';
+      try{
+        var res=await fetch(SB_URL_API+'/rest/v1/rpc/get_eplus_price_changes',{method:'POST',headers:await sbH({'Content-Type':'application/json'}),body:JSON.stringify({p_from:ePcF.from||null,p_to:ePcF.to||null,p_branch:ePcF.branch||null})});
+        var raw=await res.json(); eplusPC=Array.isArray(raw)?raw:(raw.data||[]);
+        var hr=await fetch(SB_URL_API+'/rest/v1/rpc/get_eplus_price_hidden_users',{method:'POST',headers:await sbH({'Content-Type':'application/json'}),body:'{}'});
+        var hraw=await hr.json(); eplusHidden=Array.isArray(hraw)?hraw:[];
+        ePcF.page=1; renderEplusShell();
+      }catch(e){ console.error('eplus pc',e); document.getElementById('result-container').innerHTML='<div class="loading-overlay" style="color:var(--danger)">❌ فشل تحميل تغيّرات الأسعار</div>'; }
+    }
+
+    function eplusFiltered(){
+      return eplusPC.filter(function(r){
+        if(ePcF.rev==='pending'&&ePcRev(r)) return false;
+        if(ePcF.rev==='done'&&!ePcRev(r)) return false;
+        if(ePcF.usr&&r.usr!==ePcF.usr) return false;
+        var p=ePcP(r.sell_old,r.sell_new);
+        if(ePcF.dir==='up'&&!(p>0)) return false;
+        if(ePcF.dir==='down'&&!(p<0)) return false;
+        if(ePcF.q){ var q=ePcF.q.trim(); if(q && String(r.code||'').indexOf(q)<0 && String(r.name||'').indexOf(q)<0) return false; }
+        return true;
+      }).sort(function(a,b){ return String(b.d||'').localeCompare(String(a.d||'')); });
+    }
+
+    function renderEplusShell(){
+      var inp='height:32px;border:1px solid var(--border);border-radius:8px;padding:0 10px;font-family:inherit;font-size:.82rem;background:var(--surface,#fff);color:inherit';
+      var FL=function(lbl,inner){ return '<div style="display:flex;flex-direction:column;gap:3px"><label style="font-size:.7rem;color:var(--text-muted);font-weight:700">'+lbl+'</label>'+inner+'</div>'; };
+      var uopts='<option value="">كل المستخدمين</option>'+eplusUsers().map(function(u){return '<option value="'+ePcEsc(u)+'"'+(ePcF.usr===u?' selected':'')+'>'+ePcEsc(u)+'</option>';}).join('');
+      var bopts='<option value="">كل الفروع</option>'+Object.keys(BRANCHES).map(function(k){return '<option value="'+k+'"'+(ePcF.branch===k?' selected':'')+'>'+ePcEsc(BRANCHES[k])+'</option>';}).join('');
+      var bar=FL('من تاريخ','<input type="date" id="epc-from" style="'+inp+'" value="'+ePcF.from+'" onchange="ePcF.from=this.value;loadEplusPC()">')
+        +FL('إلى تاريخ','<input type="date" id="epc-to" style="'+inp+'" value="'+ePcF.to+'" onchange="ePcF.to=this.value;loadEplusPC()">')
+        +FL('الفرع','<select id="epc-branch" style="'+inp+'" onchange="ePcF.branch=this.value;loadEplusPC()">'+bopts+'</select>')
+        +FL('المستخدم','<select id="epc-usr" style="'+inp+'" onchange="ePcF.usr=this.value;ePcF.page=1;renderEplusRows()">'+uopts+'</select>')
+        +FL('المراجعة','<select id="epc-rev" style="'+inp+'" onchange="ePcF.rev=this.value;ePcF.page=1;renderEplusRows()"><option value="pending"'+(ePcF.rev==='pending'?' selected':'')+'>غير مراجع</option><option value="done"'+(ePcF.rev==='done'?' selected':'')+'>تمت المراجعة</option><option value=""'+(ePcF.rev===''?' selected':'')+'>الكل</option></select>')
+        +FL('النوع','<select id="epc-dir" style="'+inp+'" onchange="ePcF.dir=this.value;ePcF.page=1;renderEplusRows()"><option value=""'+(ePcF.dir===''?' selected':'')+'>الكل</option><option value="up"'+(ePcF.dir==='up'?' selected':'')+'>ارتفاع بيع</option><option value="down"'+(ePcF.dir==='down'?' selected':'')+'>انخفاض بيع</option></select>')
+        +FL('بحث','<input type="text" id="epc-q" style="'+inp+'" value="'+ePcEsc(ePcF.q)+'" placeholder="كود / اسم" oninput="clearTimeout(window._epcT);window._epcT=setTimeout(function(){ePcF.q=document.getElementById(\'epc-q\').value;ePcF.page=1;renderEplusRows();},280)">')
+        +'<button class="btn-review" style="height:32px;align-self:flex-end" onclick="var p=document.getElementById(\'epc-hide-panel\');p.style.display=(p.style.display===\'none\'?\'block\':\'none\')"><i class="fas fa-user-slash"></i> إخفاء موظفين</button>';
+      var html='<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">'+bar+'</div>'
+        +'<div id="epc-hide-panel" style="display:none;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:#fffdf5;margin-bottom:10px"><div style="font-size:.74rem;font-weight:700;color:#b45309;margin-bottom:6px">أي تغيير للموظفين المختارين يتخفي من الشاشة:</div><div id="epc-hide-list" style="display:flex;flex-wrap:wrap;gap:6px 16px"></div></div>'
+        +'<div id="epc-summary" class="summary-bar"></div>'
+        +'<div class="res-wrap"><table class="res-table" style="min-width:920px"><thead>'
+          +'<tr><th rowspan="2" class="name-cell">الصنف</th><th rowspan="2">الكود</th><th rowspan="2">الفرع</th>'
+          +'<th colspan="2" style="background:#0f766e">أسعار حالية</th><th colspan="2" style="background:#64748b">أسعار قديمة</th>'
+          +'<th rowspan="2">المستخدم</th><th rowspan="2">التاريخ</th><th rowspan="2">المراجعة</th></tr>'
+          +'<tr><th>البيع</th><th>الشراء</th><th>البيع</th><th>الشراء</th></tr>'
+        +'</thead><tbody id="epc-tbody"></tbody></table></div>'
+        +'<div id="epc-pager" style="display:flex;gap:6px;justify-content:center;padding:10px;flex-wrap:wrap"></div>';
+      document.getElementById('result-container').innerHTML=html;
+      eplusBuildHideList();
+      renderEplusRows();
+    }
+
+    function eplusBuildHideList(){
+      var el=document.getElementById('epc-hide-list'); if(!el)return;
+      var all={}; eplusUsers().forEach(function(u){all[u]=1;}); eplusHidden.forEach(function(u){all[u]=1;});
+      var names=Object.keys(all).sort(function(a,b){return a.localeCompare(b,'ar');}); window._epcHN=names;
+      el.innerHTML=names.length?names.map(function(u,i){ var ch=eplusHidden.indexOf(u)>=0?' checked':''; return '<label style="font-size:.78rem;display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox"'+ch+' onchange="eplusSetHide(window._epcHN['+i+'],this.checked)"> '+ePcEsc(u)+'</label>'; }).join(''):'<span style="color:var(--text-muted);font-size:.78rem">لا يوجد مستخدمون</span>';
+    }
+
+    function renderEplusRows(){
+      var rows=eplusFiltered();
+      var pages=Math.max(1,Math.ceil(rows.length/EPC_PER));
+      if(ePcF.page>pages)ePcF.page=pages;
+      var slice=rows.slice((ePcF.page-1)*EPC_PER, ePcF.page*EPC_PER);
+      var pending=eplusPC.filter(function(r){return !ePcRev(r);}).length;
+      var sm=document.getElementById('epc-summary'); if(sm) sm.innerHTML='<div class="summary-item">التغيّرات: <b>'+rows.length+'</b></div><div class="summary-item">غير مُراجَع: <b>'+pending+'</b></div>';
+      var rc=document.getElementById('result-count'); if(rc)rc.textContent=rows.length+' تغيير'+(ePcF.rev==='pending'?' · '+pending+' غير مُراجَع':'');
+      var tb=document.getElementById('epc-tbody'); if(!tb)return;
+      if(!slice.length){ tb.innerHTML='<tr><td colspan="10" class="loading-overlay">لا توجد تغيّرات مطابقة</td></tr>'; document.getElementById('epc-pager').innerHTML=''; return; }
+      var h='';
+      slice.forEach(function(r){
+        var sp=ePcP(r.sell_old,r.sell_new), bp=ePcP(r.buy_old,r.buy_new);
+        var sc=sp>0?'pc-up':(sp<0?'pc-down':''), bc=bp>0?'pc-up':(bp<0?'pc-down':''), rev=ePcRev(r);
+        var btn=rev
+          ? '<button class="btn-unreview" onclick="eplusMarkReviewed(\''+r.branch+'\','+r.ich_id+',false)">↩ إلغاء</button> <span class="pc-badge-rev">تمّت</span>'
+          : '<button class="btn-review" onclick="eplusMarkReviewed(\''+r.branch+'\','+r.ich_id+',true)"><i class="fas fa-check"></i> تمّت</button>';
+        h+='<tr'+(rev?' class="reviewed-row"':'')+'>'
+          +'<td class="name-cell" style="text-align:right">'+(r.name?('<span style="font-weight:600">'+ePcEsc(r.name)+'</span>'):'<span style="color:var(--text-muted)">— غير مكوّد</span>')+'</td>'
+          +'<td style="font-size:.7rem;color:var(--text-muted)">'+ePcEsc(r.code)+'</td>'
+          +'<td style="font-weight:700">'+(BRANCHES[r.branch]||r.branch||'—')+'</td>'
+          +'<td class="'+sc+'" style="font-weight:800">'+ePcN2(r.sell_new)+'</td>'
+          +'<td class="'+bc+'" style="font-weight:800">'+ePcN2(r.buy_new)+'</td>'
+          +'<td style="color:var(--text-muted)">'+ePcN2(r.sell_old)+'</td>'
+          +'<td style="color:var(--text-muted)">'+ePcN2(r.buy_old)+'</td>'
+          +'<td style="font-size:.72rem">'+ePcEsc(r.usr||'—')+'</td>'
+          +'<td style="font-size:.7rem;color:var(--text-muted)">'+ePcFmtDate(r.d)+'</td>'
+          +'<td>'+btn+'</td></tr>';
+      });
+      tb.innerHTML=h;
+      var pg=document.getElementById('epc-pager'); pg.innerHTML='';
+      if(pages>1){
+        var mk=function(lbl,p,dis,on){ return '<button '+(dis?'disabled':'')+' style="min-width:32px;height:32px;border:1px solid var(--border);background:'+(on?'var(--primary);color:#fff':'var(--surface,#fff)')+';border-radius:7px;cursor:pointer;font-weight:700" onclick="ePcF.page='+p+';renderEplusRows()">'+lbl+'</button>'; };
+        var s=mk('«',1,ePcF.page===1)+mk('‹',ePcF.page-1,ePcF.page===1);
+        for(var p=1;p<=pages;p++){ if(p===1||p===pages||Math.abs(p-ePcF.page)<=2) s+=mk(p,p,false,p===ePcF.page); else if(Math.abs(p-ePcF.page)===3) s+='<span style="margin:0 6px;color:var(--text-muted)">…</span>'; }
+        s+=mk('›',ePcF.page+1,ePcF.page===pages)+mk('»',pages,ePcF.page===pages)+'<span style="margin:0 8px;color:var(--text-muted);font-size:.78rem">صفحة '+ePcF.page+' من '+pages+'</span>';
+        pg.innerHTML=s;
+      }
+    }
+
+    function eplusAuth(){ var _t=localStorage.getItem('authJwt'), _a=SB_ANON_API; try{ var _p=_t&&JSON.parse(atob(_t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); if(_p&&_p.exp*1000>Date.now()+60000)_a=_t; }catch(e){} return _a; }
+    async function eplusMarkReviewed(branch, ichId, reviewed){
+      var rec=eplusPC.find(function(x){return x.branch===branch&&String(x.ich_id)===String(ichId);});
+      if(rec) rec.reviewed=reviewed; renderEplusRows();
+      try{
+        var r=await fetch(SB_URL_API+'/rest/v1/rpc/mark_eplus_price_reviewed',{method:'POST',headers:{apikey:SB_ANON_API,Authorization:'Bearer '+eplusAuth(),'Content-Type':'application/json'},body:JSON.stringify({p_branch:branch,p_ich_id:Number(ichId),p_reviewed:!!reviewed})});
+        if(!r.ok) throw new Error(await r.text());
+      }catch(e){ console.error('eplus review',e); if(rec)rec.reviewed=!reviewed; renderEplusRows(); alert('❌ تعذّر حفظ المراجعة'); }
+    }
+    async function eplusSetHide(user, hide){
+      try{
+        var r=await fetch(SB_URL_API+'/rest/v1/rpc/set_eplus_price_hidden_user',{method:'POST',headers:{apikey:SB_ANON_API,Authorization:'Bearer '+eplusAuth(),'Content-Type':'application/json'},body:JSON.stringify({p_user:user,p_hide:!!hide})});
+        if(!r.ok) throw new Error(await r.text());
+        if(hide){ if(eplusHidden.indexOf(user)<0)eplusHidden.push(user); } else { eplusHidden=eplusHidden.filter(function(u){return u!==user;}); }
+        loadEplusPC();
+      }catch(e){ console.error('eplus hide',e); alert('❌ تعذّر حفظ الإعداد'); }
     }
 
     // ===================================================================
