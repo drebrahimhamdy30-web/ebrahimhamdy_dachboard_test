@@ -444,20 +444,25 @@ function drawRows(){
 }
 // ═══════════ سجل الشيفتات ═══════════
 let SL=[], slPage=1; const SL_PER=30;
+let SLSUM={diff:0,up:0,down:0};
 function dmy(s){ if(!s) return '—'; try{ return new Date(s).toLocaleDateString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',year:'numeric'}); }catch(e){ return s; } }
 function hm(s){ if(!s) return '—'; try{ return new Date(s).toLocaleTimeString('ar-EG',{timeZone:'Africa/Cairo',hour:'2-digit',minute:'2-digit',hour12:true}); }catch(e){ return s; } }
 function showShiftLog(){
   VIEW='log';
   const pointOpts='<option value="">كل النقاط</option>'+POINTS.map(p=>`<option value="${p.cashier_id}">${esc(p.point_name)}</option>`).join('');
-  const d=new Date(), p=n=>String(n).padStart(2,'0');
-  const toS=`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
-  const d7=new Date(Date.now()-7*864e5); const fromS=`${d7.getFullYear()}-${p(d7.getMonth()+1)}-${p(d7.getDate())}`;
+  /* المدى الافتراضي = الشهر الحالي (من أول الشهر لليوم) — بتوقيت
+     القاهرة مش توقيت الجهاز. */
+  const cairo = new Date(new Date().toLocaleString('en-US',{timeZone:'Africa/Cairo'}));
+  const p=n=>String(n).padStart(2,'0');
+  const toS=`${cairo.getFullYear()}-${p(cairo.getMonth()+1)}-${p(cairo.getDate())}`;
+  const fromS=`${cairo.getFullYear()}-${p(cairo.getMonth()+1)}-01`;
   document.getElementById('content').innerHTML=`
     <div class="toolbar">
       <span class="flabel">النقطة</span><select id="slPt" onchange="slPage=1;loadShiftLog()">${pointOpts}</select>
       <span class="flabel">من</span><input type="date" id="slFrom" value="${fromS}" onchange="slPage=1;loadShiftLog()">
       <span class="flabel">إلى</span><input type="date" id="slTo" value="${toS}" onchange="slPage=1;loadShiftLog()">
       <span class="shown" id="slShown"></span>
+      <span class="shown" id="slNet" style="background:transparent"></span>
     </div>
     <div class="tablecard"><table><thead><tr>
       <th>التاريخ</th><th>النقطة</th><th>الفترة</th><th>الرصيد الإفتتاحى</th><th>القيمة (نظام)</th><th>ق.الفترة</th><th>ق.الفترة الفعلية</th><th>زيادة/عجز</th><th>التحويل</th><th></th>
@@ -471,10 +476,24 @@ async function loadShiftLog(){
   const from=document.getElementById('slFrom').value||null, to=document.getElementById('slTo').value||null;
   document.getElementById('slBody').innerHTML='<tr><td colspan="10" class="state">جارِ التحميل…</td></tr>';
   const res=await rpc('get_shift_log',{p_branch:BRANCH, p_cashier: pt?+pt:null, p_from:from, p_to:to, p_limit:SL_PER, p_offset:(slPage-1)*SL_PER});
-  SL=(res&&res.rows)||[]; renderShiftLog((res&&res.total_count)||0);
+  SL=(res&&res.rows)||[];
+  /* ⚠️ الصافي من السيرفر على **كل** الفترة المفلترة — مش جمع الصفحة
+     المعروضة (٣٠ صف) اللي كان هيدّي رقم ناقص بلا ما حد ياخد باله. */
+  SLSUM = { diff:Number((res&&res.total_diff)||0),
+            up:Number((res&&res.total_up)||0),
+            down:Number((res&&res.total_down)||0) };
+  renderShiftLog((res&&res.total_count)||0);
 }
 function renderShiftLog(total){
   const sh=document.getElementById('slShown'); if(sh) sh.textContent='عدد الشيفتات: '+fmt(total);
+  const nt=document.getElementById('slNet');
+  if(nt){
+    const net=SLSUM.diff, cls=net>0?'pos':(net<0?'neg':'');
+    nt.innerHTML = total
+      ? `صافي الفترة: <b class="${cls}">${net>0?'+':''}${fmt(net)} ج</b>`
+        + ` <span style="color:var(--muted);font-weight:600">(زيادة ${fmt(SLSUM.up)} · عجز ${fmt(Math.abs(SLSUM.down))})</span>`
+      : '';
+  }
   const tb=document.getElementById('slBody');
   tb.innerHTML = SL.length ? SL.map(x=>{
     const dc=Number(x.diff)>=0?'pos':'neg';
@@ -516,16 +535,11 @@ function renderShiftDetail(d){
   const _gap    = Math.round(_period - Number(d.actual_cash||0));
   const diffCls = _gap>=0?'g':'r';
   const chips=(d.visa_by_channel||[]).map(c=>`<span class="pill visa" style="margin:2px">${esc(c.channel)} ${fmt(c.total)} (${c.cnt})</span>`).join('')||'—';
-  const txns=(d.transactions||[]);
-  const rows= txns.length ? txns.map(t=>{
-    const cls=t.kind==='صرف'?'out':(t.kind==='فيزا'?'visa':(t.kind==='توريد'?'in':'cash'));
-    return `<tr><td>${esc(t.time)}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
-      `<td class="num" style="${t.kind==='فيزا'&&!isManual(t)?'color:var(--red)':''}">${t.kind==='فيزا'?fmt(paidOf(t)):''}</td>`+
-      `<td class="num ${t.kind==='صرف'?'neg':'pos'}">${t.kind==='صرف'?'−':''}${fmt(t.amount)}</td>`+
-      `<td class="r">${esc(t.from||'—')}</td><td class="r">${esc(t.to||'—')}</td>`+
-      `<td class="r">${esc(t.user_name||'—')}</td><td class="dev">${esc(t.computer||'—')}</td>`+
-      `<td>${esc(t.channel||'—')}</td><td class="notes">${esc(t.notes||'')}</td></tr>`;
-  }).join('') : '<tr><td colspan="10" class="state">لا توجد حركات.</td></tr>';
+  /* نفس فلاتر الشيفت الحالي جوّه المراجعة (طلب المالك): بحث + نوع +
+     مستخدم، عشان مراجعة شيفت مقفول تبقى بنفس أدوات الشيفت المفتوح. */
+  DT = (d.transactions||[]).map(t=>({...t}));
+  dtType=null; dtUser=null; dtSearch='';
+  const dtUsers=[...new Set(DT.map(t=>t.user_name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ar'));
   document.getElementById('content').innerHTML=`
     <div style="margin-bottom:10px"><button class="lnk" onclick="showShiftLog()">‹ رجوع للسجل</button></div>
     <div class="meta">
@@ -550,9 +564,52 @@ function renderShiftDetail(d){
       <div class="it"><span class="k">توريد</span><b>${fmt(d.transfer_in)}</b></div>
       <div class="it" style="color:var(--muted)">الأرقام فوق من تقفيل eplus؛ قائمة الحركات للمراجعة</div>
     </div>
+    <div class="toolbar">
+      <input type="search" id="dq" placeholder="🔎 بحث بالطرف / الملاحظة / المستخدم…" oninput="onDetailSearch()">
+      <span class="flabel">النوع:</span>
+      ${['كاش','فيزا','صرف','توريد'].map(t=>`<button class="chip dtp" data-t="${t}">${t}</button>`).join('')}
+      <span class="flabel">المستخدم:</span>
+      <select id="dtUserSel" class="usel"><option value="">الكل</option>${dtUsers.map(u=>`<option value="${esc(u)}">${esc(u)}</option>`).join('')}</select>
+      <span class="shown" id="dtShown"></span>
+    </div>
     <div class="tablecard"><table><thead><tr>
       <th>الوقت</th><th>النوع</th><th>قيمة المدفوع</th><th>القيمة</th><th class="r">من</th><th class="r">الى</th><th class="r">المستخدم</th><th>الجهاز</th><th>الحساب</th><th class="r">ملاحظات</th>
-    </tr></thead><tbody>${rows}</tbody></table></div>`;
+    </tr></thead><tbody id="dtb"></tbody></table></div>`;
+
+  document.querySelectorAll('.chip.dtp').forEach(c=>c.onclick=()=>{
+    dtType=(dtType===c.dataset.t?null:c.dataset.t);
+    document.querySelectorAll('.chip.dtp').forEach(x=>x.classList.toggle('active',x.dataset.t===dtType));
+    drawDetailRows();
+  });
+  const dus=document.getElementById('dtUserSel');
+  if(dus) dus.onchange=()=>{ dtUser=dus.value||null; drawDetailRows(); };
+  drawDetailRows();
+}
+
+/* ── فلاتر مراجعة الشيفت المقفول ─────────────────────────────── */
+let DT=[], dtType=null, dtUser=null, dtSearch='', dtTimer=null;
+function onDetailSearch(){
+  clearTimeout(dtTimer);
+  dtTimer=setTimeout(()=>{ const e=document.getElementById('dq'); dtSearch=e?e.value:''; drawDetailRows(); }, 280);
+}
+function drawDetailRows(){
+  const tb=document.getElementById('dtb'); if(!tb) return;
+  const q=(dtSearch||'').trim().toLowerCase();
+  const rows=DT.filter(t=>
+    (!dtType||t.kind===dtType) && (!dtUser||t.user_name===dtUser) &&
+    (!q||((t.from||'')+' '+(t.to||'')+' '+(t.party||'')+' '+(t.visa_no||'')+' '+(t.notes||'')+' '+(t.user_name||'')).toLowerCase().includes(q)));
+  const sum=rows.reduce((a,t)=>a+(t.kind==='صرف'?-1:1)*(+t.amount||0),0);
+  const sh=document.getElementById('dtShown');
+  if(sh) sh.textContent='المعروض: '+rows.length + (CAN_TOTALS ? ' · مجموع: '+fmt(sum)+' ج' : '');
+  tb.innerHTML = rows.length ? rows.map(t=>{
+    const cls=t.kind==='صرف'?'out':(t.kind==='فيزا'?'visa':(t.kind==='توريد'?'in':'cash'));
+    return `<tr><td>${esc(t.time)}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
+      `<td class="num" style="${t.kind==='فيزا'&&!isManual(t)?'color:var(--red)':''}">${t.kind==='فيزا'?fmt(paidOf(t)):''}</td>`+
+      `<td class="num ${t.kind==='صرف'?'neg':'pos'}">${t.kind==='صرف'?'−':''}${fmt(t.amount)}</td>`+
+      `<td class="r">${esc(t.from||'—')}</td><td class="r">${esc(t.to||'—')}</td>`+
+      `<td class="r">${esc(t.user_name||'—')}</td><td class="dev">${esc(t.computer||'—')}</td>`+
+      `<td>${esc(t.channel||'—')}</td><td class="notes">${esc(t.notes||'')}</td></tr>`;
+  }).join('') : '<tr><td colspan="10" class="state">لا توجد حركات مطابقة.</td></tr>';
 }
 window.addEventListener('DOMContentLoaded', init);
 </script>
