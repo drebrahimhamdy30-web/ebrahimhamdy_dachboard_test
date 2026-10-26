@@ -1323,7 +1323,7 @@
 
     // =============== تبويب تغيّرات الأسعار (eplus) ===============
     var eplusPC=[], eplusHidden=[];
-    var ePcF={from:'',to:'',branch:'',usr:'',rev:'pending',dir:'',q:'',page:1};
+    var ePcF={from:'',to:'',branch:'',usr:'',rev:'pending',dir:'',q:'',page:1,unc:'hide'};
     var EPC_PER=40;
     function ePcEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
     function ePcDefFrom(){ var d=new Date(); d.setDate(d.getDate()-7); return d.toISOString().slice(0,10); }
@@ -1346,7 +1346,8 @@
     }
 
     function eplusFiltered(){
-      return eplusPC.filter(function(r){
+      var rows=eplusPC.filter(function(r){
+        if(ePcF.unc!=='show' && !(r.name&&String(r.name).trim())) return false;   // إخفاء غير المكوّدة افتراضيًا
         if(ePcF.rev==='pending'&&ePcRev(r)) return false;
         if(ePcF.rev==='done'&&!ePcRev(r)) return false;
         if(ePcF.usr&&r.usr!==ePcF.usr) return false;
@@ -1355,7 +1356,30 @@
         if(ePcF.dir==='down'&&!(p<0)) return false;
         if(ePcF.q){ var q=ePcF.q.trim(); if(q && String(r.code||'').indexOf(q)<0 && String(r.name||'').indexOf(q)<0) return false; }
         return true;
-      }).sort(function(a,b){ return String(b.d||'').localeCompare(String(a.d||'')); });
+      });
+      return eplusGroup(rows).sort(function(a,b){ return String(b.d||'').localeCompare(String(a.d||'')); });
+    }
+    // تجميع التعديلات المركزية: نفس الصنف/المستخدم/اللحظة/الأسعار في أكثر من فرع = تعديل من
+    // الرئيسي اتنشر لكل الفروع، فنعرضه صفًا واحدًا «كل الفروع» بدل تكراره. الصف المجمّع
+    // بيحتفظ بأعضائه في window._epcGroups عشان زر «تمّت» يراجع الكل مرة واحدة.
+    function eplusGroup(rows){
+      var map={}, order=[];
+      rows.forEach(function(r){
+        var key=[r.code,r.usr,r.d,r.sell_old,r.sell_new,r.buy_old,r.buy_new].join('\u0001');
+        if(!map[key]){ map[key]=[]; order.push(key); }
+        map[key].push(r);
+      });
+      window._epcGroups=[];
+      return order.map(function(k){
+        var g=map[k];
+        if(g.length===1) return g[0];
+        var gi=window._epcGroups.length; window._epcGroups.push(g);
+        var o={}; for(var pr in g[0]) o[pr]=g[0][pr];
+        o._gi=gi; o._count=g.length;
+        o._branches=g.map(function(x){return BRANCHES[x.branch]||x.branch;});
+        o.reviewed=g.every(function(x){return ePcRev(x);});
+        return o;
+      });
     }
 
     function renderEplusShell(){
@@ -1369,6 +1393,7 @@
         +FL('المستخدم','<select id="epc-usr" style="'+inp+'" onchange="ePcF.usr=this.value;ePcF.page=1;renderEplusRows()">'+uopts+'</select>')
         +FL('المراجعة','<select id="epc-rev" style="'+inp+'" onchange="ePcF.rev=this.value;ePcF.page=1;renderEplusRows()"><option value="pending"'+(ePcF.rev==='pending'?' selected':'')+'>غير مراجع</option><option value="done"'+(ePcF.rev==='done'?' selected':'')+'>تمت المراجعة</option><option value=""'+(ePcF.rev===''?' selected':'')+'>الكل</option></select>')
         +FL('النوع','<select id="epc-dir" style="'+inp+'" onchange="ePcF.dir=this.value;ePcF.page=1;renderEplusRows()"><option value=""'+(ePcF.dir===''?' selected':'')+'>الكل</option><option value="up"'+(ePcF.dir==='up'?' selected':'')+'>ارتفاع بيع</option><option value="down"'+(ePcF.dir==='down'?' selected':'')+'>انخفاض بيع</option></select>')
+        +FL('غير المكوّدة','<select id="epc-unc" style="'+inp+'" onchange="ePcF.unc=this.value;ePcF.page=1;renderEplusRows()"><option value="hide"'+(ePcF.unc==='hide'?' selected':'')+'>مخفية</option><option value="show"'+(ePcF.unc==='show'?' selected':'')+'>ظاهرة</option></select>')
         +FL('بحث','<input type="text" id="epc-q" style="'+inp+'" value="'+ePcEsc(ePcF.q)+'" placeholder="كود / اسم" oninput="clearTimeout(window._epcT);window._epcT=setTimeout(function(){ePcF.q=document.getElementById(\'epc-q\').value;ePcF.page=1;renderEplusRows();},280)">')
         +'<button class="btn-review" style="height:32px;align-self:flex-end" onclick="var p=document.getElementById(\'epc-hide-panel\');p.style.display=(p.style.display===\'none\'?\'block\':\'none\')"><i class="fas fa-user-slash"></i> إخفاء موظفين</button>';
       var html='<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">'+bar+'</div>'
@@ -1407,13 +1432,14 @@
       slice.forEach(function(r){
         var sp=ePcP(r.sell_old,r.sell_new), bp=ePcP(r.buy_old,r.buy_new);
         var sc=sp>0?'pc-up':(sp<0?'pc-down':''), bc=bp>0?'pc-up':(bp<0?'pc-down':''), rev=ePcRev(r);
+        var _rv=function(v){ return r._gi!=null ? 'eplusMarkReviewedGroup('+r._gi+','+v+')' : 'eplusMarkReviewed(\''+r.branch+'\','+r.ich_id+','+v+')'; };
         var btn=rev
-          ? '<button class="btn-unreview" onclick="eplusMarkReviewed(\''+r.branch+'\','+r.ich_id+',false)">↩ إلغاء</button> <span class="pc-badge-rev">تمّت</span>'
-          : '<button class="btn-review" onclick="eplusMarkReviewed(\''+r.branch+'\','+r.ich_id+',true)"><i class="fas fa-check"></i> تمّت</button>';
+          ? '<button class="btn-unreview" onclick="'+_rv('false')+'">↩ إلغاء</button> <span class="pc-badge-rev">تمّت</span>'
+          : '<button class="btn-review" onclick="'+_rv('true')+'"><i class="fas fa-check"></i> تمّت</button>';
         h+='<tr'+(rev?' class="reviewed-row"':'')+'>'
           +'<td class="name-cell" style="text-align:right">'+(r.name?('<span style="font-weight:600">'+ePcEsc(r.name)+'</span>'):'<span style="color:var(--text-muted)">— غير مكوّد</span>')+'</td>'
           +'<td style="font-size:.7rem;color:var(--text-muted)">'+ePcEsc(r.code)+'</td>'
-          +'<td style="font-weight:700">'+(BRANCHES[r.branch]||r.branch||'—')+'</td>'
+          +'<td style="font-weight:700">'+(r._gi!=null?'<span style="color:#0f766e" title="'+ePcEsc(r._branches.join('، '))+'">كل الفروع ('+r._count+')</span>':(BRANCHES[r.branch]||r.branch||'—'))+'</td>'
           +'<td class="'+sc+'" style="font-weight:800">'+ePcN2(r.sell_new)+'</td>'
           +'<td class="'+bc+'" style="font-weight:800">'+ePcN2(r.buy_new)+'</td>'
           +'<td style="color:var(--text-muted)">'+ePcN2(r.sell_old)+'</td>'
@@ -1441,6 +1467,17 @@
         var r=await fetch(SB_URL_API+'/rest/v1/rpc/mark_eplus_price_reviewed',{method:'POST',headers:{apikey:SB_ANON_API,Authorization:'Bearer '+eplusAuth(),'Content-Type':'application/json'},body:JSON.stringify({p_branch:branch,p_ich_id:Number(ichId),p_reviewed:!!reviewed})});
         if(!r.ok) throw new Error(await r.text());
       }catch(e){ console.error('eplus review',e); if(rec)rec.reviewed=!reviewed; renderEplusRows(); alert('❌ تعذّر حفظ المراجعة'); }
+    }
+    // مراجعة صف مجمّع (تعديل مركزي) = مراجعة كل أعضائه (كل الفروع) مرة واحدة
+    async function eplusMarkReviewedGroup(gi, reviewed){
+      var members=(window._epcGroups||[])[gi]; if(!members)return;
+      members.forEach(function(m){ m.reviewed=reviewed; }); renderEplusRows();
+      try{
+        var res=await Promise.all(members.map(function(m){
+          return fetch(SB_URL_API+'/rest/v1/rpc/mark_eplus_price_reviewed',{method:'POST',headers:{apikey:SB_ANON_API,Authorization:'Bearer '+eplusAuth(),'Content-Type':'application/json'},body:JSON.stringify({p_branch:m.branch,p_ich_id:Number(m.ich_id),p_reviewed:!!reviewed})});
+        }));
+        for(var i=0;i<res.length;i++){ if(!res[i].ok) throw new Error(await res[i].text()); }
+      }catch(e){ console.error('eplus review group',e); members.forEach(function(m){ m.reviewed=!reviewed; }); renderEplusRows(); alert('❌ تعذّر حفظ المراجعة'); }
     }
     async function eplusSetHide(user, hide){
       try{
