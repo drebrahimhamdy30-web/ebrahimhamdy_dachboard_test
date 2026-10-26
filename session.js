@@ -572,12 +572,106 @@ const Session = (function () {
     return u;
   }
 
+  /* ── تنبيه تأخّر مزامنة المخزون ──────────────────────────────────
+     2026-10-26: وقفت مزامنة سان ستيفانو ٢٧ ساعة وماحدّش حس — كل عقد
+     n8n كانت خضرا (التنفيذ بيتلغي عند المهلة و«Canceled» مش خطأ)،
+     والشاشات كانت بتعرض رصيد بايت كإنه سليم. الرقم الغلط أخطر من
+     الخطأ الواضح، فالتنبيه بيطلع في **كل** شاشة مش في المخزون بس.
+
+     النتيجة بتتخزّن 10 دقايق في sessionStorage عشان مانندهش القاعدة
+     مع كل تنقّل. القفل بيشيل الشريط من الصفحة دي بس — بيرجع في
+     الشاشة الجاية **بقصد**، عشان العطل مايتنسيش.                   */
+  const SYNC_TTL_MS  = 10 * 60 * 1000;
+  const SYNC_HOURS   = 6;
+  const SYNC_CACHE_K = 'phalixSyncHealth';
+
+  async function syncHealth(hours) {
+    const h = hours == null ? SYNC_HOURS : hours;
+    try {
+      const raw = sessionStorage.getItem(SYNC_CACHE_K);
+      if (raw) {
+        const c = JSON.parse(raw);
+        if (c && c.h === h && (Date.now() - c.at) < SYNC_TTL_MS) return c.d;
+      }
+    } catch (e) {}
+    const r = await fetch(PHALIX_CONFIG.supabaseUrl + '/rest/v1/rpc/get_sync_health',
+      { method: 'POST', headers: await headers(), body: JSON.stringify({ p_hours: h }) });
+    if (!r.ok) throw new Error('get_sync_health: ' + r.status);
+    const d = await r.json();
+    try { sessionStorage.setItem(SYNC_CACHE_K, JSON.stringify({ at: Date.now(), h: h, d: d })); } catch (e) {}
+    return d;
+  }
+
+  /* السبب مع الاسم: «منذ 27 ساعة» أوضح من «منذ يوم»، و«وقت التحديث
+     غير مسجّل» بيفرّق بين فرع واقف وفرع بياناته وصلت ناقصة.       */
+  function _syncWhy(b) {
+    if (b.reason === 'no_table')     return ' (لا توجد بيانات)';
+    if (b.reason === 'no_timestamp') return ' (وقت التحديث غير مسجّل)';
+    const a = b.age_hours;
+    if (a == null) return '';
+    if (a >= 48) return ' (منذ ' + Math.round(a / 24) + ' يوم)';
+    return ' (منذ ' + Math.round(a) + ' ساعة)';
+  }
+
+  function _syncBanner(stale, hours) {
+    const show = function () {
+      try {
+        if (!document.body || document.getElementById('phalix-sync-warn')) return;
+        const names = stale.map(function (b) {
+          return (b.name || b.code) + _syncWhy(b);
+        }).join(' — ');
+        const box = document.createElement('div');
+        box.id = 'phalix-sync-warn';
+        box.setAttribute('dir', 'rtl');
+        box.setAttribute('role', 'alert');
+        /* تحت شريط «البيانات ناقصة» الأحمر لو ظاهر، عشان مايغطّيهوش */
+        let top = 0;
+        const red = document.getElementById('phalix-data-warn');
+        if (red) { try { top = red.getBoundingClientRect().height || 0; } catch (e) {} }
+        box.style.cssText = 'position:fixed;top:' + top + 'px;left:0;right:0;z-index:99998;' +
+          'background:#b45309;color:#fff;font-family:Cairo,system-ui,sans-serif;font-size:13px;' +
+          'font-weight:700;padding:8px 14px;box-shadow:0 2px 10px rgba(0,0,0,.25);line-height:1.8;';
+        const x = document.createElement('span');
+        x.textContent = '✕';
+        x.style.cssText = 'float:left;cursor:pointer;padding:0 6px';
+        x.addEventListener('click', function () { box.remove(); });
+        const msg = document.createElement('div');
+        msg.textContent = '⚠️ تنبيه: لم يتم تحديث بيانات مخزون ' +
+          (stale.length > 1 ? 'الفروع التالية' : 'فرع') + ' منذ أكثر من ' + hours +
+          ' ساعات: ' + names + '. الأرصدة والأسعار المعروضة قد لا تطابق الواقع، يُرجى إبلاغ الإدارة.';
+        box.appendChild(x); box.appendChild(msg);
+        document.body.appendChild(box);
+      } catch (e) {}
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', show);
+    else show();
+  }
+
+  async function syncWatch(hours) {
+    try {
+      /* ⚠️ tokenValid() مش validToken(): مانجدّدش توكن ولا نطلّع بانر
+         «انتهت الجلسة» عشان فحص خلفية. لو التوكن مش صالح نسكت.    */
+      if (!isLoggedIn() || !tokenValid()) return;
+      const p = location.pathname;
+      if (/(^|\/)(index|auth)\.html?$/.test(p) || p.charAt(p.length - 1) === '/') return;
+      const d = await syncHealth(hours);
+      const list = (d && d.branches) || [];
+      const stale = list.filter(function (b) { return b && b.stale; });
+      if (stale.length) _syncBanner(stale, (d && d.threshold_hours) || SYNC_HOURS);
+    } catch (e) {
+      /* الدالة ممكن ماتكونش اتطبّقت على القاعدة دي (التست vs البرودكشن)
+         — التنبيه بيسكت، الشاشة ماتقعش. */
+      try { console.warn('[فحص المزامنة] ' + e.message); } catch (e2) {}
+    }
+  }
+
   return { KEYS, ROLES, normRole, user, isLoggedIn, role, branch, branchId, seesAllBranches,
            username, fullName, is, isAdmin, decodeJwt, jwtValid, tokenValid,
            refresh, validToken, bearer, headers, client,
            save, resolveBranchId, clear, logout, loginPage, thisPage,
            pages, can, require, tabRules, tabAllowed, guardTabs,
-           MAX_ROWS, fetchPage, getAll, rpcAll, count, dataWarn };
+           MAX_ROWS, fetchPage, getAll, rpcAll, count, dataWarn,
+           syncHealth, syncWatch };
 })();
 
 /* ═══════════ حارس القص الصامت (بيلفّ fetch مرة واحدة) ═══════════
@@ -612,3 +706,17 @@ const Session = (function () {
   };
 })();
 
+
+/* ═══════════ تشغيل فحص المزامنة تلقائيًا في كل شاشة ═══════════
+   session.js متحمّل في الـ63 شاشة، فالفحص هنا بيغطّيها كلها من غير
+   تعديل في ولا شاشة واحدة. بيتأجّل شوية عشان مايزاحمش تحميل الصفحة،
+   وبيفشل بصمت لو الدالة مش موجودة على القاعدة دي.                */
+(function () {
+  if (typeof window === 'undefined' || window.__phalixSyncWatch) return;
+  window.__phalixSyncWatch = true;
+  const go = function () {
+    setTimeout(function () { try { Session.syncWatch(); } catch (e) {} }, 1200);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go);
+  else go();
+})();
