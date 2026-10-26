@@ -460,8 +460,8 @@ function showShiftLog(){
       <span class="shown" id="slShown"></span>
     </div>
     <div class="tablecard"><table><thead><tr>
-      <th>التاريخ</th><th>النقطة</th><th>الفترة</th><th>الرصيد الإفتتاحى</th><th>القيمة (نظام)</th><th>الفعلي المعدود</th><th>الفرق</th><th>التحويل</th><th></th>
-    </tr></thead><tbody id="slBody"><tr><td colspan="9" class="state">جارِ التحميل…</td></tr></tbody></table></div>
+      <th>التاريخ</th><th>النقطة</th><th>الفترة</th><th>الرصيد الإفتتاحى</th><th>القيمة (نظام)</th><th>ق.الفترة</th><th>ق.الفترة الفعلية</th><th>زيادة/عجز</th><th>التحويل</th><th></th>
+    </tr></thead><tbody id="slBody"><tr><td colspan="10" class="state">جارِ التحميل…</td></tr></tbody></table></div>
     <div class="pager" id="slPager"></div>`;
   slPage=1; loadShiftLog();
 }
@@ -469,7 +469,7 @@ async function loadShiftLog(){
   VIEW='log';
   const pt=document.getElementById('slPt').value||null;
   const from=document.getElementById('slFrom').value||null, to=document.getElementById('slTo').value||null;
-  document.getElementById('slBody').innerHTML='<tr><td colspan="9" class="state">جارِ التحميل…</td></tr>';
+  document.getElementById('slBody').innerHTML='<tr><td colspan="10" class="state">جارِ التحميل…</td></tr>';
   const res=await rpc('get_shift_log',{p_branch:BRANCH, p_cashier: pt?+pt:null, p_from:from, p_to:to, p_limit:SL_PER, p_offset:(slPage-1)*SL_PER});
   SL=(res&&res.rows)||[]; renderShiftLog((res&&res.total_count)||0);
 }
@@ -481,10 +481,11 @@ function renderShiftLog(total){
     return `<tr class="logrow" data-sc="${x.sc_id}" data-c="${x.cashier_id}">
       <td>${dmy(x.closed_at)}</td><td>${esc(x.point_name||'—')}</td>
       <td style="font-size:12px">${hm(x.shift_start)} ← ${hm(x.closed_at)}</td>
-      <td class="num">${fmt(x.opening)}</td><td class="num">${fmt(x.system_cash)}</td><td class="num">${fmt(x.actual_cash)}</td>
+      <td class="num">${fmt(x.opening)}</td><td class="num">${fmt(x.system_cash)}</td>
+      <td class="num">${fmt(x.period)}</td><td class="num">${fmt(x.actual_cash)}</td>
       <td class="num ${dc}" style="font-weight:800">${Number(x.diff)>0?'+':''}${fmt(x.diff)}</td>
       <td class="num">${fmt(x.transfer)}</td><td><button class="lnk">مراجعة ›</button></td></tr>`;
-  }).join('') : '<tr><td colspan="9" class="state">لا توجد شيفتات في المدى المختار.</td></tr>';
+  }).join('') : '<tr><td colspan="10" class="state">لا توجد شيفتات في المدى المختار.</td></tr>';
   tb.querySelectorAll('.logrow').forEach(r=>r.onclick=()=>openShiftDetail(+r.dataset.sc, +r.dataset.c));
   renderPager('slPager', Math.max(1,Math.ceil(total/SL_PER)), slPage, 'slGo');
 }
@@ -507,7 +508,13 @@ async function openShiftDetail(sc_id, cashier_id){
 }
 function renderShiftDetail(d){
   const users=(d.users||[]).join('، ');
-  const diffCls=Number(d.diff)>=0?'g':'r';
+  /* ⚠️ «زيادة/عجز» بتتحسب هنا مش من الدالة: `d.diff` لسه بالمعادلة
+     القديمة (الفعلية − القيمة) اللي ماكانتش بتطابق eplus. المعادلة
+     الصح = (القيمة − الإفتتاحى) − الفعلية، وكل عناصرها في الرد أصلًا.
+     (get_shift_log اتصلّحت في القاعدة — migrate_159.) */
+  const _period = Number(d.system_cash||0) - Number(d.opening||0);
+  const _gap    = Math.round(_period - Number(d.actual_cash||0));
+  const diffCls = _gap>=0?'g':'r';
   const chips=(d.visa_by_channel||[]).map(c=>`<span class="pill visa" style="margin:2px">${esc(c.channel)} ${fmt(c.total)} (${c.cnt})</span>`).join('')||'—';
   const txns=(d.transactions||[]);
   const rows= txns.length ? txns.map(t=>{
@@ -530,9 +537,11 @@ function renderShiftDetail(d){
     <div class="kpis">
       <div class="kpi"><div class="lbl">الرصيد الإفتتاحى</div><div class="val">${fmt(d.opening)} <small>ج</small></div></div>
       <div class="kpi"><div class="lbl">القيمة (كاش النظام)</div><div class="val">${fmt(d.system_cash)} <small>ج</small></div></div>
-      <div class="kpi"><div class="lbl">الفعلي المعدود</div><div class="val">${fmt(d.actual_cash)} <small>ج</small></div></div>
-      <div class="kpi ${diffCls}"><div class="lbl">الفرق (فعلي − نظام)</div><div class="val">${Number(d.diff)>0?'+':''}${fmt(d.diff)} <small>ج</small></div>
-        <div class="formula">محوّل للخزنة: ${fmt(d.transfer)} ج</div></div>
+      <div class="kpi"><div class="lbl">ق.الفترة</div><div class="val">${fmt(_period)} <small>ج</small></div>
+        <div class="formula">القيمة − الإفتتاحى</div></div>
+      <div class="kpi"><div class="lbl">ق.الفترة الفعلية</div><div class="val">${fmt(d.actual_cash)} <small>ج</small></div></div>
+      <div class="kpi ${diffCls}"><div class="lbl">زيادة/عجز</div><div class="val">${_gap>0?'+':''}${fmt(_gap)} <small>ج</small></div>
+        <div class="formula">ق.الفترة − الفعلية · محوّل للخزنة: ${fmt(d.transfer)} ج</div></div>
       <div class="kpi v"><div class="lbl">إجمالي الفيزا</div><div class="val">${fmt(d.visa_in)} <small>ج</small></div><div class="formula">${chips}</div></div>
     </div>
     <div class="meta" style="font-size:12px">
