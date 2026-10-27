@@ -1125,6 +1125,65 @@ async function renderDriverRank(){
   }catch(e){badge.style.display='none';}
 }
 
+/* ===== متعلقات العميل =====
+   حاجة للعميل متبقية في الصيدلية (مرتجع مرفوض أو متعلقات شخصية)،
+   بتظهر مع طلبات العميل لحد ما ترجع له. الطيار بيقول «سلّمته»
+   فتبقى «بانتظار تأكيد الصيدلية» — الصيدلية هي اللي تقفلها. لو
+   راح وماسلّمش: «ماتسلّمش» بسبب، فتفضل معلّقة وعدّاد المحاولات
+   يزيد. المتعلّق الموجود في فرع تاني بيبان تنبيه بلا أزرار.
+   المطابقة بالكود/التليفون كلها على السيرفر (get_board_belongings). */
+let belongMap={};
+function drvBelongings(o){ const a=belongMap[o&&o.id]; return Array.isArray(a)?a:[]; }
+async function loadBelongings(ids){
+  if(!ids||!ids.length){ belongMap={}; return; }
+  try{
+    const {data,error}=await db.rpc('get_board_belongings',{p_branch:null,p_order_ids:ids});
+    belongMap=(!error&&data)?data:{};
+  }catch(e){ belongMap={}; }
+}
+function drvBelongHtml(o){
+  const a=drvBelongings(o);
+  if(!a.length) return '';
+  const canAct=['assigned','picked','delivered','completed'].includes(o.status);
+  return a.map(x=>{
+    const att=Number(x.attempts)>0?`<br><span style="font-weight:600;font-size:.7rem">رجع ${x.attempts} مرة${x.last_attempt_note?(' — آخر سبب: '+x.last_attempt_note):''}</span>`:'';
+    if(!x.same_branch)
+      return `<div class="or-note" style="background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;font-weight:700">📦 للعميل متعلّق في ${x.branch_name||'فرع آخر'} — مش من فرعك، ماتسلّمهوش${att}</div>`;
+    const btns=canAct?`<div class="or-actions" style="margin-top:.4rem">
+        <button class="oa-btn oa-deliver" onclick="event.stopPropagation();drvBelongDelivered(${x.id},'${o.id}')">📦 سلّمته للعميل</button>
+        <button class="oa-btn oa-fail" onclick="event.stopPropagation();drvBelongFailed(${x.id})">⚠️ ماتسلّمش</button>
+      </div>`:'';
+    return `<div class="or-note" style="background:#ede9fe;border:1px solid #c4b5fd;color:#5b21b6;font-weight:800">📦 متعلّق للعميل — ${x.kind||''}<br><span style="font-weight:600;font-size:.74rem">${x.details||''}</span>${att}${btns}</div>`;
+  }).join('');
+}
+let _belongBusy=false;
+async function drvBelongDelivered(id, orderId){
+  if(_belongBusy) return;
+  if(!confirm('تأكيد إنك سلّمت المتعلّق للعميل؟ الصيدلية هي اللي تأكّده بعد كده.')) return;
+  _belongBusy=true;
+  try{
+    const {error}=await db.rpc('belonging_mark_delivered',{p_id:id,p_order_id:orderId});
+    if(error) throw error;
+    await loadBelongings(Object.values(tripOrders).flat().map(o=>o.id));
+    renderContent();
+  }catch(e){ alert(e.message||'تعذّر الحفظ'); }
+  _belongBusy=false;
+}
+async function drvBelongFailed(id){
+  if(_belongBusy) return;
+  const note=prompt('ماتسلّمش ليه؟ (العميل مش موجود / رفض استلامه / نسيته...)');
+  if(note==null) return;
+  if(!note.trim()){ alert('السبب مطلوب'); return; }
+  _belongBusy=true;
+  try{
+    const {error}=await db.rpc('belonging_mark_failed',{p_id:id,p_note:note.trim()});
+    if(error) throw error;
+    await loadBelongings(Object.values(tripOrders).flat().map(o=>o.id));
+    renderContent();
+  }catch(e){ alert(e.message||'تعذّر الحفظ'); }
+  _belongBusy=false;
+}
+
 async function loadAll(){
   if(!driverRecord)return;
   try{
@@ -1163,6 +1222,9 @@ const {data:trips}=await db.from('trips').select('*')
         tripOrders['direct']=directOrders;
       }
     }
+
+    // متعلقات طلبات الرحلات المحمّلة — نداء واحد قبل الرسم
+    await loadBelongings([...new Set(Object.values(tripOrders).flat().map(o=>o&&o.id).filter(Boolean))]);
 
     updateStats();
     renderTabs();
@@ -1496,6 +1558,7 @@ let actions='';
         <div class="or-head" style="padding:0">
           <span class="or-name">${o.customer_name||o.cust_name||'—'}</span>
           ${o.is_gift?'<span style="background:#fef3c7;color:#92400e;font-weight:800;border-radius:8px;padding:1px 7px;font-size:.66rem">🎁 هدية</span>':''}
+          ${drvBelongings(o).length?'<span style="background:#ede9fe;color:#5b21b6;font-weight:800;border-radius:8px;padding:1px 7px;font-size:.66rem">📦 متعلّق</span>':''}
           ${late?'<span style="color:var(--red);font-weight:800;font-size:.64rem;flex-shrink:0">⏰ متأخر</span>':''}
           <span class="or-status ${stClass}">${['delivered','completed'].includes(o.status)?'✅ ':''}${ST_LABEL[o.status]||o.status}</span>
           <span class="or-chevron" id="chev-${o.id}">▾</span>
@@ -1522,6 +1585,7 @@ let actions='';
         ${(o.notes||'').includes('🚨')?`<div class="or-note note-urgent">🚨 طلب عاجل</div>`:''}
         ${o.staff_notes?`<div class="or-note note-staff">💼 ${o.staff_notes}</div>`:''}
         ${o.is_gift?`<div class="or-note gift-pulse" style="background:#fef3c7;border:1px solid #fbbf24;color:#92400e;font-weight:800">🎁 ${o.gift_title?('هدية — '+o.gift_title):'هدية للعميل'}<br>الرجاء التأكد من وجود الهدية بداخل الطلب</div>`:''}
+        ${drvBelongHtml(o)}
         ${o.status==='failed'&&o.postpone_reason?`<div class="or-note note-urgent">⚠️ تعذر: ${o.postpone_reason}</div>`:''}
         ${_xtra>0?`<div class="or-note" style="background:#fff7ed;border:1px solid #fed7aa;color:#b45309;font-weight:700">➕ تحصيل إضافي: ${_xtra.toLocaleString('ar-EG')} ج — الإجمالي المطلوب ${amount.toLocaleString('ar-EG')} ج${o.extra_collection_note?`<br><span style="font-weight:600;font-size:.72rem">السبب: ${o.extra_collection_note}</span>`:''}</div>`:''}
         <div style="margin-top:.5rem;padding:.45rem .5rem;background:#f1efe8;border-top:1px solid #cfcdc4;border-radius:6px">

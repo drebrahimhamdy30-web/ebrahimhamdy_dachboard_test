@@ -223,6 +223,48 @@
       background: #e0f2fe;
       color: #0369a1;
     }
+
+    /* ===== متعلقات العميل ===== */
+    .cb-bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px }
+    .cb-bar .cb-q { position:relative; flex:1 1 240px; max-width:320px }
+    .cb-bar .cb-q input { width:100%; padding:.5rem .7rem .5rem 2rem }
+    .cb-bar .cb-q i { position:absolute; left:10px; top:50%; transform:translateY(-50%);
+                      color:var(--text-muted); font-size:.8rem; pointer-events:none }
+    .cb-bar select { padding:.5rem .6rem; border:1px solid var(--border); border-radius:9px;
+                     font-family:inherit; font-size:.83rem; background:var(--surface);
+                     color:var(--text-primary) }
+    .cb-det { font-size:.84rem; line-height:1.7; max-width:420px }
+    .cb-sub { font-size:.72rem; color:var(--text-muted) }
+    .cb-act { border:1px solid var(--border); background:var(--surface); color:var(--text-primary);
+              padding:.3rem .6rem; border-radius:7px; font-family:inherit; font-size:.75rem;
+              font-weight:700; cursor:pointer; white-space:nowrap }
+    .cb-act:hover { background:var(--surface-2) }
+    .cb-act.ok { border-color:var(--success); color:var(--success) }
+    .cb-act.no { border-color:var(--danger);  color:var(--danger) }
+    .cb-pager { display:flex; gap:5px; align-items:center; justify-content:center;
+                flex-wrap:wrap; margin-top:12px }
+    .cb-pager button { min-width:32px; height:32px; border:1px solid var(--border);
+                       background:var(--surface); border-radius:7px; cursor:pointer;
+                       font-weight:700; font-family:inherit; color:var(--text-primary) }
+    .cb-pager button.on { background:var(--accent); color:#fff; border-color:var(--accent) }
+    .cb-pager button:disabled { opacity:.4; cursor:default }
+    /* مودال الإضافة */
+    .cb-bg { display:none; position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:9999;
+             align-items:flex-start; justify-content:center; padding:24px 12px; overflow:auto }
+    .cb-bg.open { display:flex }
+    .cb-mdl { background:var(--surface); border-radius:14px; max-width:560px; width:100%;
+              box-shadow:var(--shadow-lg) }
+    .cb-hd { padding:14px 16px; border-bottom:1px solid var(--border); display:flex;
+             justify-content:space-between; align-items:center; font-weight:800 }
+    .cb-bd { padding:16px }
+    .cb-bd label { display:block; font-size:.76rem; font-weight:800;
+                   color:var(--text-secondary); margin:0 0 4px }
+    .cb-bd input, .cb-bd textarea, .cb-bd select {
+      width:100%; border:1px solid var(--border); border-radius:9px; padding:.55rem .7rem;
+      font-family:inherit; font-size:.88rem; margin-bottom:12px;
+      background:var(--surface); color:var(--text-primary) }
+    .cb-bd textarea { min-height:90px; resize:vertical; line-height:1.8 }
+    .cb-msg { font-size:.8rem; font-weight:700; min-height:18px; margin-bottom:8px }
   </style>
 </head>
 <body>
@@ -251,6 +293,10 @@
         </button>
         <button class="tab-btn" data-tab="clients" onclick="switchTab('clients')">
           <i class="fas fa-wallet"></i> أرصدة العملاء
+        </button>
+        <button class="tab-btn" data-tab="belongings" onclick="switchTab('belongings')">
+          <i class="fas fa-box-open"></i> متعلقات العملاء
+          <span class="badge badge-yellow" id="cb-open-badge" style="display:none"></span>
         </button>
       </div>
 
@@ -311,6 +357,92 @@
         </div>
       </div>
 
+      <!-- ===== تاب 4: متعلقات العملاء ===== -->
+      <div class="tab-panel" id="panel-belongings">
+        <div class="result-hint" style="margin-bottom:14px;text-align:right">
+          <i class="fas fa-circle-info"></i>
+          حاجة للعميل متبقية في الصيدلية (مرتجع مرفوض أو متعلقات شخصية). بتظهر للطيار مع
+          أول طلب للعميل، والطيار يقول «سلّمته» — والصيدلية هي اللي تؤكّد الاستلام فيتقفل.
+        </div>
+        <div class="stats-row" id="cb-stats"></div>
+        <div class="cb-bar">
+          <div class="cb-q">
+            <input type="text" id="cb-search" placeholder="بحث بالكود أو الاسم أو الهاتف أو الوصف...">
+            <i class="fas fa-search"></i>
+          </div>
+          <select id="cb-status" onchange="cbSetStatus(this.value)">
+            <option value="live">المفتوح وبانتظار التأكيد</option>
+            <option value="open">معلّق فقط</option>
+            <option value="delivered_pending">بانتظار تأكيد الصيدلية</option>
+            <option value="confirmed">تم التسليم</option>
+            <option value="cancelled">ملغي</option>
+            <option value="">الكل</option>
+          </select>
+          <select id="cb-branch" style="display:none" onchange="cbSetBranch(this.value)"></select>
+          <button class="btn btn-primary" onclick="cbOpenAdd()" style="margin-right:auto">
+            <i class="fas fa-plus"></i> إضافة متعلّق
+          </button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>العميل</th>
+                <th>الفرع</th>
+                <th>النوع</th>
+                <th>الوصف</th>
+                <th>الحالة</th>
+                <th>المحاولات</th>
+                <th>منذ</th>
+                <th>سجّله</th>
+                <th>إجراء</th>
+              </tr>
+            </thead>
+            <tbody id="cb-list">
+              <tr class="loading-row"><td colspan="9">⏳ جاري التحميل...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="cb-pager" id="cb-pager"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="cb-bg" id="cb-bg">
+    <div class="cb-mdl">
+      <div class="cb-hd">
+        <span><i class="fas fa-box-open"></i> إضافة متعلّق للعميل</span>
+        <button class="cb-act" onclick="cbCloseAdd()"><i class="fas fa-xmark"></i></button>
+      </div>
+      <div class="cb-bd">
+        <label>العميل — ابحث بالكود أو الاسم</label>
+        <input type="text" id="cb-f-cust" list="cb-custlist" placeholder="كود العميل أو اسمه"
+               oninput="cbCustInput()" autocomplete="off">
+        <datalist id="cb-custlist"></datalist>
+        <label>رقم الهاتف — لو العميل مش مسجّل بكود</label>
+        <input type="text" id="cb-f-phone" inputmode="numeric" placeholder="01xxxxxxxxx">
+        <label>نوع المتعلّق</label>
+        <select id="cb-f-kind">
+          <option>مرتجع مرفوض</option>
+          <option>متعلقات شخصية</option>
+          <option>مبلغ/باقي نقدي</option>
+          <option>أخرى</option>
+        </select>
+        <div id="cb-f-branch-wrap" style="display:none">
+          <label>الفرع اللي المتعلّق موجود فيه</label>
+          <select id="cb-f-branch"></select>
+        </div>
+        <label>الوصف — إيه بالظبط اللي عند الصيدلية</label>
+        <textarea id="cb-f-details" placeholder="مثال: علبة بانادول إكسترا ٢٤ قرص — مرتجع اترفض لأن الشريط مفتوح"></textarea>
+        <div class="cb-msg" id="cb-f-msg"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="cb-act" onclick="cbCloseAdd()">إلغاء</button>
+          <button class="btn btn-success" id="cb-f-save" onclick="cbSaveAdd()">
+            <i class="fas fa-save"></i> تسجيل المتعلّق
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -508,6 +640,9 @@
       const tab = (document.querySelector('.tab-btn.active') || {}).dataset?.tab;
       if (tab === 'employees') renderEmployees();
       else if (tab === 'clients') renderClients();
+      if (tab === 'employees') renderEmployees();
+      else if (tab === 'clients') renderClients();
+      else if (tab === 'belongings') cbEnter();
     }
 
     // ===== تاب 1: البحث =====
@@ -613,6 +748,14 @@
         <div class="save-bar">
           <button class="btn btn-success" id="saveBtn" onclick="saveCustomer(event)">
             <i class="fas fa-save"></i> حفظ التعديلات
+          </button>
+        </div>
+        <div class="save-bar">
+          <button class="btn btn-success" id="saveBtn" onclick="saveCustomer(event)">
+            <i class="fas fa-save"></i> حفظ التعديلات
+          </button>
+          <button class="btn" onclick="cbOpenAdd(selectedCust)" style="background:var(--surface);color:var(--text-primary);border:1px solid var(--border)">
+            <i class="fas fa-box-open"></i> تسجيل متعلّق لهذا العميل
           </button>
         </div>
         <div class="rate-card">
@@ -920,6 +1063,303 @@
           <div class="stat-lbl">صافي الإجمالي</div>
         </div>`;
     }
+
+    /* ════════════════════════════════════════════════════════════
+       متعلقات العميل — حاجة عند الصيدلية لازم ترجع لصاحبها
+       ------------------------------------------------------------
+       القفل تأكيد بشري في خطوتين: الطيار يقول «سلّمته» فيبقى
+       «بانتظار تأكيد الصيدلية»، والصيدلية هي اللي تقفله. لو قفلنا
+       تلقائيًا مع تسليم الطلب، المتعلّق المنسي في الصيدلية كان
+       هيختفي من الشاشة وهو لسه موجود.
+
+       الجلب: `get_belongings` بترجّع jsonb (صف واحد) فمش متأثرة
+       بسقف الألف صف، والفرز والبحث والترقيم كلهم على الصفوف
+       المحمّلة — الإجماليات بتتحسب على كل المفلتر مش الصفحة.
+       ════════════════════════════════════════════════════════════ */
+    const CB_PAGE_SIZE = 40;
+    const CB_ST = {
+      open:              { t: 'معلّق',                   c: 'badge-yellow' },
+      delivered_pending: { t: 'بانتظار تأكيد الصيدلية', c: 'badge-blue'   },
+      confirmed:         { t: 'تم التسليم',              c: 'badge-green'  },
+      cancelled:         { t: 'ملغي',                    c: 'badge-gray'   }
+    };
+    const CB = { rows: [], status: 'live', branch: '', q: '', page: 1, loaded: false, busy: false, timer: null, ui: false };
+
+    /* نداء بتوكن المستخدم: الدوال بترفع رسالة عربية واضحة، فبنمرّرها
+       زي ما هي بدل «فشل الاتصال» العام. */
+    async function cbRpc(fn, body) {
+      const r = await fetch(`${SB_URL_API}/rest/v1/rpc/${fn}`, {
+        method: 'POST',
+        headers: await sbH({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body || {})
+      });
+      let j = null;
+      try { j = await r.json(); } catch (e) {}
+      if (!r.ok) throw new Error((j && (j.message || j.hint)) || `فشل الاتصال (${r.status})`);
+      return j;
+    }
+
+    function cbEsc(v) {
+      return String(v == null ? '' : v)
+        .replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+    }
+    function cbDT(v) {
+      if (!v) return '';
+      return new Date(v).toLocaleString('ar-EG', {
+        timeZone: 'Africa/Cairo', dateStyle: 'short', timeStyle: 'short'
+      });
+    }
+    function cbDays(n) {
+      const v = Number(n);
+      if (!isFinite(v)) return '---';
+      if (v <= 0) return 'النهاردة';
+      if (v === 1) return 'يوم';
+      if (v === 2) return 'يومين';
+      if (v <= 10) return v + ' أيام';
+      return v + ' يوم';
+    }
+
+    /* أول دخول للتبويب بس — بعد كده التحديث بالزر أو بعد أي إجراء */
+    function cbEnter() {
+      if (!CB.loaded) { cbInitUI(); cbLoad(); }
+      else cbRender();
+    }
+
+    function cbInitUI() {
+      /* بتتنادى من دخول التبويب ومن زر الإضافة في كارت العميل — من غير
+         الحارس ده كان مستمع البحث يتسجّل أكتر من مرة والقوايم تترسم من
+         أول وجديد فيضيع اختيار الفرع. */
+      if (CB.ui) return;
+      CB.ui = true;
+      const list = (typeof Branches !== 'undefined' && Branches.all) ? Branches.all() : [];
+      const names = list.filter(b => b && b.name).map(b => b.name);
+      /* فلتر الفرع بيظهر للي بيشوف كل الفروع بس — وغيره السيرفر
+         بيقصره على فرعه أصلًا، فالقايمة كانت هتوهم باختيار مش نافذ. */
+      const sel = document.getElementById('cb-branch');
+      if (SEE_ALL_BRANCHES && names.length) {
+        sel.innerHTML = '<option value="">كل الفروع</option>' +
+          names.map(n => `<option value="${cbEsc(n)}">${cbEsc(n)}</option>`).join('');
+        sel.style.display = '';
+      }
+      const fb = document.getElementById('cb-f-branch');
+      if (fb) fb.innerHTML = names.map(n => `<option value="${cbEsc(n)}">${cbEsc(n)}</option>`).join('');
+      if (SEE_ALL_BRANCHES && names.length)
+        document.getElementById('cb-f-branch-wrap').style.display = '';
+
+      /* بحث فوري بـdebounce بسيط — الفلترة محلية فمفيش حمل على السيرفر */
+      const q = document.getElementById('cb-search');
+      q.addEventListener('input', () => {
+        clearTimeout(CB.timer);
+        CB.timer = setTimeout(() => { CB.q = q.value.trim(); CB.page = 1; cbRender(); }, 250);
+      });
+    }
+
+    function cbSetStatus(v) { CB.status = v; CB.page = 1; cbRender(); }
+    function cbSetBranch(v) { CB.branch = v; CB.page = 1; cbLoad(); }
+
+    async function cbLoad() {
+      const tb = document.getElementById('cb-list');
+      tb.innerHTML = '<tr class="loading-row"><td colspan="9">⏳ جاري التحميل...</td></tr>';
+      try {
+        const rows = await cbRpc('get_belongings', {
+          p_branch: CB.branch || null, p_status: null, p_search: null
+        });
+        CB.rows = Array.isArray(rows) ? rows : [];
+        CB.loaded = true;
+        cbRender();
+      } catch (e) {
+        CB.rows = [];
+        tb.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--danger);padding:30px">❌ ${cbEsc(e.message)}</td></tr>`;
+        document.getElementById('cb-stats').innerHTML = '';
+        document.getElementById('cb-pager').innerHTML = '';
+      }
+    }
+
+    function cbFiltered() {
+      const q = CB.q.toLowerCase();
+      return CB.rows.filter(r => {
+        if (CB.status === 'live') { if (r.status !== 'open' && r.status !== 'delivered_pending') return false; }
+        else if (CB.status && r.status !== CB.status) return false;
+        if (!q) return true;
+        return [r.cust_code, r.customer_name, r.customer_phone, r.details, r.created_by]
+          .some(v => String(v == null ? '' : v).toLowerCase().includes(q));
+      });
+    }
+
+    function cbRender() {
+      const rows  = cbFiltered();
+      const pages = Math.max(1, Math.ceil(rows.length / CB_PAGE_SIZE));
+      if (CB.page > pages) CB.page = pages;
+      const slice = rows.slice((CB.page - 1) * CB_PAGE_SIZE, CB.page * CB_PAGE_SIZE);
+
+      /* الإجماليات على كل الصفوف المحمّلة — مش على الصفحة ولا الفلتر */
+      const n = st => CB.rows.filter(r => r.status === st).length;
+      const openN = n('open'), pendN = n('delivered_pending');
+      const stale = CB.rows.filter(r => r.status === 'open' && Number(r.days_open) >= 14).length;
+      document.getElementById('cb-stats').innerHTML = [
+        ['معلّق', openN, 'var(--warning, #a16207)'],
+        ['بانتظار تأكيد الصيدلية', pendN, 'var(--accent-dark)'],
+        ['معلّق أكثر من ١٤ يوم', stale, stale ? 'var(--danger)' : 'var(--text-muted)'],
+        ['تم التسليم', n('confirmed'), 'var(--success)'],
+        ['ملغي', n('cancelled'), 'var(--text-muted)']
+      ].map(([lbl, v, col]) => `<div class="stat-card">
+          <div style="font-size:1.3rem;font-weight:800;color:${col}">${v}</div>
+          <div style="font-size:.74rem;color:var(--text-muted)">${lbl}</div>
+        </div>`).join('');
+
+      const badge = document.getElementById('cb-open-badge');
+      const live  = openN + pendN;
+      badge.textContent = live;
+      badge.style.display = live ? '' : 'none';
+
+      const tb = document.getElementById('cb-list');
+      if (!slice.length) {
+        tb.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:34px">
+          <i class="fas fa-box-open" style="font-size:1.6rem;opacity:.3;display:block;margin-bottom:8px"></i>
+          ${CB.rows.length ? 'مفيش متعلقات بالفلتر الحالي' : 'مفيش متعلقات مسجّلة'}</td></tr>`;
+      } else {
+        tb.innerHTML = slice.map(r => {
+          const st = CB_ST[r.status] || { t: r.status, c: 'badge-gray' };
+          const who = r.status === 'confirmed'
+            ? `أكّده ${cbEsc(r.confirmed_by || '—')} · ${cbDT(r.confirmed_at)}`
+            : (r.status === 'cancelled'
+                ? `ألغاه ${cbEsc(r.confirmed_by || '—')} · ${cbEsc(r.closed_note || '')}`
+                : (r.status === 'delivered_pending'
+                    ? `الطيار ${cbEsc(r.delivered_by || '—')} · ${cbDT(r.delivered_at)}`
+                    : (r.last_attempt_note ? `آخر محاولة: ${cbEsc(r.last_attempt_note)}` : '')));
+          let act = '<span class="cb-sub">—</span>';
+          if (r.status === 'delivered_pending') {
+            act = `<button class="cb-act ok" onclick="cbConfirm(${r.id})"><i class="fas fa-check"></i> تأكيد الاستلام</button>`
+                + ` <button class="cb-act no" onclick="cbCancel(${r.id})">إلغاء</button>`;
+          } else if (r.status === 'open') {
+            act = `<button class="cb-act ok" onclick="cbConfirm(${r.id})"><i class="fas fa-check"></i> استلمه من الصيدلية</button>`
+                + ` <button class="cb-act no" onclick="cbCancel(${r.id})">إلغاء</button>`;
+          }
+          return `<tr>
+            <td><div style="font-weight:700">${cbEsc(r.customer_name || '(بدون اسم)')}</div>
+                <div class="cb-sub">${cbEsc(r.cust_code || '')}${r.customer_phone ? ' · ' + cbEsc(r.customer_phone) : ''}</div></td>
+            <td><span class="branch-tag">${cbEsc(r.branch_name || '—')}</span></td>
+            <td style="font-size:.8rem">${cbEsc(r.kind || '')}</td>
+            <td><div class="cb-det">${cbEsc(r.details || '')}</div>
+                ${who ? `<div class="cb-sub">${who}</div>` : ''}</td>
+            <td><span class="badge ${st.c}">${st.t}</span></td>
+            <td style="font-weight:800;color:${Number(r.attempts) >= 3 ? 'var(--danger)' : 'var(--text-secondary)'}">${Number(r.attempts) || 0}</td>
+            <td style="font-size:.78rem;color:${r.status === 'open' && Number(r.days_open) >= 14 ? 'var(--danger)' : 'var(--text-muted)'}">${cbDays(r.days_open)}</td>
+            <td style="font-size:.76rem">${cbEsc(r.created_by || '—')}<div class="cb-sub">${cbDT(r.created_at)}</div></td>
+            <td>${act}</td>
+          </tr>`;
+        }).join('');
+      }
+
+      const pg = document.getElementById('cb-pager');
+      if (pages <= 1) { pg.innerHTML = ''; return; }
+      const mk = (lbl, p, dis, on) =>
+        `<button ${dis ? 'disabled' : ''} class="${on ? 'on' : ''}" onclick="cbGo(${p})">${lbl}</button>`;
+      let h = mk('«', 1, CB.page === 1) + mk('‹', CB.page - 1, CB.page === 1);
+      for (let p = 1; p <= pages; p++) {
+        if (p === 1 || p === pages || Math.abs(p - CB.page) <= 2) h += mk(p, p, false, p === CB.page);
+        else if (Math.abs(p - CB.page) === 3) h += '<span style="margin:0 6px;color:var(--text-muted)">…</span>';
+      }
+      h += mk('›', CB.page + 1, CB.page === pages) + mk('»', pages, CB.page === pages);
+      h += `<span style="margin:0 8px;color:var(--text-muted);font-size:.78rem">صفحة ${CB.page} من ${pages} · ${rows.length} متعلّق</span>`;
+      pg.innerHTML = h;
+    }
+
+    function cbGo(p) {
+      CB.page = p; cbRender();
+      const el = document.getElementById('panel-belongings');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    async function cbAction(fn, body, confirmMsg) {
+      if (CB.busy) return;
+      if (confirmMsg && !confirm(confirmMsg)) return;
+      CB.busy = true;
+      try { await cbRpc(fn, body); await cbLoad(); }
+      catch (e) { alert(e.message); }
+      finally { CB.busy = false; }
+    }
+
+    function cbConfirm(id) {
+      cbAction('belonging_confirm', { p_id: id },
+        'تأكيد إن المتعلّق وصل للعميل فعلًا؟ بعد التأكيد مش هيظهر تاني.');
+    }
+    function cbCancel(id) {
+      const note = prompt('سبب الإلغاء (إجباري) — مثال: العميل تنازل عنه / اتصرّف فيه:');
+      if (note == null) return;
+      if (!note.trim()) { alert('سبب الإلغاء مطلوب'); return; }
+      cbAction('belonging_cancel', { p_id: id, p_note: note.trim() });
+    }
+
+    /* ===== إضافة ===== */
+    function cbOpenAdd(cust) {
+      cbInitUI();
+      document.getElementById('cb-f-msg').textContent = '';
+      document.getElementById('cb-f-details').value = '';
+      document.getElementById('cb-f-phone').value = '';
+      document.getElementById('cb-f-cust').value = cust
+        ? `${clean(cust.cust_code)} — ${clean(cust.cust_name)}` : '';
+      const dl = document.getElementById('cb-custlist');
+      dl.innerHTML = '';
+      document.getElementById('cb-bg').classList.add('open');
+    }
+    function cbCloseAdd() { document.getElementById('cb-bg').classList.remove('open'); }
+
+    /* قايمة اقتراح العملاء: بنبنيها بعد ٣ حروف وبأول ٢٠ نتيجة —
+       ٢١ ألف عميل في datalist بيوقف المتصفح. */
+    function cbCustInput() {
+      const q  = document.getElementById('cb-f-cust').value.trim().toLowerCase();
+      const dl = document.getElementById('cb-custlist');
+      if (q.length < 3) { dl.innerHTML = ''; return; }
+      dl.innerHTML = allCustomers.filter(c =>
+          String(c.cust_code || '').trim() === q ||
+          String(c.cust_name || '').toLowerCase().includes(q))
+        .slice(0, 20)
+        .map(c => `<option value="${cbEsc(clean(c.cust_code) + ' — ' + clean(c.cust_name))}"></option>`)
+        .join('');
+    }
+
+    async function cbSaveAdd() {
+      const msg  = document.getElementById('cb-f-msg');
+      const btn  = document.getElementById('cb-f-save');
+      const raw  = document.getElementById('cb-f-cust').value.trim();
+      const code = raw.split('—')[0].trim();
+      const hit  = allCustomers.find(c => String(c.cust_code).trim() === code);
+      const det  = document.getElementById('cb-f-details').value.trim();
+      const ph   = document.getElementById('cb-f-phone').value.trim();
+      if (!det) { msg.style.color = 'var(--danger)'; msg.textContent = 'الوصف مطلوب'; return; }
+      if (!hit && !ph) {
+        msg.style.color = 'var(--danger)';
+        msg.textContent = 'اختر عميل من القايمة أو اكتب رقم هاتفه';
+        return;
+      }
+      btn.disabled = true;
+      msg.style.color = 'var(--text-muted)'; msg.textContent = 'جاري التسجيل...';
+      try {
+        await cbRpc('create_customer_belonging', {
+          p_cust_code:     hit ? String(hit.cust_code) : null,
+          p_customer_name: hit ? clean(hit.cust_name) : (raw || null),
+          p_customer_phone: ph || null,
+          p_branch: (SEE_ALL_BRANCHES ? document.getElementById('cb-f-branch').value : userBranch) || userBranch,
+          p_kind:    document.getElementById('cb-f-kind').value,
+          p_details: det
+        });
+        cbCloseAdd();
+        if (!CB.loaded) cbInitUI();
+        await cbLoad();
+      } catch (e) {
+        msg.style.color = 'var(--danger)'; msg.textContent = e.message;
+      } finally { btn.disabled = false; }
+    }
+
+    // الخروج من المودال بالضغط على الخلفية أو Esc
+    document.addEventListener('click', e => {
+      if (e.target && e.target.id === 'cb-bg') cbCloseAdd();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') cbCloseAdd();
+    });
+
 
     // إغلاق الاقتراحات عند الضغط خارجها
     document.addEventListener('click', e => {
