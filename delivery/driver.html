@@ -192,6 +192,15 @@ textarea.form-ctrl{height:80px;padding:.75rem;resize:none}
 .btn-primary{background:var(--primary);color:white}
 .btn-red{background:var(--red);color:white}
 .btn-gray{background:var(--gray-light);color:var(--text)}
+.bl-ask{background:#f5f3ff;border:2px solid #a78bfa;border-radius:12px;padding:.7rem;margin-bottom:1rem}
+.bl-ask .ttl{font-size:.82rem;font-weight:800;color:#5b21b6;margin-bottom:.25rem}
+.bl-ask .dtl{font-size:.74rem;color:#6d28d9;font-weight:600;line-height:1.7}
+.bl-ask .q{font-size:.8rem;font-weight:800;color:#5b21b6;margin:.5rem 0 .45rem}
+.bl-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+.bl-opt{padding:.7rem .5rem;border-radius:10px;font-family:'Cairo',sans-serif;font-size:.82rem;font-weight:800;cursor:pointer;border:2px solid var(--border);background:var(--surface);text-align:center;color:var(--text)}
+.bl-opt.yes.on{border-color:#16a34a;background:#dcfce7;color:#15803d}
+.bl-opt.no.on{border-color:#dc2626;background:#fee2e2;color:#b91c1c}
+.bl-hint{font-size:.68rem;color:#6d28d9;margin-top:.45rem;font-weight:600;min-height:1em}
 .loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,.8);z-index:300;display:none;align-items:center;justify-content:center;flex-direction:column;gap:.75rem}
 .loading-overlay.show{display:flex}
 .spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite}
@@ -287,6 +296,7 @@ textarea.form-ctrl{height:80px;padding:.75rem;resize:none}
     <div class="modal-handle"></div>
     <div class="modal-title">✅ تأكيد التوصيل</div>
     <input type="hidden" id="dlv-id">
+    <div id="dlv-belong"></div>
     <div class="form-group">
       <label class="form-label">طريقة الدفع *</label>
       <div class="pay-grid">
@@ -1144,44 +1154,56 @@ async function loadBelongings(ids){
 function drvBelongHtml(o){
   const a=drvBelongings(o);
   if(!a.length) return '';
-  const canAct=['assigned','picked','delivered','completed'].includes(o.status);
   return a.map(x=>{
     const att=Number(x.attempts)>0?`<br><span style="font-weight:600;font-size:.7rem">رجع ${x.attempts} مرة${x.last_attempt_note?(' — آخر سبب: '+x.last_attempt_note):''}</span>`:'';
     if(!x.same_branch)
       return `<div class="or-note" style="background:#f1f5f9;border:1px solid #cbd5e1;color:#475569;font-weight:700">📦 للعميل متعلّق في ${x.branch_name||'فرع آخر'} — مش من فرعك، ماتسلّمهوش${att}</div>`;
-    const btns=canAct?`<div class="or-actions" style="margin-top:.4rem">
-        <button class="oa-btn oa-deliver" onclick="event.stopPropagation();drvBelongDelivered(${x.id},'${o.id}')">📦 سلّمته للعميل</button>
-        <button class="oa-btn oa-fail" onclick="event.stopPropagation();drvBelongFailed(${x.id})">⚠️ ماتسلّمش</button>
-      </div>`:'';
-    return `<div class="or-note" style="background:#ede9fe;border:1px solid #c4b5fd;color:#5b21b6;font-weight:800">📦 متعلّق للعميل — ${x.kind||''} · ضيفه مع الطلب<br><span style="font-weight:600;font-size:.74rem">${x.details||''}</span>${att}${btns}</div>`;
+    /* مفيش أزرار هنا: السؤال بقى جوّه مودال التسليم — الطيار
+       بيجاوب والحاجة في إيده قدام العميل مش بيفتكر بعدين. */
+    return `<div class="or-note" style="background:#ede9fe;border:1px solid #c4b5fd;color:#5b21b6;font-weight:800">📦 متعلّق للعميل — ${x.kind||''} · ضيفه مع الطلب<br><span style="font-weight:600;font-size:.74rem">${x.details||''}</span>${att}</div>`;
   }).join('');
 }
-let _belongBusy=false;
-async function drvBelongDelivered(id, orderId){
-  if(_belongBusy) return;
-  if(!confirm('تأكيد إنك سلّمت المتعلّق للعميل؟ الصيدلية هي اللي تأكّده بعد كده.')) return;
-  _belongBusy=true;
-  try{
-    const {error}=await db.rpc('belonging_mark_delivered',{p_id:id,p_order_id:orderId});
-    if(error) throw error;
-    await loadBelongings(Object.values(tripOrders).flat().map(o=>o.id));
-    renderContent();
-  }catch(e){ alert(e.message||'تعذّر الحفظ'); }
-  _belongBusy=false;
+/* ===== سؤال المتعلّق جوّه مودال التسليم =====
+   «نعم» بتقفل المتعلّق على طول وتسجّل اسم الطيار ووقت التسليم
+   (مفيش تأكيد من الصيدلية — قرار المالك 2026-10-28).
+   «لأ» بتسيبه مفتوح وبتزوّد عدّاد المحاولات، فيظهر مع الطلب
+   الجاي للعميل. */
+let _dlvBelongs=[], _dlvBelongAns=null;
+function dlvBelongRender(o){
+  const box=document.getElementById('dlv-belong');
+  _dlvBelongs=drvBelongings(o).filter(x=>x.same_branch);
+  _dlvBelongAns=null;
+  if(!_dlvBelongs.length){ box.innerHTML=''; return; }
+  const list=_dlvBelongs.map(x=>`<div class="dtl">• ${x.kind||''} — ${x.details||''}</div>`).join('');
+  box.innerHTML=`<div class="bl-ask">
+    <div class="ttl">📦 العميل له ${_dlvBelongs.length>1?(_dlvBelongs.length+' متعلقات'):'متعلّق'} عندنا</div>
+    ${list}
+    <div class="q">هل سلّمته للعميل؟</div>
+    <div class="bl-grid">
+      <button type="button" class="bl-opt yes" onclick="dlvBelongPick(1,this)">✓ نعم سلّمته</button>
+      <button type="button" class="bl-opt no"  onclick="dlvBelongPick(0,this)">✕ لأ</button>
+    </div>
+    <div class="bl-hint" id="dlv-belong-hint"></div>
+  </div>`;
 }
-async function drvBelongFailed(id){
-  if(_belongBusy) return;
-  const note=prompt('ماتسلّمش ليه؟ (العميل مش موجود / رفض استلامه / نسيته...)');
-  if(note==null) return;
-  if(!note.trim()){ alert('السبب مطلوب'); return; }
-  _belongBusy=true;
-  try{
-    const {error}=await db.rpc('belonging_mark_failed',{p_id:id,p_note:note.trim()});
-    if(error) throw error;
-    await loadBelongings(Object.values(tripOrders).flat().map(o=>o.id));
-    renderContent();
-  }catch(e){ alert(e.message||'تعذّر الحفظ'); }
-  _belongBusy=false;
+function dlvBelongPick(yes,btn){
+  _dlvBelongAns=!!yes;
+  document.querySelectorAll('#dlv-belong .bl-opt').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  document.getElementById('dlv-belong-hint').textContent = yes
+    ? 'هيتقفل باسمك وبوقت التسليم — ومش هيظهر تاني.'
+    : 'هيفضل مفتوح وهيظهر مع طلب العميل الجاي.';
+}
+/* بتتنادى بعد ما الطلب يتسجّل تسليم — فشلها مايلغيش التوصيل */
+async function dlvBelongSave(orderId){
+  if(!_dlvBelongs.length || _dlvBelongAns===null) return;
+  for(const x of _dlvBelongs){
+    try{
+      if(_dlvBelongAns) await db.rpc('belonging_mark_delivered',{p_id:x.id,p_order_id:orderId});
+      else              await db.rpc('belonging_mark_failed',{p_id:x.id,p_note:'ماتسلّمش مع الطلب'});
+    }catch(e){ console.error('belonging save failed:',e); }
+  }
+  _dlvBelongs=[]; _dlvBelongAns=null;
 }
 
 async function loadAll(){
@@ -1726,6 +1748,7 @@ function openDeliver(id){
     const match=b.getAttribute('onclick')?.includes(`'${preselectedPay}'`);
     if(match) b.classList.add(`po-${preselectedPay}`);
   });
+  dlvBelongRender(o);
   document.getElementById('deliverModal').classList.add('open');
   checkDlvDiff();
 }
@@ -1741,6 +1764,10 @@ async function confirmDeliver(){
   const id=document.getElementById('dlv-id').value;
   const pay=document.getElementById('dlv-pay').value;
   if(!pay){alert('اختر طريقة الدفع');return;}
+  if(_dlvBelongs.length && _dlvBelongAns===null){
+    alert('العميل له متعلّق عندنا — جاوب: سلّمته ولا لأ؟');
+    return;
+  }
   const amt=parseFloat(document.getElementById('dlv-amt').value)||0;
   const note=document.getElementById('dlv-note').value.trim();
   // موقع التسليم (لحساب زمن الطريق والأداء) — لا يمنع التسليم لو تعذّر، لكن نطلب تفعيله
@@ -1756,6 +1783,7 @@ async function confirmDeliver(){
   if(dloc){ upd.delivery_lat=dloc.lat; upd.delivery_lng=dloc.lng; }
   await db.from('orders').update(upd).eq('id',id);
   await addOrderLog(id,'order_delivered',{payment:pay,amount:amt,...(dloc?{delivery_lat:dloc.lat,delivery_lng:dloc.lng,gps_accuracy_m:Math.round(dloc.acc||0)}:{no_location:true})});
+  await dlvBelongSave(id);
   closeModal('deliverModal');await loadAll();load(false);
 }
 
