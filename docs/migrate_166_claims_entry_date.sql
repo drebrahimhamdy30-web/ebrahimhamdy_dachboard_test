@@ -92,11 +92,7 @@ end $out$;
      • get_purchase_surplus_return_impl  (الفائض: الفلتر)
 
    ⚠️ **اللي اتساب عن قصد** — دي مش تواريخ عرض، دي منطق أرقام:
-     • ترتيب `array_agg(... order by pih.ven_bill_date desc)` في
-       الفائض — بيختار «آخر سعر شراء».
-     • `refresh_best_purchase` و`search_item_cost` و`value_branch_goods` —
-       اختيار أحدث سعر وتقييم البضاعة.
-     تغيير دول بيحرّك تكلفة أصناف وتقييم مخزون، فمحتاج قرار منفصل.
+     (اللي كان مستثنى هنا اتعمل في ١٦٦-د بعد ما المالك شاف الأثر.)
    ════════════════════════════════════════════════════════════════ */
 
 do $out$
@@ -210,3 +206,86 @@ begin
   if n > 0 then raise exception 'order_review: فاضل % شرط قديم', n; end if;
   execute def;
 end $out$;
+
+
+/* ════════════════════════════════════════════════════════════════
+   ١٦٦-د · «آخر سعر شراء» بقاعدة محدَّدة (2026-10-28)
+   ----------------------------------------------------------------
+   وإحنا بنحسب أثر تحويل اختيار آخر سعر لتاريخ الإدخال، بان إن
+   المشكلة الحقيقية مش التاريخ: من ٤١ صنف كان سعرهم هيتغيّر، **٣٠**
+   منهم تاريخهم واحد في الحالتين — يعني الفرق كان جاي من إن الصنف
+   اتشترى أكتر من مرة في نفس اليوم بسعرين، والترتيب
+   `array_agg(... order by d desc)` مالوش قاعدة فاصلة، فالسعر كان
+   بيتحدد **بالصدفة** وممكن يتغيّر لوحده لو اتعاد الحساب.
+
+   أمثلة لقيناها:
+     • bepanthene+biotine · المعمورة · فاتورتين من «مستورد عموما»
+       ٦٢٦٥٠ (٩:٥٨ص · ١٥٢٥) و٦٢٦٥١ (١٠:٠٠ص · ١٩٥٠) — فرق ٤٢٥ ج.
+     • بيزلين سيرم · سان ستيفانو · نفس الفاتورة فيها سطرين:
+       ٤٤٠ لكمية ٢٠ و٥٤ لكمية ١ (شكله سطر عيّنة).
+   و**١٨٦ صنف** آخر يوم شراء فيهم فيه أكتر من سعر.
+
+   قرار المالك: **آخر سعر بالتاريخ والوقت، ولو تساووا بالظبط نأخد
+   الأعلى** — عشان ما ياخدش سطر العيّنة على إنه سعر الشراء.
+
+   الدوال المتأثرة (كلها قرارات شراء مش أرقام محاسبية):
+     • search_item_cost            (البحث السريع ← وضع «التكلفة»)
+     • refresh_best_purchase       (أفضل سعر في شاشات الطلب — بتتحدّث كل ساعة)
+     • get_purchase_surplus_return_impl (الفائض للمرتجع)
+     • value_branch_goods          (مفيش شاشة بتناديها حاليًا — وُحِّدت للاتساق)
+   ════════════════════════════════════════════════════════════════ */
+
+do $out$
+declare def text; n int;
+begin
+  select pg_get_functiondef('public.search_item_cost'::regproc) into def;
+  def := replace(def,
+    'i.branch, h.ven_name_ar, (h.ven_bill_date)::date as d',
+    'i.branch, h.ven_name_ar, coalesce(h.sec_insert_date, h.ven_bill_date)::date as d,'||chr(10)||
+    '           coalesce(h.sec_insert_date, h.ven_bill_date) as ts');
+  def := replace(def,
+    'select li.itm_code, li.d, li.ven_name_ar, li.itm_pur_price,',
+    'select li.itm_code, li.d, li.ven_name_ar, li.itm_pur_price, max(li.ts) as ts,');
+  def := replace(def,
+    'order by li.d desc, li.itm_pur_price desc) as rn',
+    'order by max(li.ts) desc, li.itm_pur_price desc) as rn');
+  def := replace(def,
+    '''branches'', g.branches) order by g.d desc), ''[]''::jsonb)',
+    '''branches'', g.branches) order by g.ts desc, g.itm_pur_price desc), ''[]''::jsonb)');
+  if position('(h.ven_bill_date)::date as d' in def) > 0
+     or position('order by li.d desc' in def) > 0 then
+    raise exception 'search_item_cost: تعريف مختلف — عدّله يدويًا';
+  end if;
+  execute def;
+
+  select pg_get_functiondef('public.refresh_best_purchase'::regproc) into def;
+  def := replace(def, 'pi.itm_dis_per::numeric disc, h.ven_bill_date::date d,',
+                      'pi.itm_dis_per::numeric disc, coalesce(h.sec_insert_date, h.ven_bill_date)::date d,');
+  def := replace(def, '(h.ven_bill_date >= current_date - 90) in3m',
+                      '(coalesce(h.sec_insert_date, h.ven_bill_date) >= current_date - 90) in3m');
+  if position('h.ven_bill_date::date d,' in def) > 0 then
+    raise exception 'refresh_best_purchase: تعريف مختلف';
+  end if;
+  execute def;
+
+  select pg_get_functiondef('public.get_purchase_surplus_return_impl'::regproc) into def;
+  def := replace(def, 'order by pih.ven_bill_date desc nulls last, pih.pth_id desc',
+                      'order by coalesce(pih.sec_insert_date, pih.ven_bill_date) desc nulls last, pii.itm_pur_price desc, pih.pth_id desc');
+  select count(*) into n from regexp_matches(def, 'order by pih\.ven_bill_date desc', 'g');
+  if n > 0 then raise exception 'surplus: فاضل % ترتيب قديم', n; end if;
+  execute def;
+
+  select pg_get_functiondef('public.value_branch_goods'::regproc) into def;
+  def := replace(def, 'select pii.itm_code, pii.itm_pur_price, coalesce(pi.ven_bill_date, pi.sec_insert_date) d',
+                      'select pii.itm_code, pii.itm_pur_price, coalesce(pi.sec_insert_date, pi.ven_bill_date) d');
+  def := replace(def, '(array_agg(itm_pur_price order by d desc))[1] as price',
+                      '(array_agg(itm_pur_price order by d desc, itm_pur_price desc))[1] as price');
+  if position('coalesce(pi.ven_bill_date, pi.sec_insert_date) d' in def) > 0 then
+    raise exception 'value_branch_goods: تعريف مختلف';
+  end if;
+  execute def;
+end $out$;
+
+/* بعد التطبيق: شغّل تحديث أفضل سعر مرة واحدة عشان الجدول يتظبط فورًا
+   بدل ما يستنى النبضة الساعية. */
+select public.refresh_best_purchase();
