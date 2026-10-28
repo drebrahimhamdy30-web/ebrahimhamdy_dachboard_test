@@ -186,7 +186,10 @@
         <label class="fld"><span>الفرع</span>
           <select id="f-branch" onchange="reload()"><option value="">كل الفروع</option></select></label>
         <label class="fld"><span>الشركة</span>
-          <select id="f-company" onchange="reload()"><option value="">كل الشركات</option></select></label>
+          <input type="text" id="f-company" list="f-company-list" placeholder="كل الشركات — اكتب للبحث"
+                 autocomplete="off" oninput="debCompany()" onchange="pickCompany()" onblur="pickCompany()"
+                 style="max-width:230px">
+          <datalist id="f-company-list"></datalist></label>
         <label class="fld n"><span>خلال كم شهر</span>
           <input type="number" id="f-months" value="4" min="1" max="24" oninput="deb()"></label>
         <label class="fld"><span>الحالة</span>
@@ -252,7 +255,8 @@
       discount: { t:'يُباع بخصم',        i:'fa-percent',      c:'ab-dis'  },
       stop:     { t:'لا يُطلَب مجددًا',  i:'fa-ban',          c:'ab-stop' },
     };
-    let PAGE = 1, SIZE = 50, LAST = null, canEdit = false, polOpen = false, debT = null;
+    let PAGE = 1, SIZE = 50, LAST = null, canEdit = false, polOpen = false, debT = null, debCT = null;
+    let COMPANIES = [];
 
     const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
     const num = n => (n==null?'—':Number(n).toLocaleString('en-US',{maximumFractionDigits:2}));
@@ -273,13 +277,32 @@
 
     /* الفلاتر فورية: المنسدلات عند التغيير، والنصوص بـdebounce بسيط. */
     function deb(){ clearTimeout(debT); debT = setTimeout(reload, 280); }
+
+    /* الشركة تُختار من القائمة فقط — الكتابة الحرّة تُرفض، لأن الاسم
+       الواحد يُكتب بأكثر من صورة فيخرج الفلتر فارغًا بلا سبب ظاهر. */
+    function companyValid(){
+      const v = document.getElementById('f-company').value.trim();
+      return v === '' || COMPANIES.indexOf(v) >= 0;
+    }
+    function debCompany(){
+      clearTimeout(debCT);
+      debCT = setTimeout(function(){ if (companyValid()) { showMsg(''); reload(); } }, 300);
+    }
+    function pickCompany(){
+      const inp = document.getElementById('f-company'), v = inp.value.trim();
+      if (v !== '' && COMPANIES.indexOf(v) < 0){
+        inp.value = '';
+        showMsg('اختر اسم شركة من القائمة — الأسماء تُقرأ من الأصناف الموجودة.', false);
+      } else { showMsg(''); }
+      reload();
+    }
     function reload(){ PAGE = 1; loadRows(); }
 
     function filters(){
       return {
         p_branch:      document.getElementById('f-branch').value || null,
         p_months:      parseInt(document.getElementById('f-months').value, 10) || 4,
-        p_company:     document.getElementById('f-company').value || null,
+        p_company:     (companyValid() ? document.getElementById('f-company').value.trim() : '') || null,
         p_sold:        document.getElementById('f-sold').value || null,
         p_policy_only: document.getElementById('f-policy').checked,
         p_q:           document.getElementById('f-q').value.trim() || null,
@@ -450,11 +473,14 @@
     async function loadCompanies(){
       const months = parseInt(document.getElementById('f-months').value, 10) || 4;
       const d = await rpc('get_expiry_companies', { p_months: months });
-      const sel = document.getElementById('f-company'), keep = sel.value;
       if (!Array.isArray(d)) return;
-      sel.innerHTML = '<option value="">كل الشركات</option>'
-        + d.map(c => '<option value="'+esc(c.company)+'">'+esc(c.company)+' ('+c.batches+')</option>').join('');
-      if (keep && d.some(c => c.company === keep)) sel.value = keep;
+      const inp = document.getElementById('f-company'), keep = inp.value.trim();
+      COMPANIES = d.map(c => c.company);
+      /* الاسم نفسه هو الـvalue والعدد في الوصف — عشان الاختيار يرجّع
+         الاسم بالظبط من غير ما العدد يلزق بيه. */
+      document.getElementById('f-company-list').innerHTML =
+        d.map(c => '<option value="'+esc(c.company)+'" label="'+esc(c.company)+' ('+c.batches+')"></option>').join('');
+      if (keep && COMPANIES.indexOf(keep) < 0) inp.value = '';
     }
     function fillBranches(){
       const sel = document.getElementById('f-branch');
