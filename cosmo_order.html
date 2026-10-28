@@ -919,11 +919,16 @@ saveQty();
       applyFilters();
     }
 
-    // قائمة «أفضل مورّد» للفلترة — من الموردين الظاهرين في النتيجة الحالية
-    function buildBestList(){
+    /* قائمة «أفضل مورّد» للفلترة — من الموردين الظاهرين في النتيجة
+       الحالية فعلًا، يعني بعد الشركات والبحث والحالة.
+       ⚠️ كانت بتتبني من `allResults` (كل الأصناف) فكانت بتفضل ثابتة
+       مهما غيّرت الفلاتر، وتوريك موردين مالهمش علاقة بالمعروض.
+       وبتتبني من غير فلتر المورّد نفسه، وإلا أول ما تختار واحد
+       القايمة تتقفل عليه لوحده وماتقدرش تغيّر. */
+    function buildBestList(pool){
       var dl=document.getElementById('best-list'); if(!dl) return;
       var set={};
-      allResults.forEach(function(i){ var b=cosmoBest[String(i.code)]; if(b&&b.price_store) set[b.price_store]=1; });
+      (pool || allResults).forEach(function(i){ var b=cosmoBest[String(i.code)]; if(b&&b.price_store) set[b.price_store]=1; });
       dl.innerHTML='';
       Object.keys(set).sort(function(a,b){return String(a).localeCompare(String(b),'ar');}).forEach(function(n){
         var o=document.createElement('option'); o.value=n; dl.appendChild(o);
@@ -938,15 +943,21 @@ saveQty();
       var bestEl   =document.getElementById('best-filter');
       var bestF    =bestEl ? bestEl.value.trim().toLowerCase() : '';
 
-      // كل الفلاتر ماعدا إخفاء المتجاهَل — ده نطاق العدّادات
-      scopedResults=allResults.filter(function(item){
+      // كل الفلاتر ماعدا فلتر المورّد — منها بتتبني قايمة الموردين
+      var poolNoBest=allResults.filter(function(item){
         var state=itemStates[item.code]||{};
         if(search&&!item.name.toLowerCase().includes(search)&&!item.code.includes(search)) return false;
         if(companies.length&&!companies.includes(item.company)) return false;
         if(statusF==='pending'&&state.ordered) return false;
         if(statusF==='ordered'&&!state.ordered) return false;
-        if(bestF){ var bb=cosmoBest[String(item.code)]; if(!bb||!bb.price_store||String(bb.price_store).toLowerCase().indexOf(bestF)===-1) return false; }
         return true;
+      });
+      buildBestList(poolNoBest);
+
+      // + فلتر المورّد — ده نطاق العدّادات (ماعدا إخفاء المتجاهَل)
+      scopedResults = !bestF ? poolNoBest : poolNoBest.filter(function(item){
+        var bb=cosmoBest[String(item.code)];
+        return !!(bb && bb.price_store && String(bb.price_store).toLowerCase().indexOf(bestF) !== -1);
       });
       filteredResults = showIgnored ? scopedResults.slice()
         : scopedResults.filter(function(i){ return !(itemStates[i.code]||{}).ignored; });
