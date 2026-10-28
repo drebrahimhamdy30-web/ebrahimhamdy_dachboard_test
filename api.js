@@ -153,9 +153,8 @@ async function sbTaskUpdate(id, patch) {
   }
 }
 
-// ===================== التعاقدات + عدم الوصول على Supabase (بدل n8n) =====================
+// ===================== التعاقدات على Supabase (بدل n8n) =====================
 const SB_CONTRACT_URL = `${SB_URL_API}/rest/v1/contracts`;
-const SB_MISSING_URL  = `${SB_URL_API}/rest/v1/missing_items`;
 
 // إدراج فاتورة تعاقد — بيفحص الحظر الأول (لو العميل عنده أي صف status='block')
 // بيرجّع { ok, blocked }
@@ -202,44 +201,6 @@ async function sbContractList() {
     const rows = await r.json();
     return Array.isArray(rows) ? rows.map(x => ({ ...x, createdAt: x.created_at })) : [];
   } catch (e) { console.error('sbContractList error:', e); return []; }
-}
-
-// إدراج بلاغ عدم وصول
-async function sbMissingInsert({ branch, invoice_no, item_name, qty, supplier_code }) {
-  try {
-    const r = await fetch(SB_MISSING_URL, {
-      method: 'POST',
-      headers: await sbH({ 'Prefer': 'return=minimal' }),
-      body: JSON.stringify({
-        branch:        branch || null,
-        invoice_no:    invoice_no || null,
-        item_name:     item_name || null,
-        qty:           (qty != null ? String(qty) : null),
-        supplier_code: supplier_code || null,
-        state:         false,
-        call:          false
-      })
-    });
-    return r.ok;
-  } catch (e) { console.error('sbMissingInsert error:', e); return false; }
-}
-
-async function sbMissingUpdate(id, patch) {
-  try {
-    const r = await fetch(`${SB_MISSING_URL}?id=eq.${encodeURIComponent(id)}`, {
-      method: 'PATCH', headers: await sbH(), body: JSON.stringify(patch || {})
-    });
-    return r.ok;
-  } catch (e) { console.error('sbMissingUpdate error:', e); return false; }
-}
-
-async function sbMissingList() {
-  try {
-    const r = await fetch(`${SB_MISSING_URL}?select=*&order=created_at.desc`, { headers: await sbH() });
-    if (!r.ok) return [];
-    const rows = await r.json();
-    return Array.isArray(rows) ? rows.map(x => ({ ...x, createdAt: x.created_at })) : [];
-  } catch (e) { console.error('sbMissingList error:', e); return []; }
 }
 
 // ---- متابعة النواقص: طلبات "غير متوفر يحتاج متابعة" + رصيد المخزون الحالي (stq) لحظيًا ----
@@ -561,7 +522,6 @@ async function updateCustomer({ cust_code, cust_type, note, category }) {
 }
 
 async function fetchContracts()        { return await sbContractList(); }   // Supabase (بدل n8n)
-async function fetchMissing()          { return await sbMissingList(); }    // Supabase (بدل n8n)
 
 // ===================== المصادقة =====================
 // فك payload بتاع JWT بترميز UTF-8 صحيح.

@@ -57,7 +57,7 @@ const SMALL_TABLES = new Set(['branches','regions','routes','route_regions','reg
   'code_replace','consumption_exceptional','sales_analysis_access','branch_users','jard_committee','problems',
   'gift_campaigns','supplier_balance_settings','supplier_balance_runs','supplier_balance_exclusions',
   'driver_app_version','known_item_codes','stock_limit','monthly_sales_months','pos_branch_opening',
-  'contracts','missing_items','material_prices','offers','cosmo_states','overstock_exclusions','tasks',
+  'contracts','material_prices','offers','cosmo_states','overstock_exclusions','tasks',
   'v_branch_value_audit','erp_expense_hide_rules','supplier_movement_reviews','supplier_balance_notes',
   'pos_manual_transfers','pos_wallet_transfers','pos_period_closes','cash_to_wallet','links','sales_months']);
 
