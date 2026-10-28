@@ -132,6 +132,9 @@
         <button class="type-btn" onclick="setType('تعاقد', this)">
           <i class="fas fa-file-contract" style="color:#0ea5e9;"></i> لنا فاتورة تعاقد
         </button>
+        <button class="type-btn" onclick="setType('متعلق', this)">
+          <i class="fas fa-box-open" style="color:#7c3aed;"></i> متعلقات العملاء
+        </button>
       </div>
 
       <!-- ===== قسم: شراء / تحويل / جرد / إشعار ===== -->
@@ -371,6 +374,68 @@
         </div>
         <button class="btn-submit-full" id="contractBtn" onclick="submitContract()">
           <i class="fas fa-file-contract"></i> حفظ فاتورة التعاقد
+        </button>
+      </div>
+
+      <!-- ===== قسم: متعلقات العملاء ===== -->
+      <div class="form-section" id="section-belonging">
+        <div class="grid-2" style="margin-bottom:4px;">
+          <div class="field-group">
+            <label><i class="fas fa-store" style="margin-left:5px;"></i> الفرع</label>
+            <input type="text" id="belong-branch" class="form-input readonly-field" readonly>
+          </div>
+          <div class="field-group">
+            <label><i class="fas fa-box" style="margin-left:5px;"></i> نوع المتعلّق <span class="required-star">*</span></label>
+            <div class="field-icon-wrap">
+              <i class="fas fa-tag field-icon"></i>
+              <select id="belong-kind" class="form-select">
+                <option>مرتجع مرفوض</option>
+                <option>متعلقات شخصية</option>
+                <option>مبلغ/باقي نقدي</option>
+                <option>أخرى</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-code-name">
+          <div class="field-group">
+            <label>كود العميل <span class="required-star">*</span></label>
+            <div class="field-icon-wrap">
+              <i class="fas fa-hashtag field-icon"></i>
+              <input type="text" id="belong-code" class="form-input" inputmode="numeric"
+                oninput="this.value = this.value.replace(/[^0-9]/g, ''); clearBelongName();"
+                onblur="lookupBelongCustomer()">
+            </div>
+            <div class="lookup-loading" id="belong-loading">⏳ جاري البحث...</div>
+            <div class="lookup-found"  id="belong-found">✅ تم العثور على العميل</div>
+          </div>
+          <div class="field-group">
+            <label>اسم العميل</label>
+            <div class="field-icon-wrap">
+              <i class="fas fa-user field-icon"></i>
+              <input type="text" id="belong-name" class="form-input">
+            </div>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label>ملاحظات <span class="required-star">*</span></label>
+          <textarea id="belong-note" class="form-input" rows="3" style="resize:vertical;"
+            placeholder="مثال: علبة باندول إكسترا ٢٤ قرص — مرتجع اترفض لأن الشريط مفتوح"></textarea>
+        </div>
+
+        <div class="available-branch-box" style="display:block;background:#f5f3ff;border-color:#c4b5fd;">
+          <label style="display:block;font-size:0.82rem;font-weight:700;color:#5b21b6;margin-bottom:6px;">
+            <i class="fas fa-circle-info" style="margin-left:5px;"></i> هيحصل إيه بعد الإرسال؟
+          </label>
+          <div style="font-size:0.78rem;color:#5b21b6;line-height:1.9;font-weight:600;">
+            المتعلّق هيظهر للطيار مع أول طلب للعميل ده · الطيار يقول «سلّمته» · والصيدلية هي اللي تأكّد الاستلام فيتقفل.
+          </div>
+        </div>
+
+        <button class="btn-submit-full" id="belongBtn" onclick="submitBelonging()" style="background:#7c3aed;">
+          <i class="fas fa-box-open"></i> تسجيل المتعلّق
         </button>
       </div>
 
@@ -634,6 +699,7 @@
       const dateStr = now.toLocaleDateString('ar-EG', opts);
       document.getElementById('contract-date').textContent = dateStr;
       document.getElementById('contract-branch').value     = userBranch;
+      document.getElementById('belong-branch').value       = userBranch;
     }
 
     function setType(type, btn) {
@@ -695,6 +761,7 @@
     function handleTypeInit() {
       document.getElementById('section-original').classList.remove('visible');
       document.getElementById('section-contract').classList.remove('visible');
+      document.getElementById('section-belonging').classList.remove('visible');
       document.getElementById('block-alert').classList.remove('show');
 
       Array.from(document.getElementById('branch').options).forEach(opt => { opt.hidden = false; });
@@ -702,6 +769,10 @@
 
       if (currentType === 'تعاقد') {
         document.getElementById('section-contract').classList.add('visible');
+        return;
+      }
+      if (currentType === 'متعلق') {
+        document.getElementById('section-belonging').classList.add('visible');
         return;
       }
 
@@ -944,6 +1015,86 @@
       finally {
         btn.disabled  = false;
         btn.innerHTML = '<i class="fas fa-file-contract"></i> حفظ فاتورة التعاقد';
+      }
+    }
+
+    /* ════════════════════════════════════════════════════════════
+       متعلقات العملاء — حاجة للعميل متبقية في الصيدلية
+       ------------------------------------------------------------
+       مش طلب توصيل ومش بيتسجّل في جدول الطلبات: بيروح على
+       `create_customer_belonging` فيظهر للطيار مع أول طلب للعميل.
+       الفرع بيتفرض من التوكن على السيرفر، فاللي معروض هنا للعلم بس.
+       الكود إجباري لأنه هو اللي بيربط المتعلّق بطلبات العميل. */
+    function clearBelongName() {
+      const nameEl = document.getElementById('belong-name');
+      if (nameEl.readOnly) {
+        nameEl.value = '';
+        nameEl.readOnly = false;
+        nameEl.classList.remove('readonly-field');
+      }
+      document.getElementById('belong-found').classList.remove('show');
+    }
+
+    async function lookupBelongCustomer() {
+      const code = document.getElementById('belong-code').value.trim();
+      if (!code) return;
+      const nameEl  = document.getElementById('belong-name');
+      const loadEl  = document.getElementById('belong-loading');
+      const foundEl = document.getElementById('belong-found');
+      if (nameEl.value.trim()) return;
+      loadEl.classList.add('show');
+      foundEl.classList.remove('show');
+      try {
+        const resp = await fetch(`${SB_URL_API}/rest/v1/customers?cust_code=eq.${encodeURIComponent(code)}&select=cust_name&limit=1`, { headers: await sbH() });
+        const raw  = await resp.json();
+        const item = Array.isArray(raw) ? raw[0] : raw;
+        const name = item?.cust_name || '';
+        if (name) {
+          nameEl.value    = name;
+          nameEl.readOnly = true;
+          nameEl.classList.add('readonly-field');
+          foundEl.classList.add('show');
+        }
+      } catch (e) { console.log('belonging customer lookup failed:', e); }
+      finally { loadEl.classList.remove('show'); }
+    }
+
+    async function submitBelonging() {
+      const btn  = document.getElementById('belongBtn');
+      const code = document.getElementById('belong-code').value.trim();
+      const name = document.getElementById('belong-name').value.trim();
+      const note = document.getElementById('belong-note').value.trim();
+      if (!code) { alert('برجاء إدخال كود العميل'); return; }
+      if (!note) { alert('برجاء كتابة الملاحظات — إيه اللي عند الصيدلية'); return; }
+
+      btn.disabled  = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الإرسال...';
+      try {
+        const r = await fetch(`${SB_URL_API}/rest/v1/rpc/create_customer_belonging`, {
+          method: 'POST',
+          headers: await sbH({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            p_cust_code:      code,
+            p_customer_name:  name || null,
+            p_customer_phone: null,
+            p_branch:         userBranch,
+            p_kind:           document.getElementById('belong-kind').value,
+            p_details:        note
+          })
+        });
+        let j = null;
+        try { j = await r.json(); } catch (e) {}
+        if (!r.ok) throw new Error((j && (j.message || j.hint)) || `فشل الإرسال (${r.status})`);
+        showToast();
+        document.getElementById('belong-code').value = '';
+        document.getElementById('belong-note').value = '';
+        clearBelongName();
+        document.getElementById('belong-name').value = '';
+      } catch (e) {
+        alert(e.message || 'خطأ في الاتصال');
+      } finally {
+        btn.disabled  = false;
+        btn.innerHTML = '<i class="fas fa-box-open"></i> تسجيل المتعلّق';
       }
     }
 
