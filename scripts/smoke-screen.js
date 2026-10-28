@@ -41,7 +41,15 @@ global.fetch = () => Promise.resolve({ ok:true, status:200, json:()=>Promise.res
 global.Session = { role:()=>'admin', bearer:async()=>'t', seesAllBranches:async()=>true, branch:()=>'المعمورة',
   getAll:async()=>[], user:()=>({}), fullName:()=>'سموك', username:()=>'smoke', isAdmin:()=>true,
   is:()=>true, branchId:()=>'b1', can:async()=>({view:true,edit:true}), tabAllowed:async()=>true,
-  headers:async()=>({}), rpcAll:async()=>[], count:async()=>0 };
+  headers:async()=>({}), rpcAll:async()=>[], count:async()=>0,
+  /* الشاشات الجديدة بتحرس نفسها بـrequire بدل can — من غير الستَب ده
+     السموك بيرمي «Session.require is not a function» على شاشة سليمة. */
+  require:async()=>({ role:'admin' }), guardTabs:async()=>{}, thisPage:()=>'smoke',
+  pages:async()=>[], dataWarn(){}, syncWatch(){}, syncHealth:async()=>({ branches:[] }),
+  loginPage:()=>'login.html', tokenValid:()=>true };
+/* من api.js — الشاشة بتستعمله في رسائل الفشل */
+global.sbH = async (extra) => ({ 'Content-Type':'application/json', ...(extra||{}) });
+global.sbFailMsg = (base) => base;
 global.Branches = { all:()=>[{name:'المعمورة'},{name:'سان ستيفانو'},{name:'سيدى بشر'},{name:'السيوف'}],
   codeMap:()=>({mamora:'المعمورة',san:'سان ستيفانو',bishr:'سيدى بشر',seyouf:'السيوف'}),
   keys:()=>['mamora','san','bishr','seyouf'], names:()=>['المعمورة','سان ستيفانو','سيدى بشر','السيوف'],
