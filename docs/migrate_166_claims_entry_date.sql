@@ -92,8 +92,6 @@ end $out$;
      • get_purchase_surplus_return_impl  (الفائض: الفلتر)
 
    ⚠️ **اللي اتساب عن قصد** — دي مش تواريخ عرض، دي منطق أرقام:
-     • `sl.applied_at <= h.ven_bill_date` في مراجعة أوامر الشراء —
-       بيقرّر أنهي قائمة أسعار كانت سارية على الفاتورة.
      • ترتيب `array_agg(... order by pih.ven_bill_date desc)` في
        الفائض — بيختار «آخر سعر شراء».
      • `refresh_best_purchase` و`search_item_cost` و`value_branch_goods` —
@@ -179,5 +177,36 @@ begin
                       '|| ''      and ($3 is null or coalesce(pih.sec_insert_date, pih.ven_bill_date)::date >= $3)''');
   def := replace(def, '|| ''      and ($4 is null or pih.ven_bill_date::date <= $4)''',
                       '|| ''      and ($4 is null or coalesce(pih.sec_insert_date, pih.ven_bill_date)::date <= $4)''');
+  execute def;
+end $out$;
+
+
+/* ════════════════════════════════════════════════════════════════
+   ١٦٦-ج · ربط الفاتورة بطلبيتها يمشي على تاريخ الإدخال (2026-10-28)
+   ----------------------------------------------------------------
+   شاشة «مراجعة أوامر الشراء» بتجاوب: الطلبية اللي بعتناها للمورّد
+   وصل منها إيه؟ وعشان تعرف الفاتورة دي من أنهي طلبية، بتدوّر على
+   **آخر طلبية اتبعتت للمورّد قبل الفاتورة** (`supplier_links.applied_at`).
+
+   كانت المقارنة بتاريخ فاتورة المورّد، فالفاتورة اللي المورّد كاتب
+   عليها تاريخ أقدم من يوم التسليم كانت تبان «وصلت من غير طلب»
+   والطلبية تبان «طلبنا ومجاش» — وهما نفس الحاجة.
+
+   الفاتورة بتتسجّل ساعة ما البضاعة توصل الصيدلية، والطلبية اتبعتت
+   قبل الوصول — فتاريخ الإدخال أقرب للواقع في المطابقة دي.
+
+   الأثر المقاس قبل التطبيق: من ٦٤٤٩ فاتورة في آخر ٩٠ يوم، **٤٩
+   فاتورة** بس هي اللي بتترابط بطلبية مختلفة (أقل من ١٪)، وواحدة
+   كانت بلا طلبية وبقت مترابطة.
+   ════════════════════════════════════════════════════════════════ */
+
+do $out$
+declare def text; n int;
+begin
+  select pg_get_functiondef('public.get_purchase_order_review_impl'::regproc) into def;
+  def := replace(def, 'sl.applied_at::date <= h.ven_bill_date::date',
+                      'sl.applied_at::date <= coalesce(h.sec_insert_date, h.ven_bill_date)::date');
+  select count(*) into n from regexp_matches(def, 'applied_at::date <= h\.ven_bill_date', 'g');
+  if n > 0 then raise exception 'order_review: فاضل % شرط قديم', n; end if;
   execute def;
 end $out$;
