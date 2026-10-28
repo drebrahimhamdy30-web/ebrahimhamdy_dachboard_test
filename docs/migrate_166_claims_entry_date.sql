@@ -74,3 +74,110 @@ end $out$;
 /* ملاحظة: باقي الشاشات (المشتريات · مراجعة الصلاحيات · الفائض ·
    أفضل سعر شراء · قيمة بضاعة الفرع) لسه على `ven_bill_date` عن قصد —
    دي بتتكلم عن الفاتورة نفسها مش عن كشف حساب المورّد. */
+
+
+/* ════════════════════════════════════════════════════════════════
+   ١٦٦-ب · توحيد الأساس على كل شاشات المشتريات (2026-10-28)
+   ----------------------------------------------------------------
+   المالك: «اعتمادي كله على تاريخ الإدخال». فكل مكان بيستعمل تاريخ
+   الفاتورة كـ**تاريخ عرض أو فلترة** اتحوّل لـ
+   `coalesce(sec_insert_date, ven_bill_date)`:
+
+     • get_supplier_report_impl          (تقرير المورّد)
+     • get_supplier_balance_review_impl  (مراجعة الأرصدة)
+     • get_purchases_impl                (المشتريات: فلتر+ترتيب+عرض)
+     • get_purchase_expiry_review_impl   (مراجعة الصلاحيات)
+     • get_purchase_returns              (مرتجعات الشراء)
+     • get_purchase_order_review_impl    (مراجعة أوامر الشراء: الفلاتر والعرض)
+     • get_purchase_surplus_return_impl  (الفائض: الفلتر)
+
+   ⚠️ **اللي اتساب عن قصد** — دي مش تواريخ عرض، دي منطق أرقام:
+     • `sl.applied_at <= h.ven_bill_date` في مراجعة أوامر الشراء —
+       بيقرّر أنهي قائمة أسعار كانت سارية على الفاتورة.
+     • ترتيب `array_agg(... order by pih.ven_bill_date desc)` في
+       الفائض — بيختار «آخر سعر شراء».
+     • `refresh_best_purchase` و`search_item_cost` و`value_branch_goods` —
+       اختيار أحدث سعر وتقييم البضاعة.
+     تغيير دول بيحرّك تكلفة أصناف وتقييم مخزون، فمحتاج قرار منفصل.
+   ════════════════════════════════════════════════════════════════ */
+
+do $out$
+declare def text;
+begin
+  select pg_get_functiondef('public.get_supplier_report_impl'::regproc) into def;
+  def := replace(def, '(h.ven_bill_date)::date as d,',
+                      'coalesce(h.sec_insert_date, h.ven_bill_date)::date as d,');
+  def := replace(def, 'where (h.ven_bill_date)::date between p_from and p_to',
+                      'where coalesce(h.sec_insert_date, h.ven_bill_date)::date between p_from and p_to');
+  if position('(h.ven_bill_date)::date' in def) > 0 then
+    raise exception 'supplier_report: تعريف مختلف — عدّله يدويًا';
+  end if;
+  execute def;
+
+  select pg_get_functiondef('public.get_supplier_balance_review_impl'::regproc) into def;
+  def := replace(def, 'and h.ven_bill_date::date > coalesce(cuts.cut, ''-infinity''::date)',
+                      'and coalesce(h.sec_insert_date, h.ven_bill_date)::date > coalesce(cuts.cut, ''-infinity''::date)');
+  execute def;
+
+  select pg_get_functiondef('public.get_purchases_impl'::regproc) into def;
+  def := replace(def, 'and (p_from is null or h.ven_bill_date >= p_from)',
+                      'and (p_from is null or coalesce(h.sec_insert_date, h.ven_bill_date) >= p_from)');
+  def := replace(def, 'and (p_to is null or h.ven_bill_date < p_to + 1)',
+                      'and (p_to is null or coalesce(h.sec_insert_date, h.ven_bill_date) < p_to + 1)');
+  def := replace(def, 'select h.branch, h.pth_id, h.ven_bill_no, h.ven_bill_date, h.ven_name_ar, h.sto_id, h.store_name,',
+                      'select h.branch, h.pth_id, h.ven_bill_no, coalesce(h.sec_insert_date, h.ven_bill_date) ven_bill_date, h.ven_name_ar, h.sto_id, h.store_name,');
+  def := replace(def, 'order by h.ven_bill_date desc nulls last, h.pth_id desc',
+                      'order by coalesce(h.sec_insert_date, h.ven_bill_date) desc nulls last, h.pth_id desc');
+  if position('h.ven_bill_date >= p_from' in def) > 0 then raise exception 'purchases: تعريف مختلف'; end if;
+  execute def;
+
+  select pg_get_functiondef('public.get_purchase_expiry_review_impl'::regproc) into def;
+  def := replace(def, 'select pi.branch, pi.pth_id, h.ven_name_ar, h.ven_bill_date, h.entered_by,',
+                      'select pi.branch, pi.pth_id, h.ven_name_ar, coalesce(h.sec_insert_date, h.ven_bill_date) ven_bill_date, h.entered_by,');
+  def := replace(def, 'and (p_from is null or h.ven_bill_date >= p_from)',
+                      'and (p_from is null or coalesce(h.sec_insert_date, h.ven_bill_date) >= p_from)');
+  def := replace(def, 'and (p_to is null or h.ven_bill_date < p_to + 1)',
+                      'and (p_to is null or coalesce(h.sec_insert_date, h.ven_bill_date) < p_to + 1)');
+  if position('h.ven_bill_date >= p_from' in def) > 0 then raise exception 'expiry: تعريف مختلف'; end if;
+  execute def;
+
+  select pg_get_functiondef('public.get_purchase_returns'::regproc) into def;
+  def := replace(def, 'pb.ven_bill_date::date  bill_date,',
+                      'coalesce(pb.sec_insert_date, pb.ven_bill_date)::date  bill_date,');
+  def := replace(def, 'h.ven_bill_date::date ret_date,',
+                      'coalesce(h.sec_insert_date, h.ven_bill_date)::date ret_date,');
+  def := replace(def, 'h.ven_bill_date::date bill_date,',
+                      'coalesce(h.sec_insert_date, h.ven_bill_date)::date bill_date,');
+  def := replace(def, 'and (p_from is null or h.ven_bill_date::date >= p_from)',
+                      'and (p_from is null or coalesce(h.sec_insert_date, h.ven_bill_date)::date >= p_from)');
+  def := replace(def, 'and (p_to   is null or h.ven_bill_date::date <= p_to)',
+                      'and (p_to   is null or coalesce(h.sec_insert_date, h.ven_bill_date)::date <= p_to)');
+  if position('h.ven_bill_date::date >= p_from' in def) > 0 then raise exception 'returns: تعريف مختلف'; end if;
+  execute def;
+
+  select pg_get_functiondef('public.get_purchase_order_review_impl'::regproc) into def;
+  def := replace(def, 'select h.branch, h.pth_id, h.ven_name_ar, h.ven_bill_date, h.entered_by,',
+                      'select h.branch, h.pth_id, h.ven_name_ar, coalesce(h.sec_insert_date, h.ven_bill_date) ven_bill_date, h.entered_by,');
+  def := replace(def, 'select h.branch, h.pth_id, h.ven_bill_date, h.ven_name_ar,',
+                      'select h.branch, h.pth_id, coalesce(h.sec_insert_date, h.ven_bill_date) ven_bill_date, h.ven_name_ar,');
+  def := replace(def, 'and (p_from is null or h.ven_bill_date >= p_from)',
+                      'and (p_from is null or coalesce(h.sec_insert_date, h.ven_bill_date) >= p_from)');
+  def := replace(def, 'and (p_to is null or h.ven_bill_date < p_to + 1)',
+                      'and (p_to is null or coalesce(h.sec_insert_date, h.ven_bill_date) < p_to + 1)');
+  def := replace(def, 'and (p_from is null or h.ven_bill_date >= p_from)',
+                      'and (p_from is null or coalesce(h.sec_insert_date, h.ven_bill_date) >= p_from)');
+  def := replace(def, 'and (p_to is null or h.ven_bill_date < p_to + 1)',
+                      'and (p_to is null or coalesce(h.sec_insert_date, h.ven_bill_date) < p_to + 1)');
+  def := replace(def, 'and (p_from is null or h.ven_bill_date >= p_from)',
+                      'and (p_from is null or coalesce(h.sec_insert_date, h.ven_bill_date) >= p_from)');
+  def := replace(def, 'and (p_to is null or h.ven_bill_date < p_to + 1)',
+                      'and (p_to is null or coalesce(h.sec_insert_date, h.ven_bill_date) < p_to + 1)');
+  execute def;
+
+  select pg_get_functiondef('public.get_purchase_surplus_return_impl'::regproc) into def;
+  def := replace(def, '|| ''      and ($3 is null or pih.ven_bill_date::date >= $3)''',
+                      '|| ''      and ($3 is null or coalesce(pih.sec_insert_date, pih.ven_bill_date)::date >= $3)''');
+  def := replace(def, '|| ''      and ($4 is null or pih.ven_bill_date::date <= $4)''',
+                      '|| ''      and ($4 is null or coalesce(pih.sec_insert_date, pih.ven_bill_date)::date <= $4)''');
+  execute def;
+end $out$;
