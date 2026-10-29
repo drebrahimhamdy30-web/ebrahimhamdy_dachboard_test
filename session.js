@@ -604,21 +604,32 @@ const Session = (function () {
 
   /* السبب مع الاسم: «منذ 27 ساعة» أوضح من «منذ يوم»، و«وقت التحديث
      غير مسجّل» بيفرّق بين فرع واقف وفرع بياناته وصلت ناقصة.       */
+  /* جمع عربي سليم: ١ مفرد، ٢ مثنى، ٣–١٠ جمع قلة، ١١+ مفرد منصوب.
+     «9 ساعة» و«8 يوم» غلط، والنص ده بيتعرض لكل الموظفين.         */
+  function _arCount(n, one, two, few, many) {
+    if (n === 1) return one;
+    if (n === 2) return two;
+    if (n >= 3 && n <= 10) return n + ' ' + few;
+    return n + ' ' + many;
+  }
   function _syncWhy(b) {
     if (b.reason === 'no_table')     return ' (لا توجد بيانات)';
     if (b.reason === 'no_timestamp') return ' (وقت التحديث غير مسجّل)';
     const a = b.age_hours;
     if (a == null) return '';
-    if (a >= 48) return ' (منذ ' + Math.round(a / 24) + ' يوم)';
-    return ' (منذ ' + Math.round(a) + ' ساعة)';
+    if (a >= 48) return ' (منذ ' + _arCount(Math.round(a / 24), 'يوم', 'يومين', 'أيام', 'يومًا') + ')';
+    return ' (منذ ' + _arCount(Math.round(a), 'ساعة', 'ساعتين', 'ساعات', 'ساعة') + ')';
   }
 
-  function _syncBanner(stale, hours) {
+  function _syncBanner(stale, feeds, hours) {
     const show = function () {
       try {
         if (!document.body || document.getElementById('phalix-sync-warn')) return;
         const names = stale.map(function (b) {
           return (b.name || b.code) + _syncWhy(b);
+        }).join(' — ');
+        const feedNames = (feeds || []).map(function (b) {
+          return (b.name || b.key) + _syncWhy(b);
         }).join(' — ');
         const box = document.createElement('div');
         box.id = 'phalix-sync-warn';
@@ -635,11 +646,24 @@ const Session = (function () {
         x.textContent = '✕';
         x.style.cssText = 'float:left;cursor:pointer;padding:0 6px';
         x.addEventListener('click', function () { box.remove(); });
-        const msg = document.createElement('div');
-        msg.textContent = '⚠️ تنبيه: لم يتم تحديث بيانات مخزون ' +
-          (stale.length > 1 ? 'الفروع التالية' : 'فرع') + ' منذ أكثر من ' + hours +
-          ' ساعات: ' + names + '. الأرصدة والأسعار المعروضة قد لا تطابق الواقع، يُرجى إبلاغ الإدارة.';
-        box.appendChild(x); box.appendChild(msg);
+        box.appendChild(x);
+        /* سطر لكل نوع: المخزون وتغذيات البيانات. الاتنين ممكن يظهروا
+           مع بعض، وكل واحد بصيغته عشان الرسالة تفضل مفهومة.        */
+        const line = function (text) {
+          const el = document.createElement('div');
+          el.textContent = text;
+          box.appendChild(el);
+        };
+        if (stale.length) {
+          line('⚠️ تنبيه: لم يتم تحديث بيانات مخزون ' +
+            (stale.length > 1 ? 'الفروع التالية' : 'فرع') + ' منذ أكثر من ' +
+            _arCount(Math.round(hours), 'ساعة', 'ساعتين', 'ساعات', 'ساعة') +
+            ': ' + names + '. الأرصدة والأسعار المعروضة قد لا تطابق الواقع، يُرجى إبلاغ الإدارة.');
+        }
+        if (feedNames) {
+          line('⚠️ تنبيه: لم يتم تحديث ' + feedNames +
+            '. البيانات المعروضة قد لا تطابق الواقع، يُرجى إبلاغ الإدارة.');
+        }
         document.body.appendChild(box);
       } catch (e) {}
     };
@@ -655,9 +679,13 @@ const Session = (function () {
       const p = location.pathname;
       if (/(^|\/)(index|auth)\.html?$/.test(p) || p.charAt(p.length - 1) === '/') return;
       const d = await syncHealth(hours);
-      const list = (d && d.branches) || [];
-      const stale = list.filter(function (b) { return b && b.stale; });
-      if (stale.length) _syncBanner(stale, (d && d.threshold_hours) || SYNC_HOURS);
+      const stale = ((d && d.branches) || []).filter(function (b) { return b && b.stale; });
+      /* feeds ممكن ماتكونش موجودة على قاعدة لسه ماتطبّقش عليها
+         migrate_162 — ساعتها بترجع [] والتنبيه يشتغل للمخزون بس. */
+      const feeds = ((d && d.feeds)    || []).filter(function (b) { return b && b.stale; });
+      if (stale.length || feeds.length) {
+        _syncBanner(stale, feeds, (d && d.threshold_hours) || SYNC_HOURS);
+      }
     } catch (e) {
       /* الدالة ممكن ماتكونش اتطبّقت على القاعدة دي (التست vs البرودكشن)
          — التنبيه بيسكت، الشاشة ماتقعش. */

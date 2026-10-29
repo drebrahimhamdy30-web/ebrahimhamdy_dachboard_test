@@ -213,6 +213,8 @@ body.dark .order-card.prepped{background:#0f3d2e}
 .order-card.sel{border-color:var(--primary)!important;background:var(--primary-light);box-shadow:0 0 0 2px rgba(37,99,235,.25),var(--shadow-sm)}
 @keyframes urg{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.3)}50%{box-shadow:0 0 0 5px rgba(220,38,38,0)}}
 .order-card.urgent{animation:urg 1.5s ease-in-out infinite}
+.order-card.has-belong{padding-top:1.15rem}
+.order-card.has-belong::after{content:"📦";position:absolute;top:0;right:0;background:#7c3aed;font-size:.88rem;line-height:1;padding:.2rem .4rem .28rem;border-bottom-left-radius:10px;border-top-right-radius:9px;pointer-events:none}
 .oc-check{position:absolute;top:.4rem;left:.4rem;width:16px;height:16px;border-radius:4px;border:2px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:.65rem;color:white;transition:all .12s}
 .order-card.sel .oc-check{background:var(--primary);border-color:var(--primary)}
 
@@ -856,7 +858,7 @@ textarea.form-control{height:72px;padding:.5rem .75rem;resize:vertical}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../../config.js?v=20260903"></script>
-<script src="../../session.js?v=20261026"></script>
+<script src="../../session.js?v=20261029"></script>
 <script src="../../branches.js?v=20260904"></script>
 <script src="../../pages.js?v=20260905"></script>
 <script src="../../brand.js?v=20261017n"></script>
@@ -1052,6 +1054,34 @@ function buildTimers(o){
 
 // ===== LOAD =====
 let dispatchSettings = null;
+/* ===== متعلقات العميل =====
+   حاجة للعميل متبقية في الصيدلية (مرتجع مرفوض أو متعلقات شخصية).
+   بتظهر على كارت الطلب عشان الموظف يحطّها مع الطلب، والطيار هو
+   اللي يقول «سلّمته» من شاشته، والصيدلية تؤكّد. المتعلّق اللي في
+   فرع تاني بيبان تنبيه بس — مش بيتسلّم من الفرع ده. */
+let belongMap = {};
+function belongingsOf(o){ const a = belongMap[o && o.id]; return Array.isArray(a) ? a : []; }
+function belongingsBadge(o){
+  const a = belongingsOf(o);
+  if(!a.length) return '';
+  const mine  = a.filter(x=>x.same_branch);
+  const other = a.filter(x=>!x.same_branch);
+  let h = '';
+  if(mine.length){
+    const tip = mine.map(x=>(x.kind||'')+': '+(x.details||'')).join(' | ').replace(/"/g,'&quot;');
+    h += `<div style="font-size:.64rem;background:#ede9fe;color:#5b21b6;border:1px solid #c4b5fd;padding:.18rem .45rem;border-radius:5px;margin:.28rem 0;font-weight:800" title="${tip}">📦 متعلّق للعميل في الصيدلية${mine.length>1?(' ('+mine.length+')'):''} · ${(mine[0].kind||'')} — ضيفه مع الطلب</div>`;
+  }
+  if(other.length){
+    h += `<div style="font-size:.62rem;background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;padding:.16rem .45rem;border-radius:5px;margin:.28rem 0;font-weight:700" title="المتعلّق موجود في فرع تاني فمايتسلّمش من هنا">📦 للعميل متعلّق في ${other.map(x=>x.branch_name||'فرع آخر').join('، ')}</div>`;
+  }
+  return h;
+}
+function belongingsDetailRow(o){
+  const a = belongingsOf(o);
+  if(!a.length) return '';
+  return a.map(x=>`<div class="d-row"><span class="d-lbl">متعلّق للعميل</span><span class="d-val" style="color:#5b21b6;font-weight:700">📦 ${x.kind||''} — ${x.details||''}${x.same_branch?'':' (في '+(x.branch_name||'فرع آخر')+')'}${Number(x.attempts)>0?(' · رجع '+x.attempts+' مرة'):''}</span></div>`).join('');
+}
+
 function postponeInfo(o){
   if(o.status!=='postponed'||!o.postpone_time)return '';
   // بدون تاريخ (موقوف) — لا يعود إلا يدويًا
@@ -1064,57 +1094,61 @@ function postponeInfo(o){
   return `<div style="font-size:.62rem;font-weight:700;background:var(--purple-light);color:#6d28d9;padding:.15rem .45rem;border-radius:6px;margin-bottom:.3rem;display:inline-block">⏰ يعود ${timeStr} · باقي ${m}:${String(s).padStart(2,'0')}</div>`;
 }
 
+// أفاتار الطيارين مرة واحدة (نادرًا بيتغيّر) — مش بيتسحب كل دورة في get_dispatch_board
+let avatarMap={}, _avatarsLoaded=false, _avatarsLoading=false;
+async function ensureAvatars(){
+  if(_avatarsLoaded || _avatarsLoading) return;
+  _avatarsLoading=true;
+  try{
+    const {data}=await db.from('drivers').select('id,avatar').not('avatar','is',null);
+    (data||[]).forEach(d=>{ if(d.avatar) avatarMap[d.id]=d.avatar; });
+    _avatarsLoaded=true;
+    // الصور وصلت → علّم الطيارين المعروضين وأعد رسم الشريط بس (من غير ما نأخّر اللوحة)
+    (allDrivers||[]).forEach(d=>{ if(avatarMap[d.id]) d.avatar=avatarMap[d.id]; });
+    try{ renderDrivers(); }catch(_){}
+  }catch(e){}
+  _avatarsLoading=false;
+}
+
 async function loadAll(){
   showLoading(true);
   try{
     // فلتر حسب الفرع المختار
     const branchId = currentUser?.role==='admin' ? activeBranchId : (currentUser?.branch_id||null);
 
-    // كل الاستعلامات المستقلة بالتوازي (طيارين/رحلات/طلبات نشطة/مناطق/إعدادات الفرع/الحضور/الأحمال/عدد الرحلات)
-    // بدل ما تشتغل واحدة ورا التانية. التبعية الوحيدة: رحلات ← أوردرات الرحلات ← الطلبات المرتبطة.
-    let driversQ=db.from('drivers').select('*,branches!drivers_branch_id_fkey(name)').eq('is_active',true).order('full_name');
-    let tripsQ=db.from('trips').select('*').in('status',['active','pending_complete']).order('created_at',{ascending:false});
-    let actQ=db.from('orders').select(DISP_ORDER_COLS).in('status',['pending','postponed','assigned','picked']).order('created_at',{ascending:false});
-    let regQ=db.from('regions').select('name,branch_id,min_order_amount,delivery_fee,below_min_fee').eq('is_active',true);
-    let dsQ=branchId?db.from('dispatch_settings').select('*').eq('branch_id',branchId):null;
-    if(branchId){ driversQ=driversQ.eq('branch_id',branchId); tripsQ=tripsQ.eq('branch_id',branchId); actQ=actQ.eq('branch_id',branchId); }
-    const [dR,tR,actR,regRes,dsRes]=await Promise.all([
-      driversQ, tripsQ, actQ, regQ, (dsQ||Promise.resolve({data:null})),
-      loadAttendanceData(), loadHardLoad(), loadTripCounts()
+    // كل بيانات اللوحة في نداء واحد (get_dispatch_board) بدل ~12 رحلة شبكة لسيرفر بعيد.
+    // الطلبات النشطة + المرتبطة بالرحلات مدموجة سيرفر-سايد؛ الحضور آخر 36 ساعة + آخر حالة لكل طيار.
+    // hard_load مكاش ساعة (loadHardLoad بيرجع فورًا لو طازج)؛ الأفاتار مرة واحدة (ensureAvatars).
+    const [boardRes,belongRes]=await Promise.all([
+      db.rpc('get_dispatch_board',{p_branch:branchId}),
+      db.rpc('get_board_belongings',{p_branch:branchId}),
+      loadHardLoad(),
+      ensureAvatars()
     ]);
-    allDrivers=dR.data||[]; activeTrips=tR.data||[];
-    const _regRows=regRes.data||[];
+    // متعلقات العملاء المعلّقة لكل طلب (خريطة order_id ← مصفوفة).
+    // المطابقة بالكود/التليفون محسوبة على السيرفر عشان ما يبقاش عندنا
+    // نسختين من المنطق؛ الفشل مابيوقفش اللوحة.
+    belongMap = (!belongRes.error && belongRes.data) ? belongRes.data : {};
+    if(boardRes.error) throw boardRes.error;
+    const B=boardRes.data||{};
+    allDrivers=(B.drivers||[]).map(d=>{ d.avatar=avatarMap[d.id]??d.avatar??null; return d; });
+    activeTrips=B.trips||[];
+    const _regRows=B.regions||[];
     knownRegions=new Set(_regRows.map(r=>r.name));
     regionInfo={};
     _regRows.forEach(r=>{ if(!branchId || r.branch_id===branchId) regionInfo[r.name]={min:Number(r.min_order_amount||0),fee:Number(r.delivery_fee||0),below:Number(r.below_min_fee||0)}; });
-    if(branchId) dispatchSettings=dsRes.data?.[0]||null;
-
-    // التبعية: أوردرات الرحلات النشطة ثم الطلبات المرتبطة بيها
-    let rrData=[];
-    const activeTripIds=activeTrips.map(t=>t.id);
-    if(activeTripIds.length){
-      const rrR=await db.from('trip_orders').select('trip_id,order_id').in('trip_id',activeTripIds);
-      rrData=rrR.data||[];
-    }
+    if(branchId) dispatchSettings=B.settings||null;
+    // خريطة أوردرات الرحلات النشطة
     tripOrdersMap={};
-    rrData.forEach(r=>{if(!tripOrdersMap[r.trip_id])tripOrdersMap[r.trip_id]=[];tripOrdersMap[r.trip_id].push(r.order_id);});
-    const tripOrderIds=[...new Set(rrData.map(r=>r.order_id).filter(Boolean))];
-    let linkedRows=[];
-    if(tripOrderIds.length){
-      // دفعات 50: القايمة بتتحط في الرابط، والرد بيرجّعها في هيدر
-      // Content-Location — القوايم الطويلة بتكسر الوسيط بـ502.
-      // شوف docs/server_nginx.md — بس الدفعات دلوقتي بالتوازي (Promise.all) مش ورا بعض + أعمدة خفيفة
-      const _chunks=[];
-      for(let i=0;i<tripOrderIds.length;i+=50){
-        let lq=db.from('orders').select(DISP_ORDER_COLS).in('id',tripOrderIds.slice(i,i+50));
-        if(branchId) lq=lq.eq('branch_id',branchId);
-        _chunks.push(lq);
-      }
-      const _res=await Promise.all(_chunks);
-      _res.forEach(r=>{ linkedRows=linkedRows.concat(r.data||[]); });
-    }
-    { const _seen=new Set(); allOrders=[];
-      (actR.data||[]).concat(linkedRows).forEach(o=>{ if(o && !_seen.has(o.id)){ _seen.add(o.id); allOrders.push(o); } }); }
+    (B.trip_orders||[]).forEach(r=>{ if(!tripOrdersMap[r.trip_id])tripOrdersMap[r.trip_id]=[]; tripOrdersMap[r.trip_id].push(r.order_id); });
+    // الطلبات (نشطة + مرتبطة بالرحلات) مدموجة ومنزوعة التكرار من السيرفر
+    allOrders=B.orders||[];
+    // الحضور + أسماء/فروع طلبات الحضور (att_drivers بدل نداء drivers منفصل)
+    attendanceToday=B.attendance||[];
+    attReqBranch={};
+    { const _ad=B.att_drivers||{}; Object.keys(_ad).forEach(id=>{ attNames[id]=_ad[id].full_name; attReqBranch[id]=_ad[id].branch_id; }); }
+    // عدد رحلات الشهر لكل طيار
+    { const m={}; (B.trip_counts||[]).forEach(r=>{ m[r.driver_id]=Number(r.trips)||0; }); tripCountMap=m; }
 
     // تحديث لابل الفرع
     const bl=document.getElementById('branchLabel');
@@ -2251,7 +2285,7 @@ function renderOrders(){
     const owesBal=_bal>=3, creditBal=_bal<=-3;
     const prepped = !!o.prep_done_at && (o.status==='pending'||o.status==='postponed');
     const bColor = sel ? '' : `border-color:${ocBorder(o, late, owesBal)}`;
-    return _rowLbl+`<div class="order-card ${sel?'sel':''} ${prepped?'prepped':''} ${(o.notes||'').includes('🚨')?'urgent':''}" id="oc-${o.id}" onclick="toggleSel('${o.id}',event)" style="${bColor}">
+    return _rowLbl+`<div class="order-card ${sel?'sel':''} ${prepped?'prepped':''} ${(o.notes||'').includes('🚨')?'urgent':''} ${belongingsOf(o).some(x=>x.same_branch)?'has-belong':''}" id="oc-${o.id}" onclick="toggleSel('${o.id}',event)" style="${bColor}">
       <div class="oc-check">${sel?'✓':''}</div>
       <div class="oc-timers">${buildTimers(o)}</div>
       ${postponeInfo(o)}
@@ -2261,6 +2295,7 @@ function renderOrders(){
       <div class="oc-address">📍 ${o.customer_address||o.cust_address||'—'}</div>
       ${o.cust_region?`<span class="oc-region" style="${!knownRegions.has(o.cust_region)?'background:#fee2e2;color:#b91c1c;border:1px solid #fecaca':''}">${o.cust_region}${!knownRegions.has(o.cust_region)?' ⚠️':''}</span>`:''}${belowMinInfo(o)?`<span class="oc-region" style="background:#fffbeb;color:#b45309;border:1px solid #fde68a" title="إجمالي الطلب أقل من الحد الأدنى للمنطقة — راجع تكلفة التوصيل">⚠️ أقل من الحد</span>`:''}
       ${o.is_gift?`<div class="gift-pulse" style="font-size:.64rem;background:#fef3c7;color:#92400e;border:1px solid #fbbf24;padding:.18rem .45rem;border-radius:5px;margin:.28rem 0;font-weight:800">🎁 ${o.gift_title?('هدية — '+o.gift_title):'هدية للعميل'} · تأكد من وجودها بالطلب</div>`:''}
+      ${belongingsBadge(o)}
       <div class="oc-bottom">
         <span class="oc-amount">${Number(o.total_bill_net||0).toLocaleString()} ج</span>
         ${['delivered','completed'].includes(o.status)?`<span class="oc-pay ${pmC}" title="طريقة التحصيل">${pmL}</span>`:''}
@@ -3515,6 +3550,7 @@ function openDetail(id){
     <div class="d-row"><span class="d-lbl">الطيار</span><span class="d-val">${o.deliveryman||'—'}</span></div>
     <div class="d-row"><span class="d-lbl">الموظف</span><span class="d-val">${o.employee_name||'—'}</span></div>
     <div class="d-row"><span class="d-lbl">الأصناف</span><span class="d-val">${o.count_of_items||0}</span></div>
+    ${belongingsDetailRow(o)}
     ${billItemsRow(o)}
     ${o.driver_notes?`<div class="d-row"><span class="d-lbl">ملاحظة الطيار</span><span class="d-val">${o.driver_notes}</span></div>`:''}
     ${o.staff_notes?`<div class="d-row"><span class="d-lbl">ملاحظة الموظف</span><span class="d-val">${o.staff_notes}</span></div>`:''}
@@ -3673,6 +3709,7 @@ if(o.delivered_at){
     <div class="od-sum-due"><small>المطلوب</small> <b>${_due.toLocaleString()}</b> <small>ج.م · ${pmL}</small></div>
     ${_extra>0?`<div class="od-sum-brk">فاتورة ${_bill.toLocaleString()} + تحصيل إضافي ${_extra.toLocaleString()} = ${_due.toLocaleString()} ج</div>`:''}
     ${o.had_failed_attempt?`<div class="od-sum-brk" style="color:#b91c1c">🔁 اتعذّر توصيله قبل كده — محاولة جديدة</div>`:''}
+    ${belongingsOf(o).length?`<div class="od-sum-brk" style="color:#5b21b6;font-weight:800">📦 ${belongingsOf(o).map(x=>(x.kind||'')+(x.same_branch?'':' (في '+(x.branch_name||'فرع آخر')+')')).join(' · ')}</div>`:''}
     ${_phonesSum?`<div class="od-sum-phones">${_phonesSum}</div>`:''}
   </div>`;
 
