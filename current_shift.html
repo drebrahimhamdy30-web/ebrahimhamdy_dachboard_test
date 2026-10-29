@@ -99,6 +99,14 @@
               border-radius:10px;margin-bottom:10px}
   .epaid{font-weight:800;color:#7c3aed} .epaid.auto{color:var(--red);font-weight:600;opacity:.8}
   @media(max-width:760px){body{padding:10px}.kpi{min-width:100%}}
+/* تبويب مراجعة البطاقات: نفس الجدول، بس التاريخ تحت الوقت لأنه بيعدّي أيام */
+.dsub{font-size:.62rem;color:var(--text-muted,#64748b);direction:ltr}
+.crbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0 10px}
+.crbar select,.crbar input[type=date]{padding:.35rem .5rem;border:1px solid var(--border,#cbd5e1);border-radius:8px;font-family:inherit;font-size:.78rem;background:var(--surface,#fff);color:inherit}
+.crpager{display:flex;gap:5px;justify-content:center;align-items:center;margin-top:10px;flex-wrap:wrap}
+.crpager button{min-width:30px;height:30px;border:1px solid var(--border,#cbd5e1);background:var(--surface,#fff);border-radius:7px;cursor:pointer;font-weight:700;font-family:inherit}
+.crpager button.on{background:#0f766e;color:#fff;border-color:#0f766e}
+.crpager button:disabled{opacity:.4;cursor:default}
 </style>
 <script src="config.js?v=20261011"></script>
 <script src="session.js?v=20261026"></script>
@@ -199,8 +207,102 @@ async function init(){
   await loadPoints();
   setInterval(()=>{ if(VIEW==='shift' && CUR) loadShift(); }, 60000);
 }
+/* ════════════════════════════════════════════════════════════
+   مراجعة تحصيل بطاقات الائتمان
+   ------------------------------------------------------------
+   نفس جدول الشيفت بالحرف (نفس الأعمدة ونفس drawRows ونفس زر «تم»
+   ونفس القفل) — الفرق إن المصدر مش شيفت واحد: get_card_txns
+   بترجّع حركات الفيزا والمحافظ عبر الشيفتات في مدى تاريخ، بنفس
+   شكل الصفوف بالظبط عشان الجدول يرسمها من غير أي تعديل.
+   الصف المُراجَع بيفضل مكانه (بيتقفل بس) زي الشيفت. */
+let CR = { from:'', to:'', branch:'', pending:false, page:1, size:50, total:0 };
+function crToday(){ const c=new Date(new Date().toLocaleString('en-US',{timeZone:'Africa/Cairo'}));
+  const p=n=>String(n).padStart(2,'0'); return `${c.getFullYear()}-${p(c.getMonth()+1)}-${p(c.getDate())}`; }
+
+function showCardReview(){
+  VIEW='cards';
+  if(!CR.from){ CR.from=crToday(); CR.to=crToday(); CR.branch=BRANCH||''; }
+  loadCardTxns();
+}
+
+async function loadCardTxns(){
+  document.getElementById('content').innerHTML='<div class="state">جارِ التحميل…</div>';
+  const d = await rpc('get_card_txns', { p_branch: CR.branch||null, p_from: CR.from, p_to: CR.to,
+                                          p_only_pending: CR.pending, p_limit: CR.size,
+                                          p_offset: (CR.page-1)*CR.size });
+  if(!d){ document.getElementById('content').innerHTML='<div class="state">تعذّر التحميل — تأكد من صلاحيتك.</div>'; return; }
+  CR.total = +d.total || 0;
+  TXN = (d.rows||[]).map(t=>{
+    const x={...t};
+    /* نفس منطق الشيفت: المُراجَع بيسترجع قيمته المؤكَّدة من المراجعة */
+    if(x.rv){ if(x.rv.channel) x.channel=x.rv.channel; if(x.rv.paid!=null){ x.paid=+x.rv.paid; x.manual=true; } }
+    return x; });
+  renderCardReview(d);
+}
+
+function renderCardReview(d){
+  const pages = Math.max(1, Math.ceil(CR.total / CR.size));
+  if(CR.page > pages) CR.page = pages;
+  const brOpts = BRANCHES.map(b=>`<option value="${esc(b.sync_key)}" ${CR.branch===b.sync_key?'selected':''}>${esc(b.name)}</option>`).join('');
+  const kpis = CAN_TOTALS ? `<div class="kpis">
+      <div class="kpi"><div class="v">${fmt(d.total)}</div><div class="l">عدد الحركات</div></div>
+      <div class="kpi"><div class="v">${fmt(d.total_paid)}</div><div class="l">إجمالي قيمة المدفوع</div></div>
+      <div class="kpi"><div class="v" style="color:#15803d">${fmt(d.reviewed_paid)}</div><div class="l">مُراجَع (${fmt(d.reviewed)})</div></div>
+      <div class="kpi"><div class="v" style="color:#b45309">${fmt(d.pending_paid)}</div><div class="l">لم يُراجَع (${fmt(d.pending)})</div></div>
+    </div>` : '';
+  const chans = (d.channels||[]).filter(c=>c&&c!=='—').sort((a,b)=>String(a).localeCompare(String(b),'ar'));
+  const users  = (d.users||[]).sort((a,b)=>String(a).localeCompare(String(b),'ar'));
+  document.getElementById('content').innerHTML = `
+    <div class="crbar">
+      <select id="crBr"><option value="">كل الفروع</option>${brOpts}</select>
+      <input type="date" id="crFrom" value="${CR.from}"> <span style="font-size:.78rem">←</span>
+      <input type="date" id="crTo" value="${CR.to}">
+      <select id="crPend"><option value="" ${!CR.pending?'selected':''}>الكل</option><option value="1" ${CR.pending?'selected':''}>غير المراجَع فقط</option></select>
+    </div>
+    ${kpis}
+    <div class="filters">
+      <input id="q" class="q" placeholder="بحث: رقم العملية · المستخدم · ملاحظة…">
+      <span class="flabel">الحساب:</span>
+      ${chans.map(c=>`<button class="chip vch" data-ch="${esc(c)}">${esc(c)}</button>`).join('')}
+      <span class="flabel">المستخدم:</span>
+      <select id="userSel" class="usel"><option value="">الكل</option>${users.map(u=>`<option value="${esc(u)}" ${userFilter===u?'selected':''}>${esc(u)}</option>`).join('')}</select>
+      <span class="shown" id="shown"></span>
+    </div>
+    <div class="tablecard"><table><thead><tr>
+      <th class="rv">المراجعة</th>
+      <th>الوقت</th><th>النوع</th><th>قيمة المدفوع</th><th>القيمة</th><th class="r">من</th><th class="r">الى</th><th class="r">المستخدم</th><th>الجهاز</th><th>الحساب</th><th class="r">ملاحظات</th>
+    </tr></thead><tbody id="tb"></tbody></table></div>
+    <div class="crpager" id="crPager"></div>`;
+
+  const go = () => { CR.page=1; loadCardTxns(); };
+  document.getElementById('crBr').onchange   = e => { CR.branch=e.target.value; go(); };
+  document.getElementById('crFrom').onchange = e => { CR.from=e.target.value||crToday(); go(); };
+  document.getElementById('crTo').onchange   = e => { CR.to=e.target.value||crToday(); go(); };
+  document.getElementById('crPend').onchange = e => { CR.pending=!!e.target.value; go(); };
+  document.querySelectorAll('.vch[data-ch]').forEach(c=>c.onclick=()=>{
+    chFilter=(chFilter===c.dataset.ch?null:c.dataset.ch);
+    document.querySelectorAll('.vch').forEach(x=>x.classList.toggle('active',x.dataset.ch===chFilter));
+    drawRows(); });
+  document.getElementById('q').oninput=drawRows;
+  const us=document.getElementById('userSel'); if(us) us.onchange=()=>{ userFilter=us.value||null; drawRows(); };
+  drawRows();
+
+  const pg=document.getElementById('crPager');
+  if(pages<=1){ pg.innerHTML = CR.total? `<span style="font-size:.76rem;color:var(--text-muted)">${fmt(CR.total)} حركة</span>`:''; return; }
+  const mk=(lbl,p,dis,on)=>`<button ${dis?'disabled':''} class="${on?'on':''}" data-p="${p}">${lbl}</button>`;
+  let h=mk('«',1,CR.page===1)+mk('‹',CR.page-1,CR.page===1);
+  for(let p=1;p<=pages;p++){ if(p===1||p===pages||Math.abs(p-CR.page)<=2) h+=mk(p,p,false,p===CR.page);
+    else if(Math.abs(p-CR.page)===3) h+='<span style="margin:0 6px;color:var(--text-muted)">…</span>'; }
+  h+=mk('›',CR.page+1,CR.page===pages)+mk('»',pages,CR.page===pages);
+  h+=`<span style="margin:0 8px;color:var(--text-muted);font-size:.76rem">صفحة ${CR.page} من ${pages} · ${fmt(CR.total)} حركة</span>`;
+  pg.innerHTML=h;
+  pg.querySelectorAll('button[data-p]').forEach(b=>b.onclick=()=>{ CR.page=+b.dataset.p; loadCardTxns();
+    document.getElementById('content').scrollIntoView({behavior:'smooth',block:'start'}); });
+}
+
 function refreshCurrent(){
-  if(VIEW==='log') loadShiftLog();
+  if(VIEW==='cards') loadCardTxns();
+  else if(VIEW==='log') loadShiftLog();
   else if(VIEW==='detail' && SLsc!=null) openShiftDetail(SLsc, SLcashier);
   else if(CUR) loadShift();
 }
@@ -210,19 +312,23 @@ async function loadPoints(){
   const tabs=document.getElementById('tabs');
   if(!POINTS.length){ tabs.innerHTML=''; document.getElementById('content').innerHTML='<div class="state">لا توجد نقاط بيع لهذا الفرع.</div>'; return; }
   const VP = await visiblePoints(POINTS);
-  let showLog=false;
+  let showLog=false, showCards=false;
   try{ if(typeof Session!=='undefined' && Session.tabAllowed) showLog = await Session.tabAllowed('current_shift','shiftlog'); }catch(e){ showLog=false; }
-  if(!VP.length && !showLog){ tabs.innerHTML=''; document.getElementById('content').innerHTML='<div class="state">لا توجد نقطة مسموحة لدورك في هذا الفرع.</div>'; return; }
+  try{ if(typeof Session!=='undefined' && Session.tabAllowed) showCards = await Session.tabAllowed('current_shift','cardreview'); }catch(e){ showCards=false; }
+  if(!VP.length && !showLog && !showCards){ tabs.innerHTML=''; document.getElementById('content').innerHTML='<div class="state">لا توجد نقطة مسموحة لدورك في هذا الفرع.</div>'; return; }
   CUR = VP.length ? roleDefaultPoint(VP) : null;
   let html = VP.map(p=>`<button class="tab" data-c="${p.cashier_id}" data-tk="${pointTabKey(p)}">${esc(p.point_name)}</button>`).join('');
   if(showLog) html += `<button class="tab" data-mode="log"><i class="fas fa-clock-rotate-left"></i> سجل الشيفتات</button>`;
+  if(showCards) html += `<button class="tab" data-mode="cards"><i class="fas fa-credit-card"></i> مراجعة تحصيل بطاقات الائتمان</button>`;
   tabs.innerHTML = html;
   tabs.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{
     tabs.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));
     if(b.dataset.mode==='log'){ showShiftLog(); }
+    else if(b.dataset.mode==='cards'){ chFilter=null; typeFilter=null; userFilter=null; showCardReview(); }
     else { CUR=+b.dataset.c; chFilter=null; typeFilter=null; userFilter=null; loadShift(); }
   });
   if(VP.length){ const fb=tabs.querySelector('.tab[data-c]'); if(fb) fb.classList.add('active'); loadShift(); }
+  else if(showCards && !showLog){ const cb=tabs.querySelector('.tab[data-mode="cards"]'); if(cb) cb.classList.add('active'); showCardReview(); }
   else { const lb=tabs.querySelector('.tab[data-mode="log"]'); if(lb) lb.classList.add('active'); showShiftLog(); }
 }
 async function loadShift(){
@@ -315,7 +421,7 @@ async function reviewTxn(i){
   const t = TXN[i]; if(!t || t.rv) return;
   const btn = document.querySelector('.btn-rv[data-i="'+i+'"]');
   if(btn){ btn.disabled = true; btn.textContent = '…'; }
-  const r = await rpcWrite('review_shift_txn', { p_branch:BRANCH, p_fh_id:t.fh_id,
+  const r = await rpcWrite('review_shift_txn', { p_branch:(t.branch||BRANCH), p_fh_id:t.fh_id,
                                                  p_paid: paidOf(t), p_channel: t.channel || null });
   if(r.success !== true){
     alert(r.error);
@@ -323,14 +429,16 @@ async function reviewTxn(i){
     return;
   }
   t.rv = { by:r.reviewed_by, at:r.reviewed_at, paid:paidOf(t), channel:t.channel||null };
-  render();
+  /* في تبويب البطاقات الصف بيفضل مكانه ويتقفل — من غير إعادة تحميل
+     عشان الموظف ما يفقدش مكانه في القايمة وهو بيراجع ورا بعض. */
+  if(VIEW==='cards') drawRows(); else render();
 }
 async function unreviewTxn(i){
   const t = TXN[i]; if(!t || !t.rv) return;
   if(!confirm('فكّ قفل المراجعة لهذه الحركة؟')) return;
-  const r = await rpcWrite('unreview_shift_txn', { p_branch:BRANCH, p_fh_id:t.fh_id });
+  const r = await rpcWrite('unreview_shift_txn', { p_branch:(t.branch||BRANCH), p_fh_id:t.fh_id });
   if(r.success !== true){ alert(r.error); return; }
-  delete t.rv; render();
+  delete t.rv; if(VIEW==='cards') drawRows(); else render();
 }
 
 function render(){
@@ -416,7 +524,7 @@ function drawRows(){
       : lock ? `<span class="rv-ok">✓ تمت<span class="who">${esc(t.rv.by||'')}${t.rv.at?' · '+esc(t.rv.at):''}</span></span>`
                + (IS_ADMIN ? `<button class="btn-unlock" onclick="unreviewTxn(${t._i})">فتح</button>` : '')
       : `<button class="btn-rv" data-i="${t._i}" onclick="reviewTxn(${t._i})">تم ✓</button>`;
-    return `<tr class="${lock?'locked':''}"><td class="rv">${rvCell}</td><td>${esc(t.time)}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
+    return `<tr class="${lock?'locked':''}"><td class="rv">${rvCell}</td><td>${esc(t.time)}${t.date?`<div class="dsub">${esc(t.date)}</div>`:''}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
       `<td>${paidCell}</td>`+
       `<td class="num ${t.kind==='صرف'?'neg':'pos'}">${t.kind==='صرف'?'−':''}${fmt(t.amount)}</td>`+
       `<td class="r">${esc(t.from||'—')}</td><td class="r">${esc(t.to||'—')}</td>`+
