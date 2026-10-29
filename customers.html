@@ -265,6 +265,17 @@
       background:var(--surface); color:var(--text-primary) }
     .cb-bd textarea { min-height:90px; resize:vertical; line-height:1.8 }
     .cb-msg { font-size:.8rem; font-weight:700; min-height:18px; margin-bottom:8px }
+
+    /* ===== كبار العملاء ===== */
+    .vip-bar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px }
+    .vip-bar select, .vip-bar input[type=date] {
+      padding:.45rem .6rem; border:1px solid var(--border); border-radius:9px;
+      font-family:inherit; font-size:.83rem; background:var(--surface); color:var(--text-primary) }
+    .vip-note { font-size:.74rem; color:var(--text-muted) }
+    .vip-rank { font-weight:800; color:var(--text-muted); text-align:center }
+    .vip-rank.top { color:#b8860b }
+    .vip-row { cursor:pointer }
+    .vip-row:hover { background:var(--surface-2) }
   </style>
 </head>
 <body>
@@ -293,6 +304,9 @@
         </button>
         <button class="tab-btn" data-tab="clients" onclick="switchTab('clients')">
           <i class="fas fa-wallet"></i> أرصدة العملاء
+        </button>
+        <button class="tab-btn" data-tab="vip" onclick="switchTab('vip')">
+          <i class="fas fa-crown"></i> كبار العملاء
         </button>
         <button class="tab-btn" data-tab="belongings" onclick="switchTab('belongings')">
           <i class="fas fa-box-open"></i> متعلقات العملاء
@@ -352,6 +366,46 @@
             </thead>
             <tbody id="cli-list">
               <tr class="loading-row"><td colspan="6">⏳ جاري التحميل...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ===== تاب: كبار العملاء (VIP) ===== -->
+      <div class="tab-panel" id="panel-vip">
+        <div class="vip-bar">
+          <select id="vip-by" onchange="vipSet('by', this.value)">
+            <option value="value">الأعلى بالقيمة</option>
+            <option value="bills">الأعلى بعدد الفواتير</option>
+          </select>
+          <select id="vip-top" onchange="vipSet('top', this.value)">
+            <option value="50">أعلى ٥٠</option>
+            <option value="100">أعلى ١٠٠</option>
+            <option value="200">أعلى ٢٠٠</option>
+          </select>
+          <select id="vip-branch" style="display:none" onchange="vipSet('branch', this.value)"></select>
+          <input type="date" id="vip-from" onchange="vipSet('from', this.value)">
+          <span style="font-size:.78rem;color:var(--text-muted)">←</span>
+          <input type="date" id="vip-to" onchange="vipSet('to', this.value)">
+          <span class="vip-note" id="vip-note"></span>
+        </div>
+        <div class="stats-row" id="vip-stats"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:48px">#</th>
+                <th>العميل</th>
+                <th>الفرع</th>
+                <th>عدد الفواتير</th>
+                <th>إجمالي القيمة</th>
+                <th>متوسط الفاتورة</th>
+                <th>أيام الشراء</th>
+                <th>آخر شراء</th>
+              </tr>
+            </thead>
+            <tbody id="vip-list">
+              <tr class="loading-row"><td colspan="8">⏳ جاري التحميل...</td></tr>
             </tbody>
           </table>
         </div>
@@ -637,6 +691,7 @@
       if (tab === 'employees') renderEmployees();
       else if (tab === 'clients') renderClients();
       else if (tab === 'belongings') cbEnter();
+      else if (tab === 'vip') vipEnter();
     }
 
     // ===== تاب 1: البحث =====
@@ -1344,6 +1399,99 @@
       if (e.key === 'Escape') cbCloseAdd();
     });
 
+
+    /* ════════════════════════════════════════════════════════════
+       كبار العملاء (VIP)
+       ------------------------------------------------------------
+       الترتيب بالقيمة أو بعدد الفواتير، وكل الحساب على السيرفر
+       (get_vip_customers) — مفيش سحب لمبيعات في المتصفح.
+       نفس طريقة حساب تصنيف العميل: مجموع سطور الفواتير، فواتير
+       مميّزة بالعدد، واستبعاد فواتير التعاقد.
+       ⚠️ الفرع بيتفرض من التوكن على السيرفر: الأدمن بيشوف كل
+       الفروع وغيره فرعه بس — وبارامتر الفرع من الشاشة بيتجاهل
+       لغير المصرّح، فالقايمة مش ممكن تتفتح بتغيير الفلتر. */
+    const VIP = { by:'value', top:50, branch:'', from:'', to:'', ui:false, busy:false };
+
+    function vipEnter(){ if(!VIP.ui) vipInitUI(); vipLoad(); }
+
+    function vipInitUI(){
+      VIP.ui = true;
+      if (SEE_ALL_BRANCHES) {
+        const list = (typeof Branches !== 'undefined' && Branches.all) ? Branches.all() : [];
+        const sel = document.getElementById('vip-branch');
+        if (list.length) {
+          sel.innerHTML = '<option value="">كل الفروع</option>' +
+            list.filter(b=>b&&b.name).map(b=>`<option value="${cbEsc(b.name)}">${cbEsc(b.name)}</option>`).join('');
+          sel.style.display = '';
+        }
+      }
+    }
+
+    function vipSet(k, v){
+      if (k === 'top') VIP.top = +v || 50; else VIP[k] = v;
+      vipLoad();
+    }
+
+    async function vipLoad(){
+      if (VIP.busy) return;
+      VIP.busy = true;
+      const tb = document.getElementById('vip-list');
+      tb.innerHTML = '<tr class="loading-row"><td colspan="8">⏳ جاري التحميل...</td></tr>';
+      try {
+        const d = await cbRpc('get_vip_customers', {
+          p_branch: VIP.branch || null, p_from: VIP.from || null,
+          p_to: VIP.to || null, p_by: VIP.by, p_limit: VIP.top });
+        vipRender(d || {});
+      } catch (e) {
+        tb.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--danger);padding:30px">❌ ${cbEsc(e.message)}</td></tr>`;
+        document.getElementById('vip-stats').innerHTML = '';
+      } finally { VIP.busy = false; }
+    }
+
+    function vipRender(d){
+      const rows = Array.isArray(d.rows) ? d.rows : [];
+      /* أول تحميل: نملا خانات التاريخ بالمدى المتاح فعلًا في المبيعات */
+      if (!VIP.from && d.from) { VIP.from = d.from; document.getElementById('vip-from').value = d.from; }
+      if (!VIP.to   && d.to)   { VIP.to   = d.to;   document.getElementById('vip-to').value   = d.to; }
+      const note = document.getElementById('vip-note');
+      if (note) note.textContent = d.scoped_branch ? `فرعك: ${d.scoped_branch}` : 'كل الفروع';
+
+      const allNet = Number(d.all_net)||0, topNet = Number(d.top_net)||0;
+      const share = allNet ? Math.round(1000*topNet/allNet)/10 : 0;
+      document.getElementById('vip-stats').innerHTML = [
+        ['عدد العملاء المعروض', rows.length, 'var(--accent-dark)'],
+        ['مبيعاتهم', fmtJ(topNet) + ' ج', 'var(--success)'],
+        ['نسبتهم من مبيعات العملاء', share + '%', '#b8860b'],
+        ['فواتيرهم', fmtJ(d.top_bills), 'var(--text-secondary)'],
+        ['كل العملاء في المدة', fmtJ(d.all_customers), 'var(--text-muted)']
+      ].map(([l,v,c]) => `<div class="stat-card">
+          <div style="font-size:1.2rem;font-weight:800;color:${c}">${v}</div>
+          <div style="font-size:.74rem;color:var(--text-muted)">${l}</div>
+        </div>`).join('');
+
+      const tb = document.getElementById('vip-list');
+      if (!rows.length) {
+        tb.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:34px">لا توجد مبيعات في المدة المختارة</td></tr>';
+        return;
+      }
+      tb.innerHTML = rows.map(r => `<tr class="vip-row" data-code="${cbEsc(r.cust_code)}">
+          <td class="vip-rank ${r.rank<=3?'top':''}">${r.rank<=3?'👑':''}${r.rank}</td>
+          <td><div style="font-weight:700">${cbEsc(r.cust_name||'(بدون اسم)')}</div>
+              <div class="cb-sub">${cbEsc(r.cust_code)}</div></td>
+          <td><span class="branch-tag">${cbEsc(r.branch||'—')}</span></td>
+          <td style="font-weight:700">${fmtJ(r.bills)}</td>
+          <td style="font-weight:800;color:var(--success)">${fmtJ(r.net)}</td>
+          <td>${fmtJ(r.avg_ticket)}</td>
+          <td>${fmtJ(r.buy_days)}</td>
+          <td style="font-size:.78rem">${cbEsc(r.last_buy||'')}</td>
+        </tr>`).join('');
+      /* ضغطة على الصف تفتح العميل في تبويب البحث بتفاصيله وتصنيفه */
+      tb.querySelectorAll('.vip-row[data-code]').forEach(tr => tr.addEventListener('click', () => {
+        switchTab('search');
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'search'));
+        selectCustomer(tr.dataset.code);
+      }));
+    }
 
     // إغلاق الاقتراحات عند الضغط خارجها
     document.addEventListener('click', e => {
