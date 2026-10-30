@@ -89,6 +89,10 @@ revoke all on function public.get_sales_gaps(int, int) from public, anon;
 grant execute on function public.get_sales_gaps(int, int) to authenticated;
 
 /* ── ٣) نضمّه لفحص المزامنة بدل نداء تاني ─────────────────────
+   الشريط بياخد **٢١ يوم** مش ٦٠: ثقب عمره شهرين مش حاجة الموظف
+   يعملها دلوقتي، ولو فضل معلّق كل يوم بيتحوّل لورق حيطة وساعتها
+   أول تنبيه حقيقي بيعدّي. الحادثة الجديدة بتبان خلال يومين،
+   و`get_sales_gaps(60)` نفسها متاحة للأدمن بالصورة الكاملة.
    جراحيًا: بنزوّد مفتاح 'sales_gaps' على الناتج ومابنلمسش أي منطق
    تاني في الدالة — الشاشات اللي بتقرا branches/feeds ماتتأثرش. */
 do $do$
@@ -108,7 +112,7 @@ begin
   new_src := replace(src,
     $old$    'feeds',           feeds);$old$,
     $new$    'feeds',           feeds,
-    'sales_gaps',      coalesce(public.get_sales_gaps(60, 20) -> 'gaps', '[]'::jsonb));$new$);
+    'sales_gaps',      coalesce(public.get_sales_gaps(21, 20) -> 'gaps', '[]'::jsonb));$new$);
   if new_src = src then
     raise exception 'مالقيتش سطر الإرجاع في get_sync_health — راجع الدالة يدويًا';
   end if;

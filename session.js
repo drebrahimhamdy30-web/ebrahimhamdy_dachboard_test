@@ -758,8 +758,18 @@ const Session = (function () {
    session.js متحمّل في الـ63 شاشة، فالفحص هنا بيغطّيها كلها من غير
    تعديل في ولا شاشة واحدة. بيتأجّل شوية عشان مايزاحمش تحميل الصفحة،
    وبيفشل بصمت لو الدالة مش موجودة على القاعدة دي.                */
+/* ⚠️ الشل app.html بيحمّل session.js وكل شاشة جوّه الإطار كمان،
+   فالفحص كان بيشتغل مرتين والشريط بيظهر مرتين فوق بعض (اتشاف
+   2026-10-30). الحارس `__phalixSyncWatch` بيتحط على الـwindow
+   فمابيعديش بين الإطارات — فبنفحص في النافذة العليا بس. الشاشة
+   اللي بتتفتح لوحدها (مش في الشل) هي نفسها النافذة العليا فبتفضل
+   شغّالة عادي. */
+function __phalixTopOnly() {
+  try { return window.top === window.self; } catch (e) { return true; }
+}
 (function () {
   if (typeof window === 'undefined' || window.__phalixSyncWatch) return;
+  if (!__phalixTopOnly()) return;
   window.__phalixSyncWatch = true;
   const go = function () {
     setTimeout(function () { try { Session.syncWatch(); } catch (e) {} }, 1200);
