@@ -76,11 +76,19 @@ function scanFile(file) {
 
   // ① خريطة الثوابت: const SB_X_URL = `${...}/rest/v1/table`
   const consts = {};
+  /* ⚠️ ثابت مساره بينتهي بـ/rest/v1/rpc/ — النداء بيتكتب `RPC + 'fn'`
+     فمفيش في السطر أي أثر لـrest/v1/rpc، وده اللي خلّى
+     get_contract_returns تعدّي من الحارس وتتقص عند ألف صف على
+     البرودكشن (2026-10-30). بنسجّل الثوابت دي لوحدها ونفكّ النداء. */
+  const rpcConsts = new Set();
   lines.forEach(l => {
+    const r = l.match(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=[^\n]*rest\/v1\/rpc\//);
+    if (r) rpcConsts.add(r[1]);
     const m = l.match(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=.*rest\/v1\/([a-z_][a-z0-9_]*)\s*[`'"]/);
     if (m && m[2] !== 'rpc') consts[m[1]] = m[2];
   });
   const constNames = Object.keys(consts);
+  const rpcConstNames = [...rpcConsts];
 
   let inBlock = false;   // جوّه /* … */ — التعليقات اللي بتشرح الفخ مش نداءات
   lines.forEach((line, i) => {
@@ -98,7 +106,14 @@ function scanFile(file) {
     /* ⚠️ نداء RPC بيبقى POST دايمًا — فلو اعتبرناه «كتابة» بنتخطّاه ومانفحصوش،
        وده اللي خلّى suggest_purchase_sources تفوت من الحارس وتتقص على
        البرودكشن. فحص الكتابة بيتطبّق على نداءات الجداول بس. */
-    const isRpcLine = line.indexOf('/rest/v1/rpc/') >= 0;
+    /* نداء بثابت: RPC + 'fn'  أو  RPC+`fn`  أو  ${RPC}fn */
+    let constRpcFn = null;
+    for (const c of rpcConstNames) {
+      const re = new RegExp('(?:\\b' + c + '\\s*\\+\\s*|\\$\\{\\s*' + c + '\\s*\\})[\'"`]?([a-z_][a-z0-9_]*)');
+      const mm = line.match(re);
+      if (mm) { constRpcFn = mm[1]; break; }
+    }
+    const isRpcLine = line.indexOf('/rest/v1/rpc/') >= 0 || !!constRpcFn;
     const isWrite = !isRpcLine && WRITE.test(ctx) && !/Session.rpcAll/.test(ctx);
 
     // ② limit أكبر من السقف = وهم
@@ -111,6 +126,7 @@ function scanFile(file) {
     let table = null, isRpc = false;
     let m;
     if ((m = line.match(/rest\/v1\/rpc\/([a-z_][a-z0-9_]*)/))) { table = m[1]; isRpc = true; }
+    else if (constRpcFn) { table = constRpcFn; isRpc = true; }
     else if ((m = line.match(/rest\/v1\/([a-z_][a-z0-9_]*)\?/)))  { table = m[1]; }
     else if ((m = line.match(/\b(?:REST|SB_REST|api|sbGet)\s*(?:\+\s*)?[('`"]\s*\+?\s*['"`]?([a-z_][a-z0-9_]*)\?/))) { table = m[1]; }
     else {
