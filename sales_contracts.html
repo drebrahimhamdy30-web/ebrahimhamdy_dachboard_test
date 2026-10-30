@@ -56,6 +56,7 @@
             <option value="ملغاة">ملغاة ❌</option>
             <option value="مدموجة">🔗 مدموجة</option>
             <option value="__incomplete__">🟠 محفوظة (غير مكتملة)</option>
+            <option value="__nocontract__">⚠️ تعاقد بغير عقد</option>
           </select>
           <button class="btn btn-primary" onclick="openAddModal()">
             <i class="fas fa-plus"></i> إضافة فاتورة
@@ -317,7 +318,7 @@
   </div>
 
 <script src="config.js?v=20260904c"></script>
-<script src="session.js?v=20261029"></script>
+<script src="session.js?v=20261030"></script>
 <script src="branches.js?v=20260904d"></script>
 <script src="pages.js?v=20260904d"></script>
 <script src="brand.js?v=20261017n"></script>
@@ -668,7 +669,13 @@
            المحاسب)، فمينفعش يتلخبط مع منطق «قيد المتابعة». */
         if (stateVal === '__incomplete__') {
           stateMatch = isIncompletePos(item);
+        } else if (stateVal === '__nocontract__') {
+          stateMatch = !!item.no_contract;
         } else if (stateVal === 'default') {
+          /* «تعاقد بغير عقد» غلط كاشير مش فاتورة ناقصة تصنيف —
+             لو سابناها هنا المحاسب بيلغيها بإيده كل شهر من تاني.
+             ليها شريحتها، وبتفضل ظاهرة في «الكل». */
+          if (item.no_contract) return false;
           if (state === '') {
             stateMatch = true;
           } else if (state === 'فاتورة') {
@@ -764,6 +771,11 @@ function getNextSerial(billType) {
            مكتملة — الكاشير حفظها وماكمّلهاش، وعشان كده **مالهاش بنود**
            في المبيعات أصلًا. بتدخل عندنا بقرار المالك عشان المحاسب
            يقرّر، فلازم تبان مميّزة مش شكلها زي أي فاتورة. */
+        /* العميل دفع القيمة كلها ⇒ حصة الشركة صفر ⇒ مفيش عقد مختار.
+           العمود بيتحسب في القاعدة فبيشتغل على صفوف المزامنة الجديدة. */
+        const noContractBadge = item.no_contract
+          ? `<span title="عليها علامة تعاقد في eplus بس من غير عقد مختار — العميل دفع القيمة كلها" style="font-size:0.7rem;background:#fee2e2;color:#b91c1c;padding:2px 8px;border-radius:20px;">⚠️ بغير عقد</span>`
+          : '';
         const posBadge = isIncompletePos(item)
           ? `<span title="الفاتورة محفوظة في eplus ولم تُستكمل — لا توجد لها أصناف" style="font-size:0.7rem;background:#ffedd5;color:#9a3412;padding:2px 8px;border-radius:20px;">🟠 محفوظة</span>`
           : '';
@@ -772,7 +784,7 @@ function getNextSerial(billType) {
           <tr>
             <td>
               <code style="font-size:0.82rem;color:var(--text-secondary);">${item.bill_no || '---'}</code>
-              ${claimBadge}${serialBadge}${mergedBadge}${posBadge}
+              ${claimBadge}${serialBadge}${mergedBadge}${posBadge}${noContractBadge}
             </td>
             <td style="font-size:0.75rem;line-height:1.4;">
               ${dateStr}<br>

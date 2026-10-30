@@ -621,7 +621,19 @@ const Session = (function () {
     return ' (منذ ' + _arCount(Math.round(a), 'ساعة', 'ساعتين', 'ساعات', 'ساعة') + ')';
   }
 
-  function _syncBanner(stale, feeds, hours) {
+  /* ثقب في نص البيانات مش تأخير: «آخر تحديث» بيبقى سليم تمامًا
+     واليوم الضايع مالوش أي أثر فيه. يوم 2026-10-26 ضاع بالكامل من
+     مبيعات المعمورة (833 فاتورة) وفضل 4 أيام محدش واخد باله، لحد
+     ما المالك دوّر على فاتورة بعينها. فالرسالة هنا بتقول «ناقص»
+     مش «متأخر» — ودي معلومة تانية خالص لازم تتقال بصيغتها.      */
+  function _gapsLine(gaps) {
+    return gaps.map(function (g) {
+      return g.store + ' — ' + _arCount(g.missing, 'فاتورة', 'فاتورتين', 'فواتير', 'فاتورة') +
+             ' بين ' + g.after_day + ' و' + g.before_day;
+    }).join(' · ');
+  }
+
+  function _syncBanner(stale, feeds, hours, gaps) {
     const show = function () {
       try {
         if (!document.body || document.getElementById('phalix-sync-warn')) return;
@@ -664,6 +676,10 @@ const Session = (function () {
           line('⚠️ تنبيه: لم يتم تحديث ' + feedNames +
             '. البيانات المعروضة قد لا تطابق الواقع، يُرجى إبلاغ الإدارة.');
         }
+        if (gaps && gaps.length) {
+          line('⛔ تنبيه: توجد فواتير مبيعات مفقودة لم تصل من نظام eplus: ' +
+            _gapsLine(gaps) + '. التقارير والمطالبات لهذه الفترة ناقصة، يُرجى إبلاغ الإدارة.');
+        }
         document.body.appendChild(box);
       } catch (e) {}
     };
@@ -683,8 +699,11 @@ const Session = (function () {
       /* feeds ممكن ماتكونش موجودة على قاعدة لسه ماتطبّقش عليها
          migrate_162 — ساعتها بترجع [] والتنبيه يشتغل للمخزون بس. */
       const feeds = ((d && d.feeds)    || []).filter(function (b) { return b && b.stale; });
-      if (stale.length || feeds.length) {
-        _syncBanner(stale, feeds, (d && d.threshold_hours) || SYNC_HOURS);
+      /* زي feeds: ممكن ماتكونش موجودة على قاعدة لسه ماتطبّقش عليها
+         migrate_178 — ساعتها بترجع [] والتنبيهات التانية تفضل شغّالة. */
+      const gaps  = ((d && d.sales_gaps) || []).filter(function (g) { return g && g.missing; });
+      if (stale.length || feeds.length || gaps.length) {
+        _syncBanner(stale, feeds, (d && d.threshold_hours) || SYNC_HOURS, gaps);
       }
     } catch (e) {
       /* الدالة ممكن ماتكونش اتطبّقت على القاعدة دي (التست vs البرودكشن)
