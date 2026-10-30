@@ -2315,48 +2315,35 @@
     }
 
     /* توزيع كمية التحويل على فواتير الصنف.
-       الغالبية العظمى من الأصناف بتيجي في فاتورة واحدة، والقليل اللي
-       بيتكرر في أكتر من فاتورة بيتقسّم بنسبة الكمية المشتراة من كل
-       فاتورة.
+       الصنف اللي جه على أكتر من فاتورة: الكمية كلها تتاخد من **أكبر
+       فاتورة** (أكبر كمية مشتراة)، ولو ما كفتش بيكمّل من اللي بعدها،
+       وهكذا — قرار المالك ٣٠/١٠/٢٠٢٦.
 
-       ⚠️ القسمة بالنسبة لوحدها كانت بتطلع **كسور** في إذن الصرف:
-       المستخدم يكتب ٤ لصنف جه على ٣ فواتير، فيطلع ١.٥٣ + ١.٨٥ + ٠.٦٢.
-       المجموع صح بس السطر الواحد مستحيل يتنفّذ — محدش بيحوّل ١.٥ علبة.
-       فبقينا نوزّع **وحدات صحيحة**: كل فاتورة تاخد الجزء الصحيح من
-       نصيبها، والوحدات المتبقية تتوزّع واحدة واحدة على أصحاب أكبر
-       كسر (أكبر الباقي). المجموع يفضل مطابق بالظبط وكل سطر عدد صحيح.
-       لو المستخدم كتب كسرًا بنفسه بنسيبه زي ما هو. */
+       ⚠️ قبل كده كانت بتتقسّم بالنسبة، فكانت بتطلع **كسور**: المستخدم
+       يكتب ٤ لصنف على ٣ فواتير فيطلع ١.٥٣ + ١.٨٥ + ٠.٦٢. المجموع صح
+       بس السطر الواحد مستحيل يتنفّذ — محدش بيحوّل ١.٥ علبة.
+
+       ⚠️ السقف بيتقرّب لأسفل لما الكمية المكتوبة عدد صحيح، عشان
+       فاتورة كميتها ٢.٥ ماتطلّعش كسر في إذن الصرف. */
     function splitQtyOverInvoices(list, q){
       if(!list || !list.length) return [];
       if(list.length===1) return [{ inv:list[0], q:q }];
-      var tot=list.reduce(function(s,e){ return s+(e.qty||0); },0);
-      if(!(tot>0)) return [{ inv:list[0], q:q }];
-
-      /* كسر مكتوب باليد: نسيبه بالقسمة النسبية القديمة */
-      if(Math.abs(q-Math.round(q)) > 1e-9){
-        var out=[], used=0;
-        for(var i=0;i<list.length;i++){
-          var share = (i===list.length-1) ? (q-used)
-                    : Math.round(q*(list[i].qty/tot)*100)/100;
-          used+=share;
-          if(share>0) out.push({ inv:list[i], q:Math.round(share*100)/100 });
-        }
-        return out;
+      var isInt = Math.abs(q-Math.round(q)) < 1e-9;
+      /* الأكبر كمية الأول، وعند التساوي الأقدم (ترتيب الفواتير الأصلي) */
+      var sorted = list.map(function(e,i){ return { e:e, i:i, cap:(e.qty||0) }; })
+                       .sort(function(a,b){ return (b.cap-a.cap) || (a.i-b.i); });
+      var out=[], left=q;
+      for(var k=0; k<sorted.length && left>1e-9; k++){
+        var cap = isInt ? Math.floor(sorted[k].cap) : sorted[k].cap;
+        var take = Math.min(left, cap);
+        if(take>1e-9){ out.push({ inv:sorted[k].e, q:take }); left-=take; }
       }
-
-      var qi=Math.round(q);
-      var parts=list.map(function(e,i){
-        var exact=qi*((e.qty||0)/tot);
-        var base=Math.floor(exact);
-        return { i:i, inv:e, base:base, rem:exact-base };
-      });
-      var left=qi-parts.reduce(function(s,p){ return s+p.base; },0);
-      /* الوحدات المتبقية لأكبر كسر، وعند التساوي للفاتورة الأقدم */
-      parts.slice().sort(function(a,b){ return (b.rem-a.rem) || (a.i-b.i); })
-           .slice(0, Math.max(0,left))
-           .forEach(function(p){ p.base++; });
-      return parts.filter(function(p){ return p.base>0; })
-                  .map(function(p){ return { inv:p.inv, q:p.base }; });
+      /* الفواتير كلها ما كفتش (أو كمياتها مش مسجّلة): الباقي على أكبرها */
+      if(left>1e-9){
+        if(out.length) out[0].q += left;
+        else out.push({ inv:sorted[0].e, q:q });
+      }
+      return out;
     }
 
     function exportDisb(){
