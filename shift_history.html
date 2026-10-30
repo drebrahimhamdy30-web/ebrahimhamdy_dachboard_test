@@ -122,6 +122,9 @@ tr:last-child td{border-bottom:none;}
     <button class="tab" id="tab-balance" onclick="switchTab('balance')">
       <i class="fas fa-wallet"></i> الرصيد الحالي
     </button>
+    <button class="tab" id="tab-saferecon" onclick="switchTab('saferecon')">
+      <i class="fas fa-code-compare"></i> مطابقة الخزنة
+    </button>
   </div>
 
   <div class="pane active" id="pane-shifts">
@@ -138,6 +141,15 @@ tr:last-child td{border-bottom:none;}
       <i class="fas fa-circle-info"></i> كل إغلاق فيه ماكينات باي موب ومحافظ إلكترونية — اضغط عليه تشوف كل وسيلة بقيمة إغلاقها ومجموع معاملاتها (بين الإغلاق السابق وده)، والفرق لو موجود. اضغط على الوسيلة تشوف معاملاتها، وتقدر تنقل أي معاملة لشيفت أعلى (أحدث) أو أسفل (أقدم)، أو تضيف معاملة على نفس الشيفت.
     </div>
     <div id="recon-area"><div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div></div>
+  </div>
+
+  <div class="pane" id="pane-saferecon">
+    <div style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 12px;">
+      <i class="fas fa-circle-info"></i> مقارنة <b>كشف النظام</b> (الإغلاقات + التحويلات + الصرف) بـ<b>حركة خزنة فيزا في eplus</b> حركةً بحركة.
+      المطابقة على الاتجاه والقيمة — لا على رقم المستند، لأن الجانبين لا يتشاركان مرجعًا واحدًا.
+      <br><i class="fas fa-triangle-exclamation" style="font-size:.7rem"></i> اختر فرعًا واحدًا من الفلتر بالأعلى؛ المقارنة تتم لفرع واحد في كل مرة.
+    </div>
+    <div id="saferecon-area"><div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div></div>
   </div>
 
   <div class="pane" id="pane-balance">
@@ -247,7 +259,7 @@ const tabLoaded=new Set();
 
 // بالنداء مش كثابت — عشان ما نعتمدش على ترتيب التعريف
 function tabLoader(t){
-  return {shifts:loadShifts, transfers:loadTransfers, recon:loadRecon, balance:loadBalance}[t];
+  return {shifts:loadShifts, transfers:loadTransfers, recon:loadRecon, balance:loadBalance, saferecon:loadSafeRecon}[t];
 }
 
 async function loadTab(t){
@@ -261,7 +273,7 @@ async function loadTab(t){
 }
 
 function switchTab(t){
-  ['shifts','transfers','recon','balance'].forEach(x=>{
+  ['shifts','transfers','recon','balance','saferecon'].forEach(x=>{
     document.getElementById('tab-'+x).classList.toggle('active',x===t);
     document.getElementById('pane-'+x).classList.toggle('active',x===t);
   });
@@ -943,7 +955,10 @@ function balRawEntries(closures,wtrans,mtrans){
     });
   });
   (wtrans||[]).forEach(t=>e.push({date:t.created_at, day:cairoDay(t.created_at), dir:'out', kind:'wallet', wid:t.id, label:'تحويل محفظة — '+esc(t.display_name||'')+(t.reason?(' ('+(REASON_LABEL[t.reason]||esc(t.reason))+')'):''), amount:+t.amount||0}));
-  (mtrans||[]).forEach(t=>e.push({date:t.txn_date, day:cairoDay(t.txn_date), dir:'out', kind:'manual', mid:t.id, label:'صرف — '+esc(t.display_name||t.channel||'')+(t.reason?(' ('+esc(t.reason)+')'):'')+(t.note?(' · '+esc(t.note)):''), amount:+t.amount||0}));
+  /* البيان المختصر: «صرف — باي موب». السبب وأسماء ملفات الكشف كانت
+   بتملا السطر وتخفي باقي الكشف، فبقت tooltip — المعلومة موجودة
+   من غير ما تزاحم العين (طلب المالك 2026-10-30). */
+  (mtrans||[]).forEach(t=>e.push({date:t.txn_date, day:cairoDay(t.txn_date), dir:'out', kind:'manual', mid:t.id, label:'صرف — '+esc(t.display_name||t.channel||''), tip:[t.reason?esc(t.reason):'', t.note?esc(t.note):''].filter(Boolean).join(' · '), amount:+t.amount||0}));
   e.sort((a,b)=> (new Date(a.date)-new Date(b.date)) || (a.day<b.day?-1:a.day>b.day?1:0) );
   return e;
 }
@@ -1155,7 +1170,7 @@ function balLedgerTable(entries, opts){
     <tbody>${view.length?view.map(e=>`<tr>
       <td style="color:var(--muted);font-size:0.75rem;white-space:nowrap">${dt(e.date)}</td>
       <td>${e.dir==='in'?'<span class="badge" style="background:#dcfce7;color:#15803d">توريد</span>':'<span class="badge" style="background:#fee2e2;color:#b91c1c">صرف</span>'}</td>
-      <td>${ic(e.kind)}${e.label}</td>
+      <td${e.tip?` title="${e.tip}"`:''}>${ic(e.kind)}${e.label}${e.tip?' <i class="fas fa-circle-info" style="color:var(--muted);font-size:.65rem"></i>':''}</td>
       <td class="num" style="font-weight:800;color:${e.dir==='in'?'var(--success)':'var(--wal-c)'}">${e.dir==='in'?'+':'−'}${fmt(e.amount)}</td>
       <td class="num" style="font-weight:800;color:${e.balance<0?'var(--danger)':'inherit'}">${fmt(e.balance)}</td>
       ${del?`<td class="num" style="white-space:nowrap">${isLocked(e)?'<i class="fas fa-lock" title="حركة داخل فترة مقفولة" style="color:var(--muted);font-size:.72rem"></i>':e.kind==='manual'?`<button title="تعديل الصرف" onclick="editManualTransfer(${e.mid},${e.amount})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.8rem"><i class="fas fa-pen-to-square"></i></button> <button title="حذف الصرف" onclick="deleteManualTransfer(${e.mid},'${esc(opts.branch)}')" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:.8rem"><i class="fas fa-trash"></i></button>`:e.kind==='wallet'?`<button title="تعديل التحويل" onclick="editWalletTransfer(${e.wid},${e.amount})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.8rem"><i class="fas fa-pen-to-square"></i></button> <button title="حذف التحويل" onclick="deleteWalletTransfer(${e.wid},'${esc(opts.branch)}')" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:.8rem"><i class="fas fa-trash"></i></button>`:(e.sid!=null?`<button title="تعديل قيمة الإغلاق" onclick="editShiftValue(${e.sid},${e.raw})" style="background:none;border:none;cursor:pointer;color:#2563eb;font-size:.8rem"><i class="fas fa-pen-to-square"></i></button>`:'')}</td>`:''}
@@ -1333,6 +1348,100 @@ async function deleteWalletTransfer(id, branch){
 init();
 </script>
 <!-- صلاحيات التبويبات: بيخفي التبويبات الممنوعة على دور المستخدم (من شاشة الصلاحيات) -->
+<script>
+/* ═══ مطابقة الخزنة: كشف النظام مقابل حركة خزنة eplus ═══════════
+   كل الحساب في القاعدة (get_safe_recon) — صف واحد jsonb بدل سحب
+   الجانبين للمتصفح ومطابقتهما هنا. الدالة كمان بتحسب رصيد الخزنة
+   من آخر لقطة + الحركات بعدها، فمش محتاجين نجدول سحب الأرصدة.   */
+const SR_LABEL={ok:["مطابق","#dcfce7","#15803d"],round:["فرق كسور","#fef9c3","#a16207"],
+  split:["سُجِّلت على دفعات","#dbeafe","#1d4ed8"],ours_only:["لم تُسجَّل في الخزنة","#fee2e2","#b91c1c"],
+  eplus_only:["حركة بالخزنة بلا مصدر","#ffedd5","#9a3412"]};
+let SR_DATA=null, SR_FILT="diff", SR_PAGE=1;
+const SR_PER=40;
+
+async function loadSafeRecon(){
+  const area=document.getElementById("saferecon-area");
+  const br=document.getElementById("f-branch").value;
+  if(!br){ area.innerHTML='<div class="empty">اختر فرعًا من الفلتر بالأعلى لعرض المطابقة</div>'; return; }
+  area.innerHTML='<div class="empty"><i class="fas fa-spinner fa-spin"></i> جاري الحساب...</div>';
+  try{
+    const body={p_branch:br, p_from:document.getElementById("f-from").value||null,
+                p_to:document.getElementById("f-to").value||null};
+    const r=await fetch(SB_URL+"/rest/v1/rpc/get_safe_recon",
+      {method:"POST",headers:await shHeaders(),body:JSON.stringify(body)});
+    if(!r.ok) throw new Error(await r.text());
+    SR_DATA=await r.json(); SR_PAGE=1; renderSafeRecon();
+  }catch(e){ area.innerHTML='<div class="empty">تعذّر تحميل المطابقة — '+esc(String(e.message||e)).slice(0,200)+'</div>'; }
+}
+
+function srChip(k,txt,n){
+  const on=SR_FILT===k;
+  return '<button onclick="srFilter(\''+k+'\')" style="padding:.3rem .7rem;border:1px solid '+(on?"var(--primary)":"var(--border)")+';'+
+    'background:'+(on?"var(--primary)":"var(--surface)")+';color:'+(on?"#fff":"var(--muted)")+';border-radius:999px;'+
+    'font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer;margin-inline-end:5px">'+txt+' <b>'+n+'</b></button>';
+}
+function srFilter(k){ SR_FILT=k; SR_PAGE=1; renderSafeRecon(); }
+function srGo(p){ SR_PAGE=p; renderSafeRecon(); document.getElementById("saferecon-area").scrollIntoView({behavior:"smooth",block:"start"}); }
+
+function renderSafeRecon(){
+  const d=SR_DATA; if(!d) return;
+  const area=document.getElementById("saferecon-area");
+  const c=d.counts||{};
+  const nDiff=(c.ours_only||0)+(c.eplus_only||0)+(c.round||0)+(c.split||0);
+  const all=d.rows||[];
+  const rows=all.filter(r=>SR_FILT==="all"?true:SR_FILT==="diff"?r.state!=="ok":r.state===SR_FILT);
+  const pages=Math.max(1,Math.ceil(rows.length/SR_PER));
+  if(SR_PAGE>pages) SR_PAGE=pages;
+  const view=rows.slice((SR_PAGE-1)*SR_PER, SR_PAGE*SR_PER);
+  /* القروش ظاهرة هنا بعكس باقي الشاشات — جزء من الفروق نفسه كسور
+     (0.08 و0.19)، ولو قرّبنا الرقم الفرق يختفي والشاشة تكدب. */
+  const m=n=>(n==null?"—":Number(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}));
+  const kpi=(v,l,big)=>'<div style="border:1px solid '+(big?"#fca5a5":"var(--border)")+';background:'+(big?"#fef2f2":"var(--surface)")+';'+
+    'border-radius:11px;padding:10px 13px"><div style="font-size:1.15rem;font-weight:800;direction:ltr;text-align:right;'+
+    (big?"color:#b91c1c":"")+'">'+v+'</div><div style="font-size:.72rem;color:var(--muted)">'+l+'</div></div>';
+  const anchor=d.eplus_anchor_at?(" · لقطة الرصيد: "+dt(d.eplus_anchor_at)):"";
+  let h='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:10px;margin-bottom:12px">'
+    + kpi(m(d.eplus_balance),"رصيد خزنة eplus")
+    + kpi(m(d.ledger_balance),"رصيد كشف النظام")
+    + kpi(m(d.balance_diff),"الفرق في الرصيد",true)
+    + kpi(m(d.net_ours),"صافي حركة الكشف")
+    + kpi(m(d.net_eplus),"صافي حركة الخزنة")
+    + '</div>';
+  h+='<div style="margin-bottom:10px">'+srChip("diff","الفروق فقط",nDiff)+srChip("all","الكل",all.length)
+    + srChip("ours_only","لم تُسجَّل في الخزنة",c.ours_only||0)
+    + srChip("eplus_only","حركة بالخزنة بلا مصدر",c.eplus_only||0)
+    + srChip("ok","مطابق",c.ok||0)
+    + '<span style="font-size:.72rem;color:var(--muted);margin-inline-start:6px">'+esc(d.branch||"")+anchor+'</span></div>';
+  h+='<div class="tbl-wrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>بيان كشف النظام</th>'
+    + '<th class="num">قيمة الكشف</th><th>المقابل في خزنة eplus</th><th class="num">قيمة الخزنة</th>'
+    + '<th class="num">الفرق</th><th>الحالة</th></tr></thead><tbody>';
+  if(!view.length) h+='<tr><td colspan="8" class="empty" style="padding:24px">لا توجد حركات في هذه الشريحة</td></tr>';
+  view.forEach(r=>{
+    const L=SR_LABEL[r.state]||["—","#eee","#333"];
+    const parts=(r.eplus||[]).map(p=>"مستند "+esc(p.ref)+" · "+esc(p.party||"")+(p.note?(" · "+esc(p.note)):"")+" · <b>"+m(p.amt)+"</b>").join("<br>");
+    const none='<span style="color:var(--border);font-weight:700">— لا يوجد —</span>';
+    h+='<tr><td style="color:var(--muted);font-size:.75rem;white-space:nowrap">'+dt(r.ts)+'</td>'
+      + '<td>'+(r.dir==="in"?'<span class="badge" style="background:#dcfce7;color:#15803d">توريد</span>'
+                              :'<span class="badge" style="background:#fee2e2;color:#b91c1c">صرف</span>')+'</td>'
+      + '<td style="font-size:.78rem">'+(r.ours_label?esc(r.ours_label):none)+'</td>'
+      + '<td class="num" style="font-weight:800">'+m(r.ours_amt)+'</td>'
+      + '<td style="font-size:.74rem;color:#475569">'+(parts||none)+'</td>'
+      + '<td class="num" style="font-weight:800">'+m(r.eplus_amt)+'</td>'
+      + '<td class="num" style="font-weight:800;color:'+(Number(r.diff)?(Number(r.diff)>0?"#15803d":"#b91c1c"):"inherit")+'">'
+      + (Number(r.diff)?m(r.diff):"—")+'</td>'
+      + '<td><span class="badge" style="background:'+L[1]+';color:'+L[2]+'">'+L[0]+'</span></td></tr>';
+  });
+  h+='</tbody></table></div>';
+  if(pages>1){
+    h+='<div style="display:flex;gap:5px;justify-content:center;margin-top:10px;flex-wrap:wrap">';
+    for(let i=1;i<=pages;i++) h+='<button onclick="srGo('+i+')" style="border:1px solid '+(i===SR_PAGE?"var(--primary)":"var(--border)")+';'+
+      'background:'+(i===SR_PAGE?"var(--primary)":"var(--surface)")+';color:'+(i===SR_PAGE?"#fff":"inherit")+';'+
+      'border-radius:7px;padding:.25rem .6rem;font-family:inherit;font-size:.75rem;cursor:pointer">'+i+'</button>';
+    h+='<span style="font-size:.73rem;color:var(--muted);align-self:center">صفحة '+SR_PAGE+' من '+pages+'</span></div>';
+  }
+  area.innerHTML=h;
+}
+</script>
 <script>try { Session.guardTabs('shift_history'); } catch (e) { console.error('guardTabs', e); }</script>
 </body>
 </html>
