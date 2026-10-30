@@ -145,7 +145,7 @@ tr:last-child td{border-bottom:none;}
 
   <div class="pane" id="pane-saferecon">
     <div style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 12px;">
-      <i class="fas fa-circle-info"></i> مقارنة <b>كشف النظام</b> (الإغلاقات + التحويلات + الصرف) بـ<b>حركة خزنة فيزا في eplus</b> حركةً بحركة.
+      <i class="fas fa-circle-info"></i> مقارنة <b>حركات Phalix</b> (الإغلاقات + التحويلات + الصرف) بـ<b>حركة خزنة فيزا في eplus</b> حركةً بحركة.
       المطابقة على الاتجاه والقيمة — لا على رقم المستند، لأن الجانبين لا يتشاركان مرجعًا واحدًا.
       <br><i class="fas fa-triangle-exclamation" style="font-size:.7rem"></i> اختر فرعًا واحدًا من الفلتر بالأعلى؛ المقارنة تتم لفرع واحد في كل مرة.
     </div>
@@ -1402,19 +1402,32 @@ function renderSafeRecon(){
   const anchor=d.eplus_anchor_at?(" · لقطة الرصيد: "+dt(d.eplus_anchor_at)):"";
   let h='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:10px;margin-bottom:12px">'
     + kpi(m(d.eplus_balance),"رصيد خزنة eplus")
-    + kpi(m(d.ledger_balance),"رصيد كشف النظام")
+    + kpi(m(d.ledger_balance),"رصيد Phalix")
     + kpi(m(d.balance_diff),"الفرق في الرصيد",true)
-    + kpi(m(d.net_ours),"صافي حركة الكشف")
+    + kpi(m(d.net_ours),"صافي حركة Phalix")
     + kpi(m(d.net_eplus),"صافي حركة الخزنة")
     + '</div>';
   h+='<div style="margin-bottom:10px">'+srChip("diff","الفروق فقط",nDiff)+srChip("all","الكل",all.length)
-    + srChip("ours_only","لم تُسجَّل في الخزنة",c.ours_only||0)
-    + srChip("eplus_only","حركة بالخزنة بلا مصدر",c.eplus_only||0)
+    + srChip("ours_only","في Phalix ولم تُسجَّل في الخزنة",c.ours_only||0)
+    + srChip("eplus_only","في الخزنة وليست في Phalix",c.eplus_only||0)
     + srChip("ok","مطابق",c.ok||0)
     + '<span style="font-size:.72rem;color:var(--muted);margin-inline-start:6px">'+esc(d.branch||"")+anchor+'</span></div>';
-  h+='<div class="tbl-wrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>بيان كشف النظام</th>'
-    + '<th class="num">قيمة الكشف</th><th>المقابل في خزنة eplus</th><th class="num">قيمة الخزنة</th>'
-    + '<th class="num">الفرق</th><th>الحالة</th></tr></thead><tbody>';
+  /* الجدول بيقارن مصدرين، فلازم العين تفرّق بينهم من غير ما تقرا:
+     رأس مجمّع لكل مصدر + خلفية خفيفة + فاصل رأسي. من غير ده الستة
+     أعمدة بتبان صف واحد والمقارنة بتتوه (ملاحظة المالك 2026-10-31). */
+  h+='<style>#pane-saferecon .sr-ph{background:#f0fdfa}#pane-saferecon .sr-ep{background:#fff7ed}'
+    + '#pane-saferecon .sr-sep{border-inline-start:2px solid #cbd5e1}'
+    + '#pane-saferecon tbody tr:hover .sr-ph{background:#dcfaf4}'
+    + '#pane-saferecon tbody tr:hover .sr-ep{background:#ffe8d2}</style>';
+  h+='<div class="tbl-wrap"><table><thead>'
+    + '<tr><th rowspan="2">التاريخ</th><th rowspan="2">النوع</th>'
+    + '<th colspan="2" style="background:#0f766e"><i class="fas fa-desktop"></i> حركات Phalix</th>'
+    + '<th colspan="2" style="background:#b45309;border-inline-start:3px solid #fff"><i class="fas fa-vault"></i> خزنة eplus</th>'
+    + '<th rowspan="2" class="num">الفرق</th><th rowspan="2">الحالة</th></tr>'
+    + '<tr><th style="background:#0f766e">البيان</th><th class="num" style="background:#0f766e">القيمة</th>'
+    + '<th style="background:#b45309;border-inline-start:3px solid #fff">البيان</th>'
+    + '<th class="num" style="background:#b45309">القيمة</th></tr>'
+    + '</thead><tbody>';
   if(!view.length) h+='<tr><td colspan="8" class="empty" style="padding:24px">لا توجد حركات في هذه الشريحة</td></tr>';
   view.forEach(r=>{
     const L=SR_LABEL[r.state]||["—","#eee","#333"];
@@ -1423,10 +1436,10 @@ function renderSafeRecon(){
     h+='<tr><td style="color:var(--muted);font-size:.75rem;white-space:nowrap">'+dt(r.ts)+'</td>'
       + '<td>'+(r.dir==="in"?'<span class="badge" style="background:#dcfce7;color:#15803d">توريد</span>'
                               :'<span class="badge" style="background:#fee2e2;color:#b91c1c">صرف</span>')+'</td>'
-      + '<td style="font-size:.78rem">'+(r.ours_label?esc(r.ours_label):none)+'</td>'
-      + '<td class="num" style="font-weight:800">'+m(r.ours_amt)+'</td>'
-      + '<td style="font-size:.74rem;color:#475569">'+(parts||none)+'</td>'
-      + '<td class="num" style="font-weight:800">'+m(r.eplus_amt)+'</td>'
+      + '<td class="sr-ph" style="font-size:.78rem">'+(r.ours_label?esc(r.ours_label):none)+'</td>'
+      + '<td class="num sr-ph" style="font-weight:800">'+m(r.ours_amt)+'</td>'
+      + '<td class="sr-ep sr-sep" style="font-size:.74rem;color:#475569">'+(parts||none)+'</td>'
+      + '<td class="num sr-ep" style="font-weight:800">'+m(r.eplus_amt)+'</td>'
       + '<td class="num" style="font-weight:800;color:'+(Number(r.diff)?(Number(r.diff)>0?"#15803d":"#b91c1c"):"inherit")+'">'
       + (Number(r.diff)?m(r.diff):"—")+'</td>'
       + '<td><span class="badge" style="background:'+L[1]+';color:'+L[2]+'">'+L[0]+'</span></td></tr>';
