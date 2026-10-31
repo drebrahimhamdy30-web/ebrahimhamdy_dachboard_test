@@ -101,13 +101,13 @@
   @media(max-width:760px){body{padding:10px}.kpi{min-width:100%}}
 /* تبويب مراجعة البطاقات: نفس الجدول، بس التاريخ تحت الوقت لأنه بيعدّي أيام */
 .dsub{font-size:.62rem;color:var(--text-muted,#64748b);direction:ltr}
+.crnote{width:100%;min-width:110px}
 .wrnote{display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin-top:3px}
 .wrnote .inp{border:1px solid var(--border,#cbd5e1);border-radius:6px;padding:.15rem .3rem;
   font-family:inherit;font-size:.72rem;min-width:130px;flex:1}
 .wrnote .sel{border:1px solid var(--border,#cbd5e1);border-radius:6px;padding:.12rem .25rem;
   font-family:inherit;font-size:.7rem}
-.btn-flag{background:#fecaca;color:#7f1d1d;border:none;border-radius:6px;padding:.15rem .45rem;
-  font-family:inherit;font-weight:700;font-size:.68rem;cursor:pointer}
+
 .crstates{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
 .crst{border:1px solid var(--border,#cbd5e1);background:var(--surface,#fff);color:var(--text-muted,#64748b);
   border-radius:999px;padding:.3rem .7rem;font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer;
@@ -489,14 +489,17 @@ async function reviewTxn(i){
   const t = TXN[i]; if(!t || t.rv) return;
   const btn = document.querySelector('.btn-rv[data-i="'+i+'"]');
   if(btn){ btn.disabled = true; btn.textContent = '…'; }
+  const nEl = document.getElementById(crNoteId(t));
+  const note = nEl ? (nEl.value||'').trim() : '';
   const r = await rpcWrite('review_shift_txn', { p_branch:(t.branch||BRANCH), p_fh_id:t.fh_id,
-                                                 p_paid: paidOf(t), p_channel: t.channel || null });
+                                                 p_paid: paidOf(t), p_channel: t.channel || null,
+                                                 p_note: note || null });
   if(r.success !== true){
     alert(r.error);
     if(btn){ btn.disabled = false; btn.textContent = 'تم ✓'; }
     return;
   }
-  t.rv = { by:r.reviewed_by, at:r.reviewed_at, paid:paidOf(t), channel:t.channel||null };
+  t.rv = { by:r.reviewed_by, at:r.reviewed_at, paid:paidOf(t), channel:t.channel||null, note:note||null };
   /* في تبويب البطاقات الصف بيفضل مكانه ويتقفل — من غير إعادة تحميل
      عشان الموظف ما يفقدش مكانه في القايمة وهو بيراجع ورا بعض. */
   if(VIEW==='cards') drawRows(); else render();
@@ -567,6 +570,17 @@ function render(){
   const us=document.getElementById('userSel'); if(us) us.onchange=()=>{ userFilter=us.value||null; drawRows(); };
   drawRows();
 }
+/* الدليل: لو النظام لقى مرجع بيتعرض نص ثابت (واقعة مش رأي).
+   ولو مالقاش، المحاسب بيكتبه بنفسه وزر «تم» بيحفظه مع المراجعة
+   — فالإقفال بيبقى وراه نص منسوب لصاحبه مش ضغطة فاضية. */
+function crNoteId(t){ return 'cn-' + t.branch + '-' + t.fh_id; }
+function crEvidence(t, lock){
+  if(t.evidence) return esc(t.evidence);
+  if(lock) return t.rv && t.rv.note ? esc(t.rv.note) : '<span class="dash">—</span>';
+  if(!isReviewable(t)) return '<span class="dash">—</span>';
+  return `<input class="inp crnote" id="${crNoteId(t)}" placeholder="اكتب الدليل…"` +
+         ` onkeydown="if(event.key==='Enter')reviewTxn(${t._i})">`;
+}
 function drawRows(){
   const q=(document.getElementById('q').value||'').trim().toLowerCase();
   const rows=TXN.filter((t,i)=>{ t._i=i;
@@ -596,7 +610,7 @@ function drawRows(){
     const stC = CR_STATE[t.state] || null;
     const stCells = (VIEW==='cards')
       ? `<td>${stC?`<span class="pill" style="background:${stC[1]};color:${stC[2]}">${stC[0]}</span>`:'<span class="dash">—</span>'}</td>`
-        + `<td class="r ev">${t.evidence?esc(t.evidence):'<span class="dash">—</span>'}</td>`
+        + `<td class="r ev">${crEvidence(t, lock)}</td>`
       : '';
     return `<tr class="${lock?'locked':''}"><td class="rv">${rvCell}</td>${stCells}<td>${esc(t.time)}${t.date?`<div class="dsub">${esc(t.date)}</div>`:''}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
       `<td>${paidCell}</td>`+
@@ -636,17 +650,15 @@ function hm(s){ if(!s) return '—'; try{ return new Date(s).toLocaleTimeString(
    التسييل (خروج من محفظة ↔ دخول على ماكينة بنفس القيمة) بيتعرف
    لوحده فمابيزعّقش كل يوم — تفسير المالك للمبالغ الكبيرة بلا مقابل. */
 const WR_STATE = {
-  no_sale:   ['بلا مقابل',    '#fee2e2', '#b91c1c'],
-  candidate: ['مرشّح',        '#ffedd5', '#9a3412'],
+  no_sale:   ['بلا مقابل',     '#fee2e2', '#b91c1c'],
   has_sale:  ['مطابِقة لفاتورة','#dcfce7', '#15803d'],
-  cashout:   ['تسييل محفظة',  '#ede9fe', '#5b21b6'],
-  noted:     ['موثّقة',       '#e0f2fe', '#0369a1'],
-  flagged:   ['مشكلة',        '#fecaca', '#7f1d1d']
+  cashout:   ['تسييل محفظة',   '#ede9fe', '#5b21b6'],
+  noted:     ['موثّقة',        '#e0f2fe', '#0369a1']
 };
-/* أسباب مختصرة عشان نقدر نجمّع الأنماط المتكررة بدل ما كل واحد
-   يكتب بطريقته — النص الحر لوحده مابيتجمّعش. */
-const WR_REASONS = ['تحويل بين محافظنا','إيداع شخصي','سداد مورّد','مرتجع عميل','خطأ تسجيل','أخرى'];
-let WR = { from:'', to:'', state:'candidate', page:1, size:50, total:0 };
+/* الحالة اللي السيرفر لسه بيرجّعها قبل ترحيل الإلغاء بتتعامل
+   كأنها «بلا مقابل» — فالشاشة شغّالة سواء الترحيل اتطبّق أو لأ. */
+function wrState(r){ return (r.state==='candidate'||r.state==='flagged') ? 'no_sale' : r.state; }
+let WR = { from:'', to:'', state:'no_sale', page:1, size:50, total:0 };
 
 function showWalletReview(){
   VIEW='wallets';
@@ -677,61 +689,26 @@ function wrChips(d){
    «إيه اللي يأكد إن المحاسب راجع صح؟» — فزر «تم» المجرّد مرفوض.
    واللي النظام لقاه بنفسه **مايتكتبش فوقه**: ده واقعة مش رأي. */
 function wrProof(r){
-  const k = r.src + ':' + r.id;
   if(r.rv){
-    const txt = r.rv.kind==='noted'
-      ? (r.rv.reason? '<b>'+esc(r.rv.reason)+'</b> — ':'') + esc(r.rv.note||'')
-      : esc(r.evidence||'');
-    return `<div>${txt}</div><div class="dsub">${esc(r.rv.by||'')} · ${esc(r.rv.at||'')}` +
-           (IS_ADMIN? ` <button class="btn-unlock" onclick="wrClear('${r.src}',${r.id})">فتح</button>`:'') +
+    return `<div>${esc(r.rv.note || r.evidence || '')}</div>` +
+           `<div class="dsub">${esc(r.rv.by||'')} · ${esc(r.rv.at||'')}` +
+           (IS_ADMIN? ` <button class="btn-unlock" onclick="wrClear('${r.src}',${r.id})">إلغاء</button>`:'') +
            `</div>`;
   }
-  if(r.state==='candidate'){
-    return `<div>${esc(r.evidence||'')}</div>` +
-           `<button class="btn-rv" onclick="wrConfirm('${r.src}',${r.id},${r.cand_fh_id})">تأكيد الربط ✓</button>` +
-           ` <button class="btn-unlock" onclick="wrReject('${r.src}',${r.id},${r.cand_fh_id})">غير مطابق</button>` +
-           wrNoteBox(r, true);
-  }
-  if(r.state==='no_sale'){ return wrNoteBox(r, false); }
-  return r.evidence? esc(r.evidence) : '<span class="dash">—</span>';
-}
-function wrNoteBox(r, hidden){
+  /* اللي النظام لقاه بنفسه مايتكتبش فوقه — واقعة مش رأي */
+  if(wrState(r) !== 'no_sale') return r.evidence? esc(r.evidence) : '<span class="dash">—</span>';
   const k = r.src + ':' + r.id;
-  return `<div class="wrnote" id="nb-${k}" ${hidden?'style="display:none"':''}>` +
-    `<select class="sel" id="rs-${k}"><option value="">— السبب —</option>` +
-    WR_REASONS.map(x=>`<option>${esc(x)}</option>`).join('') + `</select>` +
-    `<input class="inp" id="nt-${k}" placeholder="اكتب الدليل…">` +
-    `<button class="btn-rv" onclick="wrSaveNote('${r.src}',${r.id})">حفظ</button>` +
-    `<button class="btn-flag" onclick="wrFlag('${r.src}',${r.id})">مشكلة</button></div>`;
+  return `<div class="wrnote">` +
+    `<input class="inp" id="nt-${k}" placeholder="اكتب الدليل…"` +
+    ` onkeydown="if(event.key==='Enter')wrSaveNote('${r.src}',${r.id})">` +
+    `<button class="btn-rv" onclick="wrSaveNote('${r.src}',${r.id})">تأكيد ✓</button></div>`;
 }
-function wrOpenNote(k){ const b=document.getElementById('nb-'+k); if(b) b.style.display=''; }
 
-async function wrConfirm(src, id, fh){
-  const r = await rpcWrite('wallet_review_set', { p_src:src, p_id:id, p_kind:'linked', p_ref_fh_id:fh });
-  if(r.success!==true){ alert(r.error); return; }
-  loadWalletTxns();
-}
 async function wrSaveNote(src, id){
-  const k = src+':'+id;
-  const note = (document.getElementById('nt-'+k)||{}).value || '';
-  const reason = (document.getElementById('rs-'+k)||{}).value || '';
-  if(!note.trim()){ alert('يُرجى كتابة الدليل قبل الحفظ'); return; }
-  const r = await rpcWrite('wallet_review_set', { p_src:src, p_id:id, p_kind:'noted',
-                                                  p_reason:reason||null, p_note:note });
-  if(r.success!==true){ alert(r.error); return; }
-  loadWalletTxns();
-}
-async function wrFlag(src, id){
-  if(!confirm('هل تريد تعليم الحركة كمشكلة؟ ستظل ظاهرة حتى تُحل.')) return;
-  const r = await rpcWrite('wallet_review_set', { p_src:src, p_id:id, p_kind:'flagged' });
-  if(r.success!==true){ alert(r.error); return; }
-  loadWalletTxns();
-}
-/* رفض الاقتراح بيتسجّل على السيرفر، فالنظام مايقترحهوش تاني
-   ويعرض المرشّح اللي بعده إن وُجد. الرفض **مش إقفال** — الحركة
-   بترجع «بلا مقابل» ولسه محتاجة إثبات. */
-async function wrReject(src, id, fh){
-  const r = await rpcWrite('wallet_cand_reject', { p_src:src, p_id:id, p_ref_fh_id:fh });
+  const el = document.getElementById('nt-' + src + ':' + id);
+  const note = (el||{}).value || '';
+  if(!note.trim()){ alert('يُرجى كتابة الدليل قبل التأكيد'); return; }
+  const r = await rpcWrite('wallet_review_set', { p_src:src, p_id:id, p_kind:'noted', p_note:note });
   if(r.success!==true){ alert(r.error); return; }
   loadWalletTxns();
 }
@@ -766,7 +743,7 @@ function renderWalletReview(d){
     <div class="crpager" id="wrPager"></div>`;
   const rows=(d.rows||[]);
   document.getElementById('wtb').innerHTML = rows.length ? rows.map(r=>{
-    const S=WR_STATE[r.state]||['—','#eee','#333'];
+    const S=WR_STATE[wrState(r)]||['—','#eee','#333'];
     const srcPill = r.src==='machine'
       ? '<span class="pill" style="background:#e0f2fe;color:#0369a1">ماكينة</span>'
       : '<span class="pill" style="background:#dcfce7;color:#15803d">محفظة</span>';
