@@ -252,7 +252,7 @@ const CR_STATE = {
   matched:     ['مطابَق',       '#dcfce7', '#15803d'],
   unexplained: ['بلا تفسير',    '#fee2e2', '#b91c1c'],
   feed_gap:    ['المصدر ناقص',  '#f1f5f9', '#475569'],
-  no_feed:     ['مفيش كشف',     '#fef9c3', '#a16207']
+  no_feed:     ['لا يوجد كشف',  '#fef9c3', '#a16207']
 };
 let SEES_ALL = false;
 let CR = { from:'', to:'', allBr:false, state:'pending', page:1, size:50, total:0, states:{} };
@@ -291,7 +291,7 @@ function crChips(d){
   const pill = (key, label, bg, fg, n, v) =>
     `<button class="crst${cur===key?' on':''}" data-s="${key}" style="--b:${bg};--f:${fg}">` +
     `${label}<b>${fmt(n||0)}</b>${v?`<span class="v">${fmt(v)} ج</span>`:''}</button>`;
-  let h = pill('pending','🔴 محتاج مراجعة','#fee2e2','#b91c1c', d.needs_review||0, d.needs_review_val||0);
+  let h = pill('pending','🔴 يتطلب مراجعة','#fee2e2','#b91c1c', d.needs_review||0, d.needs_review_val||0);
   h += pill('all','الكل','#e2e8f0','#334155',
         Object.values(st).reduce((a,x)=>a+(x[0]||0),0), 0);
   Object.keys(CR_STATE).forEach(k=>{ const c=CR_STATE[k], x=st[k]||[0,0];
@@ -638,7 +638,7 @@ function hm(s){ if(!s) return '—'; try{ return new Date(s).toLocaleTimeString(
 const WR_STATE = {
   no_sale:   ['بلا مقابل',    '#fee2e2', '#b91c1c'],
   candidate: ['مرشّح',        '#ffedd5', '#9a3412'],
-  has_sale:  ['ليها بيع',     '#dcfce7', '#15803d'],
+  has_sale:  ['مطابِقة لفاتورة','#dcfce7', '#15803d'],
   cashout:   ['تسييل محفظة',  '#ede9fe', '#5b21b6'],
   noted:     ['موثّقة',       '#e0f2fe', '#0369a1'],
   flagged:   ['مشكلة',        '#fecaca', '#7f1d1d']
@@ -689,7 +689,7 @@ function wrProof(r){
   if(r.state==='candidate'){
     return `<div>${esc(r.evidence||'')}</div>` +
            `<button class="btn-rv" onclick="wrConfirm('${r.src}',${r.id},${r.cand_fh_id})">تأكيد الربط ✓</button>` +
-           ` <button class="btn-unlock" onclick="wrOpenNote('${k}')">مش هي</button>` +
+           ` <button class="btn-unlock" onclick="wrReject('${r.src}',${r.id},${r.cand_fh_id})">غير مطابق</button>` +
            wrNoteBox(r, true);
   }
   if(r.state==='no_sale'){ return wrNoteBox(r, false); }
@@ -715,20 +715,28 @@ async function wrSaveNote(src, id){
   const k = src+':'+id;
   const note = (document.getElementById('nt-'+k)||{}).value || '';
   const reason = (document.getElementById('rs-'+k)||{}).value || '';
-  if(!note.trim()){ alert('اكتب الدليل قبل الحفظ'); return; }
+  if(!note.trim()){ alert('يُرجى كتابة الدليل قبل الحفظ'); return; }
   const r = await rpcWrite('wallet_review_set', { p_src:src, p_id:id, p_kind:'noted',
                                                   p_reason:reason||null, p_note:note });
   if(r.success!==true){ alert(r.error); return; }
   loadWalletTxns();
 }
 async function wrFlag(src, id){
-  if(!confirm('تعليم الحركة كمشكلة؟ هتفضل ظاهرة لحد ما تتحل.')) return;
+  if(!confirm('هل تريد تعليم الحركة كمشكلة؟ ستظل ظاهرة حتى تُحل.')) return;
   const r = await rpcWrite('wallet_review_set', { p_src:src, p_id:id, p_kind:'flagged' });
   if(r.success!==true){ alert(r.error); return; }
   loadWalletTxns();
 }
+/* رفض الاقتراح بيتسجّل على السيرفر، فالنظام مايقترحهوش تاني
+   ويعرض المرشّح اللي بعده إن وُجد. الرفض **مش إقفال** — الحركة
+   بترجع «بلا مقابل» ولسه محتاجة إثبات. */
+async function wrReject(src, id, fh){
+  const r = await rpcWrite('wallet_cand_reject', { p_src:src, p_id:id, p_ref_fh_id:fh });
+  if(r.success!==true){ alert(r.error); return; }
+  loadWalletTxns();
+}
 async function wrClear(src, id){
-  if(!confirm('فكّ إثبات المراجعة لهذه الحركة؟')) return;
+  if(!confirm('هل تريد إلغاء إثبات المراجعة لهذه الحركة؟')) return;
   const r = await rpcWrite('wallet_review_clear', { p_src:src, p_id:id });
   if(r.success!==true){ alert(r.error); return; }
   loadWalletTxns();
@@ -747,7 +755,7 @@ function renderWalletReview(d){
     </div>
     <div class="crstates">${wrChips(d)}</div>
     <div style="font-size:.76rem;color:var(--text-muted,#64748b);margin-bottom:9px">
-      كل حركة فلوس حقيقية ومعاها بيعها في eplus. <b>«بلا مقابل»</b> يعني فلوس دخلت ومفيش بيع يقابلها.
+      كل حركة مالية فعلية ومقابلها في eplus. <b>«بلا مقابل»</b> تعني أن المبلغ دخل ولا توجد فاتورة تقابله.
       ${d.total_amt?`· إجمالي المعروض: <b>${fmt(d.total_amt)} ج</b>`:''}
     </div>
     <div class="tablecard"><table><thead><tr>
