@@ -54,6 +54,10 @@ function SbUpsert($table,$onconf,$rows){
 }
 function SbPatch($q,$obj){ SbBody 'Patch' $q ($obj|ConvertTo-Json -Compress) 'return=minimal' }
 function SbDelete($q){ Invoke-RestMethod -Method Delete -Uri ($rest+"/"+$q) -Headers ($H + @{ Prefer='return=minimal' }) | Out-Null }
+function SbRpc($fn,$obj){
+  $hdr = @{ apikey=$SbKey; Authorization=("Bearer "+$SbKey); 'Content-Type'='application/json; charset=utf-8' }
+  Invoke-RestMethod -Method Post -Uri ($rest+"/rpc/"+$fn) -Headers $hdr -Body ([Text.Encoding]::UTF8.GetBytes(($obj|ConvertTo-Json -Compress)))
+}
 
 # ── eplus ──
 $cn = New-Object System.Data.SqlClient.SqlConnection("Server=$Server;Database=Genius;User ID=$User;Password=$pw;Connect Timeout=25")
@@ -77,10 +81,10 @@ try {
 
 # ── (2) مزامنة عناوين التوصيل الفاضية للعملاء المحتاجين منطقة ──
 try {
-  $plc=[uri]::EscapeDataString($Placeholder); $cut=[uri]::EscapeDataString($Cutoff)
-  $orders=@(SbGet "orders?select=cust_code,branch_id,created_at&cust_region=eq.$plc&created_at=gte.$cut&order=created_at.desc&limit=5000" | Where-Object { $_ -and $_.cust_code })
+  # العملاء المحتاجين منطقة عبر RPC (تجميع سيرفر — بلا عربى فى الـURL)
+  $custs=@(SbRpc "pending_region_customers" @{ p_since=$Cutoff } | Where-Object { $_ -and $_.cust_code })
   $cmap=@{}
-  foreach($o in $orders){ $cc=[string]$o.cust_code; if(-not $cmap.ContainsKey($cc)){ $cmap[$cc]=@{ branch=$o.branch_id; count=0 } }; $cmap[$cc].count++ }
+  foreach($o in $custs){ $cmap[[string]$o.cust_code]=@{ branch=$o.branch_id; count=[int]$o.order_count } }
   $cdp=@()
   foreach($cc in $cmap.Keys){
     $cnum=[decimal]0; if(-not [decimal]::TryParse($cc,[ref]$cnum)){ continue }
