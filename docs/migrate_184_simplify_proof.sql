@@ -102,3 +102,39 @@ begin
     E'                ''cand_fh_id'', cand_fh_id, ''cand_diff'', cand_diff, ''cand_mins'', cand_mins,\n', '');
   execute src;
 end $do$;
+
+/* ════════════════════════════════════════════════════════════════
+   الاقتراح كنص جاهز + علامة «مكتوب»/«تلقائي»  (نفس اليوم)
+   ----------------------------------------------------------------
+   قرار المالك بعد نقاش: الاقتراح يرجع — بس **كنص جاهز جوّه خانة
+   الكتابة** مش كزرار ولا حالة. المراجع يسيبه أو يغيّره، وفي
+   الحالتين ضغطة واحدة. فمفيش قرار إضافي ومفيش رفض يتسجّل.
+
+   ⚠️ **الخطر اللي اتعالج**: نص جاهز ممكن يتأكّد من غير ما حد يقراه
+   — ٥٠ ضغطة متتالية تبقى ٥٠ «إثبات» موقّع من بني آدم. فالنظام
+   بيسجّل مع كل إثبات إذا كان النص **«مكتوب»** (المراجع غيّره) ولا
+   **«تلقائي»** (سابه زي ما هو). مابتبطّأش الشغل، وبتخلّي المراجعة
+   اللي اتعملت بالضغط تبان لو جيت تدقّق.
+
+   ⚠️ فخ اتقابل أثناء التنفيذ: `replace` على ناتج `pg_get_functiondef`
+   لازم يطابق صيغة الإخراج بالظبط (`DEFAULT NULL::text` مش
+   `default null`) — واحد ماطابقش فالدالة اتعادت بنفس التوقيع
+   وبعدين الـdrop شالها. أي تعديل نصّي لازم يتحقق إن `nsrc <> src`
+   **قبل** أي drop.
+   ════════════════════════════════════════════════════════════════ */
+
+alter table public.shift_txn_reviews  add column if not exists note_src text
+  check (note_src in ('typed','auto'));
+alter table public.wallet_txn_reviews add column if not exists note_src text
+  check (note_src in ('typed','auto'));
+comment on column public.shift_txn_reviews.note_src  is 'typed=كتبه المراجع · auto=قَبِل اقتراح النظام كما هو';
+comment on column public.wallet_txn_reviews.note_src is 'typed=كتبه المراجع · auto=قَبِل اقتراح النظام كما هو';
+
+/* ⚠️ باقي التعديلات (توقيع p_note_src في review_shift_txn و
+   wallet_review_set، وحقل suggest في get_card_review و
+   get_wallet_review) اتعملت على السحابة بتعديل نصّي على التعريفات
+   القائمة. وقت تطبيق الذاتي: اتبع نفس الخطوات بالترتيب، وتأكد بعد
+   كل خطوة إن التوقيع واحد مش اتنين:
+     select proname, pg_get_function_identity_arguments(oid)
+       from pg_proc where proname in
+         ('review_shift_txn','wallet_review_set','get_card_review','get_wallet_review'); */
