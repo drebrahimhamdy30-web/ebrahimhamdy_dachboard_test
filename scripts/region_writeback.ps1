@@ -84,22 +84,26 @@ try {
   # العملاء المحتاجين منطقة عبر RPC (تجميع سيرفر — بلا عربى فى الـURL)
   $custs=@(SbRpc "pending_region_customers" @{ p_since=$Cutoff } | Where-Object { $_ -and $_.cust_code })
   $cmap=@{}
-  foreach($o in $custs){ $cmap[[string]$o.cust_code]=@{ branch=$o.branch_id; count=[int]$o.order_count } }
+  foreach($o in $custs){ $cmap[[string]$o.cust_code]=[pscustomobject]@{ branch=$o.branch_id; cnt=[int]$o.order_count } }
   $cdp=@()
-  foreach($cc in $cmap.Keys){
-    $cnum=[decimal]0; if(-not [decimal]::TryParse($cc,[ref]$cnum)){ continue }
-    $c=$cn.CreateCommand()
-    $c.CommandText="SELECT d.cd_id, LTRIM(RTRIM(d.cd_address)) AS addr, LTRIM(RTRIM(cu.cust_name_ar)) AS nm FROM Customer_Delivery d LEFT JOIN Customer cu ON cu.cust_id=d.cd_cust_id WHERE d.cd_cust_id=@c AND (d.cd_region_id IS NULL OR d.cd_region_id=0)"
-    [void]$c.Parameters.AddWithValue('@c',$cnum)
-    $r=$c.ExecuteReader()
-    while($r.Read()){ $cdp += @{ cust_code=$cc; cd_id=[int]$r['cd_id']; cust_name=[string]$r['nm']; cd_address=[string]$r['addr']; branch_id=$cmap[$cc].branch; order_count=$cmap[$cc].count; synced_at=$runStart } }
-    $r.Close()
+  foreach($cc in @($cmap.Keys)){
+    $cnum=[decimal]0; if(-not [decimal]::TryParse([string]$cc,[ref]$cnum)){ continue }
+    $cmd=$cn.CreateCommand()
+    $cmd.CommandText="SELECT d.cd_id, LTRIM(RTRIM(d.cd_address)) AS addr, LTRIM(RTRIM(cu.cust_name_ar)) AS nm FROM Customer_Delivery d LEFT JOIN Customer cu ON cu.cust_id=d.cd_cust_id WHERE d.cd_cust_id=@c AND (d.cd_region_id IS NULL OR d.cd_region_id=0)"
+    [void]$cmd.Parameters.AddWithValue('@c',$cnum)
+    $rd=$cmd.ExecuteReader()
+    while($rd.Read()){
+      $cdId = [int][decimal]$rd['cd_id']
+      $cdp += [pscustomobject]@{ cust_code=[string]$cc; cd_id=$cdId; cust_name=[string]$rd['nm']; cd_address=[string]$rd['addr']; branch_id=$cmap[$cc].branch; order_count=$cmap[$cc].cnt; synced_at=$runStart }
+    }
+    $rd.Close()
   }
-  for($i=0;$i -lt $cdp.Count;$i+=200){ SbUpsert "customer_delivery_pending" "cust_code,cd_id" ($cdp[$i..([Math]::Min($i+199,$cdp.Count-1))]) }
+  $cdpArr=@($cdp)
+  for($i=0;$i -lt $cdpArr.Count;$i+=200){ SbUpsert "customer_delivery_pending" "cust_code,cd_id" ($cdpArr[$i..([Math]::Min($i+199,$cdpArr.Count-1))]) }
   # مسح القديم (اتكتب أو خرج من القائمة): أى صف ماتلمسش فى الجولة دى
   SbDelete ("customer_delivery_pending?synced_at=lt."+[uri]::EscapeDataString($runStart))
-  L ("عملاء محتاجين منطقة: " + $cmap.Count + " — عناوين فاضية: " + $cdp.Count)
-} catch { L ("⚠️ مزامنة العناوين فشلت: " + $_.Exception.Message) }
+  L ("عملاء محتاجين منطقة: " + $cmap.Count + " — عناوين فاضية: " + $cdpArr.Count)
+} catch { L ("⚠️ مزامنة العناوين فشلت (سطر " + $_.InvocationInfo.ScriptLineNumber + "): " + $_.Exception.Message) }
 
 # ── (3) تطبيق الطابور ──
 $pending=@()
