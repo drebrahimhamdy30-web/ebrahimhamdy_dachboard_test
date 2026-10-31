@@ -73,6 +73,12 @@
   td.r,th.r{text-align:right} td.notes{text-align:right;white-space:normal;color:var(--muted);max-width:220px} td.dev{color:var(--muted);font-size:11.5px} td.visa{background:#faf5ff}
   tbody tr:nth-child(even){background:#fafbfc} tbody tr:hover{background:#f0fdfa}
   .num{font-variant-numeric:tabular-nums;font-weight:700} .pos{color:var(--green)}.neg{color:var(--red)}
+  /* جداول المراجعة: محاذاة للنص (يمين في RTL) مش توسيط — الأرقام
+     بتفضل بمحاذاتها عشان الخانات تحت بعضها تتقارن بالعين. */
+  .algn th:not(.num), .algn td:not(.num){text-align:start}
+  .algn th[draggable]{cursor:grab}
+  .algn th.dragging{opacity:.45}
+  .algn th.dropzone{box-shadow:inset 3px 0 0 var(--accent,#0f766e)}
   .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700}
   .pill.cash{background:#e0f2fe;color:#075985}.pill.visa{background:#f3e8ff;color:#6b21a8}.pill.out{background:#fee2e2;color:#991b1b}.pill.in{background:#dcfce7;color:#166534}
   select.e{font-family:inherit;font-size:11.5px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:6px;max-width:120px}
@@ -344,7 +350,7 @@ function renderCardReview(d){
       <select id="userSel" class="usel"><option value="">الكل</option>${users.map(u=>`<option value="${esc(u)}" ${userFilter===u?'selected':''}>${esc(u)}</option>`).join('')}</select>
       <span class="shown" id="shown"></span>
     </div>
-    <div class="tablecard"><table><thead><tr>
+    <div class="tablecard"><table class="algn" id="crTable"><thead><tr>
       <th class="rv">المراجعة</th><th>الحالة</th><th class="r">الدليل</th>
       <th>الوقت</th><th>النوع</th><th>قيمة المدفوع</th><th>القيمة</th><th class="r">من</th><th class="r">الى</th><th class="r">المستخدم</th><th>الجهاز</th><th>الحساب</th><th class="r">ملاحظات</th>
     </tr></thead><tbody id="tb"></tbody></table></div>
@@ -586,6 +592,79 @@ function render(){
 /* الدليل: لو النظام لقى مرجع بيتعرض نص ثابت (واقعة مش رأي).
    ولو مالقاش، المحاسب بيكتبه بنفسه وزر «تم» بيحفظه مع المراجعة
    — فالإقفال بيبقى وراه نص منسوب لصاحبه مش ضغطة فاضية. */
+/* ═══ ترتيب الأعمدة بالسحب ═══════════════════════════════════
+   الترتيب بيتحفظ في المتصفح لكل جدول على حدة — تفضيل عرض شخصي
+   مش إعداد مؤسسة، فمحلّه localStorage مش القاعدة.
+   بنعيد الترتيب على الـDOM بعد الرسم بدل ما نغيّر بناة الصفوف —
+   كده أي تعديل جاي على الأعمدة مايحتاجش يعرف حاجة عن الترتيب. */
+function colOrderKey(tag){ return 'phalixCols:' + tag; }
+function colOrderGet(tag, n){
+  try{
+    const v = JSON.parse(localStorage.getItem(colOrderKey(tag))||'null');
+    if(Array.isArray(v) && v.length===n && v.every(x=>Number.isInteger(x)&&x>=0&&x<n)
+       && new Set(v).size===n) return v;
+  }catch(e){}
+  return Array.from({length:n}, (_,i)=>i);
+}
+function colOrderSet(tag, order){
+  try{ localStorage.setItem(colOrderKey(tag), JSON.stringify(order)); }catch(e){}
+}
+function colOrderApply(table, tag){
+  if(!table) return;
+  const head = table.tHead && table.tHead.rows[0]; if(!head) return;
+  const n = head.cells.length;
+  const order = colOrderGet(tag, n);
+  const reorder = row => {
+    /* صف برسالة واحدة (colspan) مايتلمسش */
+    if(row.cells.length !== n) return;
+    const cells = Array.from(row.cells);
+    order.forEach(i => row.appendChild(cells[i]));
+  };
+  reorder(head);
+  Array.from(table.tBodies).forEach(tb => Array.from(tb.rows).forEach(reorder));
+  Array.from(head.cells).forEach((th, pos) => {
+    th.draggable = true;
+    th.dataset.pos = pos;
+    th.title = 'اسحب لتغيير ترتيب العمود';
+  });
+}
+function colOrderEnable(table, tag, redraw){
+  if(!table || table.dataset.cdrag) return;
+  table.dataset.cdrag = '1';
+  let from = null;
+  table.addEventListener('dragstart', e => {
+    const th = e.target.closest('th'); if(!th) return;
+    from = +th.dataset.pos; th.classList.add('dragging');
+    try{ e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',''); }catch(_){}
+  });
+  table.addEventListener('dragover', e => {
+    const th = e.target.closest('th'); if(!th || from===null) return;
+    e.preventDefault();
+    Array.from(table.tHead.rows[0].cells).forEach(x=>x.classList.remove('dropzone'));
+    th.classList.add('dropzone');
+  });
+  table.addEventListener('drop', e => {
+    const th = e.target.closest('th'); if(!th || from===null) return;
+    e.preventDefault();
+    const to = +th.dataset.pos;
+    const n = table.tHead.rows[0].cells.length;
+    const cur = colOrderGet(tag, n);
+    const moved = cur.splice(from, 1)[0];
+    cur.splice(to, 0, moved);
+    colOrderSet(tag, cur);
+    from = null;
+    if(typeof redraw === 'function') redraw(); else colOrderApply(table, tag);
+  });
+  table.addEventListener('dragend', () => {
+    from = null;
+    Array.from(table.tHead.rows[0].cells).forEach(x=>x.classList.remove('dragging','dropzone'));
+  });
+}
+function colOrderInit(sel, tag, redraw){
+  const t = document.querySelector(sel); if(!t) return;
+  colOrderApply(t, tag); colOrderEnable(t, tag, redraw);
+}
+
 function crNoteId(t){ return 'cn-' + t.branch + '-' + t.fh_id; }
 function crEvidence(t, lock){
   if(t.evidence) return esc(t.evidence);
@@ -608,6 +687,8 @@ function drawRows(){
   const sum=rows.reduce((a,t)=>a+(t.kind==='صرف'?-1:1)*(+t.amount),0);
   document.getElementById('shown').textContent =
     'المعروض: '+rows.length + (CAN_TOTALS ? ' · مجموع: '+fmt(sum)+' ج' : '');
+  /* الترتيب المحفوظ بيتطبّق بعد كل رسم عشان الصفوف الجديدة
+     تمشي عليه زي الرأس. */
   document.getElementById('tb').innerHTML = rows.map(t=>{
     const cls=t.kind==='صرف'?'out':(t.kind==='فيزا'?'visa':(t.kind==='توريد'?'in':'cash')); const iv=(t.kind==='فيزا');
     const lock=!!t.rv;
@@ -635,6 +716,8 @@ function drawRows(){
       `<td class="r">${esc(t.user_name||'—')}</td><td class="dev">${esc(t.computer||'—')}</td>`+
       `<td class="${iv?'visa':''}">${acct}</td><td class="notes">${esc(t.notes||'')}</td></tr>`;
   }).join('') || '<tr><td colspan="11" class="state">لا توجد حركات مطابقة.</td></tr>';
+  /* الترتيب المحفوظ يتطبّق على الرأس والصفوف بعد كل رسم */
+  if(VIEW==='cards') colOrderInit('#crTable', 'cardreview', drawRows);
   document.querySelectorAll('.eacct').forEach(s=>s.onchange=()=>{
     const t=TXN[+s.dataset.i]; const v=s.value;
     if(v){ t.kind='فيزا'; t.channel=v; if(t.paid==null) t.paid=+t.amount; if(t.manual==null) t.manual=false; } else { t.kind='كاش'; t.channel=''; }
@@ -754,7 +837,7 @@ function renderWalletReview(d){
       كل حركة مالية فعلية ومقابلها في eplus. <b>«بلا مقابل»</b> تعني أن المبلغ دخل ولا توجد فاتورة تقابله.
       ${d.total_amt?`· إجمالي المعروض: <b>${fmt(d.total_amt)} ج</b>`:''}
     </div>
-    <div class="tablecard"><table><thead><tr>
+    <div class="tablecard"><table class="algn" id="wrTable"><thead><tr>
       <th>الحالة</th><th>المصدر</th><th>الوقت</th><th class="r">الماكينة / المحفظة</th>
       <th>الفرع</th><th>القيمة</th><th class="r">رقم العملية</th><th>الرصيد بعدها</th>
       <th>النوع</th><th class="r">الدليل</th>
@@ -779,6 +862,8 @@ function renderWalletReview(d){
       `<td>${esc(r.kind||'—')}</td>`+
       `<td class="r ev">${wrProof(r)}</td></tr>`;
   }).join('') : '<tr><td colspan="10" class="state">لا توجد حركات في هذه الشريحة</td></tr>';
+
+  colOrderInit('#wrTable', 'walletreview', () => renderWalletReview(d));
 
   const go=()=>{ WR.page=1; loadWalletTxns(); };
   document.querySelectorAll('.crst[data-w]').forEach(b=>b.onclick=()=>{
