@@ -34,6 +34,8 @@ GRANT SELECT ON Delivery_cost_region TO phalix_writer
 GO
 GRANT SELECT, UPDATE ON Customer_Delivery TO phalix_writer
 GO
+GRANT INSERT ON Replication_Trans TO phalix_writer
+GO
 SELECT 'regions=' + CAST(COUNT(*) AS varchar(12)) FROM Delivery_cost_region
 GO
 SELECT 'delivery_rows=' + CAST(COUNT(*) AS varchar(12)) FROM Customer_Delivery

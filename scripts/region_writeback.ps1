@@ -28,6 +28,7 @@ param(
   [switch]$ApplyOnly,     # تطبيق الطابور فقط (خفيف) — للمهمة كل دقيقة، يكتب تلقائيًا
   [string]$PasswordFile,  # ملف باسوورد مشفّر للمهام المجدولة
   [string]$KeyFile,       # مفتاح AES للفكّ (يخلّى المهمة تشتغل كـSYSTEM)
+  [string]$ReplUid = "1", # sec_insert_uid لصف إشارة الريبليكشن
   [int]$Max = 500
 )
 $ErrorActionPreference = "Stop"
@@ -130,7 +131,16 @@ try {
 }  # نهاية doSync
 
 # ── (3) تطبيق الطابور ──
-$done=0; $failed=0
+$done=0; $failed=0; $signaled=@{}
+# إشارة ريبليكشن «Edit Customer» (زى التطبيق بالظبط) → الفرع يعيد سحب العميل بمنطقته
+function SignalRepl($custNum){
+  $k=[string]$custNum
+  if($signaled.ContainsKey($k)){ return }
+  try {
+    [void](NonQuery "INSERT INTO Replication_Trans (trans_typ_1,trans_typ_2,store_id,itm_id,class_id,class_id_ext1,class_id_ext2,itm_qty,general_id,general_name,trans_qry,store_id2,itm_expire,sec_insert_date,sec_insert_uid,form_nm,ePlusVersion) VALUES (7,2,0,0,0,0,0,0,@g,'Edit Customer','',0,NULL,getdate(),@u,'Add_edit_customer_ar',NULL)" @{ '@g'=$custNum; '@u'=$ReplUid })
+    $signaled[$k]=$true
+  } catch { L ("  ⚠️ فشل إشارة الريبليكشن للعميل ${k}: " + $_.Exception.Message) }
+}
 if($doApply){
 $pending=@()
 try { $pending=@(SbGet "customer_region_queue?status=eq.pending&order=created_at.asc&limit=$Max" | Where-Object { $_ -and $_.id }) } catch { L ("فشل قراءة الطابور: " + $_.Exception.Message); $cn.Close(); exit 1 }
@@ -173,8 +183,9 @@ foreach($row in $pending){
         else { SbPatch "customer_region_queue?id=eq.$id" @{ status='failed'; dc_id=$dc; result_note=("لا يوجد عنوان مطابق (فاضى=$empty)"); applied_at=(NowUtc) }; L ("  [$code] ✗ لا يوجد عنوان مطابق (فاضى=$empty)"); $failed++; continue }
       }
     }
+    SignalRepl $codeNum   # إشارة الريبليكشن عشان الفرع يسحب العميل بمنطقته الجديدة
     SbPatch "customer_region_queue?id=eq.$id" @{ status='done'; dc_id=$dc; result_note=("صفوف=$n"+$(if($note){" — "+$note}else{""})); applied_at=(NowUtc) }
-    L ("  [$code] ✓ $name (صفوف=$n)"+$(if($note){" — "+$note}else{""})); $done++
+    L ("  [$code] ✓ $name (صفوف=$n → إشارة ريبليكشن)"+$(if($note){" — "+$note}else{""})); $done++
   } catch {
     try { SbPatch "customer_region_queue?id=eq.$id" @{ status='failed'; dc_id=$dc; result_note=("خطأ: "+$_.Exception.Message); applied_at=(NowUtc) } } catch {}
     L ("  [$code] ✗ خطأ: " + $_.Exception.Message); $failed++
