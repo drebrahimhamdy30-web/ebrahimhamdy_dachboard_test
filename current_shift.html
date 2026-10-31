@@ -101,6 +101,9 @@
   @media(max-width:760px){body{padding:10px}.kpi{min-width:100%}}
 /* تبويب مراجعة البطاقات: نفس الجدول، بس التاريخ تحت الوقت لأنه بيعدّي أيام */
 .dsub{font-size:.62rem;color:var(--text-muted,#64748b);direction:ltr}
+.crbr{font-weight:800;font-size:.82rem;color:var(--primary,#0f766e)}
+.crall{display:inline-flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-muted,#64748b);cursor:pointer}
+.crall input{cursor:pointer}
 .crbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0 10px}
 .crbar select,.crbar input[type=date]{padding:.35rem .5rem;border:1px solid var(--border,#cbd5e1);border-radius:8px;font-family:inherit;font-size:.78rem;background:var(--surface,#fff);color:inherit}
 .crpager{display:flex;gap:5px;justify-content:center;align-items:center;margin-top:10px;flex-wrap:wrap}
@@ -195,12 +198,18 @@ async function init(){
   try{ bid=(typeof Session!=='undefined'&&Session.branchId)?Session.branchId():''; }catch(e){}
   try{ bname=(typeof Session!=='undefined'&&Session.branch)?Session.branch():''; }catch(e){}
   try{ seesAll=(typeof Session!=='undefined'&&Session.seesAllBranches)?await Session.seesAllBranches():false; }catch(e){}
+  SEES_ALL = seesAll;
   const mine = BRANCHES.find(b=>b.id&&b.id===bid) || BRANCHES.find(b=>norm(b.name)===norm(bname));
   if(mine) BRANCH=mine.sync_key; else if(BRANCHES.length) BRANCH=BRANCHES[0].sync_key;
   const sel=document.getElementById('brSel');
   if(seesAll || !mine){
     sel.style.display=''; sel.innerHTML=BRANCHES.map(b=>`<option value="${b.sync_key}" ${b.sync_key===BRANCH?'selected':''}>${esc(b.name)}</option>`).join('');
-    sel.onchange=()=>{ BRANCH=sel.value; loadPoints(); };
+    /* الشاشة كانت فيها فلترين للفرع: بتاع الصفحة ده وواحد جوّه تبويب
+       البطاقات — اتنين بيتناقضوا والمستخدم مايعرفش مين الحاكم
+       (ملاحظة المالك 2026-10-31). بقى فلتر واحد، والتبويب المفتوح
+       بيتحدّث عليه بدل ما يفضل على فرع قديم. */
+    sel.onchange=()=>{ BRANCH=sel.value;
+      if(VIEW==='cards'){ CR.page=1; loadCardTxns(); } else loadPoints(); };
   }
   document.getElementById('refreshBtn').onclick=refreshCurrent;
   if(!BRANCH){ document.getElementById('content').innerHTML='<div class="state">تعذّر تحميل الفروع.</div>'; return; }
@@ -215,19 +224,22 @@ async function init(){
    بترجّع حركات الفيزا والمحافظ عبر الشيفتات في مدى تاريخ، بنفس
    شكل الصفوف بالظبط عشان الجدول يرسمها من غير أي تعديل.
    الصف المُراجَع بيفضل مكانه (بيتقفل بس) زي الشيفت. */
-let CR = { from:'', to:'', branch:'', pending:false, page:1, size:50, total:0 };
+let SEES_ALL = false;
+let CR = { from:'', to:'', allBr:false, pending:false, page:1, size:50, total:0 };
 function crToday(){ const c=new Date(new Date().toLocaleString('en-US',{timeZone:'Africa/Cairo'}));
   const p=n=>String(n).padStart(2,'0'); return `${c.getFullYear()}-${p(c.getMonth()+1)}-${p(c.getDate())}`; }
 
 function showCardReview(){
   VIEW='cards';
-  if(!CR.from){ CR.from=crToday(); CR.to=crToday(); CR.branch=BRANCH||''; }
+  if(!CR.from){ CR.from=crToday(); CR.to=crToday(); }
   loadCardTxns();
 }
 
 async function loadCardTxns(){
   document.getElementById('content').innerHTML='<div class="state">جارِ التحميل…</div>';
-  const d = await rpc('get_card_txns', { p_branch: CR.branch||null, p_from: CR.from, p_to: CR.to,
+  /* الفرع من فلتر الصفحة، و«كل الفروع» بتشيله. والسيرفر بيضيّقه
+     على فرع المستخدم لو مش مصرّح — الإخفاء في الشاشة مش حماية. */
+  const d = await rpc('get_card_txns', { p_branch: CR.allBr ? null : (BRANCH||null), p_from: CR.from, p_to: CR.to,
                                           p_only_pending: CR.pending, p_limit: CR.size,
                                           p_offset: (CR.page-1)*CR.size });
   if(!d){ document.getElementById('content').innerHTML='<div class="state">تعذّر التحميل — تأكد من صلاحيتك.</div>'; return; }
@@ -243,7 +255,10 @@ async function loadCardTxns(){
 function renderCardReview(d){
   const pages = Math.max(1, Math.ceil(CR.total / CR.size));
   if(CR.page > pages) CR.page = pages;
-  const brOpts = BRANCHES.map(b=>`<option value="${esc(b.sync_key)}" ${CR.branch===b.sync_key?'selected':''}>${esc(b.name)}</option>`).join('');
+  const brName = (BRANCHES.find(b=>b.sync_key===BRANCH)||{}).name || '';
+  const brBox = SEES_ALL
+    ? `<label class="crall"><input type="checkbox" id="crAll" ${CR.allBr?'checked':''}> كل الفروع</label>`
+    : '';
   const kpis = CAN_TOTALS ? `<div class="kpis">
       <div class="kpi"><div class="v">${fmt(d.total)}</div><div class="l">عدد الحركات</div></div>
       <div class="kpi"><div class="v">${fmt(d.total_paid)}</div><div class="l">إجمالي قيمة المدفوع</div></div>
@@ -254,7 +269,7 @@ function renderCardReview(d){
   const users  = (d.users||[]).sort((a,b)=>String(a).localeCompare(String(b),'ar'));
   document.getElementById('content').innerHTML = `
     <div class="crbar">
-      <select id="crBr"><option value="">كل الفروع</option>${brOpts}</select>
+      <span class="crbr">${CR.allBr ? 'كل الفروع' : esc(brName)}</span>${brBox}
       <input type="date" id="crFrom" value="${CR.from}"> <span style="font-size:.78rem">←</span>
       <input type="date" id="crTo" value="${CR.to}">
       <select id="crPend"><option value="" ${!CR.pending?'selected':''}>الكل</option><option value="1" ${CR.pending?'selected':''}>غير المراجَع فقط</option></select>
@@ -275,7 +290,7 @@ function renderCardReview(d){
     <div class="crpager" id="crPager"></div>`;
 
   const go = () => { CR.page=1; loadCardTxns(); };
-  document.getElementById('crBr').onchange   = e => { CR.branch=e.target.value; go(); };
+  const ab=document.getElementById('crAll'); if(ab) ab.onchange = e => { CR.allBr=e.target.checked; go(); };
   document.getElementById('crFrom').onchange = e => { CR.from=e.target.value||crToday(); go(); };
   document.getElementById('crTo').onchange   = e => { CR.to=e.target.value||crToday(); go(); };
   document.getElementById('crPend').onchange = e => { CR.pending=!!e.target.value; go(); };
