@@ -101,6 +101,13 @@
   @media(max-width:760px){body{padding:10px}.kpi{min-width:100%}}
 /* تبويب مراجعة البطاقات: نفس الجدول، بس التاريخ تحت الوقت لأنه بيعدّي أيام */
 .dsub{font-size:.62rem;color:var(--text-muted,#64748b);direction:ltr}
+.wrnote{display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin-top:3px}
+.wrnote .inp{border:1px solid var(--border,#cbd5e1);border-radius:6px;padding:.15rem .3rem;
+  font-family:inherit;font-size:.72rem;min-width:130px;flex:1}
+.wrnote .sel{border:1px solid var(--border,#cbd5e1);border-radius:6px;padding:.12rem .25rem;
+  font-family:inherit;font-size:.7rem}
+.btn-flag{background:#fecaca;color:#7f1d1d;border:none;border-radius:6px;padding:.15rem .45rem;
+  font-family:inherit;font-weight:700;font-size:.68rem;cursor:pointer}
 .crstates{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
 .crst{border:1px solid var(--border,#cbd5e1);background:var(--surface,#fff);color:var(--text-muted,#64748b);
   border-radius:999px;padding:.3rem .7rem;font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer;
@@ -629,11 +636,17 @@ function hm(s){ if(!s) return '—'; try{ return new Date(s).toLocaleTimeString(
    التسييل (خروج من محفظة ↔ دخول على ماكينة بنفس القيمة) بيتعرف
    لوحده فمابيزعّقش كل يوم — تفسير المالك للمبالغ الكبيرة بلا مقابل. */
 const WR_STATE = {
-  no_sale:  ['بلا مقابل',   '#fee2e2', '#b91c1c'],
-  has_sale: ['ليها بيع',    '#dcfce7', '#15803d'],
-  cashout:  ['تسييل محفظة', '#ede9fe', '#5b21b6']
+  no_sale:   ['بلا مقابل',    '#fee2e2', '#b91c1c'],
+  candidate: ['مرشّح',        '#ffedd5', '#9a3412'],
+  has_sale:  ['ليها بيع',     '#dcfce7', '#15803d'],
+  cashout:   ['تسييل محفظة',  '#ede9fe', '#5b21b6'],
+  noted:     ['موثّقة',       '#e0f2fe', '#0369a1'],
+  flagged:   ['مشكلة',        '#fecaca', '#7f1d1d']
 };
-let WR = { from:'', to:'', state:'no_sale', page:1, size:50, total:0 };
+/* أسباب مختصرة عشان نقدر نجمّع الأنماط المتكررة بدل ما كل واحد
+   يكتب بطريقته — النص الحر لوحده مابيتجمّعش. */
+const WR_REASONS = ['تحويل بين محافظنا','إيداع شخصي','سداد مورّد','مرتجع عميل','خطأ تسجيل','أخرى'];
+let WR = { from:'', to:'', state:'candidate', page:1, size:50, total:0 };
 
 function showWalletReview(){
   VIEW='wallets';
@@ -658,6 +671,69 @@ function wrChips(d){
     h+=pill(k,c[0],c[1],c[2],x[0],x[1]); });
   return h;
 }
+/* ═══ إثبات المراجعة ═════════════════════════════════════════
+   **الصف مايتقفلش بضغطة فاضية**: يا مرجع قابل للفحص (رقم بيعة
+   أكّدها بني آدم)، يا نص مكتوب منسوب لصاحبه. ده أصل السؤال كله:
+   «إيه اللي يأكد إن المحاسب راجع صح؟» — فزر «تم» المجرّد مرفوض.
+   واللي النظام لقاه بنفسه **مايتكتبش فوقه**: ده واقعة مش رأي. */
+function wrProof(r){
+  const k = r.src + ':' + r.id;
+  if(r.rv){
+    const txt = r.rv.kind==='noted'
+      ? (r.rv.reason? '<b>'+esc(r.rv.reason)+'</b> — ':'') + esc(r.rv.note||'')
+      : esc(r.evidence||'');
+    return `<div>${txt}</div><div class="dsub">${esc(r.rv.by||'')} · ${esc(r.rv.at||'')}` +
+           (IS_ADMIN? ` <button class="btn-unlock" onclick="wrClear('${r.src}',${r.id})">فتح</button>`:'') +
+           `</div>`;
+  }
+  if(r.state==='candidate'){
+    return `<div>${esc(r.evidence||'')}</div>` +
+           `<button class="btn-rv" onclick="wrConfirm('${r.src}',${r.id},${r.cand_fh_id})">تأكيد الربط ✓</button>` +
+           ` <button class="btn-unlock" onclick="wrOpenNote('${k}')">مش هي</button>` +
+           wrNoteBox(r, true);
+  }
+  if(r.state==='no_sale'){ return wrNoteBox(r, false); }
+  return r.evidence? esc(r.evidence) : '<span class="dash">—</span>';
+}
+function wrNoteBox(r, hidden){
+  const k = r.src + ':' + r.id;
+  return `<div class="wrnote" id="nb-${k}" ${hidden?'style="display:none"':''}>` +
+    `<select class="sel" id="rs-${k}"><option value="">— السبب —</option>` +
+    WR_REASONS.map(x=>`<option>${esc(x)}</option>`).join('') + `</select>` +
+    `<input class="inp" id="nt-${k}" placeholder="اكتب الدليل…">` +
+    `<button class="btn-rv" onclick="wrSaveNote('${r.src}',${r.id})">حفظ</button>` +
+    `<button class="btn-flag" onclick="wrFlag('${r.src}',${r.id})">مشكلة</button></div>`;
+}
+function wrOpenNote(k){ const b=document.getElementById('nb-'+k); if(b) b.style.display=''; }
+
+async function wrConfirm(src, id, fh){
+  const r = await rpcWrite('wallet_review_set', { p_src:src, p_id:id, p_kind:'linked', p_ref_fh_id:fh });
+  if(r.success!==true){ alert(r.error); return; }
+  loadWalletTxns();
+}
+async function wrSaveNote(src, id){
+  const k = src+':'+id;
+  const note = (document.getElementById('nt-'+k)||{}).value || '';
+  const reason = (document.getElementById('rs-'+k)||{}).value || '';
+  if(!note.trim()){ alert('اكتب الدليل قبل الحفظ'); return; }
+  const r = await rpcWrite('wallet_review_set', { p_src:src, p_id:id, p_kind:'noted',
+                                                  p_reason:reason||null, p_note:note });
+  if(r.success!==true){ alert(r.error); return; }
+  loadWalletTxns();
+}
+async function wrFlag(src, id){
+  if(!confirm('تعليم الحركة كمشكلة؟ هتفضل ظاهرة لحد ما تتحل.')) return;
+  const r = await rpcWrite('wallet_review_set', { p_src:src, p_id:id, p_kind:'flagged' });
+  if(r.success!==true){ alert(r.error); return; }
+  loadWalletTxns();
+}
+async function wrClear(src, id){
+  if(!confirm('فكّ إثبات المراجعة لهذه الحركة؟')) return;
+  const r = await rpcWrite('wallet_review_clear', { p_src:src, p_id:id });
+  if(r.success!==true){ alert(r.error); return; }
+  loadWalletTxns();
+}
+
 function renderWalletReview(d){
   const pages=Math.max(1,Math.ceil(WR.total/WR.size));
   if(WR.page>pages) WR.page=pages;
@@ -697,7 +773,7 @@ function renderWalletReview(d){
       `<td class="r ev">${esc(r.ref||'—')}</td>`+
       `<td class="num">${r.balance!=null?fmt(r.balance):'—'}</td>`+
       `<td>${esc(r.kind||'—')}</td>`+
-      `<td class="r ev">${r.evidence?esc(r.evidence):'<span class="dash">—</span>'}</td></tr>`;
+      `<td class="r ev">${wrProof(r)}</td></tr>`;
   }).join('') : '<tr><td colspan="10" class="state">لا توجد حركات في هذه الشريحة</td></tr>';
 
   const go=()=>{ WR.page=1; loadWalletTxns(); };
