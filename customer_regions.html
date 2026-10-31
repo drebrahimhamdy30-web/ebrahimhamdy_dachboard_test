@@ -57,7 +57,7 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
     <option value="">كل الفروع</option>
   </select>
   <input type="text" class="search-input" id="search" placeholder="🔍 بحث باسم العميل أو الكود..." oninput="onSearch()">
-  <span class="stat-pill">عملاء محتاجين منطقة <b id="stCount">—</b></span>
+  <span class="stat-pill">عناوين محتاجة منطقة <b id="stCount">—</b></span>
 </div>
 
 <div id="content"><div class="loading">جارٍ التحميل…</div></div>
@@ -66,13 +66,12 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
 
 <script>
 // ═══════════════ تعيين مناطق العملاء ═══════════════
-// بتعرض العملاء اللي طلباتهم «يحتاج إضافة منطقة» من وقت تشغيل الشاشة،
-// وبتخلّي الموظف يحدّد المنطقة — والحفظ (لاحقًا) بيكتبها في eplus.
-// الفرع بيتحدد من مبيعات العميل (orders.branch_id)، والمناطق قائمة واحدة مشتركة.
+// بتعرض عناوين التوصيل الفاضية (من eplus) للعملاء اللي طلباتهم «يحتاج إضافة منطقة».
+// المصدر customer_delivery_pending (بيعبّيه سكربت الماستر من Customer_Delivery) —
+// العنوان مش موجود فى طلباتنا فبييجى من eplus. صف لكل (عميل+عنوان/cd_id):
+// العميل اللي له عنوان بمنطقة وعنوان بلا منطقة بيظهرله العنوان الناقص بس.
+// الموظف يحدّد المنطقة ويحفظ → طابور → السكربت يكتبها على نفس السطر فى eplus.
 
-const PLACEHOLDER = 'يحتاج إضافة منطقة';
-// من وقت «بناء الشاشة» وجاي — بنتجاهل الطلبات الأقدم
-const CUTOFF = '2026-10-30T00:00:00+02:00';
 const PAGE_SIZE = 40;
 
 let db, currentUser, activeBranch = null;
@@ -81,9 +80,9 @@ let filtered = [];
 let page = 1;
 let regionOptions = [];  // أسماء المناطق المشتركة (لقطة eplus)
 let regionIdByName = new Map(); // اسم المنطقة → dc_id (من اللقطة)
-let submitted = new Map(); // key(عميل|عنوان) → {region,status} لللى اتبعت/اتطبّق
+let submitted = new Map(); // key(عميل|cd_id) → {region,status} لللى اتبعت/اتطبّق
 let searchTimer = null;
-const keyOf = (code,addr)=> String(code)+'|'+String(addr||'');
+const keyOf = (code,cdId)=> String(code)+'|'+String(cdId);
 
 (async function init(){
   currentUser = Session.user();
@@ -133,37 +132,25 @@ async function loadRegions(){
 async function loadSubmitted(){
   submitted = new Map();
   try{
-    let path = 'customer_region_queue?select=cust_code,cust_address,region_name,status&status=in.(pending,done)';
+    let path = 'customer_region_queue?select=cust_code,cd_id,region_name,status&status=in.(pending,done)';
     const rows = await Session.getAll(path);
-    (rows||[]).forEach(r=> submitted.set(keyOf(r.cust_code,r.cust_address), {region:r.region_name, status:r.status}));
+    (rows||[]).forEach(r=> submitted.set(keyOf(r.cust_code,r.cd_id), {region:r.region_name, status:r.status}));
   }catch(e){}
 }
 
 async function loadData(){
   document.getElementById('content').innerHTML = '<div class="loading">جارٍ التحميل…</div>';
   try{
-    let path = 'orders?select=cust_code,customer_name,customer_address,customer_phone,branch_id,created_at'
-             + '&cust_region=eq.' + encodeURIComponent(PLACEHOLDER)
-             + '&created_at=gte.' + encodeURIComponent(CUTOFF)
-             + '&order=created_at.desc';
+    // المصدر = عناوين التوصيل الفاضية من eplus (بيعبّيها سكربت الماستر). صف لكل cd_id.
+    let path = 'customer_delivery_pending?select=cust_code,cd_id,cust_name,cd_address,branch_id,order_count&order=cust_name.asc';
     if(activeBranch) path += '&branch_id=eq.' + activeBranch;
-    const orders = await Session.getAll(path);
-
-    // صف لكل (عميل + عنوان): المنطقة لكل عنوان، فالعنوان المختلف طلب مستقل
-    const byKey = new Map();
-    (orders||[]).forEach(o=>{
-      if(!o.cust_code) return;                 // «مرتجع» وخلافه بلا كود — نتجاهله
-      const addr = o.customer_address||'';
-      const k = keyOf(o.cust_code, addr);
-      const cur = byKey.get(k);
-      if(cur){ cur.count++; }
-      else byKey.set(k, {
-        key:k, cust_code:o.cust_code, name:o.customer_name||'—',
-        address:addr, phone:o.customer_phone||'',
-        branch_id:o.branch_id, last:o.created_at, count:1
-      });
-    });
-    allRows = [...byKey.values()];
+    const rows = await Session.getAll(path);
+    allRows = (rows||[]).map(r=>({
+      key: keyOf(r.cust_code, r.cd_id),
+      cust_code: r.cust_code, cd_id: r.cd_id,
+      name: r.cust_name || '—', address: r.cd_address || '',
+      branch_id: r.branch_id, count: r.order_count || 0
+    }));
     applyFilter();
   }catch(e){
     document.getElementById('content').innerHTML = '<div class="empty">خطأ في التحميل</div>';
@@ -197,7 +184,7 @@ function render(){
       : `<td><input class="region-pick" list="regionsDL" placeholder="🔍 ابحث واختر المنطقة" autocomplete="off"></td>
          <td><button class="btn-save" onclick="saveRow(this)">حفظ</button></td>`;
     return `
-    <tr data-code="${esc(r.cust_code)}" data-addr="${esc(r.address)}" data-branch="${esc(r.branch_id||'')}" data-key="${esc(r.key)}">
+    <tr data-code="${esc(r.cust_code)}" data-cdid="${esc(r.cd_id)}" data-addr="${esc(r.address)}" data-branch="${esc(r.branch_id||'')}" data-key="${esc(r.key)}">
       <td class="cr-code">${esc(r.cust_code)}</td>
       <td><div class="cr-name">${esc(r.name)}</div></td>
       <td class="cr-addr" title="${esc(r.address)}">${r.address?('📍 '+esc(r.address)):'<span style="color:var(--text-muted)">— بلا عنوان —</span>'}</td>
@@ -245,8 +232,10 @@ async function saveRow(btn){
   if(!regionOptions.includes(region)){ toast('اختر منطقة من القائمة بالظبط'); return; }
   btn.disabled = true; btn.textContent = '...';
   try{
+    const cdId = tr.dataset.cdid;
     const { error } = await db.from('customer_region_queue').insert({
       cust_code: code,
+      cd_id: cdId ? Number(cdId) : null,
       cust_address: addr,
       region_name: region,
       dc_id: regionIdByName.get(region) ?? null,
