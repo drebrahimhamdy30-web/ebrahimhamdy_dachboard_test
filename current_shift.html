@@ -101,6 +101,14 @@
   @media(max-width:760px){body{padding:10px}.kpi{min-width:100%}}
 /* تبويب مراجعة البطاقات: نفس الجدول، بس التاريخ تحت الوقت لأنه بيعدّي أيام */
 .dsub{font-size:.62rem;color:var(--text-muted,#64748b);direction:ltr}
+.crstates{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
+.crst{border:1px solid var(--border,#cbd5e1);background:var(--surface,#fff);color:var(--text-muted,#64748b);
+  border-radius:999px;padding:.3rem .7rem;font-family:inherit;font-size:.76rem;font-weight:700;cursor:pointer;
+  display:inline-flex;align-items:center;gap:5px}
+.crst b{background:var(--b,#e2e8f0);color:var(--f,#334155);border-radius:7px;padding:0 .35rem;font-size:.72rem}
+.crst .v{font-size:.68rem;font-weight:600;opacity:.75}
+.crst.on{border-color:var(--f,#334155);color:var(--f,#334155);box-shadow:inset 0 0 0 1px var(--f,#334155)}
+.ev{font-size:.72rem;color:var(--text-muted,#64748b);max-width:200px}
 .crbr{font-weight:800;font-size:.82rem;color:var(--primary,#0f766e)}
 .crall{display:inline-flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-muted,#64748b);cursor:pointer}
 .crall input{cursor:pointer}
@@ -209,7 +217,9 @@ async function init(){
        (ملاحظة المالك 2026-10-31). بقى فلتر واحد، والتبويب المفتوح
        بيتحدّث عليه بدل ما يفضل على فرع قديم. */
     sel.onchange=()=>{ BRANCH=sel.value;
-      if(VIEW==='cards'){ CR.page=1; loadCardTxns(); } else loadPoints(); };
+      if(VIEW==='cards'){ CR.page=1; loadCardTxns(); }
+      else if(VIEW==='wallets'){ WR.page=1; loadWalletTxns(); }
+      else loadPoints(); };
   }
   document.getElementById('refreshBtn').onclick=refreshCurrent;
   if(!BRANCH){ document.getElementById('content').innerHTML='<div class="state">تعذّر تحميل الفروع.</div>'; return; }
@@ -224,8 +234,21 @@ async function init(){
    بترجّع حركات الفيزا والمحافظ عبر الشيفتات في مدى تاريخ، بنفس
    شكل الصفوف بالظبط عشان الجدول يرسمها من غير أي تعديل.
    الصف المُراجَع بيفضل مكانه (بيتقفل بس) زي الشيفت. */
+/* ═══ التصنيف التلقائي لحركات البطاقات ═══════════════════════
+   زر «تم» لوحده بيسجّل إن حد ضغط، مش إن الفلوس وصلت. فالسيرفر
+   بيقارن كل معاملة بكشف مصدرها (ماكينات wallet / رسايل المحافظ
+   wallet_sms) ويطلّع حالة ودليل.
+   ⚠️ أربع حالات مش اتنين: لو كشف المصدر نفسه ناقص في الفترة،
+      المعاملة السليمة هتتّهم. «المصدر ناقص» بتتقاس من انقطاع
+      الرصيد التراكمي في رسايل المحافظ — مش تخمين.            */
+const CR_STATE = {
+  matched:     ['مطابَق',       '#dcfce7', '#15803d'],
+  unexplained: ['بلا تفسير',    '#fee2e2', '#b91c1c'],
+  feed_gap:    ['المصدر ناقص',  '#f1f5f9', '#475569'],
+  no_feed:     ['مفيش كشف',     '#fef9c3', '#a16207']
+};
 let SEES_ALL = false;
-let CR = { from:'', to:'', allBr:false, pending:false, page:1, size:50, total:0 };
+let CR = { from:'', to:'', allBr:false, state:'pending', page:1, size:50, total:0, states:{} };
 function crToday(){ const c=new Date(new Date().toLocaleString('en-US',{timeZone:'Africa/Cairo'}));
   const p=n=>String(n).padStart(2,'0'); return `${c.getFullYear()}-${p(c.getMonth()+1)}-${p(c.getDate())}`; }
 
@@ -239,8 +262,8 @@ async function loadCardTxns(){
   document.getElementById('content').innerHTML='<div class="state">جارِ التحميل…</div>';
   /* الفرع من فلتر الصفحة، و«كل الفروع» بتشيله. والسيرفر بيضيّقه
      على فرع المستخدم لو مش مصرّح — الإخفاء في الشاشة مش حماية. */
-  const d = await rpc('get_card_txns', { p_branch: CR.allBr ? null : (BRANCH||null), p_from: CR.from, p_to: CR.to,
-                                          p_only_pending: CR.pending, p_limit: CR.size,
+  const d = await rpc('get_card_review', { p_branch: CR.allBr ? null : (BRANCH||null), p_from: CR.from, p_to: CR.to,
+                                          p_state: CR.state || null, p_limit: CR.size,
                                           p_offset: (CR.page-1)*CR.size });
   if(!d){ document.getElementById('content').innerHTML='<div class="state">تعذّر التحميل — تأكد من صلاحيتك.</div>'; return; }
   CR.total = +d.total || 0;
@@ -252,6 +275,22 @@ async function loadCardTxns(){
   renderCardReview(d);
 }
 
+/* الافتراضي «محتاج مراجعة» = بلا تفسير وغير مُراجَع. «المصدر ناقص»
+   ليها شريحتها: المحاسب مايقدرش يعمل فيها حاجة، ولو حطّيناها مع
+   المحتاج مراجعة الشريحة تبقى ضوضاء وأول حاجة حقيقية تعدّي. */
+function crChips(d){
+  const st = d.states || {};
+  const cur = CR.state || 'all';
+  const pill = (key, label, bg, fg, n, v) =>
+    `<button class="crst${cur===key?' on':''}" data-s="${key}" style="--b:${bg};--f:${fg}">` +
+    `${label}<b>${fmt(n||0)}</b>${v?`<span class="v">${fmt(v)} ج</span>`:''}</button>`;
+  let h = pill('pending','🔴 محتاج مراجعة','#fee2e2','#b91c1c', d.needs_review||0, d.needs_review_val||0);
+  h += pill('all','الكل','#e2e8f0','#334155',
+        Object.values(st).reduce((a,x)=>a+(x[0]||0),0), 0);
+  Object.keys(CR_STATE).forEach(k=>{ const c=CR_STATE[k], x=st[k]||[0,0];
+    h += pill(k, c[0], c[1], c[2], x[0], x[1]); });
+  return h;
+}
 function renderCardReview(d){
   const pages = Math.max(1, Math.ceil(CR.total / CR.size));
   if(CR.page > pages) CR.page = pages;
@@ -272,7 +311,10 @@ function renderCardReview(d){
       <span class="crbr">${CR.allBr ? 'كل الفروع' : esc(brName)}</span>${brBox}
       <input type="date" id="crFrom" value="${CR.from}"> <span style="font-size:.78rem">←</span>
       <input type="date" id="crTo" value="${CR.to}">
-      <select id="crPend"><option value="" ${!CR.pending?'selected':''}>الكل</option><option value="1" ${CR.pending?'selected':''}>غير المراجَع فقط</option></select>
+    </div>
+    <div class="crstates">${crChips(d)}
+    </div>
+    <div style="display:none">
     </div>
     ${kpis}
     <div class="filters">
@@ -284,7 +326,7 @@ function renderCardReview(d){
       <span class="shown" id="shown"></span>
     </div>
     <div class="tablecard"><table><thead><tr>
-      <th class="rv">المراجعة</th>
+      <th class="rv">المراجعة</th><th>الحالة</th><th class="r">الدليل</th>
       <th>الوقت</th><th>النوع</th><th>قيمة المدفوع</th><th>القيمة</th><th class="r">من</th><th class="r">الى</th><th class="r">المستخدم</th><th>الجهاز</th><th>الحساب</th><th class="r">ملاحظات</th>
     </tr></thead><tbody id="tb"></tbody></table></div>
     <div class="crpager" id="crPager"></div>`;
@@ -293,7 +335,8 @@ function renderCardReview(d){
   const ab=document.getElementById('crAll'); if(ab) ab.onchange = e => { CR.allBr=e.target.checked; go(); };
   document.getElementById('crFrom').onchange = e => { CR.from=e.target.value||crToday(); go(); };
   document.getElementById('crTo').onchange   = e => { CR.to=e.target.value||crToday(); go(); };
-  document.getElementById('crPend').onchange = e => { CR.pending=!!e.target.value; go(); };
+  document.querySelectorAll('.crst[data-s]').forEach(b=>b.onclick=()=>{
+    CR.state = (b.dataset.s==='all' ? null : b.dataset.s); go(); });
   document.querySelectorAll('.vch[data-ch]').forEach(c=>c.onclick=()=>{
     chFilter=(chFilter===c.dataset.ch?null:c.dataset.ch);
     document.querySelectorAll('.vch').forEach(x=>x.classList.toggle('active',x.dataset.ch===chFilter));
@@ -327,19 +370,22 @@ async function loadPoints(){
   const tabs=document.getElementById('tabs');
   if(!POINTS.length){ tabs.innerHTML=''; document.getElementById('content').innerHTML='<div class="state">لا توجد نقاط بيع لهذا الفرع.</div>'; return; }
   const VP = await visiblePoints(POINTS);
-  let showLog=false, showCards=false;
+  let showLog=false, showCards=false, showWallets=false;
   try{ if(typeof Session!=='undefined' && Session.tabAllowed) showLog = await Session.tabAllowed('current_shift','shiftlog'); }catch(e){ showLog=false; }
   try{ if(typeof Session!=='undefined' && Session.tabAllowed) showCards = await Session.tabAllowed('current_shift','cardreview'); }catch(e){ showCards=false; }
-  if(!VP.length && !showLog && !showCards){ tabs.innerHTML=''; document.getElementById('content').innerHTML='<div class="state">لا توجد نقطة مسموحة لدورك في هذا الفرع.</div>'; return; }
+  try{ if(typeof Session!=='undefined' && Session.tabAllowed) showWallets = await Session.tabAllowed('current_shift','walletreview'); }catch(e){ showWallets=false; }
+  if(!VP.length && !showLog && !showCards && !showWallets){ tabs.innerHTML=''; document.getElementById('content').innerHTML='<div class="state">لا توجد نقطة مسموحة لدورك في هذا الفرع.</div>'; return; }
   CUR = VP.length ? roleDefaultPoint(VP) : null;
   let html = VP.map(p=>`<button class="tab" data-c="${p.cashier_id}" data-tk="${pointTabKey(p)}">${esc(p.point_name)}</button>`).join('');
   if(showLog) html += `<button class="tab" data-mode="log"><i class="fas fa-clock-rotate-left"></i> سجل الشيفتات</button>`;
   if(showCards) html += `<button class="tab" data-mode="cards"><i class="fas fa-credit-card"></i> مراجعة تحصيل بطاقات الائتمان</button>`;
+  if(showWallets) html += `<button class="tab" data-mode="wallets"><i class="fas fa-wallet"></i> الفيزا والمحافظ</button>`;
   tabs.innerHTML = html;
   tabs.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{
     tabs.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));
     if(b.dataset.mode==='log'){ showShiftLog(); }
     else if(b.dataset.mode==='cards'){ chFilter=null; typeFilter=null; userFilter=null; showCardReview(); }
+    else if(b.dataset.mode==='wallets'){ showWalletReview(); }
     else { CUR=+b.dataset.c; chFilter=null; typeFilter=null; userFilter=null; loadShift(); }
   });
   if(VP.length){ const fb=tabs.querySelector('.tab[data-c]'); if(fb) fb.classList.add('active'); loadShift(); }
@@ -539,7 +585,13 @@ function drawRows(){
       : lock ? `<span class="rv-ok">✓ تمت<span class="who">${esc(t.rv.by||'')}${t.rv.at?' · '+esc(t.rv.at):''}</span></span>`
                + (IS_ADMIN ? `<button class="btn-unlock" onclick="unreviewTxn(${t._i})">فتح</button>` : '')
       : `<button class="btn-rv" data-i="${t._i}" onclick="reviewTxn(${t._i})">تم ✓</button>`;
-    return `<tr class="${lock?'locked':''}"><td class="rv">${rvCell}</td><td>${esc(t.time)}${t.date?`<div class="dsub">${esc(t.date)}</div>`:''}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
+    /* العمودين دول في تبويب البطاقات بس — جدول الشيفت نفس الراسم */
+    const stC = CR_STATE[t.state] || null;
+    const stCells = (VIEW==='cards')
+      ? `<td>${stC?`<span class="pill" style="background:${stC[1]};color:${stC[2]}">${stC[0]}</span>`:'<span class="dash">—</span>'}</td>`
+        + `<td class="r ev">${t.evidence?esc(t.evidence):'<span class="dash">—</span>'}</td>`
+      : '';
+    return `<tr class="${lock?'locked':''}"><td class="rv">${rvCell}</td>${stCells}<td>${esc(t.time)}${t.date?`<div class="dsub">${esc(t.date)}</div>`:''}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
       `<td>${paidCell}</td>`+
       `<td class="num ${t.kind==='صرف'?'neg':'pos'}">${t.kind==='صرف'?'−':''}${fmt(t.amount)}</td>`+
       `<td class="r">${esc(t.from||'—')}</td><td class="r">${esc(t.to||'—')}</td>`+
@@ -570,6 +622,104 @@ let SL=[], slPage=1; const SL_PER=30;
 let SLSUM={diff:0,up:0,down:0};
 function dmy(s){ if(!s) return '—'; try{ return new Date(s).toLocaleDateString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',year:'numeric'}); }catch(e){ return s; } }
 function hm(s){ if(!s) return '—'; try{ return new Date(s).toLocaleTimeString('ar-EG',{timeZone:'Africa/Cairo',hour:'2-digit',minute:'2-digit',hour12:true}); }catch(e){ return s; } }
+/* ═══ تبويب «الفيزا والمحافظ» ═══════════════════════════════════
+   بيبص من ناحية **الفلوس** مش من ناحية eplus: كل عملية ماكينة وكل
+   رسالة محفظة — وفين بيعها. ودي اللي الموظف مش شايفها خالص في
+   التبويب التاني لأنها مش في eplus أصلًا.
+   التسييل (خروج من محفظة ↔ دخول على ماكينة بنفس القيمة) بيتعرف
+   لوحده فمابيزعّقش كل يوم — تفسير المالك للمبالغ الكبيرة بلا مقابل. */
+const WR_STATE = {
+  no_sale:  ['بلا مقابل',   '#fee2e2', '#b91c1c'],
+  has_sale: ['ليها بيع',    '#dcfce7', '#15803d'],
+  cashout:  ['تسييل محفظة', '#ede9fe', '#5b21b6']
+};
+let WR = { from:'', to:'', state:'no_sale', page:1, size:50, total:0 };
+
+function showWalletReview(){
+  VIEW='wallets';
+  if(!WR.from){ WR.from=crToday(); WR.to=crToday(); }
+  loadWalletTxns();
+}
+async function loadWalletTxns(){
+  document.getElementById('content').innerHTML='<div class="state">جارِ التحميل…</div>';
+  const d = await rpc('get_wallet_review', { p_branch: WR.allBr ? null : (BRANCH||null),
+      p_from: WR.from, p_to: WR.to, p_state: WR.state || null,
+      p_limit: WR.size, p_offset: (WR.page-1)*WR.size });
+  if(!d){ document.getElementById('content').innerHTML='<div class="state">تعذّر التحميل — تأكد من صلاحيتك.</div>'; return; }
+  WR.total = +d.total || 0;
+  renderWalletReview(d);
+}
+function wrChips(d){
+  const st=d.states||{}, cur=WR.state||'all';
+  const pill=(k,label,bg,fg,n,v)=>`<button class="crst${cur===k?' on':''}" data-w="${k}" style="--b:${bg};--f:${fg}">`+
+    `${label}<b>${fmt(n||0)}</b>${v?`<span class="v">${fmt(v)} ج</span>`:''}</button>`;
+  let h=pill('all','الكل','#e2e8f0','#334155', Object.values(st).reduce((a,x)=>a+(x[0]||0),0), 0);
+  Object.keys(WR_STATE).forEach(k=>{ const c=WR_STATE[k], x=st[k]||[0,0];
+    h+=pill(k,c[0],c[1],c[2],x[0],x[1]); });
+  return h;
+}
+function renderWalletReview(d){
+  const pages=Math.max(1,Math.ceil(WR.total/WR.size));
+  if(WR.page>pages) WR.page=pages;
+  const brName=(BRANCHES.find(b=>b.sync_key===BRANCH)||{}).name||'';
+  const brBox = SEES_ALL ? `<label class="crall"><input type="checkbox" id="wrAll" ${WR.allBr?'checked':''}> كل الفروع</label>` : '';
+  document.getElementById('content').innerHTML = `
+    <div class="crbar">
+      <span class="crbr">${WR.allBr ? 'كل الفروع' : esc(brName)}</span>${brBox}
+      <input type="date" id="wrFrom" value="${WR.from}"> <span style="font-size:.78rem">←</span>
+      <input type="date" id="wrTo" value="${WR.to}">
+    </div>
+    <div class="crstates">${wrChips(d)}</div>
+    <div style="font-size:.76rem;color:var(--text-muted,#64748b);margin-bottom:9px">
+      كل حركة فلوس حقيقية ومعاها بيعها في eplus. <b>«بلا مقابل»</b> يعني فلوس دخلت ومفيش بيع يقابلها.
+      ${d.total_amt?`· إجمالي المعروض: <b>${fmt(d.total_amt)} ج</b>`:''}
+    </div>
+    <div class="tablecard"><table><thead><tr>
+      <th>الحالة</th><th>المصدر</th><th>الوقت</th><th class="r">الماكينة / المحفظة</th>
+      <th>الفرع</th><th>القيمة</th><th class="r">رقم العملية</th><th>الرصيد بعدها</th>
+      <th>النوع</th><th class="r">الدليل</th>
+    </tr></thead><tbody id="wtb"></tbody></table></div>
+    <div class="crpager" id="wrPager"></div>`;
+  const rows=(d.rows||[]);
+  document.getElementById('wtb').innerHTML = rows.length ? rows.map(r=>{
+    const S=WR_STATE[r.state]||['—','#eee','#333'];
+    const srcPill = r.src==='machine'
+      ? '<span class="pill" style="background:#e0f2fe;color:#0369a1">ماكينة</span>'
+      : '<span class="pill" style="background:#dcfce7;color:#15803d">محفظة</span>';
+    const t=String(r.ts||'').replace('T',' ');
+    return `<tr>`+
+      `<td><span class="pill" style="background:${S[1]};color:${S[2]}">${S[0]}</span></td>`+
+      `<td>${srcPill}</td>`+
+      `<td>${esc(t.slice(11,16))}<div class="dsub">${esc(t.slice(0,10))}</div></td>`+
+      `<td class="r">${esc(r.party||'—')}</td>`+
+      `<td>${esc(r.branch||'—')}</td>`+
+      `<td class="num pos">${fmt(r.amt)}</td>`+
+      `<td class="r ev">${esc(r.ref||'—')}</td>`+
+      `<td class="num">${r.balance!=null?fmt(r.balance):'—'}</td>`+
+      `<td>${esc(r.kind||'—')}</td>`+
+      `<td class="r ev">${r.evidence?esc(r.evidence):'<span class="dash">—</span>'}</td></tr>`;
+  }).join('') : '<tr><td colspan="10" class="state">لا توجد حركات في هذه الشريحة</td></tr>';
+
+  const go=()=>{ WR.page=1; loadWalletTxns(); };
+  document.querySelectorAll('.crst[data-w]').forEach(b=>b.onclick=()=>{
+    WR.state=(b.dataset.w==='all'?null:b.dataset.w); go(); });
+  document.getElementById('wrFrom').onchange = e => { WR.from=e.target.value||crToday(); go(); };
+  document.getElementById('wrTo').onchange   = e => { WR.to=e.target.value||crToday(); go(); };
+  const wa=document.getElementById('wrAll'); if(wa) wa.onchange = e => { WR.allBr=e.target.checked; go(); };
+
+  const pg=document.getElementById('wrPager');
+  if(pages<=1){ pg.innerHTML = WR.total? `<span style="font-size:.76rem;color:var(--text-muted)">${fmt(WR.total)} حركة</span>`:''; return; }
+  const mk=(lbl,p,dis,on)=>`<button ${dis?'disabled':''} class="${on?'on':''}" data-p="${p}">${lbl}</button>`;
+  let h=mk('«',1,WR.page===1)+mk('‹',WR.page-1,WR.page===1);
+  for(let p=1;p<=pages;p++){ if(p===1||p===pages||Math.abs(p-WR.page)<=2) h+=mk(p,p,false,p===WR.page);
+    else if(Math.abs(p-WR.page)===3) h+='<span style="margin:0 6px;color:var(--text-muted)">…</span>'; }
+  h+=mk('›',WR.page+1,WR.page===pages)+mk('»',pages,WR.page===pages);
+  h+=`<span style="margin:0 8px;color:var(--text-muted);font-size:.76rem">صفحة ${WR.page} من ${pages} · ${fmt(WR.total)} حركة</span>`;
+  pg.innerHTML=h;
+  pg.querySelectorAll('button[data-p]').forEach(b=>b.onclick=()=>{ WR.page=+b.dataset.p; loadWalletTxns();
+    document.getElementById('content').scrollIntoView({behavior:'smooth',block:'start'}); });
+}
+
 function showShiftLog(){
   VIEW='log';
   const pointOpts='<option value="">كل النقاط</option>'+POINTS.map(p=>`<option value="${p.cashier_id}">${esc(p.point_name)}</option>`).join('');
