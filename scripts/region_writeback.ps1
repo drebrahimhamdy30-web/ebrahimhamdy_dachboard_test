@@ -91,7 +91,9 @@ try {
 
 # ── (2) تطبيق الطابور ──
 $pending = @()
-try { $pending = @(SbGet "customer_region_queue?status=eq.pending&order=created_at.asc&limit=$Max") } catch { L ("فشل قراءة الطابور: " + $_.Exception.Message); $cn.Close(); exit 1 }
+# ملاحظة: PostgREST بيرجّع [] للطابور الفاضى، و@() بتلفّها لعنصر $null واحد —
+# فلازم نفلتر الـnull وإلا بيتعدّ «طلب بكود فاضى» وهمى.
+try { $pending = @(SbGet "customer_region_queue?status=eq.pending&order=created_at.asc&limit=$Max" | Where-Object { $_ -and $_.id }) } catch { L ("فشل قراءة الطابور: " + $_.Exception.Message); $cn.Close(); exit 1 }
 L ("طلبات معلّقة: " + $pending.Count)
 
 $done=0; $failed=0
