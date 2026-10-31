@@ -46,7 +46,12 @@ global.Session = { role:()=>'admin', bearer:async()=>'t', seesAllBranches:async(
      السموك بيرمي «Session.require is not a function» على شاشة سليمة. */
   require:async()=>({ role:'admin' }), guardTabs:async()=>{}, thisPage:()=>'smoke',
   pages:async()=>[], dataWarn(){}, syncWatch(){}, syncHealth:async()=>({ branches:[] }),
-  loginPage:()=>'login.html', tokenValid:()=>true };
+  loginPage:()=>'login.html', tokenValid:()=>true,
+  /* عميل Supabase وهمى متسلسل: أى سلسلة .from().select()/.insert()/... بترجّع
+     {data:[],error:null}. من غيره السموك بيرمي «Session.client is not a function». */
+  client:()=>{ const q={ then:(r)=>r({data:[],error:null}) };
+    ['select','insert','update','upsert','delete','eq','in','gte','lte','gt','lt','like','ilike','order','limit','range','single','filter','match','is','not','or','contains'].forEach(m=>q[m]=()=>q);
+    return { from:()=>q, rpc:()=>q }; } };
 /* من api.js — الشاشة بتستعمله في رسائل الفشل */
 global.sbH = async (extra) => ({ 'Content-Type':'application/json', ...(extra||{}) });
 global.sbFailMsg = (base) => base;
