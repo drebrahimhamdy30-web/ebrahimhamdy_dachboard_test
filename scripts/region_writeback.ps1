@@ -24,6 +24,10 @@ param(
   [string]$Placeholder = "يحتاج إضافة منطقة",
   [string]$Cutoff = "2026-10-30T00:00:00+02:00",
   [switch]$Apply,
+  [switch]$SyncOnly,      # المزامنة فقط (المناطق + العناوين) — للمهمة كل 10 د
+  [switch]$ApplyOnly,     # تطبيق الطابور فقط (خفيف) — للمهمة كل دقيقة، يكتب تلقائيًا
+  [string]$PasswordFile,  # ملف باسوورد مشفّر للمهام المجدولة
+  [string]$KeyFile,       # مفتاح AES للفكّ (يخلّى المهمة تشتغل كـSYSTEM)
   [int]$Max = 500
 )
 $ErrorActionPreference = "Stop"
@@ -35,9 +39,20 @@ function NowUtc(){ (Get-Date).ToUniversalTime().ToString("o") }
 if ([string]::IsNullOrWhiteSpace($SbKey)) {
   L "وقّف: مفيش SUPABASE_SERVICE_KEY. عيّنه: `$env:SUPABASE_SERVICE_KEY='...'  (أو setx للجدولة)"; exit 1
 }
+if (-not $Password -and $PasswordFile -and (Test-Path $PasswordFile)) {
+  try {
+    $enc = (Get-Content $PasswordFile -Raw).Trim()
+    if($KeyFile -and (Test-Path $KeyFile)){ $Password = $enc | ConvertTo-SecureString -Key (Get-Content $KeyFile -Encoding Byte) }
+    else { $Password = $enc | ConvertTo-SecureString }
+  } catch { L "وقّف: فشل قراءة ملف الباسوورد المشفّر."; exit 1 }
+}
 if (-not $Password) { $Password = Read-Host "باسورد phalix_writer" -AsSecureString }
 $pw = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($Password))
 if ([string]::IsNullOrWhiteSpace($pw)) { L "وقّف: الباسورد فاضى."; exit 1 }
+
+$doSync   = -not $ApplyOnly        # شغّل المزامنة إلا لو طلبنا تطبيق فقط
+$doApply  = -not $SyncOnly         # شغّل الطابور إلا لو طلبنا مزامنة فقط
+$writeDb  = $Apply -or $ApplyOnly  # ApplyOnly بيكتب تلقائيًا من غير -Apply
 
 # ── Supabase REST (الرفع UTF-8 عشان العربى مايتبوّظش) ──
 $rest = ($SbUrl.TrimEnd('/')) + "/rest/v1"
@@ -71,10 +86,12 @@ try { $cn.Open() } catch { L "فشل الاتصال بـeplus: $($_.Exception.Me
 function Scalar($sql,$params){ $c=$cn.CreateCommand(); $c.CommandText=$sql; if($params){foreach($k in $params.Keys){[void]$c.Parameters.AddWithValue($k,$params[$k])}}; return $c.ExecuteScalar() }
 function NonQuery($sql,$params){ $c=$cn.CreateCommand(); $c.CommandText=$sql; if($params){foreach($k in $params.Keys){[void]$c.Parameters.AddWithValue($k,$params[$k])}}; return $c.ExecuteNonQuery() }
 
-L ("البدء — الوضع: " + $(if($Apply){"تطبيق"}else{"عرض فقط"}))
+$modeTxt = if($ApplyOnly){"تطبيق فقط"} elseif($SyncOnly){"مزامنة فقط"} elseif($writeDb){"الكل + كتابة"} else {"الكل (عرض)"}
+L ("البدء — الوضع: $modeTxt")
 $runStart = NowUtc
 
 # ── (1) مزامنة المناطق ──
+if($doSync){
 try {
   $c=$cn.CreateCommand()
   $c.CommandText="SELECT dc_id, LTRIM(RTRIM(dc_region_name_ar)) AS nm, dc_delivery_cost FROM Delivery_cost_region WHERE dc_region_name_ar IS NOT NULL AND LTRIM(RTRIM(dc_region_name_ar))<>''"
@@ -110,28 +127,30 @@ try {
   SbDelete ("customer_delivery_pending?synced_at=lt."+[uri]::EscapeDataString($runStart))
   L ("عملاء محتاجين منطقة: " + $cmap.Count + " — عناوين فاضية: " + $cdpArr.Count)
 } catch { L ("⚠️ مزامنة العناوين فشلت (سطر " + $_.InvocationInfo.ScriptLineNumber + "): " + $_.Exception.Message) }
+}  # نهاية doSync
 
 # ── (3) تطبيق الطابور ──
+$done=0; $failed=0
+if($doApply){
 $pending=@()
 try { $pending=@(SbGet "customer_region_queue?status=eq.pending&order=created_at.asc&limit=$Max" | Where-Object { $_ -and $_.id }) } catch { L ("فشل قراءة الطابور: " + $_.Exception.Message); $cn.Close(); exit 1 }
 L ("طلبات معلّقة: " + $pending.Count)
 
-$done=0; $failed=0
 foreach($row in $pending){
   $id=$row.id; $code=[string]$row.cust_code; $name=[string]$row.region_name; $dc=$row.dc_id; $cdid=$row.cd_id; $addr=[string]$row.cust_address
   $codeNum=[decimal]0
   if(-not [decimal]::TryParse($code,[ref]$codeNum)){
-    if($Apply){ SbPatch "customer_region_queue?id=eq.$id" @{ status='failed'; result_note='كود عميل غير رقمى'; applied_at=(NowUtc) } }
+    if($writeDb){ SbPatch "customer_region_queue?id=eq.$id" @{ status='failed'; result_note='كود عميل غير رقمى'; applied_at=(NowUtc) } }
     L ("  [$code] ✗ كود غير رقمى"); $failed++; continue
   }
   if(-not $dc){ try { $dc = Scalar "SELECT MIN(dc_id) FROM Delivery_cost_region WHERE LTRIM(RTRIM(dc_region_name_ar))=@n" @{ '@n'=$name } } catch {} }
   if(-not $dc -or $dc -is [DBNull]){
-    if($Apply){ SbPatch "customer_region_queue?id=eq.$id" @{ status='failed'; result_note=("منطقة غير موجودة: "+$name); applied_at=(NowUtc) } }
+    if($writeDb){ SbPatch "customer_region_queue?id=eq.$id" @{ status='failed'; result_note=("منطقة غير موجودة: "+$name); applied_at=(NowUtc) } }
     L ("  [$code] ✗ المنطقة غير موجودة: $name"); $failed++; continue
   }
   $dc=[int]$dc
 
-  if(-not $Apply){
+  if(-not $writeDb){
     if($cdid){ L ("  [عرض][$code] cd_id=$cdid → $name (dc=$dc)") }
     else { $cnt=[int](Scalar "SELECT COUNT(*) FROM Customer_Delivery WHERE cd_cust_id=@c AND (cd_region_id IS NULL OR cd_region_id=0)" @{ '@c'=$codeNum }); L ("  [عرض][$code] (بلا cd_id) فاضى=$cnt → $name (dc=$dc)") }
     continue
@@ -161,6 +180,7 @@ foreach($row in $pending){
     L ("  [$code] ✗ خطأ: " + $_.Exception.Message); $failed++
   }
 }
+}  # نهاية doApply
 
 $cn.Close()
-L ("انتهى — تم: $done | فشل: $failed" + $(if(-not $Apply){"  (عرض فقط — مفيش كتابة)"}else{""}))
+L ("انتهى — تم: $done | فشل: $failed" + $(if(-not $writeDb){"  (عرض فقط — مفيش كتابة)"}else{""}))
