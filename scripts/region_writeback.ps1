@@ -42,7 +42,12 @@ if ([string]::IsNullOrWhiteSpace($pw)) { L "وقّف: الباسورد فاضى.
 # ── Supabase REST (الرفع UTF-8 عشان العربى مايتبوّظش) ──
 $rest = ($SbUrl.TrimEnd('/')) + "/rest/v1"
 $H = @{ apikey=$SbKey; Authorization=("Bearer "+$SbKey) }
-function SbGet($q){ Invoke-RestMethod -Method Get -Uri ($rest+"/"+$q) -Headers $H }
+# القراءة بـIWR+ConvertFrom-Json (مش IRM) عشان تفسير الـJSON يبقى ثابت فى كل نسخ
+# PowerShell — IRM القديم على الماستر كان بيرجّع أعمدة كمصفوفات (Object[]).
+function SbGet($q){
+  $t = (Invoke-WebRequest -Method Get -Uri ($rest+"/"+$q) -Headers $H -UseBasicParsing).Content
+  if([string]::IsNullOrWhiteSpace($t)){ return @() } else { return ($t | ConvertFrom-Json) }
+}
 function SbBody($method,$q,$json,$prefer){
   $hdr = @{ apikey=$SbKey; Authorization=("Bearer "+$SbKey); 'Content-Type'='application/json; charset=utf-8' }
   if($prefer){ $hdr['Prefer']=$prefer }
@@ -56,7 +61,8 @@ function SbPatch($q,$obj){ SbBody 'Patch' $q ($obj|ConvertTo-Json -Compress) 're
 function SbDelete($q){ Invoke-RestMethod -Method Delete -Uri ($rest+"/"+$q) -Headers ($H + @{ Prefer='return=minimal' }) | Out-Null }
 function SbRpc($fn,$obj){
   $hdr = @{ apikey=$SbKey; Authorization=("Bearer "+$SbKey); 'Content-Type'='application/json; charset=utf-8' }
-  Invoke-RestMethod -Method Post -Uri ($rest+"/rpc/"+$fn) -Headers $hdr -Body ([Text.Encoding]::UTF8.GetBytes(($obj|ConvertTo-Json -Compress)))
+  $t = (Invoke-WebRequest -Method Post -Uri ($rest+"/rpc/"+$fn) -Headers $hdr -Body ([Text.Encoding]::UTF8.GetBytes(($obj|ConvertTo-Json -Compress))) -UseBasicParsing).Content
+  if([string]::IsNullOrWhiteSpace($t)){ return @() } else { return ($t | ConvertFrom-Json) }
 }
 
 # ── eplus ──
