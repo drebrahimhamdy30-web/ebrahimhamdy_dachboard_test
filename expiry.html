@@ -88,6 +88,8 @@
     .unknown { color:var(--warn-text); background:var(--warn-bg); padding:1px 7px;
                border-radius:6px; font-size:.73rem; font-weight:700; }
     .days.hot { color:var(--danger-strong); font-weight:800; }
+    table.ex td.qty .sub-unit { display:block; font-size:.66rem; font-weight:600;
+                color:var(--text-muted); margin-top:1px; }
 
     .chip { font-size:.68rem; font-weight:700; padding:1px 8px; border-radius:999px;
             border:1px solid var(--border); color:var(--text-secondary); background:var(--surface); }
@@ -212,7 +214,7 @@
         <div class="kpi k-ok"><div class="l">أصناف</div><div class="v num" id="k-items">—</div>
           <div class="h">عدد الأصناف المختلفة</div></div>
         <div class="kpi k-val"><div class="l">الكمية</div><div class="v num" id="k-qty">—</div>
-          <div class="h">بالوحدة الصغرى — كما يعدّها eplus</div></div>
+          <div class="h" id="k-qty-h">بالعلبة</div></div>
         <div class="kpi k-cost"><div class="l">التكلفة</div><div class="v num" id="k-cost">—</div>
           <div class="h" id="k-cost-h">ثمن شراء البضاعة المعروضة</div></div>
         <div class="kpi k-risk" id="kpi-unknown" style="display:none"><div class="l">أكواد غير معروفة</div>
@@ -291,7 +293,7 @@
           <thead><tr>
             <th>الكود</th><th class="r">الصنف</th><th>الفرع</th><th class="r">الشركة</th>
             <th>الصلاحية</th><th>باقٍ<br><small>يوم</small></th>
-            <th>الكمية<br><small>بالوحدة الصغرى</small></th>
+            <th>الكمية<br><small>علبة</small></th>
             <th>التكلفة<br><small>جنيه</small></th>
             <th>مباع</th><th>القرار</th>
           </tr></thead>
@@ -301,7 +303,8 @@
       </div>
 
       <div class="legend">
-        <span><b>الكمية بالوحدة الصغرى</b> (شريط أو قرص أو قطعة) — كما يسجّلها مخزون eplus، دون أي تحويل.</span>
+        <span><b>الكمية بالعلبة</b>، وتحتها عدد الوحدات الصغرى (شريط أو قرص أو قطعة) كما يسجّلها مخزون eplus.</span>
+        <span><b>التكلفة والكمية بنفس الأساس</b> — ثمن العلبة مقسومًا على عدد وحداتها.</span>
         <span><b>باقٍ</b> بالأيام حتى تاريخ الصلاحية المسجَّل.</span>
         <span><b>التكلفة</b> ثمن شراء الدفعة كما يسجّله eplus — والإجمالي محسوب على كل النتائج لا الصفحة.</span>
         <span><i class="fas fa-rotate-left pol-mark"></i> الجهة ضمن سياسة المرتجع.</span>
@@ -387,6 +390,8 @@
     const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
     const num = n => (n==null?'—':Number(n).toLocaleString('en-US',{maximumFractionDigits:2}));
     const m0  = n => (n==null?'—':Math.round(Number(n)).toLocaleString('en-US'));
+    /* الوحدة في الكتالوج اسم العلبة، فالأصغر منها نسمّيها عامة */
+    const smallUnit = r => 'وحدة صغرى';
     function showMsg(t, ok){ const m=document.getElementById('msg'); m.textContent=t||''; m.className='msg '+(ok?'ok':'err'); }
 
     /* بتوكن المستخدم: الدوال محروسة بنطاق الفروع، وmفتاح anon دوره فاضي
@@ -451,7 +456,11 @@
       document.getElementById('k-unsold').textContent  = num(s.unsold);
       document.getElementById('k-batches').textContent = num(s.batches);
       document.getElementById('k-items').textContent   = num(s.items);
-      document.getElementById('k-qty').textContent     = num(s.qty);
+      document.getElementById('k-qty').textContent     = num(s.qty_box == null ? s.qty : s.qty_box);
+      document.getElementById('k-qty-h').textContent   =
+        (s.qty_box != null && Number(s.qty) !== Number(s.qty_box))
+          ? ('بالعلبة — ' + num(s.qty) + ' بالوحدة الصغرى')
+          : 'بالعلبة';
       document.getElementById('k-cost').textContent    = s.cost ? m0(s.cost) : '—';
       /* الصفوف اللي لسه ماجاتش تكلفتها من المزامنة ماتتحسبش صفر */
       const noCost = Number(s.no_cost || 0);
@@ -500,7 +509,10 @@
         + '<td class="co">'+co+polMark+'</td>'
         + '<td class="num">'+esc(r.exp_date)+'</td>'
         + '<td class="num days'+(r.days_left<=30?' hot':'')+'">'+r.days_left+'</td>'
-        + '<td class="num qty">'+num(r.qty)+'</td>'
+        + '<td class="num qty">'+num(r.qty_box==null?r.qty:r.qty_box)
+          + (Number(r.per_box) > 1
+             ? '<small class="sub-unit">'+num(r.qty)+' '+esc(smallUnit(r))+'</small>' : '')
+          + '</td>'
         + '<td class="num cost">'+(r.cost==null?'<span class="z">—</span>':m0(r.cost))+'</td>'
         + '<td><span class="st '+(r.sold?'st-ok':'st-dead')+'">'+(r.sold?'مباع':'غير مباع')+'</span></td>'
         + '<td class="act">'+btns+'</td>'
@@ -628,10 +640,10 @@
 
     function exportCsv(){
       if (!LAST || !LAST.rows || !LAST.rows.length){ showMsg('لا توجد بيانات للتصدير.', false); return; }
-      const head = ['الكود','الصنف','الفرع','الشركة','الصلاحية','باقٍ (يوم)','الكمية (بالوحدة الصغرى)','التكلفة','مباع','القرار'];
+      const head = ['الكود','الصنف','الفرع','الشركة','الصلاحية','باقٍ (يوم)','الكمية (علبة)','الكمية (وحدة صغرى)','التكلفة','مباع','القرار'];
       const lines = [head.join(',')].concat(LAST.rows.map(r => [
         r.itm_code, '"'+String(r.itm_name).replace(/"/g,'""')+'"', BR[r.branch]||r.branch,
-        '"'+String(r.company).replace(/"/g,'""')+'"', r.exp_date, r.days_left, r.qty, (r.cost==null?'':Math.round(r.cost)),
+        '"'+String(r.company).replace(/"/g,'""')+'"', r.exp_date, r.days_left, (r.qty_box==null?r.qty:r.qty_box), r.qty, (r.cost==null?'':Math.round(r.cost)),
         r.sold ? 'مباع' : 'غير مباع', r.action ? ACTIONS[r.action].t : ''
       ].join(',')));
       const blob = new Blob(['﻿' + lines.join('\n')], { type:'text/csv;charset=utf-8' });
