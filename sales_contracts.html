@@ -1248,6 +1248,18 @@ function getNextSerial(billType) {
       btn.disabled  = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
 
+      /* المسلسل هو اللي بيترتّب بيه عرض المطالبة في claims.html، والفاضي
+         بيتحسب 9999 فبينزل آخر القائمة دايمًا. كان بيتولّد في منسدلة
+         الحالة بس، فأي فاتورة مضافة يدوي وحالتها «فاتورة» تفضل بلا
+         مسلسل وتقعد تحت للأبد (حصل مع فاتورة 4460 — اسامه صابر).
+         نولّده هنا كمان لو ناقص. ولو الفاتورة ليها مسلسل مابنبعتوش
+         أصلًا، فـcontract_update مابيلمسوش والتعديل مايحرّكش ترتيبها. */
+      const prev      = allData.find(x => String(x.id) === String(id));
+      const hasSerial = prev && prev.serial_no && prev.serial_no !== 'null' && prev.serial_no !== '0';
+      const serialPatch = (state === 'فاتورة' && !hasSerial && billType)
+        ? { serial_no: getNextSerial(String(billType).trim()) }
+        : {};
+
       const success = await updateData({
         type:          mode === 'add' ? "contract_new" : "contract_update",
         id:            id || undefined,
@@ -1261,7 +1273,8 @@ function getNextSerial(billType) {
         payment_type:  paymentType   || null,
         bill_state:    state,
         branch:        userBranch,
-        createdAt:     new Date().toISOString()
+        createdAt:     new Date().toISOString(),
+        ...serialPatch
       });
 
       if (success) { closeModal(); loadData(); }
