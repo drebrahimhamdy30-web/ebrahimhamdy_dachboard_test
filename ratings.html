@@ -135,6 +135,8 @@
       <span id="customRange" style="display:none;gap:6px;align-items:center">
         <input type="date" id="dFrom"> <span class="flabel">إلى</span> <input type="date" id="dTo">
       </span>
+      <button class="btn teal" id="repBtn" onclick="openReport()" style="display:none"
+              title="تقرير بالرسوم والتعليقات — للطباعة أو الحفظ كملف PDF">📄 تقرير تحفيزي</button>
     </div>
   </header>
 
@@ -180,6 +182,9 @@
       <select id="cWho"><option value="all">الكل</option><option value="employee">الصيادلة فقط</option><option value="driver">مندوبو التوصيل فقط</option></select>
       <span class="flabel">التقييم</span>
       <select id="cMax"><option value="5">الكل</option><option value="3">3 نجوم فأقل</option><option value="2">نجمتان فأقل</option><option value="1">نجمة واحدة</option></select>
+      <span class="flabel">التعليق</span>
+      <select id="cHas" title="الفلتر بيتطبّق في القاعدة، فالإجمالي وعدد الصفحات بيتغيّروا معاه">
+        <option value="1">بتعليق مكتوب فقط</option><option value="">الكل</option><option value="0">بدون تعليق</option></select>
       <span class="pill r" style="margin-inline-start:auto">للإدارة</span>
     </div>
     <div class="card">
@@ -217,6 +222,10 @@ const SB = PHALIX_CONFIG.supabaseUrl;
 let CAN_EDIT = false, IS_ADMIN = false, ROLE = '', SEES_ALL = false, BRANCH_ID = '';
 let TAB = 'rank', SETTINGS = null, OV = null;
 let C_PAGE = 1; const C_LIMIT = 50;
+/* القاعدة الأقدم مش عارفة p_with_comment — لو ردّت إن الدالة بالتوقيع
+   ده مش موجودة، بنرجع للنداء القديم ونوضّح إن الفلتر محتاج تحديث،
+   بدل ما الشاشة تبقى فاضية أو الفلتر يسقط بالصمت. */
+let CHAS_OK = true;
 
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function el(id){ return document.getElementById(id); }
@@ -354,12 +363,27 @@ function renderRank(){
 }
 
 /* ═══ التعليقات (50/صفحة) ═══ */
+function withComment(){ const v = el('cHas').value; return v === '' ? null : v === '1'; }
 async function loadComments(){
   const p = period(); let d;
-  try { d = await rpc('rating_comments', { p_from: p.from, p_to: p.to, p_branch_id: branchParam(), p_who: el('cWho').value, p_max_stars: +el('cMax').value, p_limit: C_LIMIT, p_offset: (C_PAGE - 1) * C_LIMIT }); }
-  catch (e) { el('cBody').innerHTML = ''; el('cPager').innerHTML = ''; el('cEmpty').style.display = ''; el('cEmpty').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; return; }
+  const body = { p_from: p.from, p_to: p.to, p_branch_id: branchParam(), p_who: el('cWho').value,
+                 p_max_stars: +el('cMax').value, p_limit: C_LIMIT, p_offset: (C_PAGE - 1) * C_LIMIT };
+  if (CHAS_OK) body.p_with_comment = withComment();
+  try { d = await rpc('rating_comments', body); }
+  catch (e) {
+    if (CHAS_OK && e.status === 404) {   /* قاعدة متأخرة: الدالة بالتوقيع الجديد مش موجودة */
+      CHAS_OK = false;
+      const sel = el('cHas'); sel.value = ''; sel.disabled = true;
+      sel.title = 'الفلتر محتاج تحديث قاعدة البيانات (migrate_185)';
+      toast('فلتر التعليق محتاج تحديث القاعدة — العرض شامل الكل.', true);
+      return loadComments();
+    }
+    el('cBody').innerHTML = ''; el('cPager').innerHTML = ''; el('cEmpty').style.display = ''; el('cEmpty').innerHTML = '<span class="err">' + esc(e.message) + '</span>'; return; }
   const rows = d.rows || [];
-  el('cEmpty').style.display = rows.length ? 'none' : ''; el('cEmpty').textContent = 'لا توجد تقييمات في هذه الفترة.';
+  el('cEmpty').style.display = rows.length ? 'none' : '';
+  el('cEmpty').textContent = withComment() === true ? 'لا توجد تعليقات مكتوبة في هذه الفترة.'
+                           : withComment() === false ? 'كل التقييمات في هذه الفترة بتعليق مكتوب.'
+                           : 'لا توجد تقييمات في هذه الفترة.';
   el('cBody').innerHTML = rows.map(r => `<tr><td>${fmtDT(r.rated_at)}</td><td style="direction:ltr;text-align:right">${esc(r.bill_no || '')}</td><td>${esc(r.branch || '')}</td><td>${esc(r.employee_name || '—')}<div>${stars(r.employee_stars)}</div></td><td>${esc(r.driver_name || '—')}<div>${stars(r.driver_stars)}</div>${r.speed_stars ? '<div title="سرعة التوصيل">⚡ ' + stars(r.speed_stars) + '</div>' : ''}</td><td>${r.comment ? esc(r.comment) : '<span class="pill gr">بدون تعليق</span>'}</td></tr>`).join('');
   renderPager(d.total || 0);
 }
@@ -374,6 +398,269 @@ function renderPager(total){
   el('cPager').innerHTML = h;
 }
 function goPage(p){ C_PAGE = p; loadComments(); el('pane-comments').scrollIntoView({ behavior:'smooth', block:'start' }); }
+
+/* ═══ التقرير التحفيزي ═══════════════════════════════════════════
+   PDF عن طريق طباعة المتصفح («حفظ كـ PDF») — مش مكتبة:
+   مكتبات الـPDF الجاهزة بتكسّر تشكيل الحروف العربية، والبديل
+   (تصوير الصفحة) بيطلع ملف تقيل ونص مهبّب. الطباعة بتطلع نص
+   عربي سليم وملف صغير وبدون أي اعتماد خارجي.
+   وكل الرسوم SVG مش خلفيات CSS: المتصفح مابيطبعش خلفيات الـCSS
+   افتراضيًا، بينما أشكال الـSVG بتتطبع دايمًا. */
+
+function repBrand(){
+  let b = null;
+  try { b = JSON.parse(localStorage.getItem('orgBrand') || 'null'); } catch (e) {}
+  return { name: (b && b.company_name) || 'الصيدلية', logo: (b && b.logo_url) || '' };
+}
+function repBranchLabel(){
+  if (!SEES_ALL) return '';
+  const s = el('brSel');
+  return s.value ? ((s.options[s.selectedIndex] || {}).text || '') : 'كل الفروع';
+}
+/* تاريخ بالعربي بأرقام لاتينية — «2026-10-01» جوّه نص عربي بيتقلب
+   ترتيبه على العين وبيلخبط القارئ. */
+function repDate(d){
+  try { return new Date(d + 'T12:00:00').toLocaleDateString('ar-EG-u-nu-latn', { day:'numeric', month:'long', year:'numeric' }); }
+  catch (e) { return d; }
+}
+function repPeriodLabel(p){
+  const t = el('perSel');
+  const nm = (t.options[t.selectedIndex] || {}).text || '';
+  return (t.value === 'custom' ? '' : nm + ' · ') + 'من ' + repDate(p.from) + ' إلى ' + repDate(p.to);
+}
+const REP_MIN_N = 3;   /* أقل عدد تقييمات يسمح بدخول قائمة المتميزين */
+
+/* أعمدة أفقية تُقرأ من اليمين لليسار.
+   ⚠️ الرسم بيتمدّ على عرض الكارت، فلو الـviewBox أعرض من الكارت
+   النص بيصغّر معاه ويبقى مش مقروء في الطباعة. عشان كده الرسوم
+   كارت بعرض الصفحة كله والـviewBox بعرضه تقريبًا (1:1). */
+function repBars(rows, maxVal, color){
+  const H = 26, W = 660, h = rows.length * H + 6, RX = W, LBL = 150, T0 = 96, T1 = RX - LBL;
+  const part = rows.map((r, i) => {
+    const y = i * H + 4, tw = T1 - T0;
+    const w = Math.max(3, Math.round(tw * (+r.value || 0) / (maxVal || 1)));
+    return '<rect x="' + T0 + '" y="' + y + '" width="' + tw + '" height="13" rx="6.5" fill="#eef2f7"/>'
+      + '<rect x="' + (T1 - w) + '" y="' + y + '" width="' + w + '" height="13" rx="6.5" fill="' + color + '"/>'
+      + '<text x="' + RX + '" y="' + (y + 11) + '" text-anchor="end" font-size="11.5" font-weight="700" fill="#0f172a">' + esc(r.label) + '</text>'
+      + '<text x="' + (T0 - 6) + '" y="' + (y + 11) + '" text-anchor="end" font-size="11" font-weight="800" fill="' + color + '">' + esc(r.note) + '</text>';
+  }).join('');
+  /* direction="ltr" مقصود: في صفحة RTL الـtext-anchor بيتقلب
+     (end = الشمال) فالأسماء بتترمي برّه الرسم وتختفي. الاتجاه هنا
+     هندسي للإحداثيات بس — النص العربي جوّاه بيفضل يتقرا يمين لشمال. */
+  return '<svg viewBox="0 0 ' + W + ' ' + h + '" width="100%" height="' + h + '" direction="ltr">' + part + '</svg>';
+}
+
+/* خط التقييمات يوم بيوم */
+function repLine(rows){
+  if (!rows.length) return '<div class="rnone">لا توجد تقييمات في هذه الفترة.</div>';
+  const W = 660, H = 130, px = 12, py = 18, max = Math.max(3, ...rows.map(r => +r.n || 0));
+  const x = i => rows.length === 1 ? W / 2 : px + i * (W - 2 * px) / (rows.length - 1);
+  const y = v => H - py - ((+v || 0) / max) * (H - 2 * py);
+  let g = '';
+  [0, Math.ceil(max / 2), max].forEach(v => {
+    g += '<line x1="' + px + '" x2="' + (W - px) + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="#e5e7eb" stroke-width="1"/>'
+      + '<text x="' + (W - px + 2) + '" y="' + (y(v) + 4) + '" font-size="8.5" fill="#94a3b8">' + v + '</text>';
+  });
+  const pts = rows.map((r, i) => x(i) + ',' + y(r.n)).join(' ');
+  if (rows.length > 1) g += '<polyline points="' + pts + '" fill="none" stroke="#0d9488" stroke-width="2" stroke-linejoin="round"/>';
+  rows.forEach((r, i) => { g += '<circle cx="' + x(i) + '" cy="' + y(r.n) + '" r="2.6" fill="#0d9488"/>'; });
+  g += '<text x="' + px + '" y="' + (H - 3) + '" font-size="8.5" fill="#64748b">' + esc(rows[0].d) + '</text>';
+  if (rows.length > 1) g += '<text x="' + (W - px) + '" y="' + (H - 3) + '" font-size="8.5" fill="#64748b" text-anchor="end">' + esc(rows[rows.length - 1].d) + '</text>';
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="' + H + '" direction="ltr">' + g + '</svg>';
+}
+
+function repStars(n){
+  const k = Math.round(+n || 0);
+  return '<span class="rst">' + '★'.repeat(k) + '<span class="off">' + '★'.repeat(5 - k) + '</span></span>';
+}
+function repMinStar(r){
+  return Math.min(+r.employee_stars || 5, +r.driver_stars || 5, r.speed_stars == null ? 5 : +r.speed_stars);
+}
+function repTop(list){
+  return (list || []).filter(x => (+x.n || 0) >= REP_MIN_N)
+    .sort((a, b) => (b.avg - a.avg) || (b.n - a.n)).slice(0, 3);
+}
+function repMedals(rows, kind){
+  if (!rows.length) return '<div class="rnone">لم يبلغ أحد ' + CNT(REP_MIN_N) + ' في هذه الفترة.</div>';
+  const m = ['🥇', '🥈', '🥉'];
+  return '<div class="rtop">' + rows.map((x, i) =>
+    '<div class="rtopr"><span class="rmed">' + m[i] + '</span>'
+    + '<span class="rnm">' + esc(x.name || '—') + '<small>' + esc(x.branch || '') + ' · ' + CNT(+x.n || 0) + '</small></span>'
+    + '<span class="rv">' + repStars(x.avg) + ' <b>' + f1(x.avg) + '</b>'
+    + (kind === 'drv' && x.avg_speed != null ? '<small>⚡ السرعة ' + f1(x.avg_speed) + '</small>' : '')
+    + '</span></div>').join('') + '</div>';
+}
+
+/* اقتباسات العملاء مجمّعة بالفرع */
+function repQuotes(rows){
+  if (!rows.length) return '';
+  const by = new Map();
+  rows.forEach(r => { const k = r.branch || '—'; if (!by.has(k)) by.set(k, []); by.get(k).push(r); });
+  return [...by.keys()].map(b =>
+    '<div class="rqb"><div class="rqbh">🏪 ' + esc(b) + ' <span>' + CNT(by.get(b).length) + '</span></div>'
+    + by.get(b).map(r => {
+        const who = [r.employee_name ? 'الصيدلي ' + r.employee_name : '', r.driver_name ? 'المندوب ' + r.driver_name : '']
+          .filter(Boolean).join(' · ');
+        return '<div class="rq"><div class="rqt">' + esc(r.comment) + '</div>'
+          + '<div class="rqm">' + repStars(repMinStar(r)) + ' <span>' + esc(who) + '</span>'
+          + '<span class="rqd">' + fmtDT(r.rated_at) + (r.bill_no ? ' · فاتورة ' + esc(r.bill_no) : '') + '</span></div></div>';
+      }).join('')
+    + '</div>').join('');
+}
+
+function repDelta(cur, prev){
+  if (cur == null || prev == null) return '';
+  const d = +cur - +prev;
+  if (Math.abs(d) < 0.05) return '<span class="rd eq">= كما الفترة السابقة</span>';
+  return '<span class="rd ' + (d > 0 ? 'up' : 'dn') + '">' + (d > 0 ? '▲' : '▼') + ' ' + Math.abs(d).toFixed(1) + ' عن الفترة السابقة</span>';
+}
+
+function reportHtml(ov, rows, p){
+  const br = repBrand(), k = ov.kpis || {}, pv = ov.prev || {};
+  const praise = rows.filter(r => repMinStar(r) >= 4);
+  const fix    = rows.filter(r => repMinStar(r) <= 3);
+  const brs    = (ov.branches || []).slice().sort((a, b) => (b.avg - a.avg) || (b.n - a.n));
+  const dist   = ov.dist || {};
+  const distTot = [5, 4, 3, 2, 1].reduce((s, j) => s + (+dist[j] || 0), 0);
+  const goalAvg = Math.min(5, Math.round(((+k.avg_all || 0) + 0.1) * 10) / 10);
+  /* النسبة صغيرة (أقل من 10%) فالتقريب لصحيح بيخبّي الفرق */
+  const curPct  = +k.rate_pct || 0;
+  const pctTxt  = curPct < 10 ? f1(curPct) : String(Math.round(curPct));
+  /* هدف واقعي: ربع زيادة على النسبة الحالية وبحد أدنى نقطتين —
+     مضاعفة النسبة أضعاف هدف الناس بتتجاهله بدل ما يحفّزها. */
+  const goalPct = Math.min(100, Math.round(curPct + Math.max(2, curPct * 0.25)));
+  const kpi = (lbl, val, sub) =>
+    '<div class="rk"><div class="rkl">' + lbl + '</div><div class="rkv">' + val + '</div><div class="rks">' + (sub || '') + '</div></div>';
+
+  const CSS = [
+    '@page{size:A4;margin:12mm 10mm}',
+    '*{box-sizing:border-box}',
+    'body{font-family:Cairo,system-ui,sans-serif;margin:0;color:#0f172a;background:#fff;font-size:12.5px;line-height:1.7}',
+    '.pg{max-width:190mm;margin:0 auto;padding:6mm}',
+    '.noprint{display:flex;gap:10px;align-items:center;justify-content:space-between;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;margin-bottom:14px}',
+    '.noprint b{font-size:13px}.noprint small{color:#64748b;font-weight:700}',
+    '.noprint button{font-family:Cairo;font-weight:800;font-size:13px;border:0;border-radius:8px;padding:8px 16px;background:#0d9488;color:#fff;cursor:pointer}',
+    '@media print{.noprint{display:none}.pg{padding:0;max-width:none}}',
+    'header{display:flex;align-items:center;gap:12px;border-bottom:3px solid #0d9488;padding-bottom:10px;margin-bottom:14px}',
+    'header img{height:46px;width:auto}',
+    'header .ht{flex:1}header h1{margin:0;font-size:19px;font-weight:800}',
+    'header .hs{font-size:11.5px;color:#64748b;font-weight:700}',
+    'header .hb{font-size:12px;font-weight:800;color:#0f766e;border:1px solid #99f6e4;background:#f0fdfa;border-radius:8px;padding:4px 10px}',
+    'h2{font-size:14.5px;margin:0 0 8px;font-weight:800;display:flex;align-items:center;gap:6px}',
+    'h2 small{font-weight:700;color:#94a3b8;font-size:11px}',
+    'section{margin-bottom:14px;page-break-inside:avoid}',
+    '.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}',
+    '.rk{border:1px solid #e2e8f0;border-radius:10px;padding:9px 11px}',
+    '.rkl{font-size:10.5px;color:#64748b;font-weight:700}',
+    '.rkv{font-size:21px;font-weight:800;line-height:1.3;color:#0f766e}',
+    '.rks{font-size:10px;color:#94a3b8;font-weight:700;min-height:14px}',
+    '.rd{font-size:9.5px;font-weight:800;border-radius:99px;padding:1px 6px;white-space:nowrap}',
+    '.rd.up{background:#dcfce7;color:#166534}.rd.dn{background:#fee2e2;color:#991b1b}.rd.eq{background:#f1f5f9;color:#475569}',
+    '.card{border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px}',
+    '.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}',
+    '.rst{color:#f59e0b;letter-spacing:.5px}.rst .off{color:#e2e8f0}',
+    '.rtop{display:flex;flex-direction:column;gap:5px}',
+    '.rtopr{display:flex;align-items:center;gap:8px;border-bottom:1px dashed #eef2f7;padding-bottom:4px}',
+    '.rtopr:last-child{border-bottom:0;padding-bottom:0}',
+    '.rmed{font-size:16px}.rnm{flex:1;font-weight:700}.rnm small{display:block;font-size:10px;color:#94a3b8;font-weight:700}',
+    '.rv{text-align:left;font-size:11px;white-space:nowrap}.rv b{font-size:13.5px;margin-inline-start:3px}',
+    '.rv small{display:block;color:#64748b;font-weight:700;font-size:10px}',
+    '.rqb{margin-bottom:10px;page-break-inside:avoid}',
+    '.rqbh{font-weight:800;font-size:12.5px;background:#f0fdfa;border:1px solid #ccfbf1;border-radius:8px;padding:4px 10px;margin-bottom:6px}',
+    '.rqbh span{font-weight:700;color:#0f766e;font-size:10.5px}',
+    '.rq{border-inline-start:3px solid #99f6e4;padding:2px 10px 6px;margin-bottom:6px;page-break-inside:avoid}',
+    '.rqt{font-size:12.5px;font-weight:600}',
+    '.rqm{display:flex;gap:8px;align-items:center;font-size:10px;color:#64748b;font-weight:700;margin-top:2px;flex-wrap:wrap}',
+    '.rqd{margin-inline-start:auto}',
+    '.goal{border:2px solid #0d9488;border-radius:12px;padding:12px 14px;page-break-inside:avoid}',
+    '.goal h2{color:#0f766e}',
+    '.goal .gr{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px 0}',
+    '.goal .gi{background:#f0fdfa;border:1px solid #ccfbf1;border-radius:9px;padding:8px 11px}',
+    '.goal .gi b{display:block;font-size:17px;color:#0f766e}',
+    '.goal .gi small{font-size:10.5px;color:#64748b;font-weight:700}',
+    '.msg{font-size:12.5px;font-weight:700}',
+    '.rnone{color:#94a3b8;font-weight:700;font-size:11.5px;padding:6px 0}',
+    'footer{border-top:1px solid #e2e8f0;margin-top:14px;padding-top:7px;font-size:10px;color:#94a3b8;font-weight:700;display:flex;justify-content:space-between}'
+  ].join('');
+
+  return '<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8">'
+    + '<title>تقرير تقييم العملاء ' + esc(p.from) + ' — ' + esc(p.to) + '</title>'
+    + '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">'
+    + '<style>' + CSS + '</style></head><body><div class="pg">'
+
+    + '<div class="noprint"><div><b>تقرير جاهز للطباعة أو الحفظ كملف PDF</b>'
+    + '<br><small>من نافذة الطباعة اختر «الوجهة: حفظ كـ PDF».</small></div>'
+    + '<button onclick="window.print()">🖨 طباعة / حفظ PDF</button></div>'
+
+    + '<header>' + (br.logo ? '<img src="' + esc(br.logo) + '" alt="">' : '')
+    + '<div class="ht"><h1>تقرير تقييم العملاء</h1>'
+    + '<div class="hs">' + esc(br.name) + ' · ' + esc(repPeriodLabel(p)) + '</div></div>'
+    + (repBranchLabel() ? '<div class="hb">' + esc(repBranchLabel()) + '</div>' : '')
+    + '</header>'
+
+    + '<div class="kpis">'
+    + kpi('عدد التقييمات', num(k.rated), 'من ' + num(k.delivered_orders) + ' طلب موصّل')
+    + kpi('المتوسط العام', f1(k.avg_all) + ' <small style="font-size:11px;color:#94a3b8">من 5</small>', repDelta(k.avg_all, pv.avg_all))
+    + kpi('نسبة التقييم', pctTxt + '%', 'من العملاء شاركوا برأيهم')
+    + kpi('تعليقات مكتوبة', num(rows.length), rows.length ? 'بكلمات العملاء' : 'لا توجد تعليقات')
+    + '</div>'
+
+    + '<section class="card"><h2>🏪 الفروع <small>المتوسط من 5 · عدد التقييمات</small></h2>'
+    + (brs.length ? repBars(brs.map(b => ({ label: b.name, value: b.avg, note: f1(b.avg) + ' · ' + num(b.n) })), 5, '#0d9488')
+                  : '<div class="rnone">لا توجد تقييمات.</div>') + '</section>'
+    + '<section class="card"><h2>🌟 توزيع النجوم <small>الأسئلة الثلاثة معًا</small></h2>'
+    + (distTot ? repBars([5, 4, 3, 2, 1].map(j => ({ label: '★'.repeat(j), value: +dist[j] || 0,
+        note: num(+dist[j] || 0) + ' · ' + Math.round(100 * (+dist[j] || 0) / distTot) + '%' })), distTot, '#f59e0b')
+              : '<div class="rnone">لا توجد تقييمات.</div>') + '</section>'
+
+    + '<section class="card"><h2>📈 التقييمات يومًا بيوم</h2>' + repLine(ov.daily || []) + '</section>'
+
+    + '<section class="g2">'
+    + '<div class="card"><h2>💊 صيادلة متميزون <small>' + CNT(REP_MIN_N) + ' على الأقل</small></h2>' + repMedals(repTop(ov.employees), 'emp') + '</div>'
+    + '<div class="card"><h2>🛵 مندوبون متميزون <small>' + CNT(REP_MIN_N) + ' على الأقل</small></h2>' + repMedals(repTop(ov.drivers), 'drv') + '</div>'
+    + '</section>'
+
+    + (praise.length ? '<section><h2>💬 ما قاله العملاء <small>' + CNT(praise.length) + ' بتقييم 4 نجوم أو أكثر</small></h2>' + repQuotes(praise) + '</section>' : '')
+    + (fix.length ? '<section><h2>🔧 ملاحظات تحتاج معالجة <small>' + CNT(fix.length) + ' بتقييم 3 نجوم أو أقل</small></h2>' + repQuotes(fix) + '</section>' : '')
+
+    + '<section class="goal"><h2>🎯 هدف الفترة القادمة</h2>'
+    + '<div class="gr">'
+    + '<div class="gi"><small>متوسط التقييم</small><b>من ' + f1(k.avg_all) + ' إلى ' + goalAvg.toFixed(1) + '</b></div>'
+    + '<div class="gi"><small>نسبة العملاء الذين يقيّمون</small><b>من ' + pctTxt + '% إلى ' + goalPct + '%</b></div>'
+    + '</div>'
+    + '<div class="msg">كل تعليق في هذا التقرير كتبه عميل حقيقي بعد استلام طلبه. شكرًا لكل زميل حافظ على هذا المستوى، ونتطلّع في الفترة القادمة إلى تقييمات أكثر ومتوسط أعلى.</div>'
+    + '</section>'
+
+    + '<footer><span>' + esc(br.name) + ' · تقييم العملاء</span>'
+    + '<span>صدر في ' + esc(new Date().toLocaleString('ar-EG-u-nu-latn', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' })) + '</span></footer>'
+    + '</div></body></html>';
+}
+
+async function openReport(){
+  const b = el('repBtn'), old = b.textContent;
+  b.disabled = true; b.textContent = 'جارٍ التجهيز…';
+  const p = period();
+  try {
+    const body = { p_from: p.from, p_to: p.to, p_branch_id: branchParam(),
+                   p_who: 'all', p_max_stars: 5, p_limit: 200, p_offset: 0 };
+    if (CHAS_OK) body.p_with_comment = true;
+    const [ov, cm] = await Promise.all([
+      rpc('rating_overview', { p_from: p.from, p_to: p.to, p_branch_id: branchParam() }),
+      rpc('rating_comments', body)   // data-ok: الدالة بترجّع jsonb — 200 تعليق سقف التقرير
+    ]);
+    if (!(ov.kpis && ov.kpis.rated)) { toast('لا توجد تقييمات في هذه الفترة.', true); return; }
+    /* الفلترة هنا احتياط لو القاعدة لسه مش عارفة p_with_comment */
+    const rows = (cm.rows || []).filter(r => String(r.comment || '').trim() !== '');
+    const w = window.open('', '_blank');
+    if (!w) { toast('المتصفح منع فتح النافذة — اسمح بالنوافذ المنبثقة.', true); return; }
+    w.document.open(); w.document.write(reportHtml(ov, rows, p)); w.document.close();
+    /* الطباعة بعد ما الخط يوصل، وإلا الصفحة تتقاس بخط بديل */
+    try { w.focus(); setTimeout(() => { try { w.print(); } catch (e) {} }, 1200); } catch (e) {}
+    if (CHAS_OK && (cm.total || 0) > rows.length) toast('التقرير يعرض أحدث ' + rows.length + ' تعليق من ' + cm.total + '.');
+  } catch (e) {
+    toast(e.message || 'تعذّر تجهيز التقرير', true);
+  } finally { b.disabled = false; b.textContent = old; }
+}
 
 /* ═══ الإعدادات ═══ */
 async function loadSettings(){
@@ -410,7 +697,10 @@ async function init(){
   BRANCH_ID = Session.branchId ? Session.branchId() : '';
 
   if (!IS_ADMIN) el('tab-settings').style.display = 'none';
-  if (!(IS_ADMIN || ROLE === 'manager' || CAN_EDIT)) el('tab-comments').style.display = 'none';
+  /* التقرير فيه نصوص العملاء، فنفس شرط تبويب التعليقات */
+  const canComments = IS_ADMIN || ROLE === 'manager' || CAN_EDIT;
+  if (!canComments) el('tab-comments').style.display = 'none';
+  if (canComments) el('repBtn').style.display = '';
 
   if (SEES_ALL) {
     try {
@@ -425,7 +715,7 @@ async function init(){
   el('perSel').onchange = () => { el('customRange').style.display = el('perSel').value === 'custom' ? 'inline-flex' : 'none'; if (el('perSel').value !== 'custom') refresh(); };
   el('dFrom').onchange = el('dTo').onchange = refresh;
   el('sortSel').onchange = renderRank;
-  el('cWho').onchange = el('cMax').onchange = () => { C_PAGE = 1; loadComments(); };
+  el('cWho').onchange = el('cMax').onchange = el('cHas').onchange = () => { C_PAGE = 1; loadComments(); };
 
   try { if (Session.guardTabs) await Session.guardTabs('ratings'); } catch (e) {}
   loadOverview();
