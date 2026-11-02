@@ -424,8 +424,8 @@ function repBrand(gate){
    الإحداثيات بمقاس A4 ثابت (794×1123) عشان rotate محتاج نقطة محور. */
 function repWatermark(org){
   const t = esc(org);
-  return '<div class="wmbox" aria-hidden="true">'
-    + '<svg viewBox="0 0 794 1123" preserveAspectRatio="xMidYMid slice" width="100%" height="100%" direction="ltr">'
+  return '<div class="wm" aria-hidden="true">'
+    + '<svg viewBox="0 0 794 1123" preserveAspectRatio="none" width="100%" height="100%" direction="ltr">'
     + '<text x="397" y="580" text-anchor="middle" transform="rotate(-30 397 580)"'
     + ' font-family="Cairo" font-size="46" font-weight="800" fill="#0f766e" fill-opacity="0.09">' + t + '</text>'
     + '<text x="397" y="630" text-anchor="middle" transform="rotate(-30 397 580)"'
@@ -516,8 +516,11 @@ function repQuotes(rows){
   if (!rows.length) return '';
   const by = new Map();
   rows.forEach(r => { const k = r.branch || '—'; if (!by.has(k)) by.set(k, []); by.get(k).push(r); });
+  /* مفيش غلاف للمجموعة: التوزيع على الصفحات بيشتغل على الأبناء
+     المباشرة، فلو مجموعة فرع فيها 40 تعليق في غلاف واحد ماتنفعش
+     تتقسّم. ترويسة الفرع وكل تعليق بلوك لوحده. */
   return [...by.keys()].map(b =>
-    '<div class="rqb"><div class="rqbh">🏪 ' + esc(b) + ' <span>' + CNT(by.get(b).length) + '</span></div>'
+    '<div class="rqbh">🏪 ' + esc(b) + ' <span>' + CNT(by.get(b).length) + '</span></div>'
     + by.get(b).map(r => {
         const who = [r.employee_name ? 'الصيدلي ' + r.employee_name : '', r.driver_name ? 'المندوب ' + r.driver_name : '']
           .filter(Boolean).join(' · ');
@@ -525,7 +528,7 @@ function repQuotes(rows){
           + '<div class="rqm">' + repStars(repMinStar(r)) + ' <span>' + esc(who) + '</span>'
           + '<span class="rqd">' + fmtDT(r.rated_at) + (r.bill_no ? ' · فاتورة ' + esc(r.bill_no) : '') + '</span></div></div>';
       }).join('')
-    + '</div>').join('');
+    ).join('');
 }
 
 function repDelta(cur, prev){
@@ -553,15 +556,26 @@ function reportHtml(ov, rows, p, gate){
     '<div class="rk"><div class="rkl">' + lbl + '</div><div class="rkv">' + val + '</div><div class="rks">' + (sub || '') + '</div></div>';
 
   const CSS = [
-    '@page{size:A4;margin:12mm 10mm}',
+    '@page{size:A4;margin:0}',
     '*{box-sizing:border-box}',
     'body{font-family:Cairo,system-ui,sans-serif;margin:0;color:#0f172a;background:#fff;font-size:12.5px;line-height:1.7}',
-    '.pg{max-width:190mm;margin:0 auto;padding:6mm;position:relative;z-index:1}',
-    '.wmbox{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}',
+    /* ورقة A4 حقيقية لكل صفحة — التوزيع بيتم بالجافاسكربت بعد ما
+       الخط يوصل، فكل ورقة بتاخد علامتها وترقيمها جوّاها. */
+    '#doc{max-width:186mm;margin:0 auto;padding:0 10mm}',
+    /* 296 مش 297: لو الورقة بنفس طول الصفحة بالظبط، تقريب الكسور
+       بيطلّعها لصفحة تانية فتظهر صفحة فاضية بين كل ورقتين. */
+    '.sheet{width:210mm;height:296mm;padding:12mm 10mm 16mm;margin:0 auto 7mm;',
+    '  background:#fff;position:relative;overflow:hidden;box-shadow:0 1px 7px rgba(0,0,0,.13)}',
+    '.sheet .wm{position:absolute;inset:0;z-index:0;pointer-events:none}',
+    '.sheet .inner{position:relative;z-index:1}',
+    '.pgno{position:absolute;bottom:6mm;left:0;right:0;text-align:center;z-index:1;',
+    '  font-size:9.5px;font-weight:700;color:#94a3b8}',
     '.noprint{display:flex;gap:10px;align-items:center;justify-content:space-between;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;margin-bottom:14px}',
     '.noprint b{font-size:13px}.noprint small{color:#64748b;font-weight:700}',
     '.noprint button{font-family:Cairo;font-weight:800;font-size:13px;border:0;border-radius:8px;padding:8px 16px;background:#0d9488;color:#fff;cursor:pointer}',
-    '@media print{.noprint{display:none}.pg{padding:0;max-width:none}}',
+    '@media print{.noprint{display:none}#doc{padding:0}',
+    '  .sheet{margin:0;box-shadow:none;break-after:page;page-break-after:always}',
+    '  .sheet:last-child{break-after:auto;page-break-after:auto}}',
     'header{display:flex;align-items:center;gap:12px;border-bottom:3px solid #0d9488;padding-bottom:10px;margin-bottom:14px}',
     'header img{height:46px;width:auto}',
     'header .ht{flex:1}header h1{margin:0;font-size:19px;font-weight:800}',
@@ -570,6 +584,7 @@ function reportHtml(ov, rows, p, gate){
     'h2{font-size:14.5px;margin:0 0 8px;font-weight:800;display:flex;align-items:center;gap:6px}',
     'h2 small{font-weight:700;color:#94a3b8;font-size:11px}',
     'section{margin-bottom:14px;page-break-inside:avoid}',
+    '.hblk{margin:4px 0 8px}',
     '.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}',
     '.rk{border:1px solid #e2e8f0;border-radius:10px;padding:9px 11px}',
     '.rkl{font-size:10.5px;color:#64748b;font-weight:700}',
@@ -586,7 +601,7 @@ function reportHtml(ov, rows, p, gate){
     '.rmed{font-size:16px}.rnm{flex:1;font-weight:700}.rnm small{display:block;font-size:10px;color:#94a3b8;font-weight:700}',
     '.rv{text-align:left;font-size:11px;white-space:nowrap}.rv b{font-size:13.5px;margin-inline-start:3px}',
     '.rv small{display:block;color:#64748b;font-weight:700;font-size:10px}',
-    '.rqb{margin-bottom:10px;page-break-inside:avoid}',
+
     '.rqbh{font-weight:800;font-size:12.5px;background:#f0fdfa;border:1px solid #ccfbf1;border-radius:8px;padding:4px 10px;margin-bottom:6px}',
     '.rqbh span{font-weight:700;color:#0f766e;font-size:10.5px}',
     '.rq{border-inline-start:3px solid #99f6e4;padding:2px 10px 6px;margin-bottom:6px;page-break-inside:avoid}',
@@ -607,11 +622,13 @@ function reportHtml(ov, rows, p, gate){
   return '<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8">'
     + '<title>تقرير تقييم العملاء ' + esc(p.from) + ' — ' + esc(p.to) + '</title>'
     + '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">'
-    + '<style>' + CSS + '</style></head><body>' + repWatermark(br.name) + '<div class="pg">'
+    + '<style>' + CSS + '</style></head><body>'
 
     + '<div class="noprint"><div><b>تقرير جاهز للطباعة أو الحفظ كملف PDF</b>'
     + '<br><small>من نافذة الطباعة اختر «الوجهة: حفظ كـ PDF».</small></div>'
     + '<button onclick="window.print()">🖨 طباعة / حفظ PDF</button></div>'
+
+    + '<div id="doc">'
 
     + '<header>' + (br.logo ? '<img src="' + esc(br.logo) + '" alt="">' : '')
     + '<div class="ht"><h1>تقرير تقييم العملاء</h1>'
@@ -641,8 +658,10 @@ function reportHtml(ov, rows, p, gate){
     + '<div class="card"><h2>🛵 مندوبون متميزون <small>' + CNT(REP_MIN_N) + ' على الأقل</small></h2>' + repMedals(repTop(ov.drivers), 'drv') + '</div>'
     + '</section>'
 
-    + (praise.length ? '<section><h2>💬 ما قاله العملاء <small>' + CNT(praise.length) + ' بتقييم 4 نجوم أو أكثر</small></h2>' + repQuotes(praise) + '</section>' : '')
-    + (fix.length ? '<section><h2>🔧 ملاحظات تحتاج معالجة <small>' + CNT(fix.length) + ' بتقييم 3 نجوم أو أقل</small></h2>' + repQuotes(fix) + '</section>' : '')
+    /* الترويسة بلوك لوحدها والتعليقات بلوكات — لو لفّيناهم في section
+       واحدة تبقى أطول من الصفحة وماتنفعش تتقسّم، والزيادة تتقص. */
+    + (praise.length ? '<div class="hblk"><h2>💬 ما قاله العملاء <small>' + CNT(praise.length) + ' بتقييم 4 نجوم أو أكثر</small></h2></div>' + repQuotes(praise) : '')
+    + (fix.length ? '<div class="hblk"><h2>🔧 ملاحظات تحتاج معالجة <small>' + CNT(fix.length) + ' بتقييم 3 نجوم أو أقل</small></h2></div>' + repQuotes(fix) : '')
 
     + '<section class="goal"><h2>🎯 هدف الفترة القادمة</h2>'
     + '<div class="gr">'
@@ -654,7 +673,54 @@ function reportHtml(ov, rows, p, gate){
 
     + '<footer><span>' + esc(br.name) + ' · تقييم العملاء</span>'
     + '<span>صدر في ' + esc(new Date().toLocaleString('ar-EG-u-nu-latn', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Cairo' })) + '</span></footer>'
-    + '</div></body></html>';
+
+    + '</div><div id="sheets"></div>'
+    + repPaginator(repWatermark(br.name))
+    + '</body></html>';
+}
+
+/* سكربت بيشتغل جوّه نافذة التقرير: بيوزّع البلوكات على ورق A4
+   وبيحط العلامة والترقيم في كل ورقة، وبعدين بيفتح الطباعة.
+   القياس بعد ما الخط يوصل (document.fonts.ready) — قبل كده
+   الارتفاعات بتتقاس بخط بديل والتوزيع بيطلع غلط.
+   ولو وقع لأي سبب، بنسيب المستند زي ما هو بدل ما نضيّع المحتوى. */
+function repPaginator(wmHtml){
+  return '<scr' + 'ipt>(function(){' +
+    'var WM = ' + JSON.stringify(wmHtml) + ';' +
+    'function run(){' +
+    '  var doc=document.getElementById("doc"), box=document.getElementById("sheets");' +
+    '  if(!doc||!box) return;' +
+    '  var pr=document.createElement("div");' +
+    '  pr.style.cssText="position:absolute;visibility:hidden;height:262mm";' +
+    '  document.body.appendChild(pr); var MAX=pr.offsetHeight; pr.parentNode.removeChild(pr);' +
+    '  if(!(MAX>100)) return;' +
+    '  var blocks=[].slice.call(doc.children), sheet=null, inner=null;' +
+    '  function add(){' +
+    '    sheet=document.createElement("div"); sheet.className="sheet"; sheet.innerHTML=WM;' +
+    '    inner=document.createElement("div"); inner.className="inner";' +
+    '    sheet.appendChild(inner); box.appendChild(sheet);' +
+    '  }' +
+    '  add();' +
+    '  blocks.forEach(function(b){' +
+    '    inner.appendChild(b);' +
+    '    if(inner.scrollHeight>MAX && inner.children.length>1){ add(); inner.appendChild(b); }' +
+    '    else if(b.className==="rqbh" && MAX-inner.scrollHeight<90 && inner.children.length>1){' +
+    '      add(); inner.appendChild(b);' +
+    '    }' +
+    '  });' +
+    '  if(doc.parentNode) doc.parentNode.removeChild(doc);' +
+    '  var all=[].slice.call(box.children);' +
+    '  all.forEach(function(s,i){' +
+    '    var n=document.createElement("div"); n.className="pgno";' +
+    '    n.textContent="صفحة "+(i+1)+" من "+all.length; s.appendChild(n);' +
+    '  });' +
+    '}' +
+    /* الطباعة بتتفتح لوحدها لما التقرير ييجي من الشاشة (window.opener)،
+       ومابتتفتحش لو الملف اتفتح بإيد للمعاينة. */
+    'function go(){ try{ run(); }catch(e){}' +
+    '  if(window.opener) setTimeout(function(){ try{ window.print(); }catch(e){} }, 250); }' +
+    'if(document.fonts && document.fonts.ready) document.fonts.ready.then(go, go); else window.addEventListener("load", go);' +
+    '})();<\/scr' + 'ipt>';
 }
 
 async function openReport(){
@@ -685,8 +751,8 @@ async function openReport(){
     const w = window.open('', '_blank');
     if (!w) { toast('المتصفح منع فتح النافذة — اسمح بالنوافذ المنبثقة.', true); return; }
     w.document.open(); w.document.write(reportHtml(ov, rows, p, gate)); w.document.close();
-    /* الطباعة بعد ما الخط يوصل، وإلا الصفحة تتقاس بخط بديل */
-    try { w.focus(); setTimeout(() => { try { w.print(); } catch (e) {} }, 1200); } catch (e) {}
+    /* الطباعة بتتنده من جوّه التقرير بعد ما يتقسّم لصفحات */
+    try { w.focus(); } catch (e) {}
     if (CHAS_OK && (cm.total || 0) > rows.length) toast('التقرير يعرض أحدث ' + rows.length + ' تعليق من ' + cm.total + '.');
   } catch (e) {
     toast(e.message || 'تعذّر تجهيز التقرير', true);
