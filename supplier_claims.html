@@ -229,9 +229,23 @@
     </div>
   </div>
 
+  <style>
+    .mh-acts { display:flex; gap:6px; align-items:center; }
+    .mh-acts button { font-family:var(--font,inherit); font-size:.74rem; font-weight:800;
+      border:1px solid rgba(255,255,255,.45); background:rgba(255,255,255,.14); color:#fff;
+      border-radius:6px; padding:4px 10px; cursor:pointer; white-space:nowrap; }
+    .mh-acts button:hover { background:rgba(255,255,255,.26); }
+  </style>
   <div class="ovl" id="ovl" onclick="if(event.target===this)closeModal()">
     <div class="modal">
-      <div class="mh"><span id="mTitle">مراجعة مطالبة</span><button onclick="closeModal()">✕ إغلاق</button></div>
+      <div class="mh"><span id="mTitle">مراجعة مطالبة</span>
+        <span class="mh-acts">
+          <button id="btnDoc" onclick="exportClaimDoc()" title="مستند جاهز للإرسال إلى المورّد">
+            <i class="fas fa-file-pdf"></i> ملف للمورّد</button>
+          <button id="btnXls" onclick="exportClaimXlsx()" title="جدول تفصيلي بصيغة Excel">
+            <i class="fas fa-file-excel"></i> Excel</button>
+          <button onclick="closeModal()">✕ إغلاق</button>
+        </span></div>
       <div class="mb" id="mBody"></div>
     </div>
   </div>
@@ -251,6 +265,7 @@
     /* عمود التاريخ في الفواتير = **تاريخ الإدخال على النظام**، لأن ده
        اللي كشف حساب المورّد في eplus بيترتّب بيه — مش تاريخ فاتورة
        المورّد المكتوب على الورقة (ممكن يفرقوا لحد ٣١ يوم). */
+    /* (ستايل أزرار رأس المودال مضاف في <style>) */
     function dOnly(s){ if(!s) return '—'; try{ return new Date(s).toLocaleDateString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',year:'numeric'}); }catch(e){ return s; } }
     /* ⚠️ من نص الطابع مباشرة — من غير new Date(). eplus بيخزّن وقت
        القاهرة حرفيًا في عمود بلا منطقة زمنية، وأي تحويل بيزحزحه. */
@@ -475,16 +490,19 @@
     async function viewClaim(id){
       const d = await rpc('get_claim_detail',{p_id:id});
       if(!d || d.error){ showMsg((d&&d.error)||'تعذّر تحميل التفاصيل',false); return; }
+      CLAIM = d;
       const invs=d.invoices||[], rets=d.returns||[];
       const invRows = invs.length ? invs.map(v=>`<tr><td>${esc(v.bill_no||'—')}</td><td>${dOnly(v.date)}</td><td class="num">${f0(v.total)}</td></tr>`).join('') : '<tr><td colspan="3" class="empty">—</td></tr>';
-      const retRows = rets.length ? rets.map(r=>`<tr><td>${dOnly(r.date)}</td><td>${esc(r.kind)}</td><td style="text-align:right">${esc(r.name)}</td><td class="num">${f0(r.qty)}</td><td class="num">${f0(r.val)}</td><td>${esc(r.reason||'—')}</td></tr>`).join('') : '<tr><td colspan="6" class="empty">لا مرتجعات</td></tr>';
+      /* ⚠️ الـRPC بترجّع bill_no أصلًا — كان العرض ناقصه مش البيانات.
+         «شراء عام» مرتجع غير مربوط بفاتورة فبيفضل بشرطة. */
+      const retRows = rets.length ? rets.map(r=>`<tr><td>${esc(r.bill_no||'—')}</td><td>${dOnly(r.date)}</td><td>${esc(r.kind)}</td><td style="text-align:right">${esc(r.name)}</td><td class="num">${f0(r.qty)}</td><td class="num">${f0(r.val)}</td><td>${esc(r.reason||'—')}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">لا مرتجعات</td></tr>';
       document.getElementById('mTitle').textContent = (d.vendor||'مورّد')+' — مطالبة مقفولة بتاريخ '+dOnly(d.closed_at)+' · أقفلها: '+(d.closed_by||'—');
       document.getElementById('mBody').innerHTML = `
         <div class="grid2">
           <div class="card"><div class="card-h inv">فواتير الشراء (${invs.length})</div>
             <div class="scroll" style="max-height:46vh"><table><thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>القيمة</th></tr></thead><tbody>${invRows}</tbody></table></div></div>
           <div class="card"><div class="card-h ret">المرتجعات (${rets.length})</div>
-            <div class="scroll" style="max-height:46vh"><table><thead><tr><th>التاريخ</th><th>المصدر</th><th>الصنف</th><th>الكمية</th><th>القيمة</th><th>السبب</th></tr></thead><tbody>${retRows}</tbody></table></div></div>
+            <div class="scroll" style="max-height:46vh"><table><thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>المصدر</th><th>الصنف</th><th>الكمية</th><th>القيمة</th><th>السبب</th></tr></thead><tbody>${retRows}</tbody></table></div></div>
         </div>
         <div class="card sum" style="margin-top:12px"><div class="sumgrid">
           <div class="srow plus"><span class="l">قيمة الفواتير</span><span class="v">${f0(d.invoices_total)}</span></div>
@@ -496,6 +514,158 @@
       document.getElementById('ovl').classList.add('on');
     }
     function closeModal(){ document.getElementById('ovl').classList.remove('on'); }
+
+    /* ══════════════ تصدير التسوية للمورّد ══════════════════════
+       المستند بيتفتح في نافذة مستقلة بتنسيق A4 ويُطبع أو يُحفظ PDF.
+       بيتكتب من `CLAIM` المحمَّلة في viewClaim — نفس الأرقام
+       المعروضة بالظبط، من غير أي حساب جديد في الواجهة. */
+    let CLAIM = null;
+
+    function orgInfo(){
+      try { const b = JSON.parse(localStorage.getItem('orgBrand') || 'null');
+            return { name: (b && b.company_name) || 'الصيدلية', logo: (b && b.logo_url) || '' }; }
+      catch(e){ return { name: 'الصيدلية', logo: '' }; }
+    }
+    function claimFileName(ext){
+      const d = CLAIM || {};
+      const v = String(d.vendor || 'مورد').replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 40);
+      return 'تسوية_' + v + '_' + String(d.closed_at || '').slice(0, 10) + '.' + ext;
+    }
+
+    function exportClaimDoc(){
+      const d = CLAIM;
+      if(!d){ showMsg('لم تُحمَّل تفاصيل المطالبة بعد.', false); return; }
+      const org = orgInfo();
+      const invs = d.invoices || [], rets = d.returns || [];
+      const row = a => '<tr>' + a.map(c => '<td>' + c + '</td>').join('') + '</tr>';
+
+      const invBody = invs.length
+        ? invs.map(v => row([esc(v.bill_no||'—'), dOnly(v.date), '<b>'+f0(v.total)+'</b>'])).join('')
+        : '<tr><td colspan="3" class="mid">لا توجد فواتير</td></tr>';
+      const retBody = rets.length
+        ? rets.map(r => row([esc(r.bill_no||'—'), dOnly(r.date), esc(r.kind),
+                             '<span class="rt">'+esc(r.name)+'</span>', f0(r.qty),
+                             '<b>'+f0(r.val)+'</b>', esc(r.reason||'—')])).join('')
+        : '<tr><td colspan="7" class="mid">لا توجد مرتجعات</td></tr>';
+
+      const sum = [
+        ['قيمة الفواتير', f0(d.invoices_total), ''],
+        ['يُخصم: إجمالي المرتجعات', f0(d.returns_total), 'neg'],
+        ['يُخصم: إجمالي ما لم يصل', f0(d.notarr_total), 'neg'],
+        ['يُخصم: خصم نقدي ' + f0(d.disc_pct) + '٪ من ' + f0(d.local_value), f0(d.disc_value), 'neg'],
+      ].map(x => '<tr class="' + x[2] + '"><td>' + x[0] + '</td><td class="n">' + x[1] + '</td></tr>').join('');
+
+      const html = [
+'<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8">',
+'<title>', esc(claimFileName('pdf').replace(/\.pdf$/, '')), '</title>',
+'<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&display=swap" rel="stylesheet">',
+'<style>',
+'@page { size:A4; margin:14mm 12mm; }',
+'*{box-sizing:border-box} body{font-family:Cairo,system-ui,sans-serif;color:#0f172a;margin:0;font-size:12px}',
+'@media screen{ body{padding:18px} }',
+'.hd{display:flex;align-items:center;gap:12px;border-bottom:3px solid #0f766e;padding-bottom:10px;margin-bottom:14px}',
+'.hd img{height:46px}.hd .org{font-size:17px;font-weight:800;color:#0f766e}',
+'.hd .ttl{margin-inline-start:auto;text-align:left;font-size:13px;font-weight:800}',
+'.meta{display:grid;grid-template-columns:repeat(3,1fr);gap:6px 14px;margin-bottom:14px}',
+'.meta div{font-size:12px}.meta b{color:#475569;font-weight:600}',
+'h3{font-size:13px;margin:14px 0 6px;color:#0f766e;border-inline-start:4px solid #0f766e;padding-inline-start:7px}',
+'table{width:100%;border-collapse:collapse;font-size:11px}',
+'th{background:#f1f5f9;border:1px solid #cbd5e1;padding:4px 5px;font-weight:800;text-align:center}',
+'td{border:1px solid #e2e8f0;padding:4px 5px;text-align:center}',
+'td.mid{text-align:center;color:#64748b;padding:10px}',
+'.rt{display:block;text-align:right}',
+'tbody tr:nth-child(even){background:#f8fafc}',
+'.sum{width:62%;margin-inline-start:auto;margin-top:14px}',
+'.sum td{text-align:right;padding:5px 8px}.sum td.n{text-align:left;font-weight:800;font-variant-numeric:tabular-nums}',
+'.sum tr.neg td.n{color:#b91c1c}',
+'.sum tr.net td{border-top:2px solid #0f766e;font-size:14px;font-weight:800;color:#0f766e;padding-top:8px}',
+'.note{margin-top:10px;padding:7px 10px;background:#f8fafc;border:1px solid #e2e8f0;font-size:11px}',
+'.sg{display:flex;gap:40px;margin-top:26px;font-size:11px}',
+'.sg div{flex:1;border-top:1px solid #94a3b8;padding-top:5px;text-align:center;color:#475569}',
+'.ft{margin-top:14px;font-size:10px;color:#64748b;text-align:center}',
+'@media print{.noprint{display:none}}',
+'.noprint{display:flex;gap:6px;justify-content:flex-start;margin-bottom:10px}',
+'.noprint button{font-family:Cairo,sans-serif;font-size:12px;font-weight:800;padding:6px 14px;',
+'border:none;border-radius:6px;background:#0f766e;color:#fff;cursor:pointer}',
+'</style></head><body>',
+'<div class="noprint"><button onclick="window.print()">طباعة / حفظ PDF</button></div>',
+'<div class="hd">',
+  (org.logo ? '<img src="' + esc(org.logo) + '" alt="">' : ''),
+  '<div class="org">', esc(org.name), '</div>',
+  '<div class="ttl">إشعار تسوية مطالبة مورّد<br><span style="font-weight:600;color:#475569">رقم ',
+  esc(String(d.id || '—')), '</span></div>',
+'</div>',
+'<div class="meta">',
+  '<div><b>المورّد:</b> ', esc(d.vendor || '—'), '</div>',
+  '<div><b>الفرع:</b> ', esc(BR[d.branch] || d.branch || '—'), '</div>',
+  '<div><b>تاريخ الإقفال:</b> ', dOnly(d.closed_at), '</div>',
+  '<div><b>الفترة من:</b> ', dOnly(d.from_date), '</div>',
+  '<div><b>إلى:</b> ', dOnly(d.to_date), '</div>',
+  '<div><b>أقفلها:</b> ', esc(d.closed_by || '—'), '</div>',
+'</div>',
+'<h3>فواتير الشراء (', String(invs.length), ')</h3>',
+'<table><thead><tr><th style="width:22%">رقم الفاتورة</th><th style="width:22%">التاريخ</th>',
+'<th>القيمة</th></tr></thead><tbody>', invBody, '</tbody></table>',
+'<h3>المرتجعات (', String(rets.length), ')</h3>',
+'<table><thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>المصدر</th><th>الصنف</th>',
+'<th>الكمية</th><th>القيمة</th><th>السبب</th></tr></thead><tbody>', retBody, '</tbody></table>',
+'<table class="sum">', sum,
+'<tr class="net"><td>الصافي المستحق للمورّد</td><td class="n">', f0(d.net_paid), ' جنيه</td></tr>',
+'</table>',
+(d.note ? '<div class="note"><b>ملاحظات:</b> ' + esc(d.note) + '</div>' : ''),
+'<div class="sg"><div>إعداد المحاسب</div><div>اعتماد الإدارة</div><div>توقيع المورّد</div></div>',
+'<div class="ft">حُرِّر هذا الإشعار آليًا من نظام ', esc(org.name),
+' بتاريخ ', new Date().toLocaleDateString('ar-EG', { timeZone:'Africa/Cairo' }), '</div>',
+'</body></html>'].join('');
+
+      const w = window.open('', '_blank');
+      /* ⚠️ حاجب النوافذ المنبثقة بيرجّع null — نقول السبب بدل ما
+         المستخدم يضغط ومايحصلش حاجة. */
+      if(!w){ showMsg('تعذّر فتح المستند — يُرجى السماح بالنوافذ المنبثقة لهذا الموقع.', false); return; }
+      w.document.write(html); w.document.close();
+    }
+
+    /* Excel: جدول تفصيلي يراجعه المورّد سطرًا سطرًا */
+    function loadXlsx(){
+      if (window.XLSX) return Promise.resolve();
+      return new Promise(function(res, rej){
+        const t = document.createElement('script');
+        t.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+        t.onload = res; t.onerror = function(){ rej(new Error('تعذّر تحميل مكتبة Excel')); };
+        document.head.appendChild(t);
+      });
+    }
+    async function exportClaimXlsx(){
+      const d = CLAIM;
+      if(!d){ showMsg('لم تُحمَّل تفاصيل المطالبة بعد.', false); return; }
+      try { await loadXlsx(); }
+      catch(e){ showMsg('تعذّر تحميل مكتبة Excel — يُرجى التحقق من الاتصال.', false); return; }
+      const n = v => (v==null ? null : Number(v));
+      const head = [
+        ['إشعار تسوية مطالبة مورّد'],
+        ['المورّد', d.vendor||'—', 'الفرع', BR[d.branch]||d.branch||'—'],
+        ['الفترة من', dOnly(d.from_date), 'إلى', dOnly(d.to_date)],
+        ['تاريخ الإقفال', dOnly(d.closed_at), 'أقفلها', d.closed_by||'—'],
+        [],
+      ];
+      const inv = [['فواتير الشراء'], ['رقم الفاتورة','التاريخ','القيمة']]
+        .concat((d.invoices||[]).map(v => [v.bill_no||'—', dOnly(v.date), n(v.total)]))
+        .concat([[], ['المرتجعات'],
+                 ['رقم الفاتورة','التاريخ','المصدر','الصنف','الكمية','القيمة','السبب']])
+        .concat((d.returns||[]).map(r => [r.bill_no||'—', dOnly(r.date), r.kind,
+                                          r.name, n(r.qty), n(r.val), r.reason||'—']))
+        .concat([[],
+          ['قيمة الفواتير', n(d.invoices_total)],
+          ['يُخصم: إجمالي المرتجعات', n(d.returns_total)],
+          ['يُخصم: إجمالي ما لم يصل', n(d.notarr_total)],
+          ['يُخصم: خصم نقدي ' + f0(d.disc_pct) + '٪', n(d.disc_value)],
+          ['الصافي المستحق للمورّد', n(d.net_paid)]]);
+      const ws = XLSX.utils.aoa_to_sheet(head.concat(inv));
+      ws['!cols'] = [{wch:16},{wch:14},{wch:14},{wch:42},{wch:10},{wch:12},{wch:18}];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'التسوية');
+      XLSX.writeFile(wb, claimFileName('xlsx'));
+    }
     async function reopen(id){
       if(!confirm('إلغاء إغلاق المطالبة؟ هترجع الفواتير والمرتجعات مفتوحة.')) return;
       try{ await rpcAuth('reopen_supplier_claim',{p_id:id}); loadHistory(); await loadOpen(); showMsg('تم إلغاء الإغلاق',true); }
