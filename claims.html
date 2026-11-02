@@ -683,6 +683,31 @@
 
       if (selected.length === 0) { alert('لا توجد فواتير مختارة للمطالبة'); return; }
 
+      /* الفاتورة اللي نوعها مش «عاملين» ولا «معاشات» مابتدخلش أي مجموعة
+         في العرض ولا في المطالبة المطبوعة، لكن claim_id بيتكتب عليها
+         تحت — يعني تختفي من المنتظرة والشركة ماتتطالبش بيها. نوقف قبل.
+         الحارس هنا مش في شاشة الإدخال بس، عشان يمسك الصفوف الجاية من
+         eplus كمان مش اللي بنضيفها إحنا. */
+      const noType = selected.filter(i => {
+        const t = String(i.bill_type || '').trim();
+        return t !== 'عاملين' && t !== 'معاشات';
+      });
+      if (noType.length) {
+        const list = noType.slice(0, 10)
+          .map(i => `• ${i.bill_no || '؟'} — ${i.cust_name_ar || ''}`)
+          .join(`
+`);
+        const more = noType.length > 10 ? `
+… و${noType.length - 10} غيرها` : ``;
+        alert(`⚠️ فيه ${noType.length} فاتورة بلا نوع (عاملين/معاشات) ضمن المختار.
+
+الفواتير دي مش هتظهر في المطالبة المطبوعة، لكن هتتعلّم إنها اتطالب بيها وتختفي من القائمة.
+حدّد نوعها في شاشة فواتير التعاقد الأول:
+
+${list}${more}`);
+        return;
+      }
+
       const w = selected.filter(i => String(i.bill_type || '').trim() === 'عاملين').length;
       const r = selected.filter(i => String(i.bill_type || '').trim() === 'معاشات').length;
       if (!confirm(`هل تريد إنشاء مطالبة بـ ${selected.length} فاتورة؟\nعاملين: ${w} — معاشات: ${r}`)) return;
