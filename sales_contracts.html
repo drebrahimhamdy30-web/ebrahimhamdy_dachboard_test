@@ -340,6 +340,53 @@
     // تقسيم صفحات العرض (30/صفحة)
     let currentPage = 1; const PAGE_SIZE = 30; let filteredData = [];
     function ciReviewer(){ return (activeUser && (activeUser.full_name || activeUser.username)) || Session.fullName() || 'مراجع'; }
+    /* ═══ تنبيه «لنا فواتير لدى العملاء» ═══════════════════════
+       لما الاستمارة بتيجي، المراجع بيعلّم الفاتورة هنا وبينسى يقفل
+       صف العميل في شاشة «لنا فواتير لدى العملاء»، فالصف بيفضل مفتوح.
+       التنبيه بيظهر وقت التعليم على «فاتورة» بس، وبيفكّر مش بيمنع.
+
+       ⚠️ المفتاح هو contracts.customer_code = contract_invoices.cust_code.
+          عمود contracts.cust_code كود تاني خالص — اتأكدت 2026-11-02:
+          صف كوده 4155 بيخص «احمد السيد احمد»، بينما فواتير الكود 4155
+          بتخص «محمد علي راغب». المطابقة بيه كانت هتحذّر باسم عميل غلط.
+       ⚠️ وبنطابق بالاسم كمان: العميل ممكن يكون له فواتير تحت أكتر من
+          كود («هدي يوسف سليمان 997» ليها 3786 و3820)، والصفوف القديمة
+          في contracts عمود customer_code فيها فاضي.                  */
+    function ciNorm(v){ return String(v == null ? '' : v).replace(/\s+/g, ' ').trim(); }
+
+    async function openContractsFor(custCode, custName){
+      const code = ciNorm(custCode), name = ciNorm(custName);
+      if (!code && !name) return [];
+      let rows;
+      try {
+        rows = await Session.getAll(
+          'contracts?select=id,branch,cust_code,customer_code,customer_name,total_amount,created_at'
+          + '&status=eq.unpaid&order=id.asc', { label: 'لنا فواتير لدى العملاء' });
+      } catch (e) { return null; }   // null = ماقدرناش نفحص (مش «مفيش»)
+      if (!Array.isArray(rows)) return null;
+      return rows.filter(r =>
+        (code && ciNorm(r.customer_code) === code) ||
+        (name && ciNorm(r.customer_name) === name));
+    }
+
+    /* بيرجّع true يعني كمّل. الفحص استشاري: لو النداء فشل بنكمّل
+       من غير ما ندّعي إننا فحصنا. */
+    async function confirmOpenContract(custCode, custName){
+      const rows = await openContractsFor(custCode, custName);
+      if (rows === null) { console.warn('تعذّر فحص «لنا فواتير لدى العملاء»'); return true; }
+      if (!rows.length) return true;
+      const list = rows.map(r =>
+        '• ' + (r.customer_name || '—')
+        + ' — فرع ' + (r.branch || '—')
+        + ' · ' + Number(r.total_amount || 0).toLocaleString('en-US') + ' ج'
+        + ' · ' + String(r.created_at || '').slice(0, 10)).join('\n');
+      return confirm(
+        'هذا العميل مسجّل في شاشة «لنا فواتير لدى العملاء» ولم يُغلق صفه بعد:'
+        + '\n\n' + list + '\n\n'
+        + 'برجاء مراجعة الشاشة وإغلاق الصف بعد استلام الاستمارة.'
+        + '\n\nاضغط «موافق» لمتابعة التعليم على الفاتورة.');
+    }
+
     function ciNum(v){ v=(v==null?'':(''+v)).trim(); return v===''?null:(isNaN(+v)?null:+v); }
 
     // كتابة المراجعة على contract_invoices — بديل updateData بتاع n8n (نفس الاستدعاءات في الشاشة)
@@ -885,6 +932,12 @@ function getNextSerial(billType) {
         }
       }
 
+      /* العميل له صف مفتوح في «لنا فواتير لدى العملاء»؟ نبّه قبل الحفظ */
+      if (newState === 'فاتورة' && !(await confirmOpenContract(item.cust_code, item.cust_name_ar))) {
+        applyFilter();   // يرجّع المنسدلة لحالتها الأصلية
+        return;
+      }
+
       const currentState = (item.bill_state && item.bill_state !== 'null') ? item.bill_state.trim() : '';
       if (currentState === 'لنا فاتورة') {
         const pass = prompt('هذا الإجراء يحتاج صلاحية — أدخل كلمة المرور:');
@@ -1188,6 +1241,9 @@ function getNextSerial(billType) {
 
       if (mode === 'add' && !billNo)  { alert("برجاء إدخال رقم الفاتورة");      return; }
       if (!custCode && !custName)      { alert("برجاء إدخال كود أو اسم العميل"); return; }
+
+      /* نفس تنبيه القايمة المنسدلة — الحالة بتتظبط من هنا كمان */
+      if (state === 'فاتورة' && !(await confirmOpenContract(custCode, custName))) return;
 
       btn.disabled  = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الحفظ...';
