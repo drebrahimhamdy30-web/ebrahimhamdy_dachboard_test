@@ -407,10 +407,30 @@ function goPage(p){ C_PAGE = p; loadComments(); el('pane-comments').scrollIntoVi
    وكل الرسوم SVG مش خلفيات CSS: المتصفح مابيطبعش خلفيات الـCSS
    افتراضيًا، بينما أشكال الـSVG بتتطبع دايمًا. */
 
-function repBrand(){
+/* الاسم من حارس السيرفر (gate.company) مش من localStorage: لو اتقرا
+   من المتصفح كان ينفع حد يفضّيه قبل الطباعة فتطلع نسخة بلا ختم.
+   الشعار بس هو اللي بييجي من الكاش — مالوش علاقة بالحماية. */
+function repBrand(gate){
   let b = null;
   try { b = JSON.parse(localStorage.getItem('orgBrand') || 'null'); } catch (e) {}
-  return { name: (b && b.company_name) || 'الصيدلية', logo: (b && b.logo_url) || '' };
+  return { name: (gate && gate.company) || (b && b.company_name) || 'الصيدلية',
+           logo: (b && b.logo_url) || '' };
+}
+
+/* علامة مائية باسم الصيدلية ورا نص كل صفحة — عشان أي نسخة تخرج
+   تفضل محمولة على اسم المؤسسة وماتنفعش تتقدّم كمستند شخصي.
+   position:fixed بتتكرر على كل صفحة مطبوعة، والرسم SVG مش خلفية
+   CSS لأن المتصفح مابيطبعش خلفيات الـCSS افتراضيًا.
+   الإحداثيات بمقاس A4 ثابت (794×1123) عشان rotate محتاج نقطة محور. */
+function repWatermark(org){
+  const t = esc(org);
+  return '<div class="wmbox" aria-hidden="true">'
+    + '<svg viewBox="0 0 794 1123" preserveAspectRatio="xMidYMid slice" width="100%" height="100%" direction="ltr">'
+    + '<text x="397" y="580" text-anchor="middle" transform="rotate(-30 397 580)"'
+    + ' font-family="Cairo" font-size="46" font-weight="800" fill="#0f766e" fill-opacity="0.09">' + t + '</text>'
+    + '<text x="397" y="630" text-anchor="middle" transform="rotate(-30 397 580)"'
+    + ' font-family="Cairo" font-size="19" font-weight="700" fill="#0f766e" fill-opacity="0.09">'
+    + 'مستند داخلي · غير مخصّص للنشر</text></svg></div>';
 }
 function repBranchLabel(){
   if (!SEES_ALL) return '';
@@ -515,8 +535,8 @@ function repDelta(cur, prev){
   return '<span class="rd ' + (d > 0 ? 'up' : 'dn') + '">' + (d > 0 ? '▲' : '▼') + ' ' + Math.abs(d).toFixed(1) + ' عن الفترة السابقة</span>';
 }
 
-function reportHtml(ov, rows, p){
-  const br = repBrand(), k = ov.kpis || {}, pv = ov.prev || {};
+function reportHtml(ov, rows, p, gate){
+  const br = repBrand(gate), k = ov.kpis || {}, pv = ov.prev || {};
   const praise = rows.filter(r => repMinStar(r) >= 4);
   const fix    = rows.filter(r => repMinStar(r) <= 3);
   const brs    = (ov.branches || []).slice().sort((a, b) => (b.avg - a.avg) || (b.n - a.n));
@@ -536,7 +556,8 @@ function reportHtml(ov, rows, p){
     '@page{size:A4;margin:12mm 10mm}',
     '*{box-sizing:border-box}',
     'body{font-family:Cairo,system-ui,sans-serif;margin:0;color:#0f172a;background:#fff;font-size:12.5px;line-height:1.7}',
-    '.pg{max-width:190mm;margin:0 auto;padding:6mm}',
+    '.pg{max-width:190mm;margin:0 auto;padding:6mm;position:relative;z-index:1}',
+    '.wmbox{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}',
     '.noprint{display:flex;gap:10px;align-items:center;justify-content:space-between;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;margin-bottom:14px}',
     '.noprint b{font-size:13px}.noprint small{color:#64748b;font-weight:700}',
     '.noprint button{font-family:Cairo;font-weight:800;font-size:13px;border:0;border-radius:8px;padding:8px 16px;background:#0d9488;color:#fff;cursor:pointer}',
@@ -586,7 +607,7 @@ function reportHtml(ov, rows, p){
   return '<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8">'
     + '<title>تقرير تقييم العملاء ' + esc(p.from) + ' — ' + esc(p.to) + '</title>'
     + '<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">'
-    + '<style>' + CSS + '</style></head><body><div class="pg">'
+    + '<style>' + CSS + '</style></head><body>' + repWatermark(br.name) + '<div class="pg">'
 
     + '<div class="noprint"><div><b>تقرير جاهز للطباعة أو الحفظ كملف PDF</b>'
     + '<br><small>من نافذة الطباعة اختر «الوجهة: حفظ كـ PDF».</small></div>'
@@ -641,6 +662,16 @@ async function openReport(){
   b.disabled = true; b.textContent = 'جارٍ التجهيز…';
   const p = period();
   try {
+    /* الحارس الحقيقي على السيرفر: بيرفض أي دور غير admin، وبيدّي
+       اسم المؤسسة للعلامة المائية. إخفاء الزر لوحده بيتلفّ من
+       أدوات المتصفح، فالإصدار كله واقف على الرد ده. */
+    let gate;
+    try { gate = await rpc('rating_report_gate'); }
+    catch (e) {
+      toast(e.status === 404 ? 'التقرير محتاج تحديث قاعدة البيانات (migrate_189).'
+                             : (e.message || 'إصدار التقرير مقصور على مدير النظام'), true);
+      return;
+    }
     const body = { p_from: p.from, p_to: p.to, p_branch_id: branchParam(),
                    p_who: 'all', p_max_stars: 5, p_limit: 200, p_offset: 0 };
     if (CHAS_OK) body.p_with_comment = true;
@@ -653,7 +684,7 @@ async function openReport(){
     const rows = (cm.rows || []).filter(r => String(r.comment || '').trim() !== '');
     const w = window.open('', '_blank');
     if (!w) { toast('المتصفح منع فتح النافذة — اسمح بالنوافذ المنبثقة.', true); return; }
-    w.document.open(); w.document.write(reportHtml(ov, rows, p)); w.document.close();
+    w.document.open(); w.document.write(reportHtml(ov, rows, p, gate)); w.document.close();
     /* الطباعة بعد ما الخط يوصل، وإلا الصفحة تتقاس بخط بديل */
     try { w.focus(); setTimeout(() => { try { w.print(); } catch (e) {} }, 1200); } catch (e) {}
     if (CHAS_OK && (cm.total || 0) > rows.length) toast('التقرير يعرض أحدث ' + rows.length + ' تعليق من ' + cm.total + '.');
@@ -697,10 +728,11 @@ async function init(){
   BRANCH_ID = Session.branchId ? Session.branchId() : '';
 
   if (!IS_ADMIN) el('tab-settings').style.display = 'none';
-  /* التقرير فيه نصوص العملاء، فنفس شرط تبويب التعليقات */
   const canComments = IS_ADMIN || ROLE === 'manager' || CAN_EDIT;
   if (!canComments) el('tab-comments').style.display = 'none';
-  if (canComments) el('repBtn').style.display = '';
+  /* التقرير مقصور على الأدمن — ده إخفاء للواجهة بس،
+     المنع الحقيقي في rating_report_gate على السيرفر. */
+  if (IS_ADMIN) el('repBtn').style.display = '';
 
   if (SEES_ALL) {
     try {
