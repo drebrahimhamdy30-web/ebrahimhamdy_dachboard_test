@@ -90,7 +90,11 @@ function Run-JobBranch($job, $branch, $mode, $from, $to){
       if($clause){ $sql = $sql + " WHERE (" + (Subst $clause $map) + ")" }
       $rows = Rows $cn $sql
       $n = Sb-Upsert $st.target $st.conflict $rows
-      if($st.target -eq 'purchase_invoices'){ $res.new=$n } elseif($st.target -eq 'purchase_invoice_items'){ $res.items=$n }
+      # عدّ الصفوف لأي مهمة مش للمشتريات بس. الكود القديم كان بيسجّل $n
+      # لجدولين بالاسم ويرمي الباقي، فـ11 مهمة من 12 كانت بتسجّل «صفر»
+      # مهما كتبت — ومفيش حاجة تلفت النظر لمهمة واقفة. الاستثناء الوحيد
+      # بنود المشتريات لأن ليها عمودها (item_rows).
+      if($st.target -eq 'purchase_invoice_items'){ $res.items = $n } else { $res.new += $n }
     }
     $cn.Close(); $cn=$null
     # تحديث الـwatermark (للتزايدي فقط)
