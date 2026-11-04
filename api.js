@@ -243,6 +243,21 @@ async function sbCustomerRating(code) {
   } catch (e) { console.error('sbCustomerRating error:', e); return null; }
 }
 
+/* أكثر الأصناف طلبًا للعميل — الحساب كله على السيرفر، الشاشة
+   بتجيب كائن واحد. مفيش أي سحب لسطور مبيعات في المتصفح. */
+async function sbCustomerTopItems(code, limit, days) {
+  try {
+    const r = await fetch(`${SB_URL_API}/rest/v1/rpc/get_customer_top_items`, {
+      method: 'POST', headers: await sbH(),
+      body: JSON.stringify({ p_cust_code: String(code == null ? '' : code).trim(),
+                             p_limit: limit || 10, p_days: days || null })
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return (j && typeof j === 'object' && !Array.isArray(j)) ? j : null;
+  } catch (e) { console.error('sbCustomerTopItems error:', e); return null; }
+}
+
 function sbSalesSummary(from, to, store)      { return _sbRpc('sales_summary',     { p_from: from||null, p_to: to||null, p_store: store||null }); }
 function sbSalesTopItems(from, to, store, lim){ return _sbRpc('sales_top_items',   { p_from: from||null, p_to: to||null, p_store: store||null, p_limit: lim||50 }); }
 function sbSalesByEmployee(from, to, store)   { return _sbRpc('sales_by_employee', { p_from: from||null, p_to: to||null, p_store: store||null }); }

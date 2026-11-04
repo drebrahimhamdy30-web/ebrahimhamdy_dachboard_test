@@ -107,6 +107,48 @@
       font-weight: 400; font-size: .72rem; color: var(--text-muted);
     }
     .rate-body { padding: 14px; }
+
+    /* كارت أكثر الأصناف طلبًا */
+    .ti-tools { display: flex; gap: 6px; align-items: center; margin-inline-start: auto; }
+    .ti-tools select {
+      height: 28px; border: 1px solid var(--border); border-radius: 7px;
+      background: var(--surface); font-family: 'Cairo', sans-serif; font-size: .72rem;
+      font-weight: 700; color: var(--text-secondary); padding: 0 6px; outline: none;
+    }
+    .ti-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+    .ti-table th {
+      font-size: .68rem; color: var(--text-muted); font-weight: 700; text-align: right;
+      padding: 0 8px 7px; border-bottom: 1px solid var(--border); white-space: nowrap;
+    }
+    .ti-table td { padding: 8px; border-bottom: 1px solid var(--surface-3); vertical-align: middle; }
+    .ti-table tr:last-child td { border-bottom: 0; }
+    .ti-table tr:hover td { background: var(--surface-2); }
+    .ti-rank {
+      width: 22px; height: 22px; border-radius: 50%; background: var(--surface-3);
+      color: var(--text-secondary); font-size: .7rem; font-weight: 800;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .ti-rank.top { background: var(--primary); color: #fff; }
+    .ti-nm { font-weight: 700; line-height: 1.4; }
+    .ti-code { font-size: .68rem; color: var(--text-muted); font-family: monospace; }
+    /* شريط التكرار — الفرق يتقرا بالعين من غير مقارنة أرقام */
+    .ti-bar { display: flex; align-items: center; gap: 7px; min-width: 120px; }
+    .ti-bar .bar { flex: 1; height: 7px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+    .ti-bar .bar i { display: block; height: 100%; background: var(--primary); border-radius: 99px; }
+    .ti-bar b { font-size: .82rem; min-width: 16px; text-align: left; }
+    .ti-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .ti-mut { color: var(--text-muted); font-size: .74rem; white-space: nowrap; }
+    .ti-ago { font-size: .7rem; font-weight: 700; border-radius: 99px; padding: 2px 8px; white-space: nowrap; }
+    .ti-ago.new { background: #ecfdf5; color: #047857; }
+    .ti-ago.mid { background: var(--surface-3); color: var(--text-secondary); }
+    .ti-ago.old { background: #fff7ed; color: #c2410c; }
+    .ti-ret { font-size: .68rem; font-weight: 700; color: #ea580c; white-space: nowrap; }
+    .ti-foot {
+      display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+      margin-top: 11px; padding-top: 10px; border-top: 1px dashed var(--border);
+      font-size: .72rem; color: var(--text-muted); font-weight: 600;
+    }
+    .ti-foot b { color: var(--text-secondary); }
     .rate-badge {
       display: inline-flex; align-items: center; gap: 7px;
       padding: 7px 14px; border-radius: 999px;
@@ -815,9 +857,26 @@
           <div class="rate-body" id="ratingBody">
             <span style="color:var(--text-muted);font-size:.8rem;">جاري حساب التصنيف...</span>
           </div>
+        </div>
+        <div class="rate-card">
+          <div class="rate-head">
+            <i class="fas fa-receipt"></i> أكثر الأصناف طلبًا
+            <span class="rate-note">مرتّبة بعدد الفواتير اللي اتطلب فيها الصنف · المرتجع مخصوم</span>
+            <span class="ti-tools">
+              <select id="tiPeriod" onchange="loadCustTopItems(selectedCust && selectedCust.cust_code)">
+                <option value="">كل الفترة</option>
+                <option value="90">آخر 3 شهور</option>
+                <option value="180">آخر 6 شهور</option>
+              </select>
+            </span>
+          </div>
+          <div class="rate-body" id="topItemsBody">
+            <span style="color:var(--text-muted);font-size:.8rem;">جاري تحميل الأصناف...</span>
+          </div>
         </div>`;
 
       loadCustRating(c.cust_code);
+      loadCustTopItems(c.cust_code);
     }
 
     /* ===== تصنيف العميل =====
@@ -919,6 +978,72 @@
         return;
       }
       box.innerHTML = ratingHtml(d);
+    }
+
+    /* ===== أكثر الأصناف طلبًا =====
+       الترتيب بعدد الفواتير مش الكمية: دوا مزمن بياخده كل شهر
+       بيعبّر عن العميل أكتر من صنف اتاخد علبتين مرة واحدة.
+       والحساب كله على السيرفر زي كارت التصنيف. */
+    async function loadCustTopItems(code) {
+      const box = document.getElementById('topItemsBody');
+      if (!box || !code) return;
+      const selEl = document.getElementById('tiPeriod');
+      const days = selEl && selEl.value ? +selEl.value : null;
+      box.innerHTML = '<span style="color:var(--text-muted);font-size:.8rem;">جاري تحميل الأصناف...</span>';
+      const d = await sbCustomerTopItems(code, 10, days);
+      /* المستخدم ممكن يكون اختار عميل تاني وإحنا بنجيب */
+      const cur = document.getElementById('topItemsBody');
+      if (!cur || cur !== box) return;
+      if (!d) {
+        box.innerHTML = '<span style="color:var(--danger);font-size:.8rem;">' +
+          'تعذّر تحميل الأصناف. يُرجى المحاولة مرة أخرى.</span>';
+        return;
+      }
+      box.innerHTML = topItemsHtml(d);
+    }
+
+    function tiAgo(n) {
+      const d = +n || 0;
+      const k = d <= 14 ? 'new' : d <= 60 ? 'mid' : 'old';
+      const t = d === 0 ? 'اليوم' : d === 1 ? 'أمس' : 'منذ ' + d.toLocaleString('en-US') + ' يوم';
+      return '<span class="ti-ago ' + k + '">' + t + '</span>';
+    }
+
+    function topItemsHtml(d) {
+      const rows = (d && d.rows) || [];
+      if (!rows.length) {
+        return '<span style="color:var(--text-muted);font-size:.8rem;">' +
+               'لا توجد مشتريات لهذا العميل في الفترة المختارة.</span>';
+      }
+      const esc2 = v => String(v == null ? '' : v).replace(/[&<>"]/g,
+        ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+      const n0 = v => Math.round(+v || 0).toLocaleString('en-US');
+      const max = rows.reduce((m, r) => Math.max(m, +r.times || 0), 0) || 1;
+      let h = '<table class="ti-table"><thead><tr>' +
+        '<th style="width:26px"></th><th>الصنف</th>' +
+        '<th style="width:135px">عدد المرات</th>' +
+        '<th class="ti-num" style="width:52px">الكمية</th>' +
+        '<th class="ti-num" style="width:74px">القيمة</th>' +
+        '<th style="width:96px">آخر مرة</th></tr></thead><tbody>';
+      rows.forEach((r, i) => {
+        h += '<tr>' +
+          '<td><div class="ti-rank' + (i === 0 ? ' top' : '') + '">' + (i + 1) + '</div></td>' +
+          '<td><div class="ti-nm">' + esc2(r.nm) + '</div>' +
+              '<div class="ti-code">' + esc2(r.itm_code) + '</div></td>' +
+          '<td><div class="ti-bar"><div class="bar"><i style="width:' +
+              Math.round(100 * (+r.times || 0) / max) + '%"></i></div>' +
+              '<b class="ti-num">' + n0(r.times) + '</b></div>' +
+              (+r.returned > 0 ? '<div class="ti-ret">مرتجع ' + n0(r.returned) + '</div>' : '') + '</td>' +
+          '<td class="ti-num ti-mut">' + n0(r.qty) + '</td>' +
+          '<td class="ti-num">' + n0(r.val) + ' <span class="ti-mut">ج</span></td>' +
+          '<td>' + tiAgo(r.days_ago) + '</td></tr>';
+      });
+      h += '</tbody></table>';
+      const tot = rows.reduce((sum, r) => sum + (+r.val || 0), 0);
+      h += '<div class="ti-foot">الأصناف المختلفة: <b>' + n0(d.items) + '</b>' +
+           ' · الفواتير: <b>' + n0(d.bills) + '</b>' +
+           ' · قيمة الأعلى ' + rows.length + ': <b>' + n0(tot) + ' ج</b></div>';
+      return h;
     }
 
     function ratingHtml(d) {
