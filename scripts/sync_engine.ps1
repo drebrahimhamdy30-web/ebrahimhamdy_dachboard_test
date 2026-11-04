@@ -71,7 +71,19 @@ function Run-JobBranch($job, $branch, $mode, $from, $to){
     $cut=(Get-Date).AddDays(-[int]$job.window_days).ToString('yyyy-MM-dd HH:mm:ss')
     # المود + أي فلتر
     $whereKey=$null; $curMax=$null
-    if($mode -eq 'backfill'){ $whereKey='where_range' }
+    if($mode -eq 'backfill'){
+      $whereKey='where_range'
+      # خطوة تزايدية (لها where_window أو where_new) من غير where_range:
+      # الكود تحت بيضيف الشرط «لو موجود» بس — فلو مش موجود الاستعلام
+      # بيتنفّذ **بلا أي شرط** ويجيب الجدول كله. مع saved_contracts ده
+      # كان معناه 1.47 مليون فاتورة تدخل فواتير التعاقد. نوقف بوضوح.
+      # خطوات اللقطة الكاملة (مفيش window ولا new) مستثناة لأن السحب
+      # الكامل هو سلوكها الطبيعي.
+      $bad = @($job.steps | Where-Object { ($_.where_window -or $_.where_new) -and (-not $_.where_range) })
+      if($bad.Count -gt 0){
+        throw "المهمة '$($job.id)' فيها خطوة تزايدية بلا where_range — سحب الفترة كان هيجيب الجدول كله."
+      }
+    }
     else{
       $probe = ($job.steps | Where-Object { $_.probe_max } | Select-Object -First 1)
       if($probe){ $curMax = Scalar $cn $probe.probe_max; if($null -ne $curMax){ $curMax=[int64]$curMax } }
