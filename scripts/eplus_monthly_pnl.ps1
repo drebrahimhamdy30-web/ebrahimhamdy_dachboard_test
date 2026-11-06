@@ -18,7 +18,7 @@ param(
   [string]$ConfigPath = "",
   [string]$From = "2026-01-01",
   [string]$To   = "2026-11-01",
-  [int]$StoreId = 1
+  [int]$StoreId = 0   # 0 = مخزن الصيدلية لكل فرع (نفس خريطة sync_jobs)
 )
 
 $ErrorActionPreference = "Continue"
@@ -32,7 +32,7 @@ $candidates = @(@(
 ) | Where-Object { $_ -and (Test-Path $_) })
 if (-not $candidates) { Write-Host "مش لاقي ملف إعدادات المزامنة."; exit 1 }
 $cfg = Get-Content $candidates[0] -Raw | ConvertFrom-Json
-Write-Host "الإعدادات: $($candidates[0])   الفترة: $From → $To   المخزن: $StoreId`n"
+Write-Host "الإعدادات: $($candidates[0])   الفترة: $From → $To   المخزن: $(if($StoreId){$StoreId}else{"الصيدلية لكل فرع"})`n"
 
 # basis: c = بالإقفال (تاريخ التوصيل)، i = بالإدخال
 $SQL = @"
@@ -70,13 +70,15 @@ GROUP BY x.basis, x.ym
 $fmt = "{0,-8} {1,-8} {2,16} {3,14} {4,16} {5,14}"
 foreach ($p in $cfg.branches.PSObject.Properties) {
   $name = $p.Name; $b = $p.Value
+  $sto = if ($StoreId) { $StoreId } else { @{ mamora=1; san=26; bishr=28; seyouf=29 }[$name] }
+  if (-not $sto) { Write-Host ("=== {0}: مش عارف رقم المخزن — مرّر -StoreId`n" -f $name); continue }
   Write-Host ("=== {0}  ({1})" -f $name, $b.server)
   $cs = "Server=$($b.server);Database=Genius;User ID=$($b.user);Password=$($b.password);Connect Timeout=15"
   try { $cn = New-Object System.Data.SqlClient.SqlConnection($cs); $cn.Open() }
   catch { Write-Host ("   ✗ مفيش وصول: {0}`n" -f $_.Exception.Message); continue }
   try {
     $c = $cn.CreateCommand(); $c.CommandText = $SQL; $c.CommandTimeout = 900
-    [void]$c.Parameters.AddWithValue("@sto", $StoreId)
+    [void]$c.Parameters.AddWithValue("@sto", $sto)
     [void]$c.Parameters.AddWithValue("@f", [datetime]$From)
     [void]$c.Parameters.AddWithValue("@t", [datetime]$To)
     $r = $c.ExecuteReader(); $rows = @{}
