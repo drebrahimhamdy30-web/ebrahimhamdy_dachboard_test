@@ -36,6 +36,27 @@
   .sumgrid > *{ flex:1; min-width:190px; }
   .sumgrid .srow, .sumgrid .disc-box{ border:1px solid var(--border,#e5e7eb); border-radius:10px; }
   .sumgrid .srow{ display:flex; flex-direction:column; justify-content:center; padding:10px 12px; }
+  /* ══ مودال الفاتورة: نفس استايل شاشة «فواتير الشراء» بالحرف ══ */
+  #ovInv{ z-index:60; }
+  #ovInv .modal{ max-width:1040px; }
+  #ovInv .mtop{ background:linear-gradient(135deg,#0d9488,#0f766e); color:#fff; padding:16px 20px; display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
+  #ovInv .mtop h2{ font-size:1.15rem; font-weight:800; }
+  #ovInv .mtop .sub{ opacity:.9; font-size:.76rem; margin-top:3px; }
+  #ovInv .mx{ background:rgba(255,255,255,.2); border:none; color:#fff; width:34px; height:34px; border-radius:9px; font-size:1.1rem; cursor:pointer; font-family:inherit; }
+  #ovInv .sgrid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(128px,1fr)); gap:1px; background:var(--border,#e5e7eb); }
+  #ovInv .sgrid>div{ background:var(--surface,#fff); padding:9px 12px; }
+  #ovInv .sgrid .k{ font-size:.68rem; color:var(--text-muted,#64748b); margin-bottom:2px; white-space:nowrap; }
+  #ovInv .sgrid .v{ font-size:.9rem; font-weight:800; font-variant-numeric:tabular-nums; }
+  #ovInv .sgrid .g{ background:#ecfdf5; } #ovInv .sgrid .g .k{ color:#065f46; } #ovInv .sgrid .g .v{ color:#047857; }
+  #ovInv .sgrid .r .v{ color:#dc2626; }
+  #ovInv .mbody{ max-height:46vh; overflow:auto; }
+  #ovInv table.items{ width:100%; border-collapse:collapse; font-size:.78rem; }
+  #ovInv table.items thead th{ background:var(--surface-3,#f1f5f9); color:var(--text-secondary,#475569); text-align:right; padding:8px 10px; font-weight:700; border-bottom:2px solid var(--border,#e5e7eb); position:sticky; top:0; white-space:nowrap; }
+  #ovInv table.items tbody td{ padding:7px 10px; border-bottom:1px solid var(--border,#e5e7eb); text-align:right; }
+  #ovInv table.items tbody tr:nth-child(even){ background:var(--surface-2,#f8fafc); }
+  #ovInv .sell{ color:#0f766e; font-weight:700; } #ovInv .mrg{ color:#16a34a; font-weight:700; } #ovInv .enc{ color:#b45309; font-size:.68rem; }
+  .btn-view{ background:none; border:1px solid var(--border,#e5e7eb); border-radius:7px; padding:2px 9px; cursor:pointer; font-family:inherit; font-size:.72rem; font-weight:700; color:#0f766e; white-space:nowrap; }
+  .btn-view:hover{ background:#f0fdfa; border-color:#0f766e; }
   .ovl{ position:fixed; inset:0; background:rgba(15,23,42,.5); display:none; align-items:flex-start; justify-content:center; z-index:50; padding:28px 14px; overflow:auto; }
   .ovl.on{ display:flex; }
   .modal{ background:#fff; border-radius:14px; max-width:1100px; width:100%; overflow:hidden; box-shadow:0 20px 50px rgba(0,0,0,.3); }
@@ -133,8 +154,8 @@
         <div class="card-h inv"><span><i class="fas fa-file-invoice"></i> فواتير الشراء المفتوحة <span class="code" id="invCnt"></span></span>
           <span class="code"><input type="checkbox" id="allInv" onclick="toggleAll('inv',this.checked)"> تحديد الكل</span></div>
         <div class="scroll"><table>
-          <thead><tr><th></th><th>رقم الفاتورة</th><th>التاريخ</th><th>قيمة الفاتورة</th></tr></thead>
-          <tbody id="invBody"><tr><td colspan="4" class="empty">اختر مورّدًا</td></tr></tbody>
+          <thead><tr><th></th><th>رقم الفاتورة</th><th>التاريخ</th><th>قيمة الفاتورة</th><th></th></tr></thead>
+          <tbody id="invBody"><tr><td colspan="5" class="empty">اختر مورّدًا</td></tr></tbody>
         </table></div>
       </div>
       <div class="card">
@@ -248,6 +269,10 @@
       border-radius:6px; padding:4px 10px; cursor:pointer; white-space:nowrap; }
     .mh-acts button:hover { background:rgba(255,255,255,.26); }
   </style>
+  <div class="ovl" id="ovInv" onclick="if(event.target===this)closeInv()">
+    <div class="modal" id="invModal"></div>
+  </div>
+
   <div class="ovl" id="ovl" onclick="if(event.target===this)closeModal()">
     <div class="modal">
       <div class="mh"><span id="mTitle">مراجعة مطالبة</span>
@@ -336,7 +361,7 @@
       const br=document.getElementById('brSel').value;
       const from=document.getElementById('fromD').value||null, to=document.getElementById('toD').value||null;
       if(!ven){ return; }
-      document.getElementById('invBody').innerHTML='<tr><td colspan="4" class="empty">جارِ التحميل…</td></tr>';
+      document.getElementById('invBody').innerHTML='<tr><td colspan="5" class="empty">جارِ التحميل…</td></tr>';
       document.getElementById('retBody').innerHTML='<tr><td colspan="8" class="empty">جارِ التحميل…</td></tr>';
       const d = await rpc('get_supplier_open', { p_branch:br, p_vendor:ven, p_from:from, p_to:to });
       if(!d || d.error){ showMsg((d&&d.error)||'تعذّر التحميل', false); return; }
@@ -354,8 +379,9 @@
       document.getElementById('retCnt').textContent='('+f0(CUR.ret.length)+')';
       document.getElementById('invBody').innerHTML = CUR.inv.length ? CUR.inv.map((x,i)=>`<tr id="inv${i}">
         <td><input type="checkbox" data-k="inv" data-i="${i}" onchange="rowTog('inv',${i},this.checked)"></td>
-        <td class="num">${esc(x.bill_no||'—')}</td><td>${dOnly(x.date)}</td><td class="num" style="font-weight:700">${f0(x.total)}</td></tr>`).join('')
-        : '<tr><td colspan="4" class="empty">لا فواتير مفتوحة بالفلتر</td></tr>';
+        <td class="num">${esc(x.bill_no||'—')}</td><td>${dOnly(x.date)}</td><td class="num" style="font-weight:700">${f0(x.total)}</td>
+        <td><button class="btn-view" onclick="openInvoice('${esc(document.getElementById('brSel').value)}',${x.pth_id})">عرض الأصناف</button></td></tr>`).join('')
+        : '<tr><td colspan="5" class="empty">لا فواتير مفتوحة بالفلتر</td></tr>';
       document.getElementById('retBody').innerHTML = CUR.ret.length ? CUR.ret.map((x,i)=>`<tr id="ret${i}">
         <td><input type="checkbox" data-k="ret" data-i="${i}" onchange="rowTog('ret',${i},this.checked)"></td>
         <td>${dOnly(x.date)}${x.ts?`<br><span class="code">${tOnly(x.ts)}</span>`:''}</td><td><span class="src ${x.kind==='bill'?'b':'g'}">${x.kind==='bill'?'على فاتورة':'شراء عام'}</span>${x.kind==='bill'&&x.inv_date?`<br><span class="code" title="تاريخ الفاتورة الأصلية">فاتورة ${dOnly(x.inv_date)}</span>`:''}</td>
@@ -539,7 +565,10 @@
       if(!d || d.error){ showMsg((d&&d.error)||'تعذّر تحميل التفاصيل',false); return; }
       CLAIM = d;
       const invs=d.invoices||[], rets=d.returns||[];
-      const invRows = invs.length ? invs.map(v=>`<tr><td>${esc(v.bill_no||'—')}</td><td>${dOnly(v.date)}</td><td class="num">${f0(v.total)}</td></tr>`).join('') : '<tr><td colspan="3" class="empty">—</td></tr>';
+      /* الفاتورة بتتفتح بـpth_id مش برقم المورّد — رقم المورّد بيتكرر
+         بين الفروع فمش مفتاح (migrate_191 زوّده في رد الدالة). */
+      const invRows = invs.length ? invs.map(v=>`<tr><td>${esc(v.bill_no||'—')}</td><td>${dOnly(v.date)}</td><td class="num">${f0(v.total)}</td>`
+        + `<td>${v.pth_id?`<button class="btn-view" onclick="openInvoice('${esc(d.branch)}',${v.pth_id})">عرض الأصناف</button>`:''}</td></tr>`).join('') : '<tr><td colspan="4" class="empty">—</td></tr>';
       /* ⚠️ الـRPC بترجّع bill_no أصلًا — كان العرض ناقصه مش البيانات.
          «شراء عام» مرتجع غير مربوط بفاتورة فبيفضل بشرطة. */
       const retRows = rets.length ? rets.map(r=>`<tr><td>${esc(r.bill_no||'—')}</td><td>${dOnly(r.date)}</td><td>${esc(r.kind)}</td><td style="text-align:right">${esc(r.name)}</td><td class="num">${f0(r.qty)}</td><td class="num">${f0(r.val)}</td><td>${esc(r.reason||'—')}</td></tr>`).join('') : '<tr><td colspan="7" class="empty">لا مرتجعات</td></tr>';
@@ -547,7 +576,7 @@
       document.getElementById('mBody').innerHTML = `
         <div class="grid2">
           <div class="card"><div class="card-h inv">فواتير الشراء (${invs.length})</div>
-            <div class="scroll" style="max-height:46vh"><table><thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>القيمة</th></tr></thead><tbody>${invRows}</tbody></table></div></div>
+            <div class="scroll" style="max-height:46vh"><table><thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>القيمة</th><th></th></tr></thead><tbody>${invRows}</tbody></table></div></div>
           <div class="card"><div class="card-h ret">المرتجعات (${rets.length})</div>
             <div class="scroll" style="max-height:46vh"><table><thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>المصدر</th><th>الصنف</th><th>الكمية</th><th>القيمة</th><th>السبب</th></tr></thead><tbody>${retRows}</tbody></table></div></div>
         </div>
@@ -561,6 +590,74 @@
       document.getElementById('ovl').classList.add('on');
     }
     function closeModal(){ document.getElementById('ovl').classList.remove('on'); }
+
+    /* ══════════════ عرض فاتورة بأصنافها ══════════════════════
+       نفس نداء شاشة «فواتير الشراء» (get_purchase_invoice) ونفس
+       رسم المودال بالحرف — مش حساب جديد. الحارس بتاعها
+       (purchase_branch_scope على صفحة purchase_invoices) بيدّي
+       نفس النطاق للأدوار التلاتة اللي بتدخل الشاشة دي
+       (admin/reviewer كل الفروع، manager فرعه). */
+    function cairo(ts){ if(!ts) return '—'; try{ return new Date(ts).toLocaleString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }catch(e){ return ts; } }
+    function closeInv(){ document.getElementById('ovInv').classList.remove('on'); }
+    document.addEventListener('keydown', e=>{
+      if(e.key!=='Escape') return;
+      /* الأقرب للمستخدم الأول: مودال الفاتورة بيفتح فوق مودال المراجعة */
+      if(document.getElementById('ovInv').classList.contains('on')) closeInv(); else closeModal();
+    });
+
+    async function openInvoice(branch, pth){
+      const ov=document.getElementById('ovInv'), m=document.getElementById('invModal');
+      m.innerHTML='<div class="empty" style="padding:50px">جارِ تحميل الفاتورة…</div>'; ov.classList.add('on');
+      const res = await rpc('get_purchase_invoice', { p_branch: branch, p_pth_id: pth });
+      const d = Array.isArray(res) ? res[0] : res;
+      if(!d || !d.header){ m.innerHTML='<div class="empty" style="padding:50px">'+esc((d&&d.error)||'تعذّر تحميل الفاتورة')+'</div>'; return; }
+      m.innerHTML = invoiceHTML(d.header, d.items||[]);
+    }
+
+    function invoiceHTML(h, items){
+      let sumPur=0, sumSell=0;
+      const rows = items.map((it,i)=>{
+        const qty=Number(it.qnty)||0, pur=Number(it.itm_pur_price)||0, sell=Number(it.itm_sell)||0;
+        const lt=qty*pur; sumPur+=lt; sumSell+=qty*sell;
+        const mrg = sell>0 ? Math.round((sell-pur)/sell*100) : 0;
+        const name = it.itm_name ? `<span style="font-weight:700">${esc(it.itm_name)}</span> <span style="color:var(--text-muted);font-size:.7rem">#${esc(it.itm_code||it.itm_id)}</span>`
+                                 : `<span style="color:var(--text-muted)">صنف #${it.itm_id}</span> <span class="enc">(غير مكوّد — محتاج شيت)</span>`;
+        const exp = it.exp_date ? new Date(it.exp_date).toLocaleDateString('ar-EG',{month:'2-digit',year:'numeric'}) : '—';
+        /* ⚠️ البند اللي اترجع منه جزء هو اللي بيفسّر رقم المرتجعات
+           في الكارت اللي جنبه — من غير العلامة دي المراجع بيدوّر. */
+        const back = Number(it.itm_back_qty)||0;
+        return `<tr><td class="num">${i+1}</td><td>${name}${back>0?` <span class="enc">↩ مرتجع ${f0(back)}</span>`:''}</td><td class="num">${qty}</td><td class="num">${Number(it.bonus)||0}</td>
+          <td class="num">${f2(pur)}</td><td class="num sell">${f2(sell)}</td><td class="num">${f2(lt)}</td>
+          <td class="num mrg">${mrg}%</td><td>${exp}</td></tr>`;
+      }).join('');
+      const total=Number(h.total_bill)||0, disc=Number(h.total_des_mon)||0, paid=Number(h.pth_paid)||0, after=Number(h.total_after_back!=null?h.total_after_back:total)||0;
+      const profit = sumSell - sumPur, mrgAvg = sumSell>0 ? Math.round(profit/sumSell*100) : 0;
+      return `
+        <div class="mtop">
+          <div><h2>🧾 فاتورة شراء ${h.pth_id}</h2><div class="sub">${BR[h.branch]||h.branch} · مورّد ${esc(h.ven_name_ar||'—')}</div></div>
+          <button class="mx" onclick="closeInv()">✕</button>
+        </div>
+        <div class="sgrid">
+          <div><div class="k">فاتورة المورّد</div><div class="v">${esc(h.ven_bill_no||'—')}</div></div>
+          <div><div class="k">التاريخ</div><div class="v">${cairo(h.ven_bill_date)}</div></div>
+          <div><div class="k">المخزن</div><div class="v">${esc(h.store_name||('مخزن '+(h.sto_id||'')))}</div></div>
+          <div><div class="k">أدخلها</div><div class="v">${esc(h.entered_by||'—')}</div></div>
+          <div><div class="k">الأصناف</div><div class="v">${h.no_of_items!=null?h.no_of_items:items.length}</div></div>
+          <div><div class="k">الإجمالي</div><div class="v">${f2(total)}</div></div>
+          <div><div class="k">الخصم على الفاتورة</div><div class="v">${f2(disc)}</div></div>
+          <div class="r"><div class="k">الداخل في المطالبة</div><div class="v">${f2(total-disc)}</div></div>
+          <div><div class="k">بعد المرتجع</div><div class="v">${f2(after)}</div></div>
+          <div class="g"><div class="k">قيمة بيعية متوقعة</div><div class="v">${f2(sumSell)}</div></div>
+          <div class="g"><div class="k">ربح متوقع</div><div class="v">${f2(profit)}</div></div>
+          <div class="g"><div class="k">متوسط الهامش</div><div class="v">${mrgAvg}%</div></div>
+        </div>
+        <div class="mbody">
+          <table class="items">
+            <thead><tr><th>#</th><th>الصنف</th><th>كمية</th><th>بونص</th><th>سعر الشراء</th><th>سعر البيع</th><th>الإجمالي</th><th>الهامش</th><th>الصلاحية</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="9" class="empty">لا بنود</td></tr>'}</tbody>
+          </table>
+        </div>`;
+    }
 
     /* ══════════════ تصدير التسوية للمورّد ══════════════════════
        المستند بيتفتح في نافذة مستقلة بتنسيق A4 ويُطبع أو يُحفظ PDF.
