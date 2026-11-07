@@ -77,6 +77,8 @@
   .sumtbl td.netcol{ color:var(--teal-d); font-size:1.15rem; }
   .sumtbl .edit{ width:84px; height:30px; border:1px solid var(--border,#e5e7eb); border-radius:7px; text-align:center; font-family:inherit; font-weight:800; font-size:.82rem; background:#fffdf5; color:inherit; }
   .sumtbl .edit:focus{ outline:none; border-color:var(--amber); }
+  .sumtbl select.edit{ width:150px; cursor:pointer; }
+  .sumtbl .basenote{ display:block; font-size:.68rem; font-weight:700; color:var(--text-muted,#64748b); }
   .sumfoot{ display:flex; gap:10px; align-items:center; padding:11px 14px; border-top:1px solid var(--border,#e5e7eb); flex-wrap:wrap; }
   .sumfoot .inp{ flex:1; min-width:220px; height:36px; }
   .sumfoot .btn{ padding:10px 26px; white-space:nowrap; }
@@ -153,8 +155,9 @@
             <th>قيمة الفواتير</th>
             <th>− إجمالي المرتجعات</th>
             <th>− إجمالي لم يصل</th>
-            <th>قيمة المحلي</th>
-            <th>نسبة الخصم %</th>
+            <th>نوع الخصم</th>
+            <th id="thBase">قيمة المحلي</th>
+            <th id="thRate">نسبة الخصم %</th>
             <th>− قيمة الخصم</th>
             <th class="netcol">الصافي المطلوب دفعه</th>
           </tr></thead>
@@ -162,8 +165,15 @@
             <td class="plus"><span id="sInv">0</span></td>
             <td class="minus"><span id="sRet">0</span></td>
             <td class="minus"><span id="sNotArr">0</span></td>
-            <td><input class="edit" type="number" id="localVal" value="0" oninput="calc()"></td>
-            <td><input class="edit" type="number" id="discPct" value="0" step="0.5" oninput="calc()"></td>
+            <td><select class="edit" id="discMode" onchange="modeChg()">
+              <option value="local">من المحلي</option>
+              <option value="pct_total">نسبة من التوتال</option>
+              <option value="val_total">قيمة من التوتال</option>
+            </select></td>
+            <td><input class="edit" type="number" id="localVal" value="0" oninput="calc()">
+                <span id="baseTot" style="display:none">0<span class="basenote">قيمة الفواتير</span></span></td>
+            <td><input class="edit" type="number" id="discPct" value="0" step="0.5" oninput="calc()">
+                <input class="edit" type="number" id="discAmt" value="0" step="1" oninput="calc()" style="display:none"></td>
             <td class="minus"><b id="discVal">0</b></td>
             <td class="netcol"><span id="netVal">0</span></td>
           </tr></tbody>
@@ -177,7 +187,9 @@
 
     <div class="note">
       الفاتورة بتتجمع <b>بقيمتها الكاملة</b>، والمرتجع (على فاتورة أو عام) بيتخصم <b>مرة واحدة</b> من بند المرتجعات.
-      «لم يصل» بتتفرّق من سبب المرتجع. <b>«الصافي المفتوح»</b> (فواتير − مرتجعات، لكل المفتوح) المفروض يساوي <b>الرصيد الحالي</b>؛
+      «لم يصل» بتتفرّق من سبب المرتجع.
+      <b>الخصم</b> بيشتغل بحالة واحدة في المرة: نسبة من قيمة المحلي، أو نسبة من قيمة الفواتير، أو مبلغ ثابت —
+      و«التوتال» معناه <b>قيمة الفواتير قبل أي خصم</b>. <b>«الصافي المفتوح»</b> (فواتير − مرتجعات، لكل المفتوح) المفروض يساوي <b>الرصيد الحالي</b>؛
       الفرق غالبًا دين أقدم من خط البداية (2026-09-01). بعد الإغلاق الفواتير تتعلّم «مدفوع» والمرتجعات «تم» ومتظهرش تاني.
     </div>
     </div><!-- /paneClose -->
@@ -260,6 +272,17 @@
     const BR = { mamora:'المعمورة', san:'سان ستيفانو', bishr:'سيدي بشر', seyouf:'سيوف' };
     let CUR = { inv:[], ret:[] }, canEdit=false;
     const f0 = n => (n==null?'0':Math.round(Number(n)).toLocaleString('en-US'));
+    /* سطر الخصم بيتكتب من نوعه المحفوظ مع المطالبة. المطالبات
+       المقفولة قبل ده كلها «من المحلي» — الافتراضي بيوصّفها صح. */
+    /* ⚠️ النسبة مش رقم مدوّر — f0 كانت بتخلّي ٢.٥٪ تطلع ٣٪ في
+       المستند اللي رايح للمورّد. */
+    const fpc = n => { const v=Number(n)||0; return (Math.round(v*100)/100).toString(); };
+    function discLabel(d){
+      const m=(d&&d.disc_mode)||'local';
+      if(m==='pct_total') return 'خصم '+fpc(d.disc_pct)+'٪ من قيمة الفواتير ('+f0(d.invoices_total)+')';
+      if(m==='val_total') return 'خصم قيمة على التوتال';
+      return 'خصم نقدي '+fpc(d.disc_pct)+'٪ من المحلي ('+f0(d.local_value)+')';
+    }
     const f2 = n => (n==null?'0.00':Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}));
     function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
     /* عمود التاريخ في الفواتير = **تاريخ الإدخال على النظام**، لأن ده
@@ -343,6 +366,7 @@
         : '<tr><td colspan="9" class="empty">لا مرتجعات مفتوحة بالفلتر</td></tr>';
       document.getElementById('allInv').checked=false; document.getElementById('allRet').checked=false;
       document.getElementById('localVal').value=0; document.getElementById('discPct').value=0;
+      document.getElementById('discAmt').value=0; document.getElementById('discMode').value='local'; modeChg();
       calc();
     }
 
@@ -353,11 +377,32 @@
     function checkedInv(){ return [...document.querySelectorAll('input[data-k="inv"]:checked')].map(c=>CUR.inv[c.dataset.i]); }
     function checkedRet(){ return [...document.querySelectorAll('input[data-k="ret"]:checked')].map(c=>{ const x=CUR.ret[c.dataset.i]; const rs=document.querySelector('.reason[data-i="'+c.dataset.i+'"]'); return {...x, reason: rs?rs.value:'غير مطلوب'}; }); }
 
+    /* نوع الخصم بيغيّر شكل الصف نفسه: القاعدة بقت «قيمة الفواتير»
+       في الحالتين الجديدتين فمربع المحلي مالوش لازمة، وفي حالة
+       المبلغ الثابت النسبة نفسها مالهاش لازمة. */
+    function modeChg(){
+      const m=document.getElementById('discMode').value, isLocal=(m==='local'), isVal=(m==='val_total');
+      document.getElementById('localVal').style.display = isLocal?'':'none';
+      document.getElementById('baseTot').style.display  = isLocal?'none':'';
+      document.getElementById('discPct').style.display  = isVal?'none':'';
+      document.getElementById('discAmt').style.display  = isVal?'':'none';
+      document.getElementById('thBase').textContent = isLocal?'قيمة المحلي':'قاعدة الخصم';
+      document.getElementById('thRate').textContent = isVal?'قيمة الخصم':'نسبة الخصم %';
+      calc();
+    }
+
     function calc(){
       const inv=checkedInv().reduce((s,x)=>s+(Number(x.total)||0),0);
       let ret=0,notArr=0; checkedRet().forEach(x=>{ if(x.reason==='لم يصل') notArr+=Number(x.val)||0; else ret+=Number(x.val)||0; });
+      const mode=document.getElementById('discMode').value;
       const local=Number(document.getElementById('localVal').value)||0, pct=Number(document.getElementById('discPct').value)||0;
-      const dv=Math.round(local*pct/100);
+      const amt=Number(document.getElementById('discAmt').value)||0;
+      /* نفس معادلة السيرفر بالظبط — الشاشة بتعرض والسيرفر هو اللي
+         بيسجّل، فأي فرق بينهم معناه رقم على الورق غير اللي اتحفظ. */
+      const dv = mode==='pct_total' ? Math.round(inv*pct/100)
+               : mode==='val_total' ? Math.round(amt)
+               : Math.round(local*pct/100);
+      document.getElementById('baseTot').firstChild.nodeValue=f0(inv);
       document.getElementById('sInv').textContent=f0(inv);
       document.getElementById('sRet').textContent=ret?('−'+f0(ret)):'0';
       document.getElementById('sNotArr').textContent=notArr?('−'+f0(notArr)):'0';
@@ -373,8 +418,10 @@
       const body={ p_branch:br, p_vendor:ven,
         p_inv: inv.map(x=>x.pth_id),
         p_ret: ret.map(x=>({kind:x.kind, r1:x.r1, r2:x.r2, reason:x.reason})),
+        p_mode:document.getElementById('discMode').value,
         p_local:Number(document.getElementById('localVal').value)||0,
         p_pct:Number(document.getElementById('discPct').value)||0,
+        p_val:Number(document.getElementById('discAmt').value)||0,
         p_note:document.getElementById('claimNote').value||null,
         p_from:document.getElementById('fromD').value||null, p_to:document.getElementById('toD').value||null };
       if(!confirm('إغلاق المطالبة؟\nفواتير: '+inv.length+' · مرتجعات: '+ret.length+'\nالصافي: '+document.getElementById('netVal').textContent)) return;
@@ -508,7 +555,7 @@
           <div class="srow plus"><span class="l">قيمة الفواتير</span><span class="v">${f0(d.invoices_total)}</span></div>
           <div class="srow minus"><span class="l">− إجمالي المرتجعات</span><span class="v" style="color:var(--red)">${f0(d.returns_total)}</span></div>
           <div class="srow minus"><span class="l">− إجمالي لم يصل</span><span class="v" style="color:var(--red)">${f0(d.notarr_total)}</span></div>
-          <div class="srow minus"><span class="l">− خصم نقدي (${f0(d.disc_pct)}% من ${f0(d.local_value)})</span><span class="v" style="color:var(--red)">${f0(d.disc_value)}</span></div>
+          <div class="srow minus"><span class="l">− ${discLabel(d)}</span><span class="v" style="color:var(--red)">${f0(d.disc_value)}</span></div>
           <div class="srow plus" style="border:2px solid var(--teal)"><span class="l">الصافي المدفوع</span><span class="v" style="font-weight:800;color:var(--teal)">${f0(d.net_paid)}</span></div>
         </div>${d.note?('<div style="padding:4px 14px 10px;color:var(--text-muted,#64748b)">📝 '+esc(d.note)+'</div>'):''}</div>`;
       document.getElementById('ovl').classList.add('on');
@@ -552,7 +599,7 @@
         ['قيمة الفواتير', f0(d.invoices_total), ''],
         ['يُخصم: إجمالي المرتجعات', f0(d.returns_total), 'neg'],
         ['يُخصم: إجمالي ما لم يصل', f0(d.notarr_total), 'neg'],
-        ['يُخصم: خصم نقدي ' + f0(d.disc_pct) + '٪ من ' + f0(d.local_value), f0(d.disc_value), 'neg'],
+        ['يُخصم: ' + discLabel(d), f0(d.disc_value), 'neg'],
       ].map(x => '<tr class="' + x[2] + '"><td>' + x[0] + '</td><td class="n">' + x[1] + '</td></tr>').join('');
 
       const html = [
@@ -658,7 +705,7 @@
           ['قيمة الفواتير', n(d.invoices_total)],
           ['يُخصم: إجمالي المرتجعات', n(d.returns_total)],
           ['يُخصم: إجمالي ما لم يصل', n(d.notarr_total)],
-          ['يُخصم: خصم نقدي ' + f0(d.disc_pct) + '٪', n(d.disc_value)],
+          ['يُخصم: ' + discLabel(d), n(d.disc_value)],
           ['الصافي المستحق للمورّد', n(d.net_paid)]]);
       const ws = XLSX.utils.aoa_to_sheet(head.concat(inv));
       ws['!cols'] = [{wch:16},{wch:14},{wch:14},{wch:42},{wch:10},{wch:12},{wch:18}];
