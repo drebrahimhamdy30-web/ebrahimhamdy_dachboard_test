@@ -28,6 +28,13 @@
   .inp{ height:32px; border:1px solid var(--border,#e5e7eb); border-radius:8px; padding:0 9px;
         font-family:inherit; font-size:.8rem; font-weight:700; background:var(--surface,#fff); color:inherit; }
   .hint{ font-size:.7rem; color:var(--text-muted,#9ca3af); font-weight:700; align-self:center; }
+  .chips{ display:flex; gap:5px; flex-wrap:wrap; }
+  .chip{ height:32px; border:1px solid var(--border,#e5e7eb); border-radius:8px; padding:0 11px;
+         font-family:inherit; font-size:.78rem; font-weight:700; background:var(--surface,#fff);
+         color:var(--text-muted,#6b7280); cursor:pointer; white-space:nowrap; }
+  .chip:hover{ border-color:var(--teal); }
+  .chip.on{ background:var(--teal); border-color:var(--teal); color:#fff; }
+  .chip.all.on{ background:var(--teal-d); border-color:var(--teal-d); }
 
   /* ── شريط الإحصاءات المضغوط: كل حاجة في صف واحد ── */
   /* ⚠️ كروت منفصلة مش شبكة بخلفية: الشبكة بتسيب خانات فاضية في
@@ -89,7 +96,7 @@
 
   <div class="bar">
     <div class="fld"><label>الفرع</label>
-      <select class="inp" id="fBranch" onchange="render()"></select></div>
+      <div class="chips" id="fBranch"></div></div>
     <div class="fld"><label>المقارنة مع</label>
       <select class="inp" id="fCompare" onchange="render()"></select></div>
     <div class="fld"><label>العرض</label>
@@ -129,6 +136,7 @@
 <script src="api.js?v=20260926dl"></script>
 <script>
   let POS = null;
+  const SEL = new Set();   // فاضية = كل الفروع
 
   const f0 = n => (n==null ? '—' : Math.round(Number(n)).toLocaleString('en-US'));
   function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -200,11 +208,13 @@
   /* ── الفلاتر ──────────────────────────────────────────────── */
   function fillFilters(){
     const bs = (POS && POS.branches) || [];
-    const bSel = document.getElementById('fBranch');
-    const keep = bSel.value;
-    bSel.innerHTML = '<option value="">كل الفروع</option>'
-      + bs.map(x=>'<option value="'+esc(x.code)+'">'+esc(x.name)+'</option>').join('');
-    if(keep) bSel.value = keep;
+    /* SEL فاضية = كل الفروع. أسهل من إننا نملاها بكل الأكواد
+       ونفضل نزامنها لو اتزاد فرع جديد. */
+    const allOn = SEL.size === 0 || SEL.size === bs.length;
+    document.getElementById('fBranch').innerHTML =
+        '<button type="button" class="chip all'+(allOn?' on':'')+'" onclick="pickAll()">كل الفروع</button>'
+      + bs.map(x=>'<button type="button" class="chip'+(SEL.size===0||SEL.has(x.code)?' on':'')
+          +'" onclick="pickBranch(&quot;'+esc(x.code)+'&quot;)">'+esc(x.name)+'</button>').join('');
 
     /* ⚠️ الخيارات من اللقطات الموجودة فعلًا — مش «أمس/أسبوع/شهر»
        ثابتة. لو اللقطة فاتت، خيار ثابت كان هيوعد بمقارنة مش موجودة. */
@@ -223,6 +233,19 @@
       h.length ? ('لقطات متاحة: '+h.length) : 'المقارنة تبدأ بعد أول لقطة ليلية';
   }
 
+  /* قواعد الضغط — المقصود تكون متوقّعة:
+     • «كل الفروع» بتمسح الاختيار (= الكل).
+     • ضغطة على فرع والكل مختار = اعرض الفرع ده لوحده (أسرع طريق).
+     • آخر فرع متبقي لو اتشال، نرجع للكل بدل ما الشاشة تفضى. */
+  function pickAll(){ SEL.clear(); render(); }
+  function pickBranch(code){
+    const n = ((POS && POS.branches) || []).length;
+    if(SEL.size === 0 || SEL.size === n){ SEL.clear(); SEL.add(code); }
+    else if(SEL.has(code)){ SEL.delete(code); if(SEL.size === 0) SEL.clear(); }
+    else SEL.add(code);
+    render();
+  }
+
   function baseRows(){
     const d = document.getElementById('fCompare').value;
     const h = (POS && POS.history) || [];
@@ -230,9 +253,8 @@
     return hit ? hit.rows : null;
   }
   function visibleBranches(){
-    const b = document.getElementById('fBranch').value;
     const rows = (POS && POS.branches) || [];
-    return b ? rows.filter(x => x.code === b) : rows;
+    return SEL.size ? rows.filter(x => SEL.has(x.code)) : rows;
   }
 
   const COLS = [
