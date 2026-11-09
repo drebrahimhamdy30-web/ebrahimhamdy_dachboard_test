@@ -64,6 +64,14 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
   <span class="stat-pill">عناوين محتاجة منطقة <b id="stCount">—</b></span>
 </div>
 
+<div class="top-bar" style="flex-wrap:wrap">
+  <span style="font-weight:700;color:var(--text);font-size:.85rem">✏️ تعديل منطقة عميل موجود:</span>
+  <input type="text" class="search-input" id="editCode" placeholder="اكتب كود العميل..." style="max-width:220px" onkeydown="if(event.key==='Enter')lookupCustomer()">
+  <button class="btn-save" id="editBtn" onclick="lookupCustomer()" style="height:40px">🔍 اعرض عناوينه</button>
+  <span id="editHint" style="font-size:.74rem;color:var(--text-muted)">يجيب عناوين العميل بمناطقها الحالية من eplus (خلال أقل من دقيقة) للتعديل.</span>
+</div>
+<div id="editResults"></div>
+
 <div id="content"><div class="loading">جارٍ التحميل…</div></div>
 
 <div id="toast" class="toast"></div>
@@ -268,6 +276,80 @@ async function saveRow(btn){
     toast('خطأ فى الحفظ، حاول تانى');
     btn.disabled=false; btn.textContent='حفظ';
   }
+}
+
+// ═══ تعديل منطقة عميل موجود (بحث بالكود) ═══
+let _editPollTimer=null;
+
+async function lookupCustomer(){
+  const code=(document.getElementById('editCode').value||'').trim();
+  if(!code){ toast('اكتب كود العميل'); return; }
+  if(!/^\d+$/.test(code)){ toast('الكود لازم يكون رقم'); return; }
+  const btn=document.getElementById('editBtn'), res=document.getElementById('editResults');
+  btn.disabled=true; btn.textContent='...'; clearTimeout(_editPollTimer);
+  res.innerHTML='<div class="note" style="background:#eff6ff;color:#0369a1">⏳ بيجيب عناوين العميل من eplus… (خلال أقل من دقيقة)</div>';
+  const reset=()=>{ btn.disabled=false; btn.textContent='🔍 اعرض عناوينه'; };
+  try{
+    const { data, error } = await db.from('customer_address_lookups').insert({ cust_code:code, requested_by: currentUser.username||currentUser.email||null }).select('id').single();
+    if(error) throw error;
+    const lid=data.id, t0=Date.now();
+    const poll=async()=>{
+      let st=null;
+      try{ const rows=await Session.getAll('customer_address_lookups?select=status&id=eq.'+lid); st=rows&&rows[0]&&rows[0].status; }catch(e){}
+      if(st==='done'){ await showEditAddresses(code); reset(); return; }
+      if(st==='notfound'){ res.innerHTML='<div class="empty">مفيش عناوين للعميل ده</div>'; reset(); return; }
+      if(st==='failed'){ res.innerHTML='<div class="empty">تعذّر الجلب</div>'; reset(); return; }
+      if(Date.now()-t0>90000){ res.innerHTML='<div class="empty">المهلة انتهت — جرّب تانى</div>'; reset(); return; }
+      _editPollTimer=setTimeout(poll,3000);
+    };
+    _editPollTimer=setTimeout(poll,3000);
+  }catch(e){ res.innerHTML='<div class="empty">تعذّر إرسال الطلب</div>'; reset(); }
+}
+
+async function showEditAddresses(code){
+  const res=document.getElementById('editResults');
+  let rows=[];
+  try{ rows=await Session.getAll('customer_delivery_addresses?select=cust_code,cd_id,cust_name,cd_address,region_id,region_name&cust_code=eq.'+encodeURIComponent(code)+'&order=cd_id.asc'); }catch(e){}
+  if(!rows.length){ res.innerHTML='<div class="empty">مفيش عناوين للعميل ده</div>'; return; }
+  const opts=regionOptions.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  const name=rows[0].cust_name||'';
+  const trs=rows.map(r=>`
+    <tr data-code="${esc(r.cust_code)}" data-cdid="${esc(r.cd_id)}">
+      <td class="cr-addr" title="${esc(r.cd_address)}">📍 ${esc(r.cd_address||'—')}</td>
+      <td>${r.region_name?`<span style="color:#15803d;font-weight:700">${esc(r.region_name)}</span>`:'<span style="color:#b45309;font-weight:700">— بدون منطقة —</span>'}</td>
+      <td><input class="region-pick" list="regionsDLedit" placeholder="المنطقة الجديدة" autocomplete="off"></td>
+      <td><button class="btn-save" onclick="saveEditRegion(this)">حفظ التعديل</button></td>
+    </tr>`).join('');
+  res.innerHTML=`
+    <datalist id="regionsDLedit">${opts}</datalist>
+    <div class="note" style="background:#f0fdf4;color:#15803d">عناوين العميل: <b>${esc(name)}</b> (كود ${esc(code)}) — غيّر المنطقة واحفظ، هتتكتب فوق القديمة وتنتشر للفروع.</div>
+    <div style="overflow:auto;border-radius:12px">
+      <table class="cr-table">
+        <thead><tr><th>العنوان</th><th>المنطقة الحالية</th><th>المنطقة الجديدة</th><th></th></tr></thead>
+        <tbody>${trs}</tbody>
+      </table>
+    </div>`;
+}
+
+async function saveEditRegion(btn){
+  const tr=btn.closest('tr');
+  const code=tr.dataset.code, cdId=tr.dataset.cdid;
+  const region=(tr.querySelector('.region-pick').value||'').trim();
+  if(!region){ toast('اختر المنطقة الجديدة'); return; }
+  if(!regionOptions.includes(region)){ toast('اختر منطقة من القائمة بالظبط'); return; }
+  btn.disabled=true; btn.textContent='...';
+  try{
+    const { error } = await db.from('customer_region_queue').insert({
+      cust_code: code, cd_id: cdId?Number(cdId):null, region_name: region,
+      dc_id: regionIdByName.get(region) ?? null, allow_overwrite: true,
+      requested_by: currentUser.username||currentUser.email||null
+    });
+    if(error){ if(error.code==='23505'){ toast('فيه تعديل معلّق لنفس العنوان'); } else throw error; }
+    else { toast('✅ هيتكتب «'+region+'» فوق القديمة خلال أقل من دقيقة'); }
+    const td=tr.querySelector('.region-pick').closest('td');
+    btn.closest('td').remove();
+    td.outerHTML='<td colspan="2"><span class="cr-done">⏳ قيد التطبيق: '+esc(region)+'</span></td>';
+  }catch(e){ toast('خطأ فى الحفظ'); btn.disabled=false; btn.textContent='حفظ التعديل'; }
 }
 
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }

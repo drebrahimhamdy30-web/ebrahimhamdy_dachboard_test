@@ -148,6 +148,7 @@ L ("طلبات معلّقة: " + $pending.Count)
 
 foreach($row in $pending){
   $id=$row.id; $code=[string]$row.cust_code; $name=[string]$row.region_name; $dc=$row.dc_id; $cdid=$row.cd_id; $addr=[string]$row.cust_address
+  $ovw=($row.allow_overwrite -eq $true)   # تعديل: السماح بالكتابة فوق منطقة موجودة
   $codeNum=[decimal]0
   if(-not [decimal]::TryParse($code,[ref]$codeNum)){
     if($writeDb){ SbPatch "customer_region_queue?id=eq.$id" @{ status='failed'; result_note='كود عميل غير رقمى'; applied_at=(NowUtc) } }
@@ -169,10 +170,15 @@ foreach($row in $pending){
   try {
     $n=0; $note=$null
     if($cdid){
-      $n = NonQuery "UPDATE Customer_Delivery SET cd_region_id=@dc, sec_update_uid='region_writeback', sec_update_date=GETDATE() WHERE cd_cust_id=@c AND cd_id=@cd AND (cd_region_id IS NULL OR cd_region_id=0)" @{ '@dc'=$dc; '@c'=$codeNum; '@cd'=[int]$cdid }
+      if($ovw){
+        # تعديل: اكتب فوق الموجود (بلا شرط الفاضى)
+        $n = NonQuery "UPDATE Customer_Delivery SET cd_region_id=@dc, sec_update_uid='region_writeback', sec_update_date=GETDATE() WHERE cd_cust_id=@c AND cd_id=@cd" @{ '@dc'=$dc; '@c'=$codeNum; '@cd'=[int]$cdid }
+      } else {
+        $n = NonQuery "UPDATE Customer_Delivery SET cd_region_id=@dc, sec_update_uid='region_writeback', sec_update_date=GETDATE() WHERE cd_cust_id=@c AND cd_id=@cd AND (cd_region_id IS NULL OR cd_region_id=0)" @{ '@dc'=$dc; '@c'=$codeNum; '@cd'=[int]$cdid }
+      }
       if($n -eq 0){
-        SbPatch "customer_region_queue?id=eq.$id" @{ status='failed'; dc_id=$dc; result_note=("السطر اتكتب قبل كده أو مش فاضى (cd_id=$cdid)"); applied_at=(NowUtc) }
-        L ("  [$code] ✗ cd_id=$cdid مش فاضى"); $failed++; continue
+        SbPatch "customer_region_queue?id=eq.$id" @{ status='failed'; dc_id=$dc; result_note=($(if($ovw){"العنوان غير موجود (cd_id=$cdid)"}else{"السطر اتكتب قبل كده أو مش فاضى (cd_id=$cdid)"})); applied_at=(NowUtc) }
+        L ("  [$code] ✗ cd_id=$cdid (n=0)"); $failed++; continue
       }
     } else {
       # توافق خلفى: صف طابور قديم بلا cd_id — نحاول بالعنوان ثم العنوان الوحيد الفاضى
@@ -191,6 +197,29 @@ foreach($row in $pending){
     L ("  [$code] ✗ خطأ: " + $_.Exception.Message); $failed++
   }
 }
+
+# ── معالجة طلبات جلب عناوين العميل (لشاشة تعديل منطقة موجودة) ──
+try {
+  $lks=@(SbGet "customer_address_lookups?status=eq.pending&order=created_at.asc&limit=50" | Where-Object { $_ -and $_.id })
+  foreach($lk in $lks){
+    $lid=$lk.id; $lcode=[string]$lk.cust_code; $lnum=[decimal]0
+    if(-not [decimal]::TryParse($lcode,[ref]$lnum)){ SbPatch "customer_address_lookups?id=eq.$lid" @{ status='failed'; done_at=(NowUtc) }; continue }
+    $cmd=$cn.CreateCommand()
+    $cmd.CommandText="SELECT d.cd_id, LTRIM(RTRIM(d.cd_address)) addr, d.cd_region_id, LTRIM(RTRIM(dc.dc_region_name_ar)) rn, LTRIM(RTRIM(cu.cust_name_ar)) nm FROM Customer_Delivery d LEFT JOIN Delivery_cost_region dc ON dc.dc_id=d.cd_region_id LEFT JOIN Customer cu ON cu.cust_id=d.cd_cust_id WHERE d.cd_cust_id=@c ORDER BY d.cd_id"
+    [void]$cmd.Parameters.AddWithValue('@c',$lnum)
+    $rd=$cmd.ExecuteReader(); $rows=@()
+    while($rd.Read()){
+      $rid = if($rd['cd_region_id'] -is [DBNull]){ $null } else { [int][decimal]$rd['cd_region_id'] }
+      $rows += [pscustomobject]@{ cust_code=$lcode; cd_id=[int][decimal]$rd['cd_id']; cust_name=[string]$rd['nm']; cd_address=[string]$rd['addr']; region_id=$rid; region_name=$(if($rd['rn'] -is [DBNull]){$null}else{[string]$rd['rn']}); synced_at=(NowUtc) }
+    }
+    $rd.Close()
+    SbDelete ("customer_delivery_addresses?cust_code=eq."+[uri]::EscapeDataString($lcode))
+    $rarr=@($rows)
+    if($rarr.Count){ for($i=0;$i -lt $rarr.Count;$i+=200){ SbUpsert "customer_delivery_addresses" "cust_code,cd_id" ($rarr[$i..([Math]::Min($i+199,$rarr.Count-1))]) } }
+    SbPatch "customer_address_lookups?id=eq.$lid" @{ status=$(if($rarr.Count){'done'}else{'notfound'}); done_at=(NowUtc) }
+    L ("  [جلب][$lcode] عناوين=" + $rarr.Count)
+  }
+} catch { L ("⚠️ جلب العناوين فشل: " + $_.Exception.Message) }
 }  # نهاية doApply
 
 $cn.Close()
