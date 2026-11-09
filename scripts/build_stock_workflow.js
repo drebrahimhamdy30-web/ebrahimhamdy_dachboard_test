@@ -13,7 +13,13 @@ const path = require('path');
 const SB_URL   = 'https://rxtjoqulmgkkcohmgzgi.supabase.co';
 const EPLUS    = 'http://eplus.ebrahimhamdy.com/api/Item/SearchItem';
 const CRED     = { id: 'uJYS75ZTBXnlYIqg', name: 'eplus' };  // الاعتماد الموجود في n8n
-const WINDOW   = "={{ $now.plus({hour:-24}).format('yyyy-MM-dd HH:mm:ss') }}";
+/* النافذة ٦ ساعات = **عتبة تنبيه التأخّر**. القاعدة: الوركفلو يتعافى
+   لوحده من أي توقف أقصر من الوقت اللي التنبيه بيصرخ عنده؛ وأي توقف
+   أطول هيبان في التنبيه ويتصرّف فيه إنسان. (توقف 2026-11-09 كان ٧
+   ساعات — بنافذة ساعة كانت الحركة هتضيع لحد اللقطة الليلية.)
+   وماتنزّلش عن ساعة: ساعة n8n وساعة eplus مش مضمون تطابقهم بالثانية،
+   والنافذة لازم يكون فيها هامش للانحراف. */
+const WINDOW   = "={{ $now.plus({hour:-6}).format('yyyy-MM-dd HH:mm:ss') }}";
 const CHUNK    = 2000;
 
 /* ── كود عقدة التقسيم ─────────────────────────────────────────────── */
@@ -103,7 +109,7 @@ const eplusNode = (name, filterKey, pos) => ({
 
 const nodes = [
   {
-    parameters: { rule: { interval: [{ field: 'hours', triggerAtMinute: 25 }] } },
+    parameters: { rule: { interval: [{ field: 'minutes', minutesInterval: 10 }] } },
     type: 'n8n-nodes-base.scheduleTrigger', typeVersion: 1.3,
     position: [-1392, 1024], name: 'Schedule Trigger1',
   },
