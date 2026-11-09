@@ -344,6 +344,20 @@
       }
     });
 
+    /* أرقام المحافظ المسجّلة والمفعّلة للفرع من pos_methods
+       (method_type='wallet'، المفتاح = رقم المحفظة).
+       بترجّع null لو الجلب فشل — وساعتها مابنخفيش حاجة. */
+    async function loadActiveWallets() {
+      try {
+        let q = db.from('pos_methods').select('method_key')
+                  .eq('method_type', 'wallet').eq('is_active', true);
+        if (userBranch) q = q.eq('branch', userBranch);
+        const { data, error } = await q;
+        if (error) { console.warn('[المحافظ المفعّلة] ' + error.message); return null; }
+        return new Set((data || []).map(r => String(r.method_key || '').trim()));
+      } catch (e) { console.warn('[المحافظ المفعّلة] ' + (e.message || e)); return null; }
+    }
+
     async function loadAll() {
       const tbody = document.getElementById('table-body');
       tbody.innerHTML = '<tr class="loading-row"><td colspan="10">⏳ جاري جلب البيانات...</td></tr>';
@@ -359,7 +373,15 @@
           if (data.length < page) break;
           from += page;
         }
-        allData = all;
+        /* الشاشة تعرض المحافظ المسجّلة والمفعّلة بس. الموقوفة
+           (is_active=false) والمش مسجّلة أصلًا ماتظهرش — بقرار المالك
+           2026-11-09، واتنبّه إن ده بيخفي معاملاتها غير المرحّلة كمان.
+           ⚠️ الإخفاء بيتبع السجل مش الواقع: محفظة شغّالة ومعلّمة موقوفة
+           هتختفي هي وفلوسها، فـpos_methods لازم يفضل متظبّط.
+           ولو جلب السجل فشل مابنخفيش حاجة — شاشة فاضية بفشل صامت
+           أسوأ بكتير من عرض محفظة زيادة. */
+        const activeWallets = await loadActiveWallets();
+        allData = activeWallets ? all.filter(r => activeWallets.has(walletOf(r))) : all;
 
         // ترتيب بالـ id (ترتيب الإدخال الحقيقي) — مهم عشان فحص الرصيد يطلع صح
         allData.sort((a,b) => sortKey(a) - sortKey(b));
