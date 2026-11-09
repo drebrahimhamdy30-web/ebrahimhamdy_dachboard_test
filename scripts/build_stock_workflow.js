@@ -110,7 +110,12 @@ const nodes = [
     id: 'qty-1', name: 'الكميات',
     type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2,
     position: [220, 300],
-    credentials: { httpBasicAuth: { name: 'eplus' } },
+    /* ⚠️ بيانات الاعتماد مش مكتوبة هنا بقصد. n8n بيربطها بالـID مش
+       بالاسم — وأول نسخة حطّت الاسم بس، فالخانة بانت مليانة وهي فاضية
+       والنداء رجع 401 «Invalid Username or Password». من غير المفتاح
+       ده الخانة بتبان فاضية وحمرا، فالغلط بيبان بدل ما يتخبّى.
+       بعد اللصق: اختار اعتماد eplus من الموجودين (مش Create New) —
+       أو انسخ العقدة الشغّالة من الوركفلو القديم وغيّر الـBody. */
     ...httpCommon,
   },
   {
@@ -124,7 +129,7 @@ const nodes = [
     id: 'prc-1', name: 'الأسعار',
     type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2,
     position: [440, 300],
-    credentials: { httpBasicAuth: { name: 'eplus' } },
+    /* زي «الكميات»: الاعتماد يتختار بالإيد بعد اللصق — شوف التعليق فوق */
     ...httpCommon,
   },
   {
