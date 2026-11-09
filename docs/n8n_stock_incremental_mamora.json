@@ -42,7 +42,7 @@
         "genericAuthType": "httpBasicAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ itm_lasttrans_date_search: $json.since, page_no: 1, page_size: 5000 }) }}",
+        "jsonBody": "={{ JSON.stringify({ itm_lasttrans_date_search: $json.since }) }}",
         "options": {
           "timeout": 120000
         }
@@ -67,7 +67,7 @@
         "genericAuthType": "httpBasicAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ itm_update_date_search: $('النافذة').first().json.since, page_no: 1, page_size: 5000 }) }}",
+        "jsonBody": "={{ JSON.stringify({ itm_update_date_search: $('النافذة').first().json.since }) }}",
         "options": {
           "timeout": 120000
         }
@@ -86,7 +86,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// بيجمع ناتج النداءين، يشيل التكرار، ويقسّم على دفعات للكتابة.\nconst CHUNK = 2000;\n\n// الـAPI ممكن يرجّع مصفوفة مباشرة أو كائن جوّاه المصفوفة — نتعامل مع\n// الاتنين بدل ما نفترض شكل واحد.\nfunction rowsOf(nodeName) {\n  const items = $(nodeName).all().map(i => i.json);\n  if (items.length === 1 && items[0] && items[0].itm_code === undefined) {\n    const o = items[0];\n    return o.data || o.items || o.result || o.Data || [];\n  }\n  return items;\n}\n\nconst qty    = rowsOf('الكميات');\nconst prices = rowsOf('الأسعار');\n\n// نفس الصنف ممكن يكون في النداءين — الأحدث يغلب\nconst map = new Map();\nfor (const r of [...qty, ...prices]) {\n  if (r && r.itm_code !== undefined && r.itm_code !== null) {\n    map.set(String(r.itm_code), r);\n  }\n}\nconst rows = [...map.values()];\n\n// حارس: جولة بترجّع صفر غالبًا نداء فشل واتبلع، مش يوم بلا حركة.\n// بنوقف بصوت بدل ما نكتب لا حاجة ونقول تمام.\nif (rows.length === 0) {\n  throw new Error('مفيش ولا صنف من النداءين — راجع الجلب قبل ما تثق في الجولة');\n}\n\n// حارس تاني: نافذة 24 ساعة المفروض ترجّع آلاف مش عشرات الآلاف.\n// رقم ضخم معناه الفلتر اتجاهل والـAPI رجّع الكتالوج كله.\nif (rows.length > 15000) {\n  throw new Error('الفلتر غالبًا اتجاهل — رجع ' + rows.length + ' صنف');\n}\n\nconst out = [];\nfor (let i = 0; i < rows.length; i += CHUNK) {\n  out.push({ json: { p_branch: 'mamora', p_rows: rows.slice(i, i + CHUNK) } });\n}\nreturn out;"
+        "jsCode": "// بيجمع ناتج النداءين، يشيل التكرار، ويقسّم على دفعات للكتابة.\nconst CHUNK = 2000;\n\n// الـAPI ممكن يرجّع مصفوفة مباشرة أو كائن جوّاه المصفوفة — نتعامل مع\n// الاتنين بدل ما نفترض شكل واحد.\n//\n// ⚠️ وأهم من ده: الـAPI بيرجّع **HTTP 200 حتى وهو فاشل**، بغلاف\n//    {\"Message\":\"Fail\",\"Error\":\"...\",\"AllRecords\":0,\"Data\":[]}.\n//    يعني n8n بيعتبر النداء ناجح. من غير الفحص ده، الفشل بيبان\n//    «يوم من غير حركة» — نجاح كاذب بالظبط زي اللي بنحاربه.\nfunction rowsOf(nodeName) {\n  const items = $(nodeName).all().map(i => i.json);\n  if (items.length === 1 && items[0] && items[0].itm_code === undefined) {\n    const o = items[0];\n    if (o.Error || (o.Message && String(o.Message).toLowerCase() === 'fail')) {\n      throw new Error('eplus رفض «' + nodeName + '»: ' + (o.Error || o.Message));\n    }\n    return o.data || o.items || o.result || o.Data || [];\n  }\n  return items;\n}\n\nconst qty    = rowsOf('الكميات');\nconst prices = rowsOf('الأسعار');\n\n// نفس الصنف ممكن يكون في النداءين — الأحدث يغلب\nconst map = new Map();\nfor (const r of [...qty, ...prices]) {\n  if (r && r.itm_code !== undefined && r.itm_code !== null) {\n    map.set(String(r.itm_code), r);\n  }\n}\nconst rows = [...map.values()];\n\n// حارس: جولة بترجّع صفر غالبًا نداء فشل واتبلع، مش يوم بلا حركة.\n// بنوقف بصوت بدل ما نكتب لا حاجة ونقول تمام.\nif (rows.length === 0) {\n  throw new Error('مفيش ولا صنف من النداءين — راجع الجلب قبل ما تثق في الجولة');\n}\n\n// حارس تاني: نافذة 24 ساعة المفروض ترجّع آلاف مش عشرات الآلاف.\n// رقم ضخم معناه الفلتر اتجاهل والـAPI رجّع الكتالوج كله.\nif (rows.length > 15000) {\n  throw new Error('الفلتر غالبًا اتجاهل — رجع ' + rows.length + ' صنف');\n}\n\nconst out = [];\nfor (let i = 0; i < rows.length; i += CHUNK) {\n  out.push({ json: { p_branch: 'mamora', p_rows: rows.slice(i, i + CHUNK) } });\n}\nreturn out;"
       },
       "id": "mrg-1",
       "name": "دمج",

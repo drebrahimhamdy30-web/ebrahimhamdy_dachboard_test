@@ -39,10 +39,18 @@ const CHUNK = ${CHUNK};
 
 // الـAPI ممكن يرجّع مصفوفة مباشرة أو كائن جوّاه المصفوفة — نتعامل مع
 // الاتنين بدل ما نفترض شكل واحد.
+//
+// ⚠️ وأهم من ده: الـAPI بيرجّع **HTTP 200 حتى وهو فاشل**، بغلاف
+//    {"Message":"Fail","Error":"...","AllRecords":0,"Data":[]}.
+//    يعني n8n بيعتبر النداء ناجح. من غير الفحص ده، الفشل بيبان
+//    «يوم من غير حركة» — نجاح كاذب بالظبط زي اللي بنحاربه.
 function rowsOf(nodeName) {
   const items = $(nodeName).all().map(i => i.json);
   if (items.length === 1 && items[0] && items[0].itm_code === undefined) {
     const o = items[0];
+    if (o.Error || (o.Message && String(o.Message).toLowerCase() === 'fail')) {
+      throw new Error('eplus رفض «' + nodeName + '»: ' + (o.Error || o.Message));
+    }
     return o.data || o.items || o.result || o.Data || [];
   }
   return items;
@@ -104,7 +112,12 @@ const nodes = [
       method: 'PATCH', url: EPLUS,
       authentication: 'genericCredentialType', genericAuthType: 'httpBasicAuth',
       sendBody: true, specifyBody: 'json',
-      jsonBody: '={{ JSON.stringify({ itm_lasttrans_date_search: $json.since, page_no: 1, page_size: 5000 }) }}',
+      /* ⚠️ من غير page_no/page_size بقصد. الـAPI بيعمل GetRange بالحجم
+         المطلوب من غير ما يقصّه على الموجود، فـpage_size=5000 على
+         1,300 نتيجة بيرجّع استثناء .NET:
+         «Offset and length were out of bounds for the array».
+         النافذة الفرقية صغيرة فمش محتاجة ترقيم أصلًا. */
+      jsonBody: '={{ JSON.stringify({ itm_lasttrans_date_search: $json.since }) }}',
       options: { timeout: 120000 },
     },
     id: 'qty-1', name: 'الكميات',
@@ -123,7 +136,8 @@ const nodes = [
       method: 'PATCH', url: EPLUS,
       authentication: 'genericCredentialType', genericAuthType: 'httpBasicAuth',
       sendBody: true, specifyBody: 'json',
-      jsonBody: "={{ JSON.stringify({ itm_update_date_search: $('النافذة').first().json.since, page_no: 1, page_size: 5000 }) }}",
+      /* زي «الكميات»: من غير ترقيم — شوف التعليق فوق */
+      jsonBody: "={{ JSON.stringify({ itm_update_date_search: $('النافذة').first().json.since }) }}",
       options: { timeout: 120000 },
     },
     id: 'prc-1', name: 'الأسعار',
