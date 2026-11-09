@@ -287,8 +287,11 @@ async function lookupCustomer(){
   if(!/^\d+$/.test(code)){ toast('الكود لازم يكون رقم'); return; }
   const btn=document.getElementById('editBtn'), res=document.getElementById('editResults');
   btn.disabled=true; btn.textContent='...'; clearTimeout(_editPollTimer);
-  res.innerHTML='<div class="note" style="background:#eff6ff;color:#0369a1">⏳ بيجيب عناوين العميل من eplus… (خلال أقل من دقيقة)</div>';
   const reset=()=>{ btn.disabled=false; btn.textContent='🔍 اعرض عناوينه'; };
+  // لو عناوينه محفوظة من بحث سابق، اعرضها فورًا (ونحدّثها فى الخلفية)
+  let hadExisting=false;
+  try{ const ex=await Session.getAll('customer_delivery_addresses?select=cd_id&cust_code=eq.'+encodeURIComponent(code)+'&limit=1'); if(ex&&ex.length){ hadExisting=true; await showEditAddresses(code); } }catch(e){}
+  if(!hadExisting) res.innerHTML='<div class="note" style="background:#eff6ff;color:#0369a1">⏳ بيجيب عناوين العميل من eplus… (خلال أقل من دقيقة)</div>';
   try{
     const { data, error } = await db.from('customer_address_lookups').insert({ cust_code:code, requested_by: currentUser.username||currentUser.email||null }).select('id').single();
     if(error) throw error;
