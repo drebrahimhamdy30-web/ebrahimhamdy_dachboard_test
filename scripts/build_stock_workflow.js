@@ -23,14 +23,24 @@ const codeSplit = `
 //   const BRANCHES_ON = ['mamora','san','bishr','seyouf'];
 const BRANCHES_ON = ['mamora'];
 
+// n8n بيضيف «1» لآخر اسم العقدة لو الاسم متاخد وقت اللصق
+// (lasttrans → lasttrans1)، والكود ساعتها مابيلاقيش العقدة ويقع بـ
+// «Node hasn't been executed». فبنجرّب الاسمين بدل ما نتعلّق بواحد.
+function nodeJson(names) {
+  for (const n of names) {
+    try { return $(n).first().json; } catch (e) { /* الاسم ده مش موجود */ }
+  }
+  throw new Error('مالقيتش عقدة باسم: ' + names.join(' أو '));
+}
+
 // ⚠️ eplus بيرجّع HTTP 200 حتى وهو فاشل، بغلاف
 //    {"Message":"Fail","Error":"...","Data":[]}. يعني n8n بيعتبره
 //    ناجح. من غير الفحص ده الفشل بيبان «يوم من غير حركة» — نجاح
 //    كاذب بالظبط زي اللي بنحاربه.
-function rowsOf(name) {
-  const o = $(name).first().json;
+function rowsOf(names) {
+  const o = nodeJson(names);
   if (o.Error || o.Message === 'Fail') {
-    throw new Error('eplus رفض «' + name + '»: ' + (o.Error || o.Message));
+    throw new Error('eplus رفض «' + names[0] + '»: ' + (o.Error || o.Message));
   }
   return o.Data || [];
 }
@@ -46,7 +56,8 @@ const BR = {
 
 // المفتاح فرع+كود مش كود لوحده: نفس الصنف بييجي مرة لكل مخزن
 const map = new Map();
-for (const r of [...rowsOf('lasttrans'), ...rowsOf('update')]) {
+const fetched = [...rowsOf(['lasttrans', 'lasttrans1']), ...rowsOf(['update', 'update1'])];
+for (const r of fetched) {
   const br = BR[r && r.sto_name];
   if (br && r.itm_code !== undefined && r.itm_code !== null) {
     map.set(br + '|' + r.itm_code, { br, r });
