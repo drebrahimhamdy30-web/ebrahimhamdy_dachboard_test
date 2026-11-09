@@ -1,156 +1,107 @@
-/* يبني ملف وركفلو n8n للمزامنة الفرقية للمخزون.
+/* يبني وركفلو n8n للمزامنة الفرقية للمخزون — **وركفلو واحد للأربع فروع**.
    التشغيل:  node scripts/build_stock_workflow.js
-   الناتج :  docs/n8n_stock_incremental_mamora.json  (يتلصق في n8n)
+   الناتج :  docs/n8n_stock_incremental.json
 
    ليه سكربت مش ملف JSON مكتوب بالإيد: الكود اللي جوّه عقد n8n بيتخزّن
    كنص داخل JSON، فكتابته بالإيد معناها هروب أسطر وعلامات تنصيص يدوي —
    وأول غلطة بتبوّظ الملف كله من غير ما تبان. هنا الكود مكتوب طبيعي
-   وJSON.stringify بيتولّى الهروب. */
+   وJSON.stringify بيتولّى الهروب، والسكربت بيفحص الناتج في الآخر. */
 
 const fs = require('fs');
 const path = require('path');
 
-const SB_URL  = 'https://rxtjoqulmgkkcohmgzgi.supabase.co';
-const EPLUS   = 'https://eplus.ebrahimhamdy.com/api/Item/SearchItem';
-const BRANCH  = 'mamora';
-const HOURS   = 24;     // اتساع النافذة
-const CHUNK   = 2000;   // أقصى عدد صفوف في نداء كتابة واحد
+const SB_URL   = 'https://rxtjoqulmgkkcohmgzgi.supabase.co';
+const EPLUS    = 'http://eplus.ebrahimhamdy.com/api/Item/SearchItem';
+const CRED     = { id: 'uJYS75ZTBXnlYIqg', name: 'eplus' };  // الاعتماد الموجود في n8n
+const WINDOW   = "={{ $now.plus({hour:-24}).format('yyyy-MM-dd HH:mm:ss') }}";
+const CHUNK    = 2000;
 
-/* ── كود عقدة النافذة ─────────────────────────────────────────────── */
-const codeWindow = `
-// النافذة: آخر ${HOURS} ساعة من الحركة. مفيش حالة محفوظة — كل جولة
-// بتجيب نفس الاتساع، فلو جولة (أو عشرة) فشلت، أول جولة ناجحة بتلحق
-// اللي فات لوحدها.
-//
-// ⚠️ القاهرة صراحةً. السيرفر UTC، والفرق ساعتين (تلاتة صيفًا) كفيل
-//    إنه يضيّع حركة لو حسبناها بتوقيت السيرفر.
-const since = DateTime.now()
-  .setZone('Africa/Cairo')
-  .minus({ hours: ${HOURS} })
-  .toFormat("yyyy-MM-dd'T'HH:mm:ss");
+/* ── كود عقدة التقسيم ─────────────────────────────────────────────── */
+const codeSplit = `
+// الفروع المفتوحة للكتابة. بنبدأ بالمعمورة لوحدها، وبعد التحقق
+// نوسّع السطر ده — **من غير أي وركفلو جديد**:
+//   const BRANCHES_ON = ['mamora','san','bishr','seyouf'];
+const BRANCHES_ON = ['mamora'];
 
-return [{ json: { since, branch: '${BRANCH}' } }];
-`.trim();
-
-/* ── كود عقدة الدمج ───────────────────────────────────────────────── */
-const codeMerge = `
-// بيجمع ناتج النداءين، يشيل التكرار، ويقسّم على دفعات للكتابة.
-const CHUNK = ${CHUNK};
-
-// الـAPI ممكن يرجّع مصفوفة مباشرة أو كائن جوّاه المصفوفة — نتعامل مع
-// الاتنين بدل ما نفترض شكل واحد.
-//
-// ⚠️ وأهم من ده: الـAPI بيرجّع **HTTP 200 حتى وهو فاشل**، بغلاف
-//    {"Message":"Fail","Error":"...","AllRecords":0,"Data":[]}.
-//    يعني n8n بيعتبر النداء ناجح. من غير الفحص ده، الفشل بيبان
-//    «يوم من غير حركة» — نجاح كاذب بالظبط زي اللي بنحاربه.
-function rowsOf(nodeName) {
-  const items = $(nodeName).all().map(i => i.json);
-  if (items.length === 1 && items[0] && items[0].itm_code === undefined) {
-    const o = items[0];
-    if (o.Error || (o.Message && String(o.Message).toLowerCase() === 'fail')) {
-      throw new Error('eplus رفض «' + nodeName + '»: ' + (o.Error || o.Message));
-    }
-    return o.data || o.items || o.result || o.Data || [];
+// ⚠️ eplus بيرجّع HTTP 200 حتى وهو فاشل، بغلاف
+//    {"Message":"Fail","Error":"...","Data":[]}. يعني n8n بيعتبره
+//    ناجح. من غير الفحص ده الفشل بيبان «يوم من غير حركة» — نجاح
+//    كاذب بالظبط زي اللي بنحاربه.
+function rowsOf(name) {
+  const o = $(name).first().json;
+  if (o.Error || o.Message === 'Fail') {
+    throw new Error('eplus رفض «' + name + '»: ' + (o.Error || o.Message));
   }
-  return items;
+  return o.Data || [];
 }
 
-const qty    = rowsOf('الكميات');
-const prices = rowsOf('الأسعار');
+// نداء واحد بيرجّع الأربع فروع. خريطة المخزن ← الفرع، نفس أسماء
+// branches.aliases في القاعدة.
+const BR = {
+  'الصيدلية':        'mamora',
+  'ابراهيم حمدي 2':  'san',
+  'ابراهيم حمدي 3':  'bishr',
+  'السيوف':          'seyouf',
+};
 
-// نفس الصنف ممكن يكون في النداءين — الأحدث يغلب
+// المفتاح فرع+كود مش كود لوحده: نفس الصنف بييجي مرة لكل مخزن
 const map = new Map();
-for (const r of [...qty, ...prices]) {
-  if (r && r.itm_code !== undefined && r.itm_code !== null) {
-    map.set(String(r.itm_code), r);
+for (const r of [...rowsOf('lasttrans'), ...rowsOf('update')]) {
+  const br = BR[r && r.sto_name];
+  if (br && r.itm_code !== undefined && r.itm_code !== null) {
+    map.set(br + '|' + r.itm_code, { br, r });
   }
 }
-const rows = [...map.values()];
 
-// حارس: جولة بترجّع صفر غالبًا نداء فشل واتبلع، مش يوم بلا حركة.
-// بنوقف بصوت بدل ما نكتب لا حاجة ونقول تمام.
-if (rows.length === 0) {
-  throw new Error('مفيش ولا صنف من النداءين — راجع الجلب قبل ما تثق في الجولة');
-}
-
-// حارس تاني: نافذة ${HOURS} ساعة المفروض ترجّع آلاف مش عشرات الآلاف.
-// رقم ضخم معناه الفلتر اتجاهل والـAPI رجّع الكتالوج كله.
-if (rows.length > 15000) {
-  throw new Error('الفلتر غالبًا اتجاهل — رجع ' + rows.length + ' صنف');
+const byBranch = {};
+for (const { br, r } of map.values()) {
+  if (BRANCHES_ON.includes(br)) (byBranch[br] = byBranch[br] || []).push(r);
 }
 
 const out = [];
-for (let i = 0; i < rows.length; i += CHUNK) {
-  out.push({ json: { p_branch: '${BRANCH}', p_rows: rows.slice(i, i + CHUNK) } });
+for (const br of Object.keys(byBranch)) {
+  const rows = byBranch[br];
+  for (let i = 0; i < rows.length; i += ${CHUNK}) {
+    out.push({ json: { p_branch: br, p_rows: rows.slice(i, i + ${CHUNK}) } });
+  }
+}
+
+// حارس: جولة بترجّع صفر غالبًا نداء فشل واتبلع، مش يوم بلا حركة
+if (out.length === 0) {
+  throw new Error('مفيش ولا صنف للفروع المفتوحة — راجع النداءين');
 }
 return out;
 `.trim();
 
 /* ── العقد ────────────────────────────────────────────────────────── */
-const httpCommon = {
-  retryOnFail: true,
-  maxTries: 3,
-  waitBetweenTries: 5000,
-};
+const eplusNode = (name, filterKey, pos) => ({
+  parameters: {
+    method: 'PATCH', url: EPLUS,
+    authentication: 'genericCredentialType', genericAuthType: 'httpBasicAuth',
+    sendBody: true,
+    /* ⚠️ من غير page_no/page_size بقصد. الـAPI بيعمل GetRange بالحجم
+       المطلوب من غير ما يقصّه على عدد النتائج، فـpage_size=5000 على
+       1,300 نتيجة بيرجّع «Offset and length were out of bounds». */
+    bodyParameters: { parameters: [{ name: filterKey, value: WINDOW }] },
+    options: {},
+  },
+  type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2,
+  position: pos, name,
+  credentials: { httpBasicAuth: CRED },
+});
 
 const nodes = [
   {
-    parameters: { rule: { interval: [{ field: 'minutes', minutesInterval: 10 }] } },
-    id: 'sched-1', name: 'كل 10 دقايق',
-    type: 'n8n-nodes-base.scheduleTrigger', typeVersion: 1.2,
-    position: [-220, 300],
+    parameters: { rule: { interval: [{ field: 'hours', triggerAtMinute: 25 }] } },
+    type: 'n8n-nodes-base.scheduleTrigger', typeVersion: 1.3,
+    position: [-1392, 1024], name: 'Schedule Trigger1',
   },
+  eplusNode('lasttrans', 'itm_lasttrans_date_search', [-1120, 1024]),
+  eplusNode('update',    'itm_update_date_search',    [-900, 1024]),
   {
-    parameters: { jsCode: codeWindow },
-    id: 'win-1', name: 'النافذة',
+    parameters: { jsCode: codeSplit },
     type: 'n8n-nodes-base.code', typeVersion: 2,
-    position: [0, 300],
-  },
-  {
-    parameters: {
-      method: 'PATCH', url: EPLUS,
-      authentication: 'genericCredentialType', genericAuthType: 'httpBasicAuth',
-      sendBody: true, specifyBody: 'json',
-      /* ⚠️ من غير page_no/page_size بقصد. الـAPI بيعمل GetRange بالحجم
-         المطلوب من غير ما يقصّه على الموجود، فـpage_size=5000 على
-         1,300 نتيجة بيرجّع استثناء .NET:
-         «Offset and length were out of bounds for the array».
-         النافذة الفرقية صغيرة فمش محتاجة ترقيم أصلًا. */
-      jsonBody: '={{ JSON.stringify({ itm_lasttrans_date_search: $json.since }) }}',
-      options: { timeout: 120000 },
-    },
-    id: 'qty-1', name: 'الكميات',
-    type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2,
-    position: [220, 300],
-    /* ⚠️ بيانات الاعتماد مش مكتوبة هنا بقصد. n8n بيربطها بالـID مش
-       بالاسم — وأول نسخة حطّت الاسم بس، فالخانة بانت مليانة وهي فاضية
-       والنداء رجع 401 «Invalid Username or Password». من غير المفتاح
-       ده الخانة بتبان فاضية وحمرا، فالغلط بيبان بدل ما يتخبّى.
-       بعد اللصق: اختار اعتماد eplus من الموجودين (مش Create New) —
-       أو انسخ العقدة الشغّالة من الوركفلو القديم وغيّر الـBody. */
-    ...httpCommon,
-  },
-  {
-    parameters: {
-      method: 'PATCH', url: EPLUS,
-      authentication: 'genericCredentialType', genericAuthType: 'httpBasicAuth',
-      sendBody: true, specifyBody: 'json',
-      /* زي «الكميات»: من غير ترقيم — شوف التعليق فوق */
-      jsonBody: "={{ JSON.stringify({ itm_update_date_search: $('النافذة').first().json.since }) }}",
-      options: { timeout: 120000 },
-    },
-    id: 'prc-1', name: 'الأسعار',
-    type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2,
-    position: [440, 300],
-    /* زي «الكميات»: الاعتماد يتختار بالإيد بعد اللصق — شوف التعليق فوق */
-    ...httpCommon,
-  },
-  {
-    parameters: { jsCode: codeMerge },
-    id: 'mrg-1', name: 'دمج',
-    type: 'n8n-nodes-base.code', typeVersion: 2,
-    position: [660, 300],
+    position: [-680, 1024], name: 'تقسيم',
   },
   {
     parameters: {
@@ -164,41 +115,37 @@ const nodes = [
       jsonBody: '={{ JSON.stringify($json) }}',
       options: { timeout: 120000 },
     },
-    id: 'wr-1', name: 'كتابة المخزون',
     type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2,
-    position: [880, 300],
-    ...httpCommon,
+    position: [-460, 1024], name: 'كتابة',
+    retryOnFail: true, maxTries: 3, waitBetweenTries: 5000,
   },
 ];
 
-/* سلسلة واحدة بالترتيب — مفيش تفريع ومفيش Merge.
-   النداءين وراء بعض بقصد: عقدة Merge اللي بتستنى فرعين هي بالظبط
-   اللي جمّدت مزامنة فرع يوم كامل بالساكت. */
+/* سلسلة واحدة بالترتيب — مش تفريع.
+   التفريع بيخلّي ترتيب التنفيذ معتمد على مكان العقدة على الشاشة،
+   فعقدة «تقسيم» ممكن تشتغل قبل ما «lasttrans» تخلّص. والسلسلة
+   بتخلّي الترتيب مضمون، والتكلفة ثانيتين.
+   (ونفس السبب اللي خلّانا نشيل عقدة Merge: الاعتماد على تزامن
+    فرعين هو اللي جمّد المزامنة يوم كامل بالساكت.) */
 const connections = {
-  'كل 10 دقايق': { main: [[{ node: 'النافذة',       type: 'main', index: 0 }]] },
-  'النافذة':      { main: [[{ node: 'الكميات',       type: 'main', index: 0 }]] },
-  'الكميات':      { main: [[{ node: 'الأسعار',       type: 'main', index: 0 }]] },
-  'الأسعار':      { main: [[{ node: 'دمج',           type: 'main', index: 0 }]] },
-  'دمج':          { main: [[{ node: 'كتابة المخزون', type: 'main', index: 0 }]] },
+  'Schedule Trigger1': { main: [[{ node: 'lasttrans', type: 'main', index: 0 }]] },
+  'lasttrans':         { main: [[{ node: 'update',    type: 'main', index: 0 }]] },
+  'update':            { main: [[{ node: 'تقسيم',     type: 'main', index: 0 }]] },
+  'تقسيم':             { main: [[{ node: 'كتابة',     type: 'main', index: 0 }]] },
 };
 
-const wf = {
-  name: 'مخزون المعمورة — فرقي',
-  nodes,
-  connections,
-  settings: { executionOrder: 'v1' },
-};
+const wf = { name: 'المخزون — فرقي (الأربع فروع)', nodes, connections, pinData: {} };
 
-const out = path.join(__dirname, '..', 'docs', 'n8n_stock_incremental_mamora.json');
+const out = path.join(__dirname, '..', 'docs', 'n8n_stock_incremental.json');
 fs.writeFileSync(out, JSON.stringify(wf, null, 2), 'utf8');
 
-/* فحص: الملف لازم يتقرا JSON صالح، وكود العقد لازم يتحلّل JavaScript */
+/* فحص: JSON صالح، كود العقد بيتحلّل، وكل وصلة بتشاور على عقدة موجودة */
 const back = JSON.parse(fs.readFileSync(out, 'utf8'));
 let bad = 0;
 for (const n of back.nodes) {
   if (n.type === 'n8n-nodes-base.code') {
     try { new Function(n.parameters.jsCode); }
-    catch (e) { console.log('✗ كود العقدة «' + n.name + '» مكسور: ' + e.message); bad++; }
+    catch (e) { console.log('✗ كود «' + n.name + '» مكسور: ' + e.message); bad++; }
   }
 }
 const names = new Set(back.nodes.map(n => n.name));
@@ -208,5 +155,6 @@ for (const [from, c] of Object.entries(back.connections)) {
     if (!names.has(t.node)) { console.log('✗ وصلة لعقدة مش موجودة: ' + t.node); bad++; }
   }
 }
-console.log(bad ? '✗ فشل ' + bad : '✅ ' + back.nodes.length + ' عقد — JSON صالح والكود بيتحلّل');
+if (/eyJ|service_role|password/i.test(JSON.stringify(back))) { console.log('✗ فيه سر في الملف'); bad++; }
+console.log(bad ? '✗ فشل ' + bad : '✅ ' + back.nodes.length + ' عقد · JSON صالح · الكود بيتحلّل · مفيش أسرار');
 console.log('الملف: ' + out);

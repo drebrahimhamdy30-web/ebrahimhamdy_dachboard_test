@@ -1,0 +1,180 @@
+{
+  "name": "المخزون — فرقي (الأربع فروع)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "triggerAtMinute": 25
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1392,
+        1024
+      ],
+      "name": "Schedule Trigger1"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "http://eplus.ebrahimhamdy.com/api/Item/SearchItem",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "itm_lasttrans_date_search",
+              "value": "={{ $now.plus({hour:-24}).format('yyyy-MM-dd HH:mm:ss') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1120,
+        1024
+      ],
+      "name": "lasttrans",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "uJYS75ZTBXnlYIqg",
+          "name": "eplus"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "http://eplus.ebrahimhamdy.com/api/Item/SearchItem",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "itm_update_date_search",
+              "value": "={{ $now.plus({hour:-24}).format('yyyy-MM-dd HH:mm:ss') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -900,
+        1024
+      ],
+      "name": "update",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "uJYS75ZTBXnlYIqg",
+          "name": "eplus"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// الفروع المفتوحة للكتابة. بنبدأ بالمعمورة لوحدها، وبعد التحقق\n// نوسّع السطر ده — **من غير أي وركفلو جديد**:\n//   const BRANCHES_ON = ['mamora','san','bishr','seyouf'];\nconst BRANCHES_ON = ['mamora'];\n\n// ⚠️ eplus بيرجّع HTTP 200 حتى وهو فاشل، بغلاف\n//    {\"Message\":\"Fail\",\"Error\":\"...\",\"Data\":[]}. يعني n8n بيعتبره\n//    ناجح. من غير الفحص ده الفشل بيبان «يوم من غير حركة» — نجاح\n//    كاذب بالظبط زي اللي بنحاربه.\nfunction rowsOf(name) {\n  const o = $(name).first().json;\n  if (o.Error || o.Message === 'Fail') {\n    throw new Error('eplus رفض «' + name + '»: ' + (o.Error || o.Message));\n  }\n  return o.Data || [];\n}\n\n// نداء واحد بيرجّع الأربع فروع. خريطة المخزن ← الفرع، نفس أسماء\n// branches.aliases في القاعدة.\nconst BR = {\n  'الصيدلية':        'mamora',\n  'ابراهيم حمدي 2':  'san',\n  'ابراهيم حمدي 3':  'bishr',\n  'السيوف':          'seyouf',\n};\n\n// المفتاح فرع+كود مش كود لوحده: نفس الصنف بييجي مرة لكل مخزن\nconst map = new Map();\nfor (const r of [...rowsOf('lasttrans'), ...rowsOf('update')]) {\n  const br = BR[r && r.sto_name];\n  if (br && r.itm_code !== undefined && r.itm_code !== null) {\n    map.set(br + '|' + r.itm_code, { br, r });\n  }\n}\n\nconst byBranch = {};\nfor (const { br, r } of map.values()) {\n  if (BRANCHES_ON.includes(br)) (byBranch[br] = byBranch[br] || []).push(r);\n}\n\nconst out = [];\nfor (const br of Object.keys(byBranch)) {\n  const rows = byBranch[br];\n  for (let i = 0; i < rows.length; i += 2000) {\n    out.push({ json: { p_branch: br, p_rows: rows.slice(i, i + 2000) } });\n  }\n}\n\n// حارس: جولة بترجّع صفر غالبًا نداء فشل واتبلع، مش يوم بلا حركة\nif (out.length === 0) {\n  throw new Error('مفيش ولا صنف للفروع المفتوحة — راجع النداءين');\n}\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -680,
+        1024
+      ],
+      "name": "تقسيم"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://rxtjoqulmgkkcohmgzgi.supabase.co/rest/v1/rpc/upsert_branch_stock",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -460,
+        1024
+      ],
+      "name": "كتابة",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "lasttrans",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "lasttrans": {
+      "main": [
+        [
+          {
+            "node": "update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "update": {
+      "main": [
+        [
+          {
+            "node": "تقسيم",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تقسيم": {
+      "main": [
+        [
+          {
+            "node": "كتابة",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
