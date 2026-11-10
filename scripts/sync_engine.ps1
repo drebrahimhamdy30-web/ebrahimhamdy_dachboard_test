@@ -15,7 +15,14 @@
 #   }
 # }
 
-param([string]$ConfigPath = "C:\ProgramData\phalix\sync_engine.json")
+param(
+  [string]$ConfigPath = "C:\ProgramData\phalix\sync_engine.json",
+  # كام مرة نعيد المحاولة لفرع فشل قبل ما نستنى دورته الجاية.
+  # السبب: انقطاع 30 ثانية في سيرفر فرع الساعة 06:50 (2026-11-10) خلّى
+  # مهمة يومية تسيب فجوة 24 ساعة وتنبيه عالق — والمهام اللي بتلف كل
+  # دقيقة ما اتأثرتش لأنها لحقت نفسها.
+  [int]$MaxRetries = 2
+)
 $ErrorActionPreference = "Stop"
 $logPath = [System.IO.Path]::ChangeExtension($ConfigPath, ".log")
 $inv = [Globalization.CultureInfo]::InvariantCulture
@@ -127,6 +134,42 @@ function LogRun($job,$branch,$kind,$res,$ms){
   try{ Sb-Insert "sync_runs" @{ job_id=$job.id; branch=$branch; kind=$kind; new_rows=$res.new; item_rows=$res.items; duration_ms=$ms; status=$res.status; error=$res.error } }catch{}
 }
 
+# كام محاولة إعادة حصلت بعد آخر نجاح للفرع ده في المهمة دي.
+# بنعدّ من سجل الجولات نفسه — مفيش عمود جديد ولا حالة محفوظة في مكان تاني.
+function RetryCount($jobId,$branch){
+  try{
+    $rows = Sb-Get "sync_runs?job_id=eq.$jobId&branch=eq.$branch&select=status,kind&order=ran_at.desc&limit=12"
+  }catch{
+    return 99   # مش عارفين نعدّ = ماتعيدش. أأمن من لفّة لا نهائية.
+  }
+  $n=0
+  foreach($r in $rows){
+    if($r.status -ne 'error'){ break }   # وصلنا لآخر نجاح
+    if($r.kind -eq 'retry'){ $n++ }
+  }
+  return $n
+}
+
+# بيحط الفرع الفاشل في طابور الطلبات عشان النبضة الجاية تعيد المحاولة
+# (بعد دقيقة–دقيقتين). أحسن من إعادة فورية: الانقطاع اللحظي بيكون خلص،
+# والمهمة اليومية مابتستناش ٢٤ ساعة عشان غلطة ٣٠ ثانية.
+function QueueRetry($job,$branch,$kind){
+  if($kind -eq 'backfill'){ return }   # السحب الكامل تقيل — مايتعادش لوحده
+  $n = RetryCount $job.id $branch
+  if($n -ge $MaxRetries){
+    Log ("[{0}/{1}] وصل حد إعادة المحاولة ({2}) — مستني الدورة الجاية" -f $job.id,$branch,$MaxRetries)
+    return
+  }
+  try{
+    $pend = Sb-Get "sync_requests?job_id=eq.$($job.id)&branch=eq.$branch&status=in.(pending,running)&select=id&limit=1"
+    if($pend){ return }   # في طلب مستني أصلًا، ماتكررش
+    Sb-Insert "sync_requests" @{ job_id=$job.id; branch=$branch; kind='retry' }
+    Log ("[{0}/{1}] اتحطّ في طابور إعادة المحاولة ({2} من {3})" -f $job.id,$branch,($n+1),$MaxRetries)
+  }catch{
+    Log ("[{0}/{1}] فشل تسجيل إعادة المحاولة: {2}" -f $job.id,$branch,$_.Exception.Message)
+  }
+}
+
 Log "=== نبضة المحرّك ==="
 $jobs = Sb-Get "sync_jobs?select=*"
 
@@ -143,6 +186,8 @@ foreach($rq in $reqs){
     $res = Run-JobBranch $job $br $mode $rq.from_date $rq.to_date
     $sw.Stop(); LogRun $job $br $rq.kind $res $sw.ElapsedMilliseconds
     Log ("طلب[{0}] {1}/{2}: {3} فواتير={4} بنود={5} {6}" -f $rq.kind,$job.id,$br,$res.status,$res.new,$res.items,$res.error)
+    # إعادة المحاولة نفسها لو فشلت بتدخل الطابور تاني — والعدّاد بيوقفها
+    if($res.status -eq 'error'){ QueueRetry $job $br $rq.kind }
   }
   if($job.post_rpc){ try{ Invoke-RestMethod -Uri "$SB/rest/v1/rpc/$($job.post_rpc)" -Headers $Hdr -Method Post -Body "{}" | Out-Null }catch{} }
   Sb-Patch "sync_requests?id=eq.$($rq.id)" @{ status='done'; done_at=(Get-Date).ToUniversalTime().ToString('o') }
@@ -155,15 +200,20 @@ foreach($job in ($jobs | Where-Object { $_.enabled })){
   if(-not $due){ continue }
   $branches = Sb-Get "sync_branch_state?job_id=eq.$($job.id)&enabled=eq.true&select=branch" | ForEach-Object { $_.branch }
   $anyNew=$false
+  $anyErr=$false
   foreach($br in $branches){
     $sw=[Diagnostics.Stopwatch]::StartNew()
     $res = Run-JobBranch $job $br 'incr' $null $null
     $sw.Stop()
     if($res.status -ne 'empty'){ LogRun $job $br 'auto' $res $sw.ElapsedMilliseconds; $anyNew=$true }
     if($res.status -ne 'empty'){ Log ("[{0}/{1}] {2} فواتير={3} بنود={4} {5}" -f $job.id,$br,$res.status,$res.new,$res.items,$res.error) }
+    if($res.status -eq 'error'){ $anyErr=$true; QueueRetry $job $br 'auto' }
   }
   if($anyNew -and $job.post_rpc){ try{ Invoke-RestMethod -Uri "$SB/rest/v1/rpc/$($job.post_rpc)" -Headers $Hdr -Method Post -Body "{}" | Out-Null }catch{} }
-  Sb-Patch "sync_jobs?id=eq.$($job.id)" @{ last_run_at=(Get-Date).ToUniversalTime().ToString('o'); last_status='ok' }
+  # ⚠️ كان بيكتب 'ok' دايمًا حتى لو فرع فشل — فلوحة المزامنة كانت بتقول
+  #    المهمة سليمة والواقع إن فرع واقع (اتكشف 2026-11-10 مع سان/الخزائن).
+  $jobStatus = 'ok'; if($anyErr){ $jobStatus = 'error' }
+  Sb-Patch "sync_jobs?id=eq.$($job.id)" @{ last_run_at=(Get-Date).ToUniversalTime().ToString('o'); last_status=$jobStatus }
 }
 Log "=== انتهت النبضة ==="
 
