@@ -48,15 +48,27 @@ const total = Number(o.AllRecords || 0);
 if (!total) throw new Error('AllRecords رجع فاضي — مافيش عدد نبني عليه');
 if (total > 500000) throw new Error('AllRecords رقم غير معقول: ' + total);
 
-// آخر صفحة حجمها = الباقي بالظبط. لو طلبنا 1000 والباقي 641 الـAPI
-// بترمي «Offset and length were out of bounds».
+// ⚠️ الـAPI بتحسب البداية = (page_no − 1) × page_size. يعني حجم أي
+//    صفحة لازم **يقسم بدايتها بالظبط**، وإلا البداية بتزحزح وبناخد
+//    بيانات ناقصة **من غير ما حاجة تشتكي** — أخطر من الانفجار.
+//    ولازم كمان البداية + الحجم ≤ الإجمالي وإلا بترمي
+//    «Offset and length were out of bounds».
+//    (اتأكد بالتجربة: صفحة 6 × 10000 نجحت، وصفحة 7 × 10000 انفجرت،
+//     ونداء واحد بحجم الإجمالي كله وقع بـaborted لأن الرد ~50 ميجا.)
+//
+//    فبناخد في كل خطوة **أكبر حجم** يقسم اللي اتغطّى لحد دلوقتى ومايتجاوزش
+//    الباقي. بيخلّص في ~13 صفحة، وبيشتغل حتى لو الإجمالي رقم أولي
+//    (الحجم 1 بيقسم أي رقم فالحلقة مضمون إنها تنتهي).
 const pages = [];
-for (let off = 0; off < total; off += PAGE) {
-  pages.push({ json: {
-    no:    Math.floor(off / PAGE) + 1,
-    size:  Math.min(PAGE, total - off),
-    total: total,
-  }});
+let covered = 0;
+while (covered < total) {
+  const room = Math.min(PAGE, total - covered);
+  let s = 0;
+  for (let c = room; c >= 1; c--) { if (covered % c === 0) { s = c; break; } }
+  if (!s) throw new Error('مالقيتش حجم صفحة صالح عند ' + covered);
+  pages.push({ json: { no: covered / s + 1, size: s, total: total } });
+  covered += s;
+  if (pages.length > 200) throw new Error('عدد صفحات غير معقول: ' + pages.length);
 }
 return pages;
 `.trim();
