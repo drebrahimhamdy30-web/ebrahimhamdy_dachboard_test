@@ -117,7 +117,7 @@ return out;
 /* ── العقد ────────────────────────────────────────────────────────── */
 const httpCommon = { retryOnFail: true, maxTries: 3, waitBetweenTries: 5000 };
 
-const eplusNode = (name, jsonBody, pos) => ({
+const eplusNode = (name, jsonBody, pos, extraOptions) => ({
   parameters: {
     method: 'PATCH', url: EPLUS,
     authentication: 'genericCredentialType', genericAuthType: 'httpBasicAuth',
@@ -125,7 +125,7 @@ const eplusNode = (name, jsonBody, pos) => ({
     /* ⚠️ لازم specifyBody=json. «Using Fields Below» بتبعت الأرقام
        كنصوص والـAPI بتنهار بـaborted. */
     specifyBody: 'json', jsonBody,
-    options: { timeout: 120000 },
+    options: Object.assign({ timeout: 120000 }, extraOptions || {}),
   },
   type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2,
   position: pos, name,
@@ -145,7 +145,13 @@ const nodes = [
     type: 'n8n-nodes-base.code', typeVersion: 2,
     position: [-960, 300], name: 'صفحات',
   },
-  eplusNode('جلب', '={{ JSON.stringify({ page_no: $json.no, page_size: $json.size }) }}', [-740, 300]),
+  /* ⚠️ التقطيع مقصود. n8n بيطلق نداء لكل عنصر **ورا بعض من غير أي
+     مهلة** — يعني 70 نداء متتابعة على سيرفر الصيدلية وهو نفسه الجهاز
+     اللي الكاشير شغّال عليه. 5 نداءات ثم ثانية راحة = ~14 ثانية زيادة
+     على الجولة، مقابل إننا مانضغطش على السيرفر وقت الشغل. ولو حصل خلل،
+     5 نداءات في الهوا أسهل في الإيقاف من 70. */
+  eplusNode('جلب', '={{ JSON.stringify({ page_no: $json.no, page_size: $json.size }) }}', [-740, 300],
+            { batching: { batch: { batchSize: 5, batchInterval: 1000 } } }),
   {
     parameters: { jsCode: codeSplit },
     type: 'n8n-nodes-base.code', typeVersion: 2,
