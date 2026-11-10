@@ -1,0 +1,207 @@
+{
+  "name": "المخزون — فرقي بالكود",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1400,
+        300
+      ],
+      "name": "كل ساعة"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://eplus.ebrahimhamdy.com/api/Item/SearchItem",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ itm_lasttrans_date_search: $now.plus({hour:-2}).format('yyyy-MM-dd HH:mm:ss') }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1180,
+        300
+      ],
+      "name": "تغيّرات",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "uJYS75ZTBXnlYIqg",
+          "name": "eplus"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 15000
+    },
+    {
+      "parameters": {
+        "jsCode": "const MINLEN = 4, MAXCODES = 800;\n\n// مخازن فروعنا — الرد بيرجّع مخازن تانية (طوسون، سندره، العجز) مش بتاعتنا\nconst STORES = ['الصيدلية', 'ابراهيم حمدي 2', 'ابراهيم حمدي 3', 'السيوف'];\n\nconst o = $('تغيّرات').first().json;\nif (o.Error || String(o.Message).toLowerCase() === 'fail') {\n  throw new Error('eplus رفض نداء التغيّرات: ' + (o.Error || o.Message));\n}\nconst rows = o.Data || [];\n\n// ⚠️ الكميات في الرد ده **ناقصة** (بتاعة الدفعات اللي اتحركت بس).\n//    إحنا عايزين الأكواد لا غير.\nconst codes = new Set();\nlet short = 0;\nfor (const r of rows) {\n  if (!r || r.itm_code === undefined || r.itm_code === null) continue;\n  if (STORES.indexOf(r.sto_name) < 0) continue;\n  const c = String(r.itm_code).trim();\n  if (!c) continue;\n  // البحث بالكود جزئي: كود قصير بيرجّع آلاف الصفوف. اللقطة الليلية تغطّيه.\n  if (c.length < MINLEN) { short++; continue; }\n  codes.add(c);\n}\n\nif (codes.size > MAXCODES) {\n  throw new Error('عدد الأكواد ' + codes.size + ' فوق الحد — راجع النافذة');\n}\n// مفيش تغيير أصلًا = جولة شرعية (ساعة هادية). مش خطأ.\nreturn [...codes].map(c => ({ json: { code: c, total: codes.size, short: short } }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -960,
+        300
+      ],
+      "name": "أكواد"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://eplus.ebrahimhamdy.com/api/Item/SearchItem",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ itm_code_search: $json.code }) }}",
+        "options": {
+          "timeout": 120000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -740,
+        300
+      ],
+      "name": "رصيد",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "uJYS75ZTBXnlYIqg",
+          "name": "eplus"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 15000
+    },
+    {
+      "parameters": {
+        "jsCode": "// الفروع المفتوحة للكتابة. وسّع السطر ده بعد التحقق:\n//   const BRANCHES_ON = ['mamora','san','bishr','seyouf'];\nconst BRANCHES_ON = ['mamora'];\n\nconst BR = {\n  'الصيدلية':        'mamora',\n  'ابراهيم حمدي 2':  'san',\n  'ابراهيم حمدي 3':  'bishr',\n  'السيوف':          'seyouf',\n};\n\n// الأكواد اللي طلبناها — عشان نفلتر الرد الجزئي على الكود بالحرف\nconst asked = new Set($('أكواد').all().map(i => String(i.json.code)));\n\nconst map = new Map();   // مفتاح فرع|كود\nlet seen = 0, stray = 0;\nfor (const it of $('رصيد').all()) {\n  const o = it.json;\n  if (o.Error || String(o.Message).toLowerCase() === 'fail') {\n    throw new Error('eplus رفض بحث كود: ' + (o.Error || o.Message));\n  }\n  for (const r of (o.Data || [])) {\n    seen++;\n    const code = String((r && r.itm_code) ?? '');\n    // ⚠️ البحث جزئي: \"7220\" بيرجّع 57220 و72200 كمان. بناخد المطابق بس.\n    if (!asked.has(code)) { stray++; continue; }\n    const br = BR[r.sto_name];\n    if (!br || BRANCHES_ON.indexOf(br) < 0) continue;\n    map.set(br + '|' + code, r);\n  }\n}\n\nif (map.size === 0) {\n  throw new Error('ولا صف مطابق من ' + seen + ' صف رجعوا — راجع الفلترة');\n}\n\nconst byBranch = {};\nfor (const [k, r] of map) {\n  const br = k.split('|')[0];\n  (byBranch[br] = byBranch[br] || []).push(r);\n}\n\nconst out = [];\nfor (const br of Object.keys(byBranch)) {\n  const list = byBranch[br];\n  for (let i = 0; i < list.length; i += 2000) {\n    out.push({ json: { p_branch: br, p_rows: list.slice(i, i + 2000) } });\n  }\n}\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -520,
+        300
+      ],
+      "name": "تقسيم"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://rxtjoqulmgkkcohmgzgi.supabase.co/rest/v1/rpc/upsert_branch_stock",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -300,
+        300
+      ],
+      "name": "كتابة",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 15000
+    }
+  ],
+  "connections": {
+    "كل ساعة": {
+      "main": [
+        [
+          {
+            "node": "تغيّرات",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تغيّرات": {
+      "main": [
+        [
+          {
+            "node": "أكواد",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "أكواد": {
+      "main": [
+        [
+          {
+            "node": "رصيد",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "رصيد": {
+      "main": [
+        [
+          {
+            "node": "تقسيم",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تقسيم": {
+      "main": [
+        [
+          {
+            "node": "كتابة",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
