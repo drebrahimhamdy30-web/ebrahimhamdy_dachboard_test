@@ -83,10 +83,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -960,
+        -1000,
         300
       ],
-      "name": "تغيّرات",
+      "name": "تغيّرات الكمية",
       "credentials": {
         "httpBasicAuth": {
           "id": "uJYS75ZTBXnlYIqg",
@@ -99,12 +99,42 @@
     },
     {
       "parameters": {
-        "jsCode": "const MAXCODES = 1500;\n\n/* ── اختيار طريقة البحث: الأطول يكسب ──────────────────────────────\n   البحث في eplus **جزئي** في الحالتين، فتكلفته = كام صنف في\n   الكتالوج فيه النص ده. يعني النص القصير غالي والطويل رخيص، سواء\n   كان كود أو اسم. القياس على 27,821 صنف (2026-11-10):\n\n     كود '6'   → 15,668 صنف   |   اسمه 'ريد اقراص 60 قرص'  →  1\n     كود '7068'→     12 صنف   |   اسمه 'ي'                 → 24,123\n\n   والعيبين **متكاملين**: كل صنف اسمه غالي كوده رخيص والعكس. فمفيش\n   داعي لقايمة استثناءات ولا سؤال للقاعدة — نبص على الطول ونختار.\n   على الـ588 صنف الأصعب (كل اللي اسمه قصير أو كوده قصير): متوسط\n   النتايج 2، وأسوأ نداء 166، وولا واحد فوق 300.\n   التعادل بيروح للكود (قيس: '250مل' بالاسم 366 وبالكود 1).\n\n   والاسم جاي من رد «تغيّرات» نفسه — يعني اسم eplus الحالي، مش نسخة\n   عندنا ممكن تكون قديمة. ولو الرد ماجابش اسم، بنرجع لخريطة\n   stock_sync_window، وآخر حل الكود. */\nconst HEAVY  = $('تحقق').first().json.heavy || {};\nconst pickName = (code, name) =>\n  (name && name.trim().length > code.length) ? name.trim() : null;\n\n// مخازن فروعنا — الرد بيرجّع مخازن تانية (طوسون، سندره، العجز) مش بتاعتنا\nconst STORES = ['الصيدلية', 'ابراهيم حمدي 2', 'ابراهيم حمدي 3', 'السيوف'];\n\nconst o = $('تغيّرات').first().json;\nif (o.Error || String(o.Message).toLowerCase() === 'fail') {\n  throw new Error('eplus رفض نداء التغيّرات: ' + (o.Error || o.Message));\n}\nconst rows = o.Data || [];\n\n// ⚠️ الكميات في الرد ده **ناقصة** (بتاعة الدفعات اللي اتحركت بس).\n//    إحنا عايزين الأكواد لا غير.\nconst codes = new Map();   // كود → اسم نبحث بيه (أو null = نبحث بالكود)\nlet stuck = [], other = 0;\nfor (const r of rows) {\n  if (!r || r.itm_code === undefined || r.itm_code === null) continue;\n  if (STORES.indexOf(r.sto_name) < 0) { other++; continue; }\n  const c = String(r.itm_code).trim();\n  if (!c) continue;\n  if (codes.has(c)) continue;\n\n  const name = pickName(c, r.itm_name_ar) || pickName(c, HEAVY[c]);\n  /* كود من خانة واحدة بلا اسم أطول منه = مفيش نص انتقائي نبحث بيه.\n     البحث بالكود هيجيب نص الكتالوج، فبيتأجّل للّقطة الكاملة —\n     وبيتكتب في السجل مش بيختفي في السكوت. */\n  if (!name && c.length <= 1) { stuck.push(c); continue; }\n  codes.set(c, name);\n}\n\nif (codes.size > MAXCODES) {\n  throw new Error('عدد الأكواد ' + codes.size + ' فوق الحد ' + MAXCODES +\n    ' — الجولة دي هتتعدّى على اللي بعدها، شغّل اللقطة الكاملة');\n}\n// مفيش تغيير أصلًا = جولة شرعية (ساعة هادية). مش خطأ.\nconst byName = [...codes].filter(e => e[1]).length;\nconsole.log('نافذة ' + $('تحقق').first().json.gap_minutes + 'د · ' + rows.length +\n  ' صف · ' + codes.size + ' كود (' + byName + ' بالاسم · ' +\n  (codes.size - byName) + ' بالكود) · مخازن تانية ' + other +\n  (stuck.length ? ' · اتأجّل للّقطة: ' + stuck.join(',') : ''));\nreturn [...codes].map(([code, name]) =>\n  ({ json: { code: code, name: name, total: codes.size } }));"
+        "method": "PATCH",
+        "url": "https://eplus.ebrahimhamdy.com/api/Item/SearchItem",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ itm_update_date_search: $('تحقق').first().json.since }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -820,
+        300
+      ],
+      "name": "تغيّرات الصنف",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "uJYS75ZTBXnlYIqg",
+          "name": "eplus"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 15000
+    },
+    {
+      "parameters": {
+        "jsCode": "const MAXCODES = 1500;\n\n/* ── اختيار طريقة البحث: الأطول يكسب ──────────────────────────────\n   البحث في eplus **جزئي** في الحالتين، فتكلفته = كام صنف في\n   الكتالوج فيه النص ده. يعني النص القصير غالي والطويل رخيص، سواء\n   كان كود أو اسم. القياس على 27,821 صنف (2026-11-10):\n\n     كود '6'   → 15,668 صنف   |   اسمه 'ريد اقراص 60 قرص'  →  1\n     كود '7068'→     12 صنف   |   اسمه 'ي'                 → 24,123\n\n   والعيبين **متكاملين**: كل صنف اسمه غالي كوده رخيص والعكس. فمفيش\n   داعي لقايمة استثناءات ولا سؤال للقاعدة — نبص على الطول ونختار.\n   على الـ588 صنف الأصعب (كل اللي اسمه قصير أو كوده قصير): متوسط\n   النتايج 2، وأسوأ نداء 166، وولا واحد فوق 300.\n   التعادل بيروح للكود (قيس: '250مل' بالاسم 366 وبالكود 1).\n\n   والاسم جاي من رد التغيّرات نفسه — يعني اسم eplus الحالي، مش نسخة\n   عندنا ممكن تكون قديمة. ولو الرد ماجابش اسم، بنرجع لخريطة\n   stock_sync_window، وآخر حل الكود. */\nconst HEAVY  = $('تحقق').first().json.heavy || {};\nconst pickName = (code, name) =>\n  (name && name.trim().length > code.length) ? name.trim() : null;\n\n// مخازن فروعنا — الرد بيرجّع مخازن تانية (طوسون، سندره، العجز) مش بتاعتنا\nconst STORES = ['الصيدلية', 'ابراهيم حمدي 2', 'ابراهيم حمدي 3', 'السيوف'];\n\n/* مصدرين للتغيير، لأن eplus بتمسك كل واحد في حقل لوحده:\n     last_trans_date → حركة الكمية (بيع/شراء/مرتجع)\n     update_date     → تعديل الصنف نفسه (سعر، اسم، شركة، تصنيف)\n   الاتنين مستقلين: صنف 7228 بيع النهاردة (last_trans 11/10) وآخر\n   تعديل بياناته 7/28. فالسعر اللي بيتغيّر من غير بيع **مش** بيظهر في\n   نداء الكمية خالص — و~25 صنف في اليوم بيتغيّر سعرهم في المعمورة.\n   والصنف الجديد متغطّي هنا كمان: update_date بيتحط وقت الإنشاء\n   (مُتحقَّق على 23,225 صف: ولا واحد update أقدم من insert). */\nconst rows = [];\nfor (const src of ['تغيّرات الكمية', 'تغيّرات الصنف']) {\n  const o = $(src).first().json;\n  if (o.Error || String(o.Message).toLowerCase() === 'fail') {\n    throw new Error('eplus رفض «' + src + '»: ' + (o.Error || o.Message));\n  }\n  for (const r of (o.Data || [])) rows.push(r);\n}\n\n// ⚠️ الكميات في الرد ده **ناقصة** (بتاعة الدفعات اللي اتحركت بس).\n//    إحنا عايزين الأكواد لا غير.\nconst codes = new Map();   // كود → اسم نبحث بيه (أو null = نبحث بالكود)\nlet stuck = [], other = 0;\nfor (const r of rows) {\n  if (!r || r.itm_code === undefined || r.itm_code === null) continue;\n  if (STORES.indexOf(r.sto_name) < 0) { other++; continue; }\n  const c = String(r.itm_code).trim();\n  if (!c) continue;\n  if (codes.has(c)) continue;\n\n  const name = pickName(c, r.itm_name_ar) || pickName(c, HEAVY[c]);\n  /* كود من خانة واحدة بلا اسم أطول منه = مفيش نص انتقائي نبحث بيه.\n     البحث بالكود هيجيب نص الكتالوج، فبيتأجّل للّقطة الكاملة —\n     وبيتكتب في السجل مش بيختفي في السكوت. */\n  if (!name && c.length <= 1) { stuck.push(c); continue; }\n  codes.set(c, name);\n}\n\nif (codes.size > MAXCODES) {\n  throw new Error('عدد الأكواد ' + codes.size + ' فوق الحد ' + MAXCODES +\n    ' — الجولة دي هتتعدّى على اللي بعدها، شغّل اللقطة الكاملة');\n}\n// مفيش تغيير أصلًا = جولة شرعية (ساعة هادية). مش خطأ.\nconst byName = [...codes].filter(e => e[1]).length;\nconsole.log('نافذة ' + $('تحقق').first().json.gap_minutes + 'د · ' + rows.length +\n  ' صف · ' + codes.size + ' كود (' + byName + ' بالاسم · ' +\n  (codes.size - byName) + ' بالكود) · مخازن تانية ' + other +\n  (stuck.length ? ' · اتأجّل للّقطة: ' + stuck.join(',') : ''));\nreturn [...codes].map(([code, name]) =>\n  ({ json: { code: code, name: name, total: codes.size } }));"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -740,
+        -640,
         300
       ],
       "name": "أكواد"
@@ -131,7 +161,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -520,
+        -460,
         300
       ],
       "name": "رصيد",
@@ -152,7 +182,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -300,
+        -280,
         300
       ],
       "name": "تقسيم"
@@ -184,7 +214,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -80,
+        -100,
         300
       ],
       "name": "كتابة",
@@ -220,14 +250,25 @@
       "main": [
         [
           {
-            "node": "تغيّرات",
+            "node": "تغيّرات الكمية",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "تغيّرات": {
+    "تغيّرات الكمية": {
+      "main": [
+        [
+          {
+            "node": "تغيّرات الصنف",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تغيّرات الصنف": {
       "main": [
         [
           {

@@ -118,7 +118,7 @@ const MAXCODES = ${MAXCODES};
    النتايج 2، وأسوأ نداء 166، وولا واحد فوق 300.
    التعادل بيروح للكود (قيس: '250مل' بالاسم 366 وبالكود 1).
 
-   والاسم جاي من رد «تغيّرات» نفسه — يعني اسم eplus الحالي، مش نسخة
+   والاسم جاي من رد التغيّرات نفسه — يعني اسم eplus الحالي، مش نسخة
    عندنا ممكن تكون قديمة. ولو الرد ماجابش اسم، بنرجع لخريطة
    stock_sync_window، وآخر حل الكود. */
 const HEAVY  = $('تحقق').first().json.heavy || {};
@@ -128,11 +128,22 @@ const pickName = (code, name) =>
 // مخازن فروعنا — الرد بيرجّع مخازن تانية (طوسون، سندره، العجز) مش بتاعتنا
 const STORES = ['الصيدلية', 'ابراهيم حمدي 2', 'ابراهيم حمدي 3', 'السيوف'];
 
-const o = $('تغيّرات').first().json;
-if (o.Error || String(o.Message).toLowerCase() === 'fail') {
-  throw new Error('eplus رفض نداء التغيّرات: ' + (o.Error || o.Message));
+/* مصدرين للتغيير، لأن eplus بتمسك كل واحد في حقل لوحده:
+     last_trans_date → حركة الكمية (بيع/شراء/مرتجع)
+     update_date     → تعديل الصنف نفسه (سعر، اسم، شركة، تصنيف)
+   الاتنين مستقلين: صنف 7228 بيع النهاردة (last_trans 11/10) وآخر
+   تعديل بياناته 7/28. فالسعر اللي بيتغيّر من غير بيع **مش** بيظهر في
+   نداء الكمية خالص — و~25 صنف في اليوم بيتغيّر سعرهم في المعمورة.
+   والصنف الجديد متغطّي هنا كمان: update_date بيتحط وقت الإنشاء
+   (مُتحقَّق على 23,225 صف: ولا واحد update أقدم من insert). */
+const rows = [];
+for (const src of ['تغيّرات الكمية', 'تغيّرات الصنف']) {
+  const o = $(src).first().json;
+  if (o.Error || String(o.Message).toLowerCase() === 'fail') {
+    throw new Error('eplus رفض «' + src + '»: ' + (o.Error || o.Message));
+  }
+  for (const r of (o.Data || [])) rows.push(r);
 }
-const rows = o.Data || [];
 
 // ⚠️ الكميات في الرد ده **ناقصة** (بتاعة الدفعات اللي اتحركت بس).
 //    إحنا عايزين الأكواد لا غير.
@@ -287,10 +298,17 @@ const nodes = [
       ', p_overlap_minutes: ' + OVERLAP + ', p_max_hours: ' + MAXHOURS + ' }) }}',
     [-1400, 300]),
   codeNode('تحقق', codeGuard, [-1180, 300]),
-  eplusNode('تغيّرات',
+  /* نداءين للتغيير، لأن eplus بتمسك كل نوع في حقل مستقل. سلسلة مش
+     تفريع — التفريع بيخلّي ترتيب التنفيذ معتمد على مكان العقدة. */
+  eplusNode('تغيّرات الكمية',
     '={{ JSON.stringify({ itm_lasttrans_date_search: $json.since }) }}',
-    [-960, 300]),
-  codeNode('أكواد', codeCodes, [-740, 300]),
+    [-1000, 300]),
+  /* ⚠️ العقدة دي جاية بعد نداء تاني، فـ$json بقى رد eplus مش النافذة
+     — لازم نرجع لـ«تحقق» بالاسم. */
+  eplusNode('تغيّرات الصنف',
+    "={{ JSON.stringify({ itm_update_date_search: $('تحقق').first().json.since }) }}",
+    [-820, 300]),
+  codeNode('أكواد', codeCodes, [-640, 300]),
   /* نداء خفيف لكل كود، واحد في المرة بثانية راحة. ده عكس صفحات اللقطة
      الكاملة اللي بتخلّي الـAPI تمسح الكتالوج كله في كل نداء. */
   /* الكود الرقمي الواحد بحثه بيجيب نص الكتالوج، فبيتجاب بالاسم —
@@ -299,12 +317,13 @@ const nodes = [
   eplusNode('رصيد',
     '={{ JSON.stringify($json.name ? { itm_name_ar_search: $json.name }'
     + ' : { itm_code_search: $json.code }) }}',
-    [-520, 300], { batching: { batch: { batchSize: 1, batchInterval: 1000 } } }),
-  codeNode('تقسيم', codeSplit, [-300, 300]),
-  sbNode('كتابة', 'upsert_branch_stock', '={{ JSON.stringify($json) }}', [-80, 300]),
+    [-460, 300], { batching: { batch: { batchSize: 1, batchInterval: 1000 } } }),
+  codeNode('تقسيم', codeSplit, [-280, 300]),
+  sbNode('كتابة', 'upsert_branch_stock', '={{ JSON.stringify($json) }}', [-100, 300]),
 ];
 
-const order = ['كل شوية', 'نافذة', 'تحقق', 'تغيّرات', 'أكواد', 'رصيد', 'تقسيم', 'كتابة'];
+const order = ['كل شوية', 'نافذة', 'تحقق', 'تغيّرات الكمية', 'تغيّرات الصنف',
+               'أكواد', 'رصيد', 'تقسيم', 'كتابة'];
 const connections = {};
 for (let i = 0; i < order.length - 1; i++) {
   connections[order[i]] = { main: [[{ node: order[i + 1], type: 'main', index: 0 }]] };
@@ -348,3 +367,86 @@ console.log(bad ? 'x فشل ' + bad
   : 'OK ' + back.nodes.length + ' عقد · JSON صالح · الكود بيتحلّل · مراجع العقد موجودة · '
     + 'Using JSON · الفروع متطابقة (' + BRANCHES.join(',') + ') · مفيش أسرار');
 console.log('الملف: ' + out);
+
+/* ══════════════════════════════════════════════════════════════════
+   وركفلو تانٍ: تكميل الصفوف الشحيحة (مرة واحدة بزرار)
+   ══════════════════════════════════════════════════════════════════
+   تحميل تقرير الإكسل 2026-11-10 رمّم الأرصدة، بس التقرير مافيهوش
+   أعمدة الباركود والاسم الإنجليزي وعلامة الدوا — فالأصناف اللي
+   ماكانتش موجودة عندنا قبل كده اتكتبت بصف شحيح (190 صنف له رصيد،
+   و~4,400 برصيد صفر).
+
+   الصفوف دي بتتصلّح لوحدها أول ما الصنف يتباع (الفرقي بيجيبه كامل
+   من eplus)، بس ده ممكن ياخد شهور للصنف البطيء. الوركفلو ده بيجيبهم
+   دفعة واحدة بنفس النداء الخفيف.
+
+   نفس سلسلة الوركفلو الأساسي من «رصيد» ورايح — بنفس الكود بالحرف.
+   المختلف بس: مصدر الأكواد (القاعدة بدل eplus) والتشغيل (زرار بدل
+   جدولة).  */
+
+const codeBackfill = `
+const o = $('ناقص').first().json;
+const items = (o && o.items) || [];
+if (!items.length) {
+  throw new Error('مفيش صفوف شحيحة — مفيش شغل');
+}
+/* نفس قاعدة الوركفلو الأساسي: الأطول يكسب. الاسم العربي موجود في
+   الصف الشحيح (جاي من التقرير)، فمعظمهم هيتجابوا بالاسم. */
+const pickName = (code, name) =>
+  (name && name.trim().length > code.length) ? name.trim() : null;
+
+const out = [];
+let stuck = [];
+for (const it of items) {
+  const c = String(it.code || '').trim();
+  if (!c) continue;
+  const name = pickName(c, it.name);
+  if (!name && c.length <= 1) { stuck.push(c); continue; }
+  out.push({ json: { code: c, name: name, total: items.length } });
+}
+console.log('شحيح ' + items.length + ' · هيتجاب ' + out.length +
+  (stuck.length ? ' · متعذّر: ' + stuck.join(',') : ''));
+return out;
+`.trim();
+
+const bfNodes = [
+  { parameters: {}, type: 'n8n-nodes-base.manualTrigger', typeVersion: 1,
+    position: [-1000, 300], name: 'تشغيل يدوي' },
+  sbNode('ناقص', 'stock_incomplete_codes',
+    '={{ JSON.stringify({ p_branch: ' + JSON.stringify(BRANCHES[0]) +
+      ', p_limit: 500, p_with_stock: true }) }}',
+    [-800, 300]),
+  codeNode('أكواد', codeBackfill, [-600, 300]),
+  eplusNode('رصيد',
+    '={{ JSON.stringify($json.name ? { itm_name_ar_search: $json.name }'
+    + ' : { itm_code_search: $json.code }) }}',
+    [-400, 300], { batching: { batch: { batchSize: 1, batchInterval: 1000 } } }),
+  codeNode('تقسيم', codeSplit, [-200, 300]),
+  sbNode('كتابة', 'upsert_branch_stock', '={{ JSON.stringify($json) }}', [0, 300]),
+];
+const bfOrder = ['تشغيل يدوي', 'ناقص', 'أكواد', 'رصيد', 'تقسيم', 'كتابة'];
+const bfConn = {};
+for (let i = 0; i < bfOrder.length - 1; i++) {
+  bfConn[bfOrder[i]] = { main: [[{ node: bfOrder[i + 1], type: 'main', index: 0 }]] };
+}
+const bfPath = path.join(__dirname, '..', 'docs', 'n8n_stock_backfill.json');
+fs.writeFileSync(bfPath, JSON.stringify(
+  { name: 'المخزون — تكميل الصفوف الشحيحة', nodes: bfNodes, connections: bfConn, pinData: {} },
+  null, 2), 'utf8');
+
+const bf = JSON.parse(fs.readFileSync(bfPath, 'utf8'));
+let bfBad = 0;
+const bfNames = new Set(bf.nodes.map(n => n.name));
+for (const n of bf.nodes) {
+  if (n.type === 'n8n-nodes-base.code') {
+    try { new Function(n.parameters.jsCode); }
+    catch (e) { console.log('x كود «' + n.name + '»: ' + e.message); bfBad++; }
+    for (const m of n.parameters.jsCode.matchAll(/\$\('([^']+)'\)/g)) {
+      if (!bfNames.has(m[1])) { console.log('x «' + n.name + '» بينادي عقدة مش موجودة: ' + m[1]); bfBad++; }
+    }
+  }
+}
+if (/eyJ|service_role|password/i.test(JSON.stringify(bf))) { console.log('x فيه سر'); bfBad++; }
+console.log(bfBad ? 'x التكميل فشل ' + bfBad
+  : 'OK ' + bf.nodes.length + ' عقد · تكميل الصفوف الشحيحة (' + BRANCHES[0] + ')');
+console.log('الملف: ' + bfPath);

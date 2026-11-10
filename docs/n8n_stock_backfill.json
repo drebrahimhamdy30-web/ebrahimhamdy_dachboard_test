@@ -1,0 +1,203 @@
+{
+  "name": "المخزون — تكميل الصفوف الشحيحة",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1000,
+        300
+      ],
+      "name": "تشغيل يدوي"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://rxtjoqulmgkkcohmgzgi.supabase.co/rest/v1/rpc/stock_incomplete_codes",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_branch: \"mamora\", p_limit: 500, p_with_stock: true }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -800,
+        300
+      ],
+      "name": "ناقص",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 15000
+    },
+    {
+      "parameters": {
+        "jsCode": "const o = $('ناقص').first().json;\nconst items = (o && o.items) || [];\nif (!items.length) {\n  throw new Error('مفيش صفوف شحيحة — مفيش شغل');\n}\n/* نفس قاعدة الوركفلو الأساسي: الأطول يكسب. الاسم العربي موجود في\n   الصف الشحيح (جاي من التقرير)، فمعظمهم هيتجابوا بالاسم. */\nconst pickName = (code, name) =>\n  (name && name.trim().length > code.length) ? name.trim() : null;\n\nconst out = [];\nlet stuck = [];\nfor (const it of items) {\n  const c = String(it.code || '').trim();\n  if (!c) continue;\n  const name = pickName(c, it.name);\n  if (!name && c.length <= 1) { stuck.push(c); continue; }\n  out.push({ json: { code: c, name: name, total: items.length } });\n}\nconsole.log('شحيح ' + items.length + ' · هيتجاب ' + out.length +\n  (stuck.length ? ' · متعذّر: ' + stuck.join(',') : ''));\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -600,
+        300
+      ],
+      "name": "أكواد"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://eplus.ebrahimhamdy.com/api/Item/SearchItem",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.name ? { itm_name_ar_search: $json.name } : { itm_code_search: $json.code }) }}",
+        "options": {
+          "timeout": 120000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -400,
+        300
+      ],
+      "name": "رصيد",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "uJYS75ZTBXnlYIqg",
+          "name": "eplus"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 15000
+    },
+    {
+      "parameters": {
+        "jsCode": "// الفروع المفتوحة للكتابة — نفس قايمة «نافذة» (مصدر واحد في البانى)\nconst BRANCHES_ON = [\"mamora\"];\n\nconst BR = {\n  'الصيدلية':        'mamora',\n  'ابراهيم حمدي 2':  'san',\n  'ابراهيم حمدي 3':  'bishr',\n  'السيوف':          'seyouf',\n};\n\n// الأكواد اللي طلبناها — عشان نفلتر الرد الجزئي على الكود بالحرف\nconst asked = new Set($('أكواد').all().map(i => String(i.json.code)));\n\nconst map = new Map();   // مفتاح فرع|كود\nconst got = new Set();   // كود رجع فعلًا — حتى لو فرعه مقفول\nlet seen = 0, stray = 0;\nfor (const it of $('رصيد').all()) {\n  const o = it.json;\n  if (o.Error || String(o.Message).toLowerCase() === 'fail') {\n    throw new Error('eplus رفض بحث كود: ' + (o.Error || o.Message));\n  }\n  for (const r of (o.Data || [])) {\n    seen++;\n    const code = String((r && r.itm_code) ?? '');\n    // ⚠️ البحث جزئي: \"7220\" بيرجّع 57220 و72200 كمان. بناخد المطابق بس.\n    if (!asked.has(code)) { stray++; continue; }\n    got.add(code);\n    const br = BR[r.sto_name];\n    if (!br || BRANCHES_ON.indexOf(br) < 0) continue;\n    map.set(br + '|' + code, r);\n  }\n}\n\nif (map.size === 0) {\n  throw new Error('ولا صف مطابق من ' + seen + ' صف رجعوا — راجع الفلترة');\n}\n\n/* كود طلبناه و**ولا صف رجع ليه خالص**. السبب الوارد: اسمه اتغيّر في\n   eplus بعد آخر مزامنة فالبحث بالاسم مالقاهوش. بيتكتب في السجل عشان\n   ما يختفيش في السكوت.\n   ⚠️ الكود اللي رجع بس فرعه مقفول **مش** ضايع — عشان كده \"got\"\n   بتتملى جوّه اللفة قبل فلتر الفرع، مش من \"map\". */\nconst lost = [...asked].filter(c => !got.has(c));\n\nconst byBranch = {};\nfor (const [k, r] of map) {\n  const br = k.split('|')[0];\n  (byBranch[br] = byBranch[br] || []).push(r);\n}\n\nconsole.log('رجع ' + seen + ' صف · مطابق ' + map.size + ' · مرفوض ' + stray +\n  ' · ' + Object.keys(byBranch).map(b => b + '=' + byBranch[b].length).join(' ') +\n  (lost.length ? ' · مارجعش: ' + lost.slice(0, 20).join(',') : ''));\n\nconst out = [];\nfor (const br of Object.keys(byBranch)) {\n  const list = byBranch[br];\n  for (let i = 0; i < list.length; i += 2000) {\n    out.push({ json: { p_branch: br, p_rows: list.slice(i, i + 2000) } });\n  }\n}\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        300
+      ],
+      "name": "تقسيم"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://rxtjoqulmgkkcohmgzgi.supabase.co/rest/v1/rpc/upsert_branch_stock",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        300
+      ],
+      "name": "كتابة",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 15000
+    }
+  ],
+  "connections": {
+    "تشغيل يدوي": {
+      "main": [
+        [
+          {
+            "node": "ناقص",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ناقص": {
+      "main": [
+        [
+          {
+            "node": "أكواد",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "أكواد": {
+      "main": [
+        [
+          {
+            "node": "رصيد",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "رصيد": {
+      "main": [
+        [
+          {
+            "node": "تقسيم",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تقسيم": {
+      "main": [
+        [
+          {
+            "node": "كتابة",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
