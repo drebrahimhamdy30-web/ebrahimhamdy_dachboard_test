@@ -29,7 +29,7 @@ const path = require('path');
 const SB_URL = 'https://rxtjoqulmgkkcohmgzgi.supabase.co';
 const EPLUS  = 'http://eplus.ebrahimhamdy.com/api/Item/SearchItem';
 const CRED   = { id: 'uJYS75ZTBXnlYIqg', name: 'eplus' };
-const PAGE   = 250;    // حجم الصفحة — صغّرناه بعد ما 1000 وقع متقطّع
+const PAGE   = 10000;  // 7 صفحات. اتجرّب 3 مرات متتابعة ونجح 3/3
 const CHUNK  = 2000;   // أقصى صفوف في نداء كتابة واحد
 
 /* ── كود عقدة «صفحات» ─────────────────────────────────────────────── */
@@ -149,11 +149,11 @@ const nodes = [
      مهلة** — يعني 279 نداء متتابعة على سيرفر الصيدلية وهو نفسه الجهاز
      اللي الكاشير شغّال عليه، وده اللي خلّى النداءات تقع بـaborted وقت
      الذروة.
-     نداء واحد كل ثانيتين = الجولة ~10 دقايق، 30 نداء في الدقيقة،
-     وباقي الساعة السيرفر مرتاح. وبرضه خلاص قبل الجولة اللي بعدها
-     بفارق أمان كبير. */
+     والوقوع طلع **متقطّع مش متعلّق بالحجم**: 1000 اشتغل مرة ووقع مرة،
+     و10000 نجح 3/3. فالحجم الكبير أحسن — 7 نداءات بدل 279، وكل
+     واحد بـ3 ثواني راحة = الجولة ~20 ثانية والسيرفر مرتاح باقي الساعة. */
   eplusNode('جلب', '={{ JSON.stringify({ page_no: $json.no, page_size: $json.size }) }}', [-740, 300],
-            { batching: { batch: { batchSize: 1, batchInterval: 2000 } } }),
+            { batching: { batch: { batchSize: 1, batchInterval: 3000 } } }),
   {
     parameters: { jsCode: codeSplit },
     type: 'n8n-nodes-base.code', typeVersion: 2,
