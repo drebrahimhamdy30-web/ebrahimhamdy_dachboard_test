@@ -1,0 +1,201 @@
+{
+  "name": "المخزون — لقطة كاملة (الأربع فروع)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1400,
+        300
+      ],
+      "name": "كل ساعة"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "http://eplus.ebrahimhamdy.com/api/Item/SearchItem",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ page_no: 1, page_size: 1 }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1180,
+        300
+      ],
+      "name": "عدّ",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "uJYS75ZTBXnlYIqg",
+          "name": "eplus"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const PAGE = 1000;\n\n// ⚠️ eplus بيرجّع HTTP 200 حتى وهو فاشل، بغلاف\n//    {\"Message\":\"Fail\",\"Error\":\"...\",\"Data\":[]}. من غير الفحص ده الفشل\n//    بيبان «يوم من غير حركة» — نجاح كاذب.\nconst o = $('عدّ').first().json;\nif (o.Error || String(o.Message).toLowerCase() === 'fail') {\n  throw new Error('eplus رفض نداء العدّ: ' + (o.Error || o.Message));\n}\n\nconst total = Number(o.AllRecords || 0);\nif (!total) throw new Error('AllRecords رجع فاضي — مافيش عدد نبني عليه');\nif (total > 500000) throw new Error('AllRecords رقم غير معقول: ' + total);\n\n// آخر صفحة حجمها = الباقي بالظبط. لو طلبنا 1000 والباقي 641 الـAPI\n// بترمي «Offset and length were out of bounds».\nconst pages = [];\nfor (let off = 0; off < total; off += PAGE) {\n  pages.push({ json: {\n    no:    Math.floor(off / PAGE) + 1,\n    size:  Math.min(PAGE, total - off),\n    total: total,\n  }});\n}\nreturn pages;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -960,
+        300
+      ],
+      "name": "صفحات"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "http://eplus.ebrahimhamdy.com/api/Item/SearchItem",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ page_no: $json.no, page_size: $json.size }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -740,
+        300
+      ],
+      "name": "جلب",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "uJYS75ZTBXnlYIqg",
+          "name": "eplus"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// نداء واحد بيرجّع الأربع فروع. خريطة المخزن ← الفرع، نفس أسماء\n// branches.aliases في القاعدة (والدالة بتفلتر بيها كمان كطبقة تانية).\nconst BR = {\n  'الصيدلية':        'mamora',\n  'ابراهيم حمدي 2':  'san',\n  'ابراهيم حمدي 3':  'bishr',\n  'السيوف':          'seyouf',\n};\n\nconst pages = $('جلب').all().map(i => i.json);\nlet rows = [];\nfor (const p of pages) {\n  if (p.Error || String(p.Message).toLowerCase() === 'fail') {\n    throw new Error('eplus رفض صفحة: ' + (p.Error || p.Message));\n  }\n  rows = rows.concat(p.Data || []);\n}\n\n// حارس الاكتمال: لو صفحة رجعت ناقصة بالساكت، نوقف قبل ما نكتب.\n// (الكتابة upsert فمفيش خطر حذف، بس الفشل الواضح أحسن من الناقص الصامت.)\nconst expected = Number($('صفحات').first().json.total || 0);\nif (expected && rows.length < expected * 0.95) {\n  throw new Error('جلب ناقص: ' + rows.length + ' من ' + expected);\n}\n\nconst byBranch = {};\nfor (const r of rows) {\n  const br = BR[r && r.sto_name];\n  if (br && r.itm_code !== undefined && r.itm_code !== null) {\n    (byBranch[br] = byBranch[br] || []).push(r);\n  }\n}\n\nconst out = [];\nfor (const br of Object.keys(byBranch)) {\n  const list = byBranch[br];\n  for (let i = 0; i < list.length; i += 2000) {\n    out.push({ json: { p_branch: br, p_rows: list.slice(i, i + 2000) } });\n  }\n}\nif (out.length === 0) throw new Error('مفيش ولا صنف لأي فرع — راجع الجلب');\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -520,
+        300
+      ],
+      "name": "تقسيم"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://rxtjoqulmgkkcohmgzgi.supabase.co/rest/v1/rpc/upsert_branch_stock",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -300,
+        300
+      ],
+      "name": "كتابة",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "كل ساعة": {
+      "main": [
+        [
+          {
+            "node": "عدّ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "عدّ": {
+      "main": [
+        [
+          {
+            "node": "صفحات",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "صفحات": {
+      "main": [
+        [
+          {
+            "node": "جلب",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "جلب": {
+      "main": [
+        [
+          {
+            "node": "تقسيم",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تقسيم": {
+      "main": [
+        [
+          {
+            "node": "كتابة",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
