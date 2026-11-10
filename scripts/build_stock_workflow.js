@@ -63,6 +63,12 @@ return pages;
 
 /* ── كود عقدة «تقسيم» ─────────────────────────────────────────────── */
 const codeSplit = `
+// الفروع المفتوحة للكتابة. بنبدأ بالمعمورة لوحدها والتلاتة التانيين
+// على وركفلوهاتهم القديمة. بعد التحقق نوسّع السطر ده — **من غير أي
+// وركفلو جديد** — ونقفل القدام:
+//   const BRANCHES_ON = ['mamora','san','bishr','seyouf'];
+const BRANCHES_ON = ['mamora'];
+
 // نداء واحد بيرجّع الأربع فروع. خريطة المخزن ← الفرع، نفس أسماء
 // branches.aliases في القاعدة (والدالة بتفلتر بيها كمان كطبقة تانية).
 const BR = {
@@ -91,7 +97,8 @@ if (expected && rows.length < expected * 0.95) {
 const byBranch = {};
 for (const r of rows) {
   const br = BR[r && r.sto_name];
-  if (br && r.itm_code !== undefined && r.itm_code !== null) {
+  if (br && BRANCHES_ON.indexOf(br) >= 0
+      && r.itm_code !== undefined && r.itm_code !== null) {
     (byBranch[br] = byBranch[br] || []).push(r);
   }
 }
@@ -103,7 +110,7 @@ for (const br of Object.keys(byBranch)) {
     out.push({ json: { p_branch: br, p_rows: list.slice(i, i + ${CHUNK}) } });
   }
 }
-if (out.length === 0) throw new Error('مفيش ولا صنف لأي فرع — راجع الجلب');
+if (out.length === 0) throw new Error('مفيش ولا صنف للفروع المفتوحة — راجع الجلب');
 return out;
 `.trim();
 
