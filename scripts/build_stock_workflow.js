@@ -27,7 +27,9 @@ const fs = require('fs');
 const path = require('path');
 
 const SB_URL = 'https://rxtjoqulmgkkcohmgzgi.supabase.co';
-const EPLUS  = 'http://eplus.ebrahimhamdy.com/api/Item/SearchItem';
+/* https مباشرة: كلاودفلير بيرد على http بتحويلة 301، يعني كل نداء
+   بيتعمل مرتين — اتصال ياخد التحويلة واتصال ينفّذ. */
+const EPLUS  = 'https://eplus.ebrahimhamdy.com/api/Item/SearchItem';
 const CRED   = { id: 'uJYS75ZTBXnlYIqg', name: 'eplus' };
 const PAGE   = 10000;  // 7 صفحات. اتجرّب 3 مرات متتابعة ونجح 3/3
 const CHUNK  = 2000;   // أقصى صفوف في نداء كتابة واحد
@@ -127,7 +129,7 @@ return out;
 `.trim();
 
 /* ── العقد ────────────────────────────────────────────────────────── */
-const httpCommon = { retryOnFail: true, maxTries: 5, waitBetweenTries: 10000 };
+const httpCommon = { retryOnFail: true, maxTries: 5, waitBetweenTries: 30000 };
 
 const eplusNode = (name, jsonBody, pos, extraOptions) => ({
   parameters: {
@@ -165,7 +167,7 @@ const nodes = [
      و10000 نجح 3/3. فالحجم الكبير أحسن — 7 نداءات بدل 279، وكل
      واحد بـ3 ثواني راحة = الجولة ~20 ثانية والسيرفر مرتاح باقي الساعة. */
   eplusNode('جلب', '={{ JSON.stringify({ page_no: $json.no, page_size: $json.size }) }}', [-740, 300],
-            { batching: { batch: { batchSize: 1, batchInterval: 3000 } } }),
+            { batching: { batch: { batchSize: 1, batchInterval: 15000 } } }),
   {
     parameters: { jsCode: codeSplit },
     type: 'n8n-nodes-base.code', typeVersion: 2,
