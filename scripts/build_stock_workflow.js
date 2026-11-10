@@ -29,7 +29,7 @@ const path = require('path');
 const SB_URL = 'https://rxtjoqulmgkkcohmgzgi.supabase.co';
 const EPLUS  = 'http://eplus.ebrahimhamdy.com/api/Item/SearchItem';
 const CRED   = { id: 'uJYS75ZTBXnlYIqg', name: 'eplus' };
-const PAGE   = 1000;   // حجم الصفحة
+const PAGE   = 250;    // حجم الصفحة — صغّرناه بعد ما 1000 وقع متقطّع
 const CHUNK  = 2000;   // أقصى صفوف في نداء كتابة واحد
 
 /* ── كود عقدة «صفحات» ─────────────────────────────────────────────── */
@@ -115,7 +115,7 @@ return out;
 `.trim();
 
 /* ── العقد ────────────────────────────────────────────────────────── */
-const httpCommon = { retryOnFail: true, maxTries: 3, waitBetweenTries: 5000 };
+const httpCommon = { retryOnFail: true, maxTries: 5, waitBetweenTries: 10000 };
 
 const eplusNode = (name, jsonBody, pos, extraOptions) => ({
   parameters: {
@@ -151,7 +151,7 @@ const nodes = [
      على الجولة، مقابل إننا مانضغطش على السيرفر وقت الشغل. ولو حصل خلل،
      5 نداءات في الهوا أسهل في الإيقاف من 70. */
   eplusNode('جلب', '={{ JSON.stringify({ page_no: $json.no, page_size: $json.size }) }}', [-740, 300],
-            { batching: { batch: { batchSize: 5, batchInterval: 1000 } } }),
+            { batching: { batch: { batchSize: 1, batchInterval: 500 } } }),
   {
     parameters: { jsCode: codeSplit },
     type: 'n8n-nodes-base.code', typeVersion: 2,
