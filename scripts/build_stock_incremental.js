@@ -59,7 +59,13 @@ const CRED   = { id: 'uJYS75ZTBXnlYIqg', name: 'eplus' };
    وسّعه بعد التحقق:  ['mamora','san','bishr','seyouf']  */
 const BRANCHES = ['mamora'];
 
-const OVERLAP  = 10;    // دقايق تغطية راجعة — الجولة بتاخد وقت بين الجلب والكتابة
+/* إيقاع الجولة. التغطية الراجعة لازم تفضل **أكبر من زمن الجولة نفسها**:
+   الختم بيتسجّل وقت الكتابة، والسؤال حصل قبله بثواني/دقايق، فاللي
+   اتغيّر في النص ما كانش في قايمة الأكواد. وفي نفس الوقت تغطية أوسع
+   من اللازم = إعادة جلب نفس الأكواد كل جولة (مش ضار — الكتابة
+   idempotent — بس نداءات على الفاضي). فبنربطها بالإيقاع. */
+const EVERY    = 5;     // دقايق بين الجولات
+const OVERLAP  = EVERY; // تغطية راجعة = الإيقاع (≈7 أضعاف زمن الجولة)
 const MAXHOURS = 6;     // سقف النافذة؛ فوقه capped واللقطة الليلية هي الحل
 const MINLEN   = 4;     // أقصر كود نقبل نبحث بيه
 const MAXCODES = 1500;  // حارس: فوق كده الجولة هتتعدّى على اللي بعدها
@@ -217,9 +223,9 @@ const codeNode = (name, jsCode, pos) => ({
 
 const nodes = [
   {
-    parameters: { rule: { interval: [{ field: 'hours', hoursInterval: 1 }] } },
+    parameters: { rule: { interval: [{ field: 'minutes', minutesInterval: EVERY }] } },
     type: 'n8n-nodes-base.scheduleTrigger', typeVersion: 1.3,
-    position: [-1620, 300], name: 'كل ساعة',
+    position: [-1620, 300], name: 'كل شوية',
   },
   /* النافذة من آخر كتابة ناجحة في جداول الفروع المفتوحة — مش من الساعة.
      بترجّع التاريخ جاهز بتوقيت القاهرة naive زي ما eplus عايزه، فمفيش
@@ -241,7 +247,7 @@ const nodes = [
   sbNode('كتابة', 'upsert_branch_stock', '={{ JSON.stringify($json) }}', [-80, 300]),
 ];
 
-const order = ['كل ساعة', 'نافذة', 'تحقق', 'تغيّرات', 'أكواد', 'رصيد', 'تقسيم', 'كتابة'];
+const order = ['كل شوية', 'نافذة', 'تحقق', 'تغيّرات', 'أكواد', 'رصيد', 'تقسيم', 'كتابة'];
 const connections = {};
 for (let i = 0; i < order.length - 1; i++) {
   connections[order[i]] = { main: [[{ node: order[i + 1], type: 'main', index: 0 }]] };
