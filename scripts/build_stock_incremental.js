@@ -95,15 +95,35 @@ if (w.cold)   notes.push('فرع من غير أي ختم كتابة — بداي
 if (notes.length) console.log(notes.join(' · '));
 return [{ json: { since: w.since_cairo, gap_minutes: w.gap_minutes,
                   capped: !!w.capped, cold: !!w.cold,
+                  // أسماء الأكواد اللي بتتجاب بالاسم بدل الكود
+                  heavy: w.heavy || {},
                   oldest: w.oldest || null, notes: notes } }];
 `.trim();
 
 /* ── كود عقدة «أكواد» ─────────────────────────────────────────────── */
 const codeCodes = `
 const MAXCODES = ${MAXCODES};
-// بحث الرقم الواحد بيرجّع ~10,800 صنف. أي كود تاني (حتى حرف واحد)
-// بيرجّع عشرات. اللقطة الليلية بتغطّي العشرة دول.
-const isHeavy = c => /^[0-9]$/.test(c);
+
+/* ── اختيار طريقة البحث: الأطول يكسب ──────────────────────────────
+   البحث في eplus **جزئي** في الحالتين، فتكلفته = كام صنف في
+   الكتالوج فيه النص ده. يعني النص القصير غالي والطويل رخيص، سواء
+   كان كود أو اسم. القياس على 27,821 صنف (2026-11-10):
+
+     كود '6'   → 15,668 صنف   |   اسمه 'ريد اقراص 60 قرص'  →  1
+     كود '7068'→     12 صنف   |   اسمه 'ي'                 → 24,123
+
+   والعيبين **متكاملين**: كل صنف اسمه غالي كوده رخيص والعكس. فمفيش
+   داعي لقايمة استثناءات ولا سؤال للقاعدة — نبص على الطول ونختار.
+   على الـ588 صنف الأصعب (كل اللي اسمه قصير أو كوده قصير): متوسط
+   النتايج 2، وأسوأ نداء 166، وولا واحد فوق 300.
+   التعادل بيروح للكود (قيس: '250مل' بالاسم 366 وبالكود 1).
+
+   والاسم جاي من رد «تغيّرات» نفسه — يعني اسم eplus الحالي، مش نسخة
+   عندنا ممكن تكون قديمة. ولو الرد ماجابش اسم، بنرجع لخريطة
+   stock_sync_window، وآخر حل الكود. */
+const HEAVY  = $('تحقق').first().json.heavy || {};
+const pickName = (code, name) =>
+  (name && name.trim().length > code.length) ? name.trim() : null;
 
 // مخازن فروعنا — الرد بيرجّع مخازن تانية (طوسون، سندره، العجز) مش بتاعتنا
 const STORES = ['الصيدلية', 'ابراهيم حمدي 2', 'ابراهيم حمدي 3', 'السيوف'];
@@ -116,15 +136,21 @@ const rows = o.Data || [];
 
 // ⚠️ الكميات في الرد ده **ناقصة** (بتاعة الدفعات اللي اتحركت بس).
 //    إحنا عايزين الأكواد لا غير.
-const codes = new Set();
-let heavy = [], other = 0;
+const codes = new Map();   // كود → اسم نبحث بيه (أو null = نبحث بالكود)
+let stuck = [], other = 0;
 for (const r of rows) {
   if (!r || r.itm_code === undefined || r.itm_code === null) continue;
   if (STORES.indexOf(r.sto_name) < 0) { other++; continue; }
   const c = String(r.itm_code).trim();
   if (!c) continue;
-  if (isHeavy(c)) { heavy.push(c); continue; }
-  codes.add(c);
+  if (codes.has(c)) continue;
+
+  const name = pickName(c, r.itm_name_ar) || pickName(c, HEAVY[c]);
+  /* كود من خانة واحدة بلا اسم أطول منه = مفيش نص انتقائي نبحث بيه.
+     البحث بالكود هيجيب نص الكتالوج، فبيتأجّل للّقطة الكاملة —
+     وبيتكتب في السجل مش بيختفي في السكوت. */
+  if (!name && c.length <= 1) { stuck.push(c); continue; }
+  codes.set(c, name);
 }
 
 if (codes.size > MAXCODES) {
@@ -132,10 +158,13 @@ if (codes.size > MAXCODES) {
     ' — الجولة دي هتتعدّى على اللي بعدها، شغّل اللقطة الكاملة');
 }
 // مفيش تغيير أصلًا = جولة شرعية (ساعة هادية). مش خطأ.
+const byName = [...codes].filter(e => e[1]).length;
 console.log('نافذة ' + $('تحقق').first().json.gap_minutes + 'د · ' + rows.length +
-  ' صف · ' + codes.size + ' كود · مخازن تانية ' + other +
-  (heavy.length ? ' · اتأجّل للّقطة: ' + heavy.join(',') : ''));
-return [...codes].map(c => ({ json: { code: c, total: codes.size } }));
+  ' صف · ' + codes.size + ' كود (' + byName + ' بالاسم · ' +
+  (codes.size - byName) + ' بالكود) · مخازن تانية ' + other +
+  (stuck.length ? ' · اتأجّل للّقطة: ' + stuck.join(',') : ''));
+return [...codes].map(([code, name]) =>
+  ({ json: { code: code, name: name, total: codes.size } }));
 `.trim();
 
 /* ── كود عقدة «تقسيم» ─────────────────────────────────────────────── */
@@ -154,6 +183,7 @@ const BR = {
 const asked = new Set($('أكواد').all().map(i => String(i.json.code)));
 
 const map = new Map();   // مفتاح فرع|كود
+const got = new Set();   // كود رجع فعلًا — حتى لو فرعه مقفول
 let seen = 0, stray = 0;
 for (const it of $('رصيد').all()) {
   const o = it.json;
@@ -165,6 +195,7 @@ for (const it of $('رصيد').all()) {
     const code = String((r && r.itm_code) ?? '');
     // ⚠️ البحث جزئي: "7220" بيرجّع 57220 و72200 كمان. بناخد المطابق بس.
     if (!asked.has(code)) { stray++; continue; }
+    got.add(code);
     const br = BR[r.sto_name];
     if (!br || BRANCHES_ON.indexOf(br) < 0) continue;
     map.set(br + '|' + code, r);
@@ -175,6 +206,13 @@ if (map.size === 0) {
   throw new Error('ولا صف مطابق من ' + seen + ' صف رجعوا — راجع الفلترة');
 }
 
+/* كود طلبناه و**ولا صف رجع ليه خالص**. السبب الوارد: اسمه اتغيّر في
+   eplus بعد آخر مزامنة فالبحث بالاسم مالقاهوش. بيتكتب في السجل عشان
+   ما يختفيش في السكوت.
+   ⚠️ الكود اللي رجع بس فرعه مقفول **مش** ضايع — عشان كده "got"
+   بتتملى جوّه اللفة قبل فلتر الفرع، مش من "map". */
+const lost = [...asked].filter(c => !got.has(c));
+
 const byBranch = {};
 for (const [k, r] of map) {
   const br = k.split('|')[0];
@@ -182,7 +220,8 @@ for (const [k, r] of map) {
 }
 
 console.log('رجع ' + seen + ' صف · مطابق ' + map.size + ' · مرفوض ' + stray +
-  ' · ' + Object.keys(byBranch).map(b => b + '=' + byBranch[b].length).join(' '));
+  ' · ' + Object.keys(byBranch).map(b => b + '=' + byBranch[b].length).join(' ') +
+  (lost.length ? ' · مارجعش: ' + lost.slice(0, 20).join(',') : ''));
 
 const out = [];
 for (const br of Object.keys(byBranch)) {
@@ -254,7 +293,12 @@ const nodes = [
   codeNode('أكواد', codeCodes, [-740, 300]),
   /* نداء خفيف لكل كود، واحد في المرة بثانية راحة. ده عكس صفحات اللقطة
      الكاملة اللي بتخلّي الـAPI تمسح الكتالوج كله في كل نداء. */
-  eplusNode('رصيد', '={{ JSON.stringify({ itm_code_search: $json.code }) }}',
+  /* الكود الرقمي الواحد بحثه بيجيب نص الكتالوج، فبيتجاب بالاسم —
+     `itm_name_ar_search` بالاسم الكامل بيرجّع 1–7 نتايج. و«تقسيم»
+     بيفلتر على الكود بالحرف في الحالتين فالنتيجة واحدة. */
+  eplusNode('رصيد',
+    '={{ JSON.stringify($json.name ? { itm_name_ar_search: $json.name }'
+    + ' : { itm_code_search: $json.code }) }}',
     [-520, 300], { batching: { batch: { batchSize: 1, batchInterval: 1000 } } }),
   codeNode('تقسيم', codeSplit, [-300, 300]),
   sbNode('كتابة', 'upsert_branch_stock', '={{ JSON.stringify($json) }}', [-80, 300]),
