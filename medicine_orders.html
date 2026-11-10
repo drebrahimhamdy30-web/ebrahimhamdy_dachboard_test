@@ -824,12 +824,12 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
                      r => ({ target_branch:r.target_branch, source_branch:r.source_branch, active:!!r.active, updated_at:new Date().toISOString() }));
         await nbSync('new_branch_rate_tiers', NB_TIERS, NB_TIERS0,
                      r => ({ rate_min:Number(r.rate_min), percent:Number(r.percent) }));
-        msg.textContent = 'جارٍ إعادة الحساب...';
-        await fetch(REST + 'rpc/refresh_consumption_rates', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' });
+        msg.textContent = 'جارٍ الحفظ...';
+        await requestRecalc();
         await fetch(REST + 'rpc/refresh_purchase_orders',   { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{"p_force":true}' });
         await loadNewBranchRate();
         ordLoaded = false;   // الطلبيات اتغيّرت — تتحمّل تاني أول ما تفتح التبويب
-        msg.innerHTML = '<span class="msg-ok">تم الحفظ وإعادة حساب المعدل والطلبيات ✓</span>';
+        msg.innerHTML = '<span class="msg-ok">تم الحفظ ✓ — سيُعاد حساب المعدل خلال دقائق.</span>';
         setTimeout(() => { msg.innerHTML = ''; }, 6000);
       } catch (e) {
         msg.innerHTML = '<span class="msg-err">تعذّر الحفظ: ' + esc(e.message || e) + '</span>';
@@ -2540,14 +2540,56 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       } finally { crBusy = false; }
     }
 
+    /* إعادة حساب المعدل بقت في الخلفية. get_consumption_rates() بتاخد
+       ~42 ثانية والسقف لدور authenticated 8 ثواني، فالنداء المباشر كان
+       بيرجّع 57014 (statement timeout) ويلغي العملية كلها — بما فيها
+       رفع الشهر نفسه، لأن النداء ترانزاكشن واحدة. دلوقتي بنسجّل طلب
+       ومهمة مجدولة كل دقيقتين بتنفّذه. راجع docs/migrate_200. */
+    let crPoll = null;
+
+    async function crState() {
+      try {
+        const r = await fetch(REST + 'consumption_refresh_state?select=dirty,last_done_at,last_ms&limit=1', { headers: H });
+        const j = await r.json();
+        return (j && j[0]) || null;
+      } catch (e) { return null; }
+    }
+
+    /* بنتابع كل 20 ثانية لحد ما الطلب يتنفّذ، وساعتها نحدّث الجدول.
+       مؤقّت واحد بس مهما اتنادت الدالة. */
+    function crWatch() {
+      if (crPoll) return;
+      crPoll = setInterval(async () => {
+        const st = await crState();
+        if (st && !st.dirty) {
+          clearInterval(crPoll); crPoll = null;
+          await loadMeta(); crPage = 1; await loadPage();
+        }
+      }, 20000);
+    }
+
+    async function requestRecalc() {
+      const r = await fetch(REST + 'rpc/request_consumption_refresh',
+        { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' });
+      if (!r.ok) throw new Error(await r.text());
+      await loadMeta(); crWatch();
+    }
+
     async function loadMeta() {
       try {
         const r = await fetch(REST + 'consumption_flat?select=refreshed_at&order=refreshed_at.desc&limit=1', { headers: H });
         const j = await r.json();
+        let txt = '';
         if (j && j[0]) {
           const d = new Date(j[0].refreshed_at).toLocaleString('ar-EG', { timeZone:'Africa/Cairo', dateStyle:'medium', timeStyle:'short' });
-          document.getElementById('cr-meta').textContent = 'آخر إعادة حساب: ' + d + ' — المعدل = مبيعات الشهور ÷ الشهور النشطة × الاستثنائى × معامل التغطية.';
+          txt = 'آخر إعادة حساب: ' + d + ' — المعدل = مبيعات الشهور ÷ الشهور النشطة × الاستثنائى × معامل التغطية.';
         }
+        const st = await crState();
+        if (st && st.dirty) {
+          txt += (txt ? '  ' : '') + '⏳ تم طلب إعادة الحساب — يجري تنفيذها خلال دقائق.';
+          crWatch();
+        }
+        if (txt) document.getElementById('cr-meta').textContent = txt;
       } catch (e) {}
     }
 
@@ -2642,10 +2684,8 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     // ===== إعادة حساب =====
     async function refreshCalc() {
       try {
-        const r = await fetch(REST + 'rpc/refresh_consumption_rates', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' });
-        if (!r.ok) throw new Error(await r.text());
-        crPage = 1; await loadMeta(); await loadPage();
-      } catch (e) { alert('تعذّرت إعادة الحساب: ' + e.message); }
+        await requestRecalc();
+      } catch (e) { alert('تعذّر طلب إعادة الحساب: ' + e.message); }
     }
 
     // ===== حذف شهر =====
@@ -2793,7 +2833,7 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           body: JSON.stringify({ p_month: monthStr, p_rows: recs }) });
         if(!r.ok) throw new Error(await r.text());
         const out=await r.json();
-        msg.innerHTML='<span class="msg-ok">تم ✓ — شهر '+monthStr+': '+(out.inserted||0).toLocaleString('ar-EG')+' صنف، وأُعيد حساب المعدل.</span>';
+        msg.innerHTML='<span class="msg-ok">تم ✓ — شهر '+monthStr+': '+(out.inserted||0).toLocaleString('ar-EG')+' صنف. سيُعاد حساب المعدل خلال دقائق.</span>';
         await loadMonths(); await loadMeta(); crPage=1; await loadPage();
       }catch(e){ msg.innerHTML='<span class="msg-err">فشل الرفع: '+e.message+'</span>'; }
       finally{ btn.disabled=false; }
@@ -2880,8 +2920,10 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     }
     async function etRecompute(t) {
       if (t && ET[t] && ET[t].recompute === false) return;   // الأرشيف لا يؤثر على حساب المعدل
-      try { await fetch(REST + 'rpc/refresh_consumption_rates', { method:'POST', headers:{ ...H, 'Content-Type':'application/json' }, body:'{}' }); } catch (e) {}
-      loadMeta();
+      /* كان بينادي refresh_consumption_rates مباشرة والخطأ متبلوع، يعني
+         تعديل الشرائح أو الاستثنائي كان بيفشل بـ57014 بصمت والمعدل
+         مايتغيّرش لحد المهمة اليومية. بقى طلب في الخلفية. */
+      try { await requestRecalc(); } catch (e) { loadMeta(); }
     }
     async function etSave(t, idx) {
       const cfg = ET[t]; const row = ET_DATA[t][idx]; const o = etCollect(t, idx);
