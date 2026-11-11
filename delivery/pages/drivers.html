@@ -174,6 +174,13 @@ body{padding:1.25rem;overflow-y:auto;height:100vh;background:var(--bg)}
         </div>
       </div>
 
+      <div class="section-label-sm" style="margin-top:.75rem">ربط eplus (مندوب التوصيل)</div>
+      <div class="form-group">
+        <label>كود الموظف في eplus</label>
+        <input type="text" class="form-control" id="d-eplus" placeholder="كود الطيار في نظام eplus (أرقام فقط)" dir="ltr" inputmode="numeric">
+        <div style="font-size:.66rem;color:var(--text-muted);margin-top:.25rem">الكود ده بيربط الطيار بحسابه في eplus عشان الطلب يتسجّل باسمه. سيبه فاضي لو الطيار لسه مالوش كود.</div>
+      </div>
+
       <div class="section-label-sm" style="margin-top:.75rem">بيانات الحساب</div>
       <div class="form-grid-2">
         <div class="form-group" id="usernameGroup">
@@ -358,12 +365,14 @@ function renderStats(){
   const online=allDrivers.filter(d=>d.is_online&&d.is_active).length;
   const offline=allDrivers.filter(d=>!d.is_online&&d.is_active).length;
   const inactive=allDrivers.filter(d=>!d.is_active).length;
+  const noEplus=allDrivers.filter(d=>d.is_active&&d.eplus_emp_id==null).length;
   document.getElementById('driversCount').textContent=`${total} طيار`;
   document.getElementById('statsBar').innerHTML=`
     <div class="stat-pill"><span class="stat-pill-val">${total}</span><span class="stat-pill-lbl">إجمالي</span></div>
     <div class="stat-pill"><span class="stat-pill-val" style="color:var(--green)">${online}</span><span class="stat-pill-lbl">🟢 أونلاين</span></div>
     <div class="stat-pill"><span class="stat-pill-val" style="color:#6b7280">${offline}</span><span class="stat-pill-lbl">⚫ أوفلاين</span></div>
-    <div class="stat-pill"><span class="stat-pill-val" style="color:var(--red)">${inactive}</span><span class="stat-pill-lbl">معطل</span></div>`;
+    <div class="stat-pill"><span class="stat-pill-val" style="color:var(--red)">${inactive}</span><span class="stat-pill-lbl">معطل</span></div>
+    <div class="stat-pill"><span class="stat-pill-val" style="color:#b45309">${noEplus}</span><span class="stat-pill-lbl">بدون كود eplus</span></div>`;
 }
 
 function setFilter(f,el){
@@ -377,7 +386,8 @@ function renderDrivers(){
   const search=document.getElementById('searchInput').value.toLowerCase();
   let drivers=allDrivers.filter(d=>{
     if(search&&!(d.full_name||'').toLowerCase().includes(search)&&
-       !(d.phone||'').includes(search)&&!(d.vehicle_plate||'').toLowerCase().includes(search))return false;
+       !(d.phone||'').includes(search)&&!(d.vehicle_plate||'').toLowerCase().includes(search)&&
+       !(d.eplus_emp_id!=null&&String(d.eplus_emp_id).includes(search)))return false;
     if(currentFilter==='online') return d.is_online&&d.is_active;
     if(currentFilter==='offline') return !d.is_online&&d.is_active;
     if(currentFilter==='inactive') return !d.is_active;
@@ -416,6 +426,7 @@ function renderDrivers(){
         </div>
         <div class="dc-info">
           <div class="dc-info-row"><span class="dc-info-label">الفرع</span><span class="dc-info-value">${branchName}</span></div>
+          <div class="dc-info-row"><span class="dc-info-label">كود eplus</span>${d.eplus_emp_id!=null?`<span class="dc-info-value" style="direction:ltr">${d.eplus_emp_id}</span>`:`<span class="dc-info-value" style="color:#b91c1c">بدون كود</span>`}</div>
           ${d.vehicle_type?`<div class="dc-info-row"><span class="dc-info-label">المركبة</span><span class="dc-info-value">${d.vehicle_type}${d.vehicle_plate?' · '+d.vehicle_plate:''}</span></div>`:''}
           ${licenses.length?`<div class="dc-info-row"><span class="dc-info-label">الرخص</span><span class="dc-info-value" style="font-size:.65rem">${licenses.join(' · ')}</span></div>`:''}
           ${covTypes.length?`<div class="dc-info-row"><span class="dc-info-label">يغطي</span><div class="zones-wrap">${regionTags}</div></div>`:''}
@@ -434,7 +445,7 @@ function renderDrivers(){
 function openAddModal(){
   document.getElementById('modalTitle').textContent='إضافة طيار جديد';
   document.getElementById('d-id').value='';
-  ['d-name','d-phone','d-national','d-username','d-password','d-vplate','d-email'].forEach(id=>document.getElementById(id).value='');
+  ['d-name','d-phone','d-national','d-username','d-password','d-vplate','d-email','d-eplus'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('d-branch').value='';
   document.getElementById('d-vtype').value='';
   document.getElementById('d-active').checked=true;
@@ -464,6 +475,7 @@ async function openEdit(id){
   document.getElementById('d-username').value='';
   document.getElementById('d-password').value='';
   document.getElementById('d-email').value=d.account_email||'';
+  document.getElementById('d-eplus').value=(d.eplus_emp_id!=null?d.eplus_emp_id:'');
   // الطيار اللي مالوش حساب (branch_user_id فاضي) → أظهر الحقول عشان ننشئ له حساب
   const hasAccount = d.branch_user_id != null;
   document.getElementById('usernameGroup').style.display = hasAccount ? 'none' : '';
@@ -494,6 +506,11 @@ async function saveDriver(){
 
   const coveredTypes=['inside','outside','permit','hard'].filter(t=>document.getElementById(`cov-${t}`).checked);
 
+  // كود eplus: أرقام فقط أو فاضي (null)
+  const eplusRaw=(document.getElementById('d-eplus').value||'').trim();
+  if(eplusRaw && !/^\d+$/.test(eplusRaw)){alert('كود eplus لازم يكون أرقام فقط');return;}
+  const eplusEmpId = eplusRaw ? Number(eplusRaw) : null;
+
   showLoading(true);
   try{
     const { data, error } = await db.rpc('manager_upsert_driver', {
@@ -511,7 +528,8 @@ async function saveDriver(){
       p_has_vehicle_license: document.getElementById('d-lic-vehicle').checked,
       p_has_drive_license: document.getElementById('d-lic-drive').checked,
       p_covered_types: coveredTypes,
-      p_email: document.getElementById('d-email').value.trim() || null
+      p_email: document.getElementById('d-email').value.trim() || null,
+      p_eplus_emp_id: eplusEmpId
     });
 
     if (error || (data && data.success === false)) {
