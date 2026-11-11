@@ -937,14 +937,15 @@ function showShiftLog(){
   document.getElementById('content').innerHTML=`
     <div class="toolbar">
       <span class="flabel">النقطة</span><select id="slPt" onchange="slPage=1;loadShiftLog()">${pointOpts}</select>
+      <span class="flabel">الموظف</span><select id="slEmp" onchange="slPage=1;loadShiftLog()"><option value="">كل الموظفين</option></select>
       <span class="flabel">من</span><input type="date" id="slFrom" value="${fromS}" onchange="slPage=1;loadShiftLog()">
       <span class="flabel">إلى</span><input type="date" id="slTo" value="${toS}" onchange="slPage=1;loadShiftLog()">
       <span class="shown" id="slShown"></span>
       <span class="shown" id="slNet" style="background:transparent"></span>
     </div>
     <div class="tablecard"><table><thead><tr>
-      <th>التاريخ</th><th>النقطة</th><th>الفترة</th><th>الرصيد الإفتتاحى</th><th>القيمة (نظام)</th><th>ق.الفترة</th><th>ق.الفترة الفعلية</th><th>زيادة/عجز</th><th>التحويل</th><th></th>
-    </tr></thead><tbody id="slBody"><tr><td colspan="10" class="state">جارِ التحميل…</td></tr></tbody></table></div>
+      <th>التاريخ</th><th>النقطة</th><th class="r">الموظف</th><th>الفترة</th><th>الرصيد الإفتتاحى</th><th>القيمة (نظام)</th><th>ق.الفترة</th><th>ق.الفترة الفعلية</th><th>زيادة/عجز</th><th>التحويل</th><th></th>
+    </tr></thead><tbody id="slBody"><tr><td colspan="11" class="state">جارِ التحميل…</td></tr></tbody></table></div>
     <div class="pager" id="slPager"></div>`;
   slPage=1; loadShiftLog();
 }
@@ -952,9 +953,18 @@ async function loadShiftLog(){
   VIEW='log';
   const pt=document.getElementById('slPt').value||null;
   const from=document.getElementById('slFrom').value||null, to=document.getElementById('slTo').value||null;
-  document.getElementById('slBody').innerHTML='<tr><td colspan="10" class="state">جارِ التحميل…</td></tr>';
-  const res=await rpc('get_shift_log',{p_branch:BRANCH, p_cashier: pt?+pt:null, p_from:from, p_to:to, p_limit:SL_PER, p_offset:(slPage-1)*SL_PER});
+  const emEl=document.getElementById('slEmp'), em=emEl?emEl.value:'';
+  document.getElementById('slBody').innerHTML='<tr><td colspan="11" class="state">جارِ التحميل…</td></tr>';
+  const res=await rpc('get_shift_log',{p_branch:BRANCH, p_cashier: pt?+pt:null, p_from:from, p_to:to, p_limit:SL_PER, p_offset:(slPage-1)*SL_PER, p_employee: em||null});
   SL=(res&&res.rows)||[];
+  /* قايمة الموظفين جاية من السيرفر على **كل** الفترة المفلترة — مش من
+     صفحة الـ30 اللي كانت هتخلّي نص الموظفين مش في القايمة. والسيرفر
+     بيبنيها قبل فلتر الموظف، فاختيار موظف مابيقصّش القايمة عليه. */
+  if(emEl){
+    const list=(res&&res.employees)||[];
+    emEl.innerHTML='<option value="">كل الموظفين</option>'
+      + list.map(n=>`<option value="${esc(n)}"${n===em?' selected':''}>${esc(n)}</option>`).join('');
+  }
   /* ⚠️ الصافي من السيرفر على **كل** الفترة المفلترة — مش جمع الصفحة
      المعروضة (٣٠ صف) اللي كان هيدّي رقم ناقص بلا ما حد ياخد باله. */
   SLSUM = { diff:Number((res&&res.total_diff)||0),
@@ -977,12 +987,13 @@ function renderShiftLog(total){
     const dc=Number(x.diff)>=0?'pos':'neg';
     return `<tr class="logrow" data-sc="${x.sc_id}" data-c="${x.cashier_id}">
       <td>${dmy(x.closed_at)}</td><td>${esc(x.point_name||'—')}</td>
+      <td class="r">${x.closed_by ? esc(x.closed_by) : '<span class="dash">—</span>'}</td>
       <td style="font-size:12px">${hm(x.shift_start)} ← ${hm(x.closed_at)}</td>
       <td class="num">${fmt(x.opening)}</td><td class="num">${fmt(x.system_cash)}</td>
       <td class="num">${fmt(x.period)}</td><td class="num">${fmt(x.actual_cash)}</td>
       <td class="num ${dc}" style="font-weight:800">${Number(x.diff)>0?'+':''}${fmt(x.diff)}</td>
       <td class="num">${fmt(x.transfer)}</td><td><button class="lnk">مراجعة ›</button></td></tr>`;
-  }).join('') : '<tr><td colspan="10" class="state">لا توجد شيفتات في المدى المختار.</td></tr>';
+  }).join('') : '<tr><td colspan="11" class="state">لا توجد شيفتات في المدى المختار.</td></tr>';
   tb.querySelectorAll('.logrow').forEach(r=>r.onclick=()=>openShiftDetail(+r.dataset.sc, +r.dataset.c));
   renderPager('slPager', Math.max(1,Math.ceil(total/SL_PER)), slPage, 'slGo');
 }
