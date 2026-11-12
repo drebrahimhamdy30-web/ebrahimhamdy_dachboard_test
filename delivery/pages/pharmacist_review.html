@@ -37,6 +37,11 @@ body{padding:1rem;overflow-y:auto;height:100vh;background:var(--bg)}
 .rc-body{padding:.75rem .9rem;display:flex;flex-direction:column;gap:.55rem}
 .rc-row{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;font-size:.82rem}
 .rc-addr{font-size:.85rem;font-weight:600;color:var(--text);background:var(--bg);border-radius:8px;padding:.4rem .6rem}
+.rc-meta{font-size:.78rem;color:var(--text-muted);font-weight:700}
+.rc-items{font-size:.78rem;line-height:1.9;background:var(--bg);border-radius:8px;padding:.4rem .55rem}
+.it-chip{display:inline-block;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.1rem .45rem;margin:.12rem .15rem;font-weight:600}
+.it-chip b{color:#0e7490}
+.it-load{color:#94a3b8;font-size:.76rem}
 .lk{display:inline-flex;align-items:center;gap:.25rem;border-radius:8px;padding:.32rem .6rem;font-weight:700;font-size:.76rem;text-decoration:none;border:1px solid}
 .lk-call{color:#15803d;background:#dcfce7;border-color:#bbf7d0}
 .lk-wa{color:#fff;background:#25D366;border-color:#25D366}
@@ -74,6 +79,7 @@ body{padding:1rem;overflow-y:auto;height:100vh;background:var(--bg)}
   <span class="lbl">الفرع:</span>
   <select class="sel" id="branchSel" onchange="onBranchChange()"><option value="">اختر الفرع...</option></select>
   <span id="shiftArea" style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap"></span>
+  <button id="manageBtn" onclick="openBtnsModal()" style="display:none;margin-inline-start:auto;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:9px;padding:0 .9rem;height:38px;font-family:'Cairo',sans-serif;font-weight:700;font-size:.78rem;cursor:pointer">⚙️ أزرار مخصّصة</button>
 </div>
 
 <div id="main" style="display:none">
@@ -133,6 +139,24 @@ body{padding:1rem;overflow-y:auto;height:100vh;background:var(--bg)}
   </div>
 </div>
 
+<!-- Modal: إدارة الأزرار المخصّصة -->
+<div class="modal-overlay" id="btnsModal">
+  <div class="modal modal-sm">
+    <div class="modal-header"><span class="modal-title">⚙️ أزرار مخصّصة</span><button class="modal-close" onclick="closeModal('btnsModal')">✕</button></div>
+    <div class="modal-body">
+      <div style="font-size:.78rem;color:var(--text-muted);margin-bottom:.6rem">أي زر هنا بيضيف ملاحظة جاهزة بنصّه على الطلب. «للطيار» تظهر عند الطيار، «داخلي» للصيدلية بس.</div>
+      <div id="btnsList" style="display:flex;flex-direction:column;gap:.4rem;margin-bottom:.8rem"></div>
+      <div style="border-top:1px solid var(--border);padding-top:.7rem">
+        <div class="form-group" style="margin-bottom:.5rem"><label>نص الزر الجديد</label><input class="form-control" id="nb-label" placeholder="مثلاً: اتصل قبل التوصيل" maxlength="40"></div>
+        <div class="form-group" style="margin-bottom:.6rem"><label>النوع</label>
+          <select class="form-control" id="nb-aud"><option value="driver">🚗 يظهر للطيار</option><option value="pharmacy">💊 داخلي للصيدلية</option></select>
+        </div>
+        <button class="btn btn-primary" style="width:100%" onclick="addCustomButton()">➕ إضافة الزر</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="loading-overlay" id="lo"><div class="spinner"></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -181,10 +205,18 @@ let currentUser=getCurrentUser();
 if(!currentUser) window.location.href='../auth.html';
 let branches=[], curBranchId=null, shift=null;
 let activeTab='pending', page=1, rows=[], tagsByOrder={}, searchQ='', fuRows=[];
-let _refreshTimer=null, _itemsCache={};
+let _refreshTimer=null, _itemsCache={}, _itemsInflight=new Set(), customButtons=[];
 
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function waNum(p){let d=String(p||'').replace(/\D/g,'');if(!d)return '';if(d.startsWith('0'))d='2'+d;else if(!d.startsWith('2')&&d.length===10)d='2'+d;return d;}
+function fmtDT(t){ return t? new Date(t).toLocaleString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',hour12:true}) : '—'; }
+function inlineItemsHtml(items){
+  if(!items) return '<span class="it-load">—</span>';
+  if(!items.length) return '<span class="it-load">لا توجد أصناف</span>';
+  return '🧾 '+items.map(it=>`<span class="it-chip">${esc(it.name)}${it.qty!=null?` <b>×${esc(it.qty)}</b>`:''}</span>`).join('');
+}
+// زر مخصّص (يضيف ملاحظة جاهزة بنصّه) — للطيار=driver_note، داخلي=pharmacy_note
+function cbtn(o,c){ const tag=c.audience==='driver'?'driver_note':'pharmacy_note'; return `<button class="qb" title="زر مخصّص" onclick="applyTag('${o.id}','${tag}',true,'${esc(c.label).replace(/'/g,"\\'")}')">${esc(c.label)}</button>`; }
 function load(s){document.getElementById('lo').classList.toggle('show',s);}
 function toast(msg){let t=document.getElementById('_t');if(!t){t=document.createElement('div');t.id='_t';t.style.cssText='position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:.6rem 1.25rem;border-radius:10px;font-size:.82rem;font-weight:700;z-index:9999;display:none;box-shadow:0 8px 30px rgba(0,0,0,.2)';document.body.appendChild(t);}t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',2500);}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
@@ -206,6 +238,8 @@ async function init(){
     }else{
       sel.innerHTML='<option value="">اختر الفرع...</option>'+branches.map(b=>`<option value="${b.id}">${esc(b.name)}</option>`).join('');
     }
+    await loadCustomButtons();
+    if(['admin','manager'].includes(currentUser.role)){ const mb=document.getElementById('manageBtn'); if(mb) mb.style.display=''; }
     restoreShift();
     if(curBranchId) renderShiftArea();
     if(shift){ document.getElementById('main').style.display='block'; document.getElementById('noShift').style.display='none'; await loadData(); }
@@ -352,6 +386,7 @@ function render(){
   const cont=document.getElementById('cards');
   if(!total){ cont.innerHTML=`<div class="empty">${activeTab==='followup'?'مفيش متابعات معلّقة':activeTab==='done'?'لسه مفيش طلبات اتراجعت':'مفيش طلبات جديدة للمراجعة — أي فاتورة تتطبع هتظهر هنا'}</div>`; document.getElementById('pager').innerHTML=''; return; }
   cont.innerHTML=slice.map(activeTab==='followup'?fuCardHtml:orderCardHtml).join('');
+  if(activeTab!=='followup') ensureInlineItems(slice);
   renderPager(total,pages);
   try{document.querySelector('.grid').scrollIntoView({block:'start'});}catch(e){}
 }
@@ -397,15 +432,17 @@ function orderCardHtml(o){
         <span class="lk lk-items" onclick="openItems('${esc(String(o.bill_no||''))}','${esc(String(o.branch_id||''))}','${o.id}','${esc(String(o.cust_code||''))}')">🧾 الأصناف</span>
       </div>
       <div class="rc-addr">📍 ${esc(o.customer_address||'—')}${o.cust_region?' · '+esc(o.cust_region):''}</div>
+      <div class="rc-meta">🕒 وقت الطلب: ${fmtDT(o.created_at)}</div>
+      <div class="rc-items" id="it-${o.id}">${_itemsCache[o.id]?inlineItemsHtml(_itemsCache[o.id]):'<span class="it-load">🧾 جارٍ تحميل الأصناف…</span>'}</div>
 
       <div class="grp grp-driver">
         <div class="grp-h">🚗 ملاحظات تظهر للطيار</div>
-        <div class="qbtns">${DRIVER_TAGS.map(qbtn).join('')}</div>
+        <div class="qbtns">${DRIVER_TAGS.map(qbtn).join('')}${customButtons.filter(c=>c.audience==='driver').map(c=>cbtn(o,c)).join('')}</div>
         ${drvTags.length?`<div class="chips">${drvTags.map(chip).join('')}</div>`:''}
       </div>
       <div class="grp grp-pharm">
         <div class="grp-h">💊 ملاحظات داخلية للصيدلية (لا تظهر للطيار)</div>
-        <div class="qbtns">${PHARM_TAGS.map(qbtn).join('')}</div>
+        <div class="qbtns">${PHARM_TAGS.map(qbtn).join('')}${customButtons.filter(c=>c.audience==='pharmacy').map(c=>cbtn(o,c)).join('')}</div>
         ${phTags.length?`<div class="chips">${phTags.map(chip).join('')}</div>`:''}
       </div>
     </div>
@@ -523,6 +560,29 @@ async function refreshOrderRow(oid){
 }
 
 // ===== الأصناف =====
+async function fetchItems(billNo,branchId){
+  const r=await fetch(SALES_ITEMS_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch_id:branchId||'',bill_no:String(billNo)})});
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  const data=await r.json();
+  const root=Array.isArray(data)?(data[0]||{}):(data||{});
+  const bills=(root&&root.Data)||[];
+  const bill=bills.find(b=>String(b.bill_no)===String(billNo))||bills[0]||{};
+  return ((bill&&bill.Items)||[]).map(it=>({name:(it.itm_name_ar||it.itm_name_en||'').toString().trim(),qty:it.itm_qty,unit:it.unit_name||'',price:it.unit_price}));
+}
+// الأصناف inline على كل كارت الصفحة الحالية (lazy + cache، بدون تكرار نداء)
+function ensureInlineItems(list){
+  (list||[]).forEach(o=>{
+    const el=document.getElementById('it-'+o.id); if(!el) return;
+    if(_itemsCache[o.id]){ el.innerHTML=inlineItemsHtml(_itemsCache[o.id]); return; }
+    if(_itemsInflight.has(o.id)) return;
+    if(!o.bill_no){ el.innerHTML='<span class="it-load">لا يوجد رقم فاتورة</span>'; return; }
+    _itemsInflight.add(o.id);
+    fetchItems(o.bill_no,o.branch_id)
+      .then(items=>{ _itemsCache[o.id]=items; const e2=document.getElementById('it-'+o.id); if(e2) e2.innerHTML=inlineItemsHtml(items); })
+      .catch(()=>{ const e2=document.getElementById('it-'+o.id); if(e2) e2.innerHTML='<span class="it-load">تعذّر تحميل الأصناف</span>'; })
+      .finally(()=>_itemsInflight.delete(o.id));
+  });
+}
 async function openItems(billNo,branchId,oid,cc){
   const body=document.getElementById('itemsBody');
   document.getElementById('itemsTitle').innerHTML='🧾 أصناف الفاتورة '+(billNo?('#'+esc(billNo)):'')+(cc?` · كود ${esc(cc)}`:'');
@@ -531,13 +591,7 @@ async function openItems(billNo,branchId,oid,cc){
   if(!billNo||billNo==='null'){ body.innerHTML='<div style="color:#b91c1c;text-align:center;padding:1rem">لا يوجد رقم فاتورة لهذا الطلب</div>'; return; }
   body.innerHTML='<div style="color:#64748b;text-align:center;padding:1rem">⏳ جاري جلب الأصناف...</div>';
   try{
-    const r=await fetch(SALES_ITEMS_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch_id:branchId||'',bill_no:String(billNo)})});
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    const data=await r.json();
-    const root=Array.isArray(data)?(data[0]||{}):(data||{});
-    const bills=(root&&root.Data)||[];
-    const bill=bills.find(b=>String(b.bill_no)===String(billNo))||bills[0]||{};
-    const items=((bill&&bill.Items)||[]).map(it=>({name:(it.itm_name_ar||it.itm_name_en||'').toString().trim(),qty:it.itm_qty,unit:it.unit_name||'',price:it.unit_price}));
+    const items=await fetchItems(billNo,branchId);
     _itemsCache[oid]=items;
     body.innerHTML=renderItems(items);
   }catch(e){ body.innerHTML='<div style="color:#b91c1c;text-align:center;padding:1rem">❌ تعذّر جلب الأصناف<br><span style="font-size:.78rem">'+esc(e&&e.message||e)+'</span></div>'; }
@@ -548,6 +602,47 @@ function renderItems(items){
     <thead><tr style="background:var(--bg)"><th style="text-align:right;padding:.4rem">الصنف</th><th style="padding:.4rem">كمية</th><th style="padding:.4rem">سعر</th></tr></thead>
     <tbody>${items.map(it=>`<tr style="border-bottom:1px solid var(--border)"><td style="padding:.4rem;font-weight:600">${esc(it.name)}</td><td style="padding:.4rem;text-align:center;font-weight:700">${esc(it.qty)}${it.unit?' '+esc(it.unit):''}</td><td style="padding:.4rem;text-align:center">${it.price!=null?esc(it.price):'—'}</td></tr>`).join('')}</tbody>
   </table>`;
+}
+
+// ===== الأزرار المخصّصة =====
+async function loadCustomButtons(){
+  try{
+    const {data}=await db.from('review_buttons').select('*').eq('is_active',true).order('sort_order').order('id').limit(200); // data-ok: أزرار معدودة
+    customButtons=data||[];
+  }catch(e){ customButtons=[]; }
+}
+function openBtnsModal(){ renderBtnsList(); document.getElementById('btnsModal').classList.add('open'); }
+function renderBtnsList(){
+  const box=document.getElementById('btnsList');
+  if(!customButtons.length){ box.innerHTML='<div style="color:var(--text-muted);font-size:.8rem;text-align:center;padding:.5rem">مفيش أزرار مخصّصة لسه</div>'; return; }
+  box.innerHTML=customButtons.map(c=>`<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.4rem .6rem">
+    <span style="font-weight:700;font-size:.82rem">${c.audience==='driver'?'🚗':'💊'} ${esc(c.label)}</span>
+    <span style="cursor:pointer;color:#b91c1c;font-weight:900" title="حذف" onclick="removeCustomButton(${c.id})">✕</span>
+  </div>`).join('');
+}
+async function addCustomButton(){
+  const label=(document.getElementById('nb-label').value||'').trim();
+  const aud=document.getElementById('nb-aud').value;
+  if(!label){ toast('اكتب نص الزر'); return; }
+  load(true);
+  try{
+    const {error}=await db.from('review_buttons').insert({label,audience:aud,created_by:actorName()});
+    if(error) throw error;
+    document.getElementById('nb-label').value='';
+    await loadCustomButtons(); renderBtnsList(); render();
+    toast('✓ اتضاف الزر');
+  }catch(e){ console.error(e); toast('تعذّر الإضافة'); }
+  load(false);
+}
+async function removeCustomButton(id){
+  if(!confirm('حذف الزر ده؟')) return;
+  load(true);
+  try{
+    await db.from('review_buttons').update({is_active:false}).eq('id',id);
+    await loadCustomButtons(); renderBtnsList(); render();
+    toast('تم الحذف');
+  }catch(e){ toast('تعذّر الحذف'); }
+  load(false);
 }
 
 init();
