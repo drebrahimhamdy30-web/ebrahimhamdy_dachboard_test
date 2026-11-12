@@ -60,7 +60,17 @@ const CRED   = { id: 'uJYS75ZTBXnlYIqg', name: 'eplus' };
 /* مصدر واحد للفروع المفتوحة — بيتحطّ في «نافذة» و«تقسيم» مع بعض،
    عشان ما يحصلش انحراف بين اللي بنحسب نافذته واللي بنكتبه.
    وسّعه بعد التحقق:  ['mamora','san','bishr','seyouf']  */
-const BRANCHES = ['mamora'];
+/* وركفلو مستقل لكل فرع — فرع يقع مايوقّفش التلاتة، وكل واحد له
+   نافذته الخاصة فالمتأخر يلحق نفسه لوحده.
+   ⚠️ نداء التغيّرات **مابيتفلترش بالفرع** من eplus — بيرجّع كل
+      المخازن. فكل وركفلو بيفلتر الرد على مخزنه هو، وبكده مابيجيبش
+      رصيد أكواد اتحركت في فرع تاني. */
+const BRANCHES = [
+  { code: 'mamora', store: 'الصيدلية',       label: 'المعمورة'     },
+  { code: 'san',    store: 'ابراهيم حمدي 2', label: 'سان ستيفانو' },
+  { code: 'bishr',  store: 'ابراهيم حمدي 3', label: 'سيدى بشر'    },
+  { code: 'seyouf', store: 'السيوف',          label: 'السيوف'       },
+];
 
 /* إيقاع الجولة. التغطية الراجعة لازم تفضل **أكبر من زمن الجولة نفسها**:
    الختم بيتسجّل وقت الكتابة، والسؤال حصل قبله بثواني/دقايق، فاللي
@@ -101,7 +111,7 @@ return [{ json: { since: w.since_cairo, gap_minutes: w.gap_minutes,
 `.trim();
 
 /* ── كود عقدة «أكواد» ─────────────────────────────────────────────── */
-const codeCodes = `
+const codeCodes = br => `
 const MAXCODES = ${MAXCODES};
 
 /* ── اختيار طريقة البحث: الأطول يكسب ──────────────────────────────
@@ -125,8 +135,10 @@ const HEAVY  = $('تحقق').first().json.heavy || {};
 const pickName = (code, name) =>
   (name && name.trim().length > code.length) ? name.trim() : null;
 
-// مخازن فروعنا — الرد بيرجّع مخازن تانية (طوسون، سندره، العجز) مش بتاعتنا
-const STORES = ['الصيدلية', 'ابراهيم حمدي 2', 'ابراهيم حمدي 3', 'السيوف'];
+/* مخزن الفرع ده بس. الرد بيرجّع كل المخازن — بتاعتنا وبتاعة غيرنا
+   (طوسون، سندره، العجز) — وكل وركفلو مسؤول عن فرعه لوحده، فبنفلتر
+   هنا عشان مانجيبش رصيد أكواد اتحركت في فرع تاني. */
+const STORES = ${JSON.stringify([br.store])};
 
 /* مصدرين للتغيير، لأن eplus بتمسك كل واحد في حقل لوحده:
      last_trans_date → حركة الكمية (بيع/شراء/مرتجع)
@@ -179,9 +191,9 @@ return [...codes].map(([code, name]) =>
 `.trim();
 
 /* ── كود عقدة «تقسيم» ─────────────────────────────────────────────── */
-const codeSplit = `
-// الفروع المفتوحة للكتابة — نفس قايمة «نافذة» (مصدر واحد في البانى)
-const BRANCHES_ON = ${JSON.stringify(BRANCHES)};
+const codeSplit = br => `
+// فرع الوركفلو ده بس — نفس اللي في «نافذة» (مصدر واحد في البانى)
+const BRANCHES_ON = ${JSON.stringify([br.code])};
 
 const BR = {
   'الصيدلية':        'mamora',
@@ -284,7 +296,7 @@ const codeNode = (name, jsCode, pos) => ({
   position: pos, name,
 });
 
-const nodes = [
+const buildNodes = br => [
   {
     parameters: { rule: { interval: [{ field: 'minutes', minutesInterval: EVERY }] } },
     type: 'n8n-nodes-base.scheduleTrigger', typeVersion: 1.3,
@@ -294,7 +306,7 @@ const nodes = [
      بترجّع التاريخ جاهز بتوقيت القاهرة naive زي ما eplus عايزه، فمفيش
      تحويل توقيت في n8n أصلًا (السيرفر UTC والفرق بيتغيّر مع DST). */
   sbNode('نافذة', 'stock_sync_window',
-    '={{ JSON.stringify({ p_branches: ' + JSON.stringify(BRANCHES) +
+    '={{ JSON.stringify({ p_branches: ' + JSON.stringify([br.code]) +
       ', p_overlap_minutes: ' + OVERLAP + ', p_max_hours: ' + MAXHOURS + ' }) }}',
     [-1400, 300]),
   codeNode('تحقق', codeGuard, [-1180, 300]),
@@ -308,7 +320,7 @@ const nodes = [
   eplusNode('تغيّرات الصنف',
     "={{ JSON.stringify({ itm_update_date_search: $('تحقق').first().json.since }) }}",
     [-820, 300]),
-  codeNode('أكواد', codeCodes, [-640, 300]),
+  codeNode('أكواد', codeCodes(br), [-640, 300]),
   /* نداء خفيف لكل كود، واحد في المرة بثانية راحة. ده عكس صفحات اللقطة
      الكاملة اللي بتخلّي الـAPI تمسح الكتالوج كله في كل نداء. */
   /* الكود الرقمي الواحد بحثه بيجيب نص الكتالوج، فبيتجاب بالاسم —
@@ -318,7 +330,7 @@ const nodes = [
     '={{ JSON.stringify($json.name ? { itm_name_ar_search: $json.name }'
     + ' : { itm_code_search: $json.code }) }}',
     [-460, 300], { batching: { batch: { batchSize: 1, batchInterval: 1000 } } }),
-  codeNode('تقسيم', codeSplit, [-280, 300]),
+  codeNode('تقسيم', codeSplit(br), [-280, 300]),
   sbNode('كتابة', 'upsert_branch_stock', '={{ JSON.stringify($json) }}', [-100, 300]),
 ];
 
@@ -329,44 +341,50 @@ for (let i = 0; i < order.length - 1; i++) {
   connections[order[i]] = { main: [[{ node: order[i + 1], type: 'main', index: 0 }]] };
 }
 
-const wf = { name: 'المخزون — فرقي بالكود', nodes, connections, pinData: {} };
-const out = path.join(__dirname, '..', 'docs', 'n8n_stock_incremental.json');
-fs.writeFileSync(out, JSON.stringify(wf, null, 2), 'utf8');
-
-/* ── فحص الناتج ───────────────────────────────────────────────────── */
-const back = JSON.parse(fs.readFileSync(out, 'utf8'));
+/* ── بناء وفحص وركفلو لكل فرع ─────────────────────────────────────── */
 let bad = 0;
-const names = new Set(back.nodes.map(n => n.name));
-for (const n of back.nodes) {
-  if (n.type === 'n8n-nodes-base.code') {
-    try { new Function(n.parameters.jsCode); }
-    catch (e) { console.log('x كود «' + n.name + '»: ' + e.message); bad++; }
-    /* كل $('اسم') جوّه الكود لازم يكون عقدة موجودة — غلطة الاسم
-       بترجع في n8n كرسالة مضللة «العقدة ماتنفّذتش». */
-    for (const m of n.parameters.jsCode.matchAll(/\$\('([^']+)'\)/g)) {
-      if (!names.has(m[1])) { console.log('x «' + n.name + '» بينادي عقدة مش موجودة: ' + m[1]); bad++; }
+for (const br of BRANCHES) {
+  const nodes = buildNodes(br);
+  const wf = { name: `المخزون — فرقي: ${br.label}`, nodes, connections, pinData: {} };
+  const out = path.join(__dirname, '..', 'docs', `n8n_stock_${br.code}.json`);
+  fs.writeFileSync(out, JSON.stringify(wf, null, 2), 'utf8');
+
+  const back = JSON.parse(fs.readFileSync(out, 'utf8'));
+  let e = 0;
+  const names = new Set(back.nodes.map(n => n.name));
+  for (const n of back.nodes) {
+    if (n.type === 'n8n-nodes-base.code') {
+      try { new Function(n.parameters.jsCode); }
+      catch (x) { console.log(`x [${br.code}] كود «${n.name}»: ${x.message}`); e++; }
+      /* كل $('اسم') جوّه الكود لازم يكون عقدة موجودة — غلطة الاسم
+         بترجع في n8n كرسالة مضللة «العقدة ماتنفّذتش». */
+      for (const m of n.parameters.jsCode.matchAll(/$('([^']+)')/g))
+        if (!names.has(m[1])) { console.log(`x [${br.code}] «${n.name}» بينادي عقدة مش موجودة: ${m[1]}`); e++; }
     }
+    if (n.parameters && n.parameters.url === EPLUS && n.parameters.specifyBody !== 'json')
+      { console.log(`x [${br.code}] «${n.name}» مش Using JSON`); e++; }
   }
-  if (n.parameters && n.parameters.url === EPLUS && n.parameters.specifyBody !== 'json') {
-    console.log('x «' + n.name + '» مش Using JSON'); bad++;
+  for (const [from, c] of Object.entries(back.connections)) {
+    if (!names.has(from)) { console.log(`x [${br.code}] وصلة من ${from}`); e++; }
+    for (const t of c.main[0]) if (!names.has(t.node)) { console.log(`x [${br.code}] وصلة لـ${t.node}`); e++; }
   }
+  /* الفرع لازم يكون هو هو في «نافذة» و«تقسيم» و«أكواد» — انحراف
+     بينهم معناه وركفلو بيقرا نافذة فرع ويكتب على فرع تاني. */
+  const w = back.nodes.find(n => n.name === 'نافذة').parameters.jsonBody;
+  const sp = back.nodes.find(n => n.name === 'تقسيم').parameters.jsCode;
+  const kd = back.nodes.find(n => n.name === 'أكواد').parameters.jsCode;
+  if (!w.includes(`"${br.code}"`))  { console.log(`x [${br.code}] مش في «نافذة»`); e++; }
+  if (!sp.includes(`"${br.code}"`)) { console.log(`x [${br.code}] مش في «تقسيم»`); e++; }
+  if (!kd.includes(`"${br.store}"`)){ console.log(`x [${br.code}] مخزنه مش في «أكواد»`); e++; }
+  for (const o of BRANCHES) if (o.code !== br.code) {
+    if (sp.includes(`"${o.code}"`) && !sp.includes(`'${o.store}':`)) { console.log(`x [${br.code}] فيه فرع تاني مفتوح: ${o.code}`); e++; }
+    if (kd.includes(`"${o.store}"`)) { console.log(`x [${br.code}] مخزن فرع تاني في «أكواد»: ${o.store}`); e++; }
+  }
+  if (/eyJ|service_role|password/i.test(JSON.stringify(back))) { console.log(`x [${br.code}] فيه سر`); e++; }
+  bad += e;
+  console.log((e ? 'x ' : 'OK ') + `${br.label.padEnd(12)} ${back.nodes.length} عقد · ${path.basename(out)}`);
 }
-for (const [from, c] of Object.entries(back.connections)) {
-  if (!names.has(from)) { console.log('x وصلة من ' + from); bad++; }
-  for (const t of c.main[0]) if (!names.has(t.node)) { console.log('x وصلة لـ' + t.node); bad++; }
-}
-/* قايمة الفروع لازم تكون واحدة في «نافذة» و«تقسيم» */
-const wNode = back.nodes.find(n => n.name === 'نافذة');
-const sNode = back.nodes.find(n => n.name === 'تقسيم');
-for (const b of BRANCHES) {
-  if (!wNode.parameters.jsonBody.includes('"' + b + '"')) { console.log('x ' + b + ' مش في «نافذة»'); bad++; }
-  if (!sNode.parameters.jsCode.includes('"' + b + '"'))   { console.log('x ' + b + ' مش في «تقسيم»'); bad++; }
-}
-if (/eyJ|service_role|password/i.test(JSON.stringify(back))) { console.log('x فيه سر'); bad++; }
-console.log(bad ? 'x فشل ' + bad
-  : 'OK ' + back.nodes.length + ' عقد · JSON صالح · الكود بيتحلّل · مراجع العقد موجودة · '
-    + 'Using JSON · الفروع متطابقة (' + BRANCHES.join(',') + ') · مفيش أسرار');
-console.log('الملف: ' + out);
+console.log(bad ? `x فشل ${bad}` : `OK الأربع وركفلوهات سليمة — عقدة لكل فرع، مفيش تداخل`);
 
 /* ══════════════════════════════════════════════════════════════════
    وركفلو تانٍ: تكميل الصفوف الشحيحة (مرة واحدة بزرار)
@@ -409,11 +427,14 @@ console.log('شحيح ' + items.length + ' · هيتجاب ' + out.length +
 return out;
 `.trim();
 
+/* المعمورة وحدها فيها صفوف شحيحة — جداول التلات فروع التانية بتتسحب
+   كاملة من اللقطة القديمة فمفيش فيها نقص. (مقيس 2026-11-12: صفر.) */
+const BF = BRANCHES[0];
 const bfNodes = [
   { parameters: {}, type: 'n8n-nodes-base.manualTrigger', typeVersion: 1,
     position: [-1000, 300], name: 'تشغيل يدوي' },
   sbNode('ناقص', 'stock_incomplete_codes',
-    '={{ JSON.stringify({ p_branch: ' + JSON.stringify(BRANCHES[0]) +
+    '={{ JSON.stringify({ p_branch: ' + JSON.stringify(BF.code) +
       ', p_limit: 500, p_with_stock: true }) }}',
     [-800, 300]),
   codeNode('أكواد', codeBackfill, [-600, 300]),
@@ -421,7 +442,7 @@ const bfNodes = [
     '={{ JSON.stringify($json.name ? { itm_name_ar_search: $json.name }'
     + ' : { itm_code_search: $json.code }) }}',
     [-400, 300], { batching: { batch: { batchSize: 1, batchInterval: 1000 } } }),
-  codeNode('تقسيم', codeSplit, [-200, 300]),
+  codeNode('تقسيم', codeSplit(BF), [-200, 300]),
   sbNode('كتابة', 'upsert_branch_stock', '={{ JSON.stringify($json) }}', [0, 300]),
 ];
 const bfOrder = ['تشغيل يدوي', 'ناقص', 'أكواد', 'رصيد', 'تقسيم', 'كتابة'];
@@ -431,7 +452,7 @@ for (let i = 0; i < bfOrder.length - 1; i++) {
 }
 const bfPath = path.join(__dirname, '..', 'docs', 'n8n_stock_backfill.json');
 fs.writeFileSync(bfPath, JSON.stringify(
-  { name: 'المخزون — تكميل الصفوف الشحيحة', nodes: bfNodes, connections: bfConn, pinData: {} },
+  { name: 'المخزون — تكميل الصفوف الشحيحة (' + BF.label + ')', nodes: bfNodes, connections: bfConn, pinData: {} },
   null, 2), 'utf8');
 
 const bf = JSON.parse(fs.readFileSync(bfPath, 'utf8'));
@@ -448,5 +469,5 @@ for (const n of bf.nodes) {
 }
 if (/eyJ|service_role|password/i.test(JSON.stringify(bf))) { console.log('x فيه سر'); bfBad++; }
 console.log(bfBad ? 'x التكميل فشل ' + bfBad
-  : 'OK ' + bf.nodes.length + ' عقد · تكميل الصفوف الشحيحة (' + BRANCHES[0] + ')');
+  : 'OK ' + bf.nodes.length + ' عقد · تكميل الصفوف الشحيحة (' + BF.label + ')');
 console.log('الملف: ' + bfPath);

@@ -1,0 +1,317 @@
+{
+  "name": "المخزون — فرقي: سيدى بشر",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1620,
+        300
+      ],
+      "name": "كل شوية"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://rxtjoqulmgkkcohmgzgi.supabase.co/rest/v1/rpc/stock_sync_window",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_branches: [\"bishr\"], p_overlap_minutes: 5, p_max_hours: 6 }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1400,
+        300
+      ],
+      "name": "نافذة",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 15000
+    },
+    {
+      "parameters": {
+        "jsCode": "const w = $json || {};\n// بلا تاريخ النافذة الـAPI بترجّع الكتالوج كله. نوقف قبل النداء مش بعده.\nif (!w.since_cairo || !/^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$/.test(w.since_cairo)) {\n  throw new Error('نافذة المزامنة مش صالحة: ' + JSON.stringify(w).slice(0, 300));\n}\nconst notes = [];\n// capped = المزامنة كانت واقفة أطول من السقف، فالنافذة مابتغطّيش الفجوة كلها\nif (w.capped) notes.push('النافذة اتقصّت عند 6 ساعة — اللقطة الكاملة لازمة');\nif (w.cold)   notes.push('فرع من غير أي ختم كتابة — بداية بارد');\nif (notes.length) console.log(notes.join(' · '));\nreturn [{ json: { since: w.since_cairo, gap_minutes: w.gap_minutes,\n                  capped: !!w.capped, cold: !!w.cold,\n                  // أسماء الأكواد اللي بتتجاب بالاسم بدل الكود\n                  heavy: w.heavy || {},\n                  oldest: w.oldest || null, notes: notes } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1180,
+        300
+      ],
+      "name": "تحقق"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://eplus.ebrahimhamdy.com/api/Item/SearchItem",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ itm_lasttrans_date_search: $json.since }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1000,
+        300
+      ],
+      "name": "تغيّرات الكمية",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "uJYS75ZTBXnlYIqg",
+          "name": "eplus"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 15000
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://eplus.ebrahimhamdy.com/api/Item/SearchItem",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ itm_update_date_search: $('تحقق').first().json.since }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -820,
+        300
+      ],
+      "name": "تغيّرات الصنف",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "uJYS75ZTBXnlYIqg",
+          "name": "eplus"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 15000
+    },
+    {
+      "parameters": {
+        "jsCode": "const MAXCODES = 1500;\n\n/* ── اختيار طريقة البحث: الأطول يكسب ──────────────────────────────\n   البحث في eplus **جزئي** في الحالتين، فتكلفته = كام صنف في\n   الكتالوج فيه النص ده. يعني النص القصير غالي والطويل رخيص، سواء\n   كان كود أو اسم. القياس على 27,821 صنف (2026-11-10):\n\n     كود '6'   → 15,668 صنف   |   اسمه 'ريد اقراص 60 قرص'  →  1\n     كود '7068'→     12 صنف   |   اسمه 'ي'                 → 24,123\n\n   والعيبين **متكاملين**: كل صنف اسمه غالي كوده رخيص والعكس. فمفيش\n   داعي لقايمة استثناءات ولا سؤال للقاعدة — نبص على الطول ونختار.\n   على الـ588 صنف الأصعب (كل اللي اسمه قصير أو كوده قصير): متوسط\n   النتايج 2، وأسوأ نداء 166، وولا واحد فوق 300.\n   التعادل بيروح للكود (قيس: '250مل' بالاسم 366 وبالكود 1).\n\n   والاسم جاي من رد التغيّرات نفسه — يعني اسم eplus الحالي، مش نسخة\n   عندنا ممكن تكون قديمة. ولو الرد ماجابش اسم، بنرجع لخريطة\n   stock_sync_window، وآخر حل الكود. */\nconst HEAVY  = $('تحقق').first().json.heavy || {};\nconst pickName = (code, name) =>\n  (name && name.trim().length > code.length) ? name.trim() : null;\n\n/* مخزن الفرع ده بس. الرد بيرجّع كل المخازن — بتاعتنا وبتاعة غيرنا\n   (طوسون، سندره، العجز) — وكل وركفلو مسؤول عن فرعه لوحده، فبنفلتر\n   هنا عشان مانجيبش رصيد أكواد اتحركت في فرع تاني. */\nconst STORES = [\"ابراهيم حمدي 3\"];\n\n/* مصدرين للتغيير، لأن eplus بتمسك كل واحد في حقل لوحده:\n     last_trans_date → حركة الكمية (بيع/شراء/مرتجع)\n     update_date     → تعديل الصنف نفسه (سعر، اسم، شركة، تصنيف)\n   الاتنين مستقلين: صنف 7228 بيع النهاردة (last_trans 11/10) وآخر\n   تعديل بياناته 7/28. فالسعر اللي بيتغيّر من غير بيع **مش** بيظهر في\n   نداء الكمية خالص — و~25 صنف في اليوم بيتغيّر سعرهم في المعمورة.\n   والصنف الجديد متغطّي هنا كمان: update_date بيتحط وقت الإنشاء\n   (مُتحقَّق على 23,225 صف: ولا واحد update أقدم من insert). */\nconst rows = [];\nfor (const src of ['تغيّرات الكمية', 'تغيّرات الصنف']) {\n  const o = $(src).first().json;\n  if (o.Error || String(o.Message).toLowerCase() === 'fail') {\n    throw new Error('eplus رفض «' + src + '»: ' + (o.Error || o.Message));\n  }\n  for (const r of (o.Data || [])) rows.push(r);\n}\n\n// ⚠️ الكميات في الرد ده **ناقصة** (بتاعة الدفعات اللي اتحركت بس).\n//    إحنا عايزين الأكواد لا غير.\nconst codes = new Map();   // كود → اسم نبحث بيه (أو null = نبحث بالكود)\nlet stuck = [], other = 0;\nfor (const r of rows) {\n  if (!r || r.itm_code === undefined || r.itm_code === null) continue;\n  if (STORES.indexOf(r.sto_name) < 0) { other++; continue; }\n  const c = String(r.itm_code).trim();\n  if (!c) continue;\n  if (codes.has(c)) continue;\n\n  const name = pickName(c, r.itm_name_ar) || pickName(c, HEAVY[c]);\n  /* كود من خانة واحدة بلا اسم أطول منه = مفيش نص انتقائي نبحث بيه.\n     البحث بالكود هيجيب نص الكتالوج، فبيتأجّل للّقطة الكاملة —\n     وبيتكتب في السجل مش بيختفي في السكوت. */\n  if (!name && c.length <= 1) { stuck.push(c); continue; }\n  codes.set(c, name);\n}\n\nif (codes.size > MAXCODES) {\n  throw new Error('عدد الأكواد ' + codes.size + ' فوق الحد ' + MAXCODES +\n    ' — الجولة دي هتتعدّى على اللي بعدها، شغّل اللقطة الكاملة');\n}\n// مفيش تغيير أصلًا = جولة شرعية (ساعة هادية). مش خطأ.\nconst byName = [...codes].filter(e => e[1]).length;\nconsole.log('نافذة ' + $('تحقق').first().json.gap_minutes + 'د · ' + rows.length +\n  ' صف · ' + codes.size + ' كود (' + byName + ' بالاسم · ' +\n  (codes.size - byName) + ' بالكود) · مخازن تانية ' + other +\n  (stuck.length ? ' · اتأجّل للّقطة: ' + stuck.join(',') : ''));\nreturn [...codes].map(([code, name]) =>\n  ({ json: { code: code, name: name, total: codes.size } }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        300
+      ],
+      "name": "أكواد"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://eplus.ebrahimhamdy.com/api/Item/SearchItem",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.name ? { itm_name_ar_search: $json.name } : { itm_code_search: $json.code }) }}",
+        "options": {
+          "timeout": 120000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -460,
+        300
+      ],
+      "name": "رصيد",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "uJYS75ZTBXnlYIqg",
+          "name": "eplus"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 15000
+    },
+    {
+      "parameters": {
+        "jsCode": "// فرع الوركفلو ده بس — نفس اللي في «نافذة» (مصدر واحد في البانى)\nconst BRANCHES_ON = [\"bishr\"];\n\nconst BR = {\n  'الصيدلية':        'mamora',\n  'ابراهيم حمدي 2':  'san',\n  'ابراهيم حمدي 3':  'bishr',\n  'السيوف':          'seyouf',\n};\n\n// الأكواد اللي طلبناها — عشان نفلتر الرد الجزئي على الكود بالحرف\nconst asked = new Set($('أكواد').all().map(i => String(i.json.code)));\n\nconst map = new Map();   // مفتاح فرع|كود\nconst got = new Set();   // كود رجع فعلًا — حتى لو فرعه مقفول\nlet seen = 0, stray = 0;\nfor (const it of $('رصيد').all()) {\n  const o = it.json;\n  if (o.Error || String(o.Message).toLowerCase() === 'fail') {\n    throw new Error('eplus رفض بحث كود: ' + (o.Error || o.Message));\n  }\n  for (const r of (o.Data || [])) {\n    seen++;\n    const code = String((r && r.itm_code) ?? '');\n    // ⚠️ البحث جزئي: \"7220\" بيرجّع 57220 و72200 كمان. بناخد المطابق بس.\n    if (!asked.has(code)) { stray++; continue; }\n    got.add(code);\n    const br = BR[r.sto_name];\n    if (!br || BRANCHES_ON.indexOf(br) < 0) continue;\n    map.set(br + '|' + code, r);\n  }\n}\n\nif (map.size === 0) {\n  throw new Error('ولا صف مطابق من ' + seen + ' صف رجعوا — راجع الفلترة');\n}\n\n/* كود طلبناه و**ولا صف رجع ليه خالص**. السبب الوارد: اسمه اتغيّر في\n   eplus بعد آخر مزامنة فالبحث بالاسم مالقاهوش. بيتكتب في السجل عشان\n   ما يختفيش في السكوت.\n   ⚠️ الكود اللي رجع بس فرعه مقفول **مش** ضايع — عشان كده \"got\"\n   بتتملى جوّه اللفة قبل فلتر الفرع، مش من \"map\". */\nconst lost = [...asked].filter(c => !got.has(c));\n\nconst byBranch = {};\nfor (const [k, r] of map) {\n  const br = k.split('|')[0];\n  (byBranch[br] = byBranch[br] || []).push(r);\n}\n\nconsole.log('رجع ' + seen + ' صف · مطابق ' + map.size + ' · مرفوض ' + stray +\n  ' · ' + Object.keys(byBranch).map(b => b + '=' + byBranch[b].length).join(' ') +\n  (lost.length ? ' · مارجعش: ' + lost.slice(0, 20).join(',') : ''));\n\nconst out = [];\nfor (const br of Object.keys(byBranch)) {\n  const list = byBranch[br];\n  for (let i = 0; i < list.length; i += 2000) {\n    out.push({ json: { p_branch: br, p_rows: list.slice(i, i + 2000) } });\n  }\n}\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -280,
+        300
+      ],
+      "name": "تقسيم"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://rxtjoqulmgkkcohmgzgi.supabase.co/rest/v1/rpc/upsert_branch_stock",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -100,
+        300
+      ],
+      "name": "كتابة",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 15000
+    }
+  ],
+  "connections": {
+    "كل شوية": {
+      "main": [
+        [
+          {
+            "node": "نافذة",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "نافذة": {
+      "main": [
+        [
+          {
+            "node": "تحقق",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تحقق": {
+      "main": [
+        [
+          {
+            "node": "تغيّرات الكمية",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تغيّرات الكمية": {
+      "main": [
+        [
+          {
+            "node": "تغيّرات الصنف",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تغيّرات الصنف": {
+      "main": [
+        [
+          {
+            "node": "أكواد",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "أكواد": {
+      "main": [
+        [
+          {
+            "node": "رصيد",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "رصيد": {
+      "main": [
+        [
+          {
+            "node": "تقسيم",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تقسيم": {
+      "main": [
+        [
+          {
+            "node": "كتابة",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
