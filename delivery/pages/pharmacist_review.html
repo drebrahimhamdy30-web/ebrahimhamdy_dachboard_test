@@ -40,6 +40,7 @@ body{padding:1rem;overflow-y:auto;height:100vh;background:var(--bg)}
 .rc-row{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;font-size:.82rem}
 .rc-addr{font-size:.85rem;font-weight:600;color:var(--text);background:var(--bg);border-radius:8px;padding:.4rem .6rem}
 .rc-meta{font-size:.78rem;color:var(--text-muted);font-weight:700}
+.rc-age{font-weight:800;color:#0e7490;direction:ltr;display:inline-block}
 .rc-ih{font-size:.76rem;font-weight:800;color:var(--text-muted);margin-top:.1rem}
 .rc-items{flex:1;max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
 .it-tbl{width:100%;border-collapse:collapse;font-size:.8rem}
@@ -217,6 +218,10 @@ let _refreshTimer=null, _itemsCache={}, _itemsInflight=new Set(), customButtons=
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function waNum(p){let d=String(p||'').replace(/\D/g,'');if(!d)return '';if(d.startsWith('0'))d='2'+d;else if(!d.startsWith('2')&&d.length===10)d='2'+d;return d;}
 function fmtDT(t){ return t? new Date(t).toLocaleString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',hour12:true}) : '—'; }
+// عدّاد منذ إنشاء الطلب (دقيقة:ثانية أو ساعة:دقيقة:ثانية) — حى
+function fmtAge(ms){ const s=Math.max(0,Math.floor(ms/1000)),h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60,p=n=>String(n).padStart(2,'0'); return h>0?`${h}:${p(m)}:${p(sec)}`:`${m}:${p(sec)}`; }
+function tickAges(){ const now=Date.now(); document.querySelectorAll('.rc-age[data-ts]').forEach(el=>{ const ts=Number(el.dataset.ts); if(!ts)return; const ms=now-ts; el.textContent=fmtAge(ms); const min=ms/60000; el.style.color=min>=30?'#dc2626':min>=15?'#b45309':'#0e7490'; }); }
+setInterval(tickAges,1000);
 function inlineItemsHtml(items){
   if(!items) return '<span class="it-load">—</span>';
   if(!items.length) return '<span class="it-load">لا توجد أصناف</span>';
@@ -396,6 +401,7 @@ function render(){
   if(!total){ cont.innerHTML=`<div class="empty">${activeTab==='followup'?'مفيش متابعات معلّقة':activeTab==='done'?'لسه مفيش طلبات اتراجعت':'مفيش طلبات جديدة للمراجعة — أي فاتورة تتطبع هتظهر هنا'}</div>`; document.getElementById('pager').innerHTML=''; return; }
   cont.innerHTML=slice.map(activeTab==='followup'?fuCardHtml:orderCardHtml).join('');
   if(activeTab!=='followup') ensureInlineItems(slice);
+  tickAges();
   renderPager(total,pages);
   try{document.querySelector('.grid').scrollIntoView({block:'start'});}catch(e){}
 }
@@ -442,7 +448,7 @@ function orderCardHtml(o){
           <span class="lk lk-items" onclick="openItems('${esc(String(o.bill_no||''))}','${esc(String(o.branch_id||''))}','${o.id}','${esc(String(o.cust_code||''))}')">🧾 التفاصيل</span>
         </div>
         <div class="rc-addr">📍 ${esc(o.customer_address||'—')}${o.cust_region?' · '+esc(o.cust_region):''}</div>
-        <div class="rc-meta">🕒 وقت الطلب: ${fmtDT(o.created_at)}</div>
+        <div class="rc-meta">🕒 وقت الطلب: ${fmtDT(o.created_at)}${o.created_at?` · ⏱️ عدّى <span class="rc-age" data-ts="${new Date(o.created_at).getTime()}">${fmtAge(Date.now()-new Date(o.created_at).getTime())}</span>`:''}</div>
         <div class="rc-ih">🧾 الأصناف</div>
         <div class="rc-items" id="it-${o.id}">${_itemsCache[o.id]?inlineItemsHtml(_itemsCache[o.id]):'<span class="it-load">⏳ جارٍ تحميل الأصناف…</span>'}</div>
       </div>
