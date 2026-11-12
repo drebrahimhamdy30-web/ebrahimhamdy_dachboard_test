@@ -54,7 +54,6 @@ const fs = require('fs');
 const path = require('path');
 
 const SB_URL = 'https://rxtjoqulmgkkcohmgzgi.supabase.co';
-const EPLUS  = 'https://eplus.ebrahimhamdy.com/api/Item/SearchItem';
 const CRED   = { id: 'uJYS75ZTBXnlYIqg', name: 'eplus' };
 
 /* مصدر واحد للفروع المفتوحة — بيتحطّ في «نافذة» و«تقسيم» مع بعض،
@@ -65,12 +64,29 @@ const CRED   = { id: 'uJYS75ZTBXnlYIqg', name: 'eplus' };
    ⚠️ نداء التغيّرات **مابيتفلترش بالفرع** من eplus — بيرجّع كل
       المخازن. فكل وركفلو بيفلتر الرد على مخزنه هو، وبكده مابيجيبش
       رصيد أكواد اتحركت في فرع تاني. */
+/* ⚠️ كل فرع له **نسخة eplus خاصة** وقاعدة Genius منفصلة.
+   قاعدة أي فرع فيها صفوف بأسماء مخازن الفروع التانية كمان — بس دي
+   **نسخة مكرّرة مش موثوقة**. الأرقام الصح لفرع بتيجي من سيرفره هو.
+   (اتصحّح 2026-11-12 بتنبيه المالك؛ كنت بقرا الأربعة من المعمورة.)
+   وhttps للأربعة: اتفحصوا وكلهم بيردوا 401 على https، وhttp بيرد
+   301 تحويلة بتضيّع جسم الطلب. */
 const BRANCHES = [
-  { code: 'mamora', store: 'الصيدلية',       label: 'المعمورة'     },
-  { code: 'san',    store: 'ابراهيم حمدي 2', label: 'سان ستيفانو' },
-  { code: 'bishr',  store: 'ابراهيم حمدي 3', label: 'سيدى بشر'    },
-  { code: 'seyouf', store: 'السيوف',          label: 'السيوف'       },
+  { code: 'mamora', store: 'الصيدلية',       label: 'المعمورة',    api: 'eplus'  },
+  { code: 'san',    store: 'ابراهيم حمدي 2', label: 'سان ستيفانو', api: 'eplus1' },
+  { code: 'bishr',  store: 'ابراهيم حمدي 3', label: 'سيدى بشر',    api: 'eplus2' },
+  { code: 'seyouf', store: 'السيوف',          label: 'السيوف',       api: 'eplus3' },
 ];
+const eplusUrl = br => 'https://' + br.api + '.ebrahimhamdy.com/api/Item/SearchItem';
+
+/* فرعين على نفس السيرفر = غلطة خريطة، والجدول هيتملا أرقام فرع تاني
+   وهو شغّال تمامًا. أرخص فحص يمسكها. */
+{
+  const seen = new Set();
+  for (const b of BRANCHES) {
+    if (seen.has(b.api)) { console.log('x فرعين على نفس السيرفر: ' + b.api); process.exit(1); }
+    seen.add(b.api);
+  }
+}
 
 /* إيقاع الجولة. التغطية الراجعة لازم تفضل **أكبر من زمن الجولة نفسها**:
    الختم بيتسجّل وقت الكتابة، والسؤال حصل قبله بثواني/دقايق، فاللي
@@ -275,9 +291,9 @@ const sbNode = (name, fn, jsonBody, pos) => ({
   position: pos, name, ...httpCommon,
 });
 
-const eplusNode = (name, jsonBody, pos, extraOptions) => ({
+const eplusNode = (br, name, jsonBody, pos, extraOptions) => ({
   parameters: {
-    method: 'PATCH', url: EPLUS,
+    method: 'PATCH', url: eplusUrl(br),
     authentication: 'genericCredentialType', genericAuthType: 'httpBasicAuth',
     sendBody: true,
     /* لازم Using JSON — Fields Below بتبعت الأرقام كنصوص والـAPI بتنهار */
@@ -312,12 +328,12 @@ const buildNodes = br => [
   codeNode('تحقق', codeGuard, [-1180, 300]),
   /* نداءين للتغيير، لأن eplus بتمسك كل نوع في حقل مستقل. سلسلة مش
      تفريع — التفريع بيخلّي ترتيب التنفيذ معتمد على مكان العقدة. */
-  eplusNode('تغيّرات الكمية',
+  eplusNode(br, 'تغيّرات الكمية',
     '={{ JSON.stringify({ itm_lasttrans_date_search: $json.since }) }}',
     [-1000, 300]),
   /* ⚠️ العقدة دي جاية بعد نداء تاني، فـ$json بقى رد eplus مش النافذة
      — لازم نرجع لـ«تحقق» بالاسم. */
-  eplusNode('تغيّرات الصنف',
+  eplusNode(br, 'تغيّرات الصنف',
     "={{ JSON.stringify({ itm_update_date_search: $('تحقق').first().json.since }) }}",
     [-820, 300]),
   codeNode('أكواد', codeCodes(br), [-640, 300]),
@@ -326,7 +342,7 @@ const buildNodes = br => [
   /* الكود الرقمي الواحد بحثه بيجيب نص الكتالوج، فبيتجاب بالاسم —
      `itm_name_ar_search` بالاسم الكامل بيرجّع 1–7 نتايج. و«تقسيم»
      بيفلتر على الكود بالحرف في الحالتين فالنتيجة واحدة. */
-  eplusNode('رصيد',
+  eplusNode(br, 'رصيد',
     '={{ JSON.stringify($json.name ? { itm_name_ar_search: $json.name }'
     + ' : { itm_code_search: $json.code }) }}',
     [-460, 300], { batching: { batch: { batchSize: 1, batchInterval: 1000 } } }),
@@ -361,7 +377,7 @@ for (const br of BRANCHES) {
       for (const m of n.parameters.jsCode.matchAll(/$('([^']+)')/g))
         if (!names.has(m[1])) { console.log(`x [${br.code}] «${n.name}» بينادي عقدة مش موجودة: ${m[1]}`); e++; }
     }
-    if (n.parameters && n.parameters.url === EPLUS && n.parameters.specifyBody !== 'json')
+    if (n.parameters && n.parameters.url === eplusUrl(br) && n.parameters.specifyBody !== 'json')
       { console.log(`x [${br.code}] «${n.name}» مش Using JSON`); e++; }
   }
   for (const [from, c] of Object.entries(back.connections)) {
@@ -380,6 +396,18 @@ for (const br of BRANCHES) {
     if (sp.includes(`"${o.code}"`) && !sp.includes(`'${o.store}':`)) { console.log(`x [${br.code}] فيه فرع تاني مفتوح: ${o.code}`); e++; }
     if (kd.includes(`"${o.store}"`)) { console.log(`x [${br.code}] مخزن فرع تاني في «أكواد»: ${o.store}`); e++; }
   }
+  /* ⚠️ أهم فحص هنا: كل نداء eplus لازم يروح **لسيرفر الفرع ده**.
+     وركفلو على السيرفر الغلط بيملا الجدول أرقام فرع تاني **وهو
+     شغّال تمامًا** — مفيش حاجة تشتكي. */
+  const txt = JSON.stringify(back);
+  for (const n of back.nodes)
+    if (n.parameters && typeof n.parameters.url === 'string'
+        && n.parameters.url.includes('eplus') && n.parameters.url !== eplusUrl(br))
+      { console.log(`x [${br.code}] «${n.name}» على سيرفر غلط: ${n.parameters.url}`); e++; }
+  for (const o of BRANCHES)
+    if (o.api !== br.api && txt.includes('//' + o.api + '.'))
+      { console.log(`x [${br.code}] تسرّب عنوان ${o.api}`); e++; }
+
   if (/eyJ|service_role|password/i.test(JSON.stringify(back))) { console.log(`x [${br.code}] فيه سر`); e++; }
   bad += e;
   console.log((e ? 'x ' : 'OK ') + `${br.label.padEnd(12)} ${back.nodes.length} عقد · ${path.basename(out)}`);
@@ -438,7 +466,7 @@ const bfNodes = [
       ', p_limit: 500, p_with_stock: true }) }}',
     [-800, 300]),
   codeNode('أكواد', codeBackfill, [-600, 300]),
-  eplusNode('رصيد',
+  eplusNode(BF, 'رصيد',
     '={{ JSON.stringify($json.name ? { itm_name_ar_search: $json.name }'
     + ' : { itm_code_search: $json.code }) }}',
     [-400, 300], { batching: { batch: { batchSize: 1, batchInterval: 1000 } } }),
