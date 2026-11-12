@@ -26,6 +26,15 @@ body{padding:1rem;overflow-y:auto;height:100vh;background:var(--bg)}
 .searchwrap{margin-bottom:.8rem}
 .searchwrap input{width:100%;max-width:420px;height:40px;padding:0 .9rem;border:1.5px solid var(--border);border-radius:10px;font-family:'Cairo',sans-serif;font-size:.85rem;outline:none;background:var(--surface);color:var(--text)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(460px,1fr));gap:.9rem}
+.grid.single{grid-template-columns:minmax(0,620px);justify-content:center}
+.navbar{display:none;align-items:center;justify-content:center;gap:.6rem;margin-bottom:.9rem}
+.navbar.show{display:flex}
+.nav-btn{border:1.5px solid var(--border);background:var(--surface);border-radius:10px;padding:.5rem 1.2rem;font-family:'Cairo',sans-serif;font-weight:800;font-size:.9rem;cursor:pointer;color:var(--text)}
+.nav-btn:disabled{opacity:.4;cursor:default}
+.nav-btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+.nav-pos{font-size:.92rem;font-weight:800;color:var(--text);background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:.5rem 1rem;min-width:130px;text-align:center}
+.rc-hd-right{display:flex;align-items:center;gap:.6rem}
+.rc-age-box{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);border-radius:10px;padding:.35rem .65rem;font-size:1.1rem;font-weight:800;white-space:nowrap;display:flex;align-items:center;gap:.25rem;line-height:1}
 .rc{background:var(--surface);border:1.5px solid var(--border);border-radius:14px;box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column}
 .rc.reviewed{border-color:#bbf7d0}
 .rc-top{display:flex;justify-content:space-between;align-items:flex-start;gap:.6rem;padding:.7rem .9rem;background:linear-gradient(135deg,#0f172a,#1e293b);color:#fff}
@@ -98,6 +107,7 @@ body{padding:1rem;overflow-y:auto;height:100vh;background:var(--bg)}
     <button class="tab" id="tab-followup" onclick="setTab('followup')">💙 متابعات العملاء <span class="cnt" id="c-followup">0</span></button>
   </div>
   <div class="searchwrap"><input type="text" id="search" placeholder="🔍 بحث بالاسم أو الكود أو التليفون" oninput="onSearch()"></div>
+  <div class="navbar" id="navbar"></div>
   <div class="grid" id="cards"></div>
   <div class="pager" id="pager"></div>
 </div>
@@ -213,7 +223,7 @@ function chipText(t){
 let currentUser=getCurrentUser();
 if(!currentUser) window.location.href='../auth.html';
 let branches=[], curBranchId=null, shift=null;
-let activeTab='pending', page=1, rows=[], tagsByOrder={}, searchQ='', fuRows=[];
+let activeTab='pending', page=1, cardIdx=0, rows=[], tagsByOrder={}, searchQ='', fuRows=[];
 let _refreshTimer=null, _itemsCache={}, _itemsInflight=new Set(), customButtons=[];
 
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
@@ -221,7 +231,7 @@ function waNum(p){let d=String(p||'').replace(/\D/g,'');if(!d)return '';if(d.sta
 function fmtDT(t){ return t? new Date(t).toLocaleString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',hour12:true}) : '—'; }
 // عدّاد منذ إنشاء الطلب (دقيقة:ثانية أو ساعة:دقيقة:ثانية) — حى
 function fmtAge(ms){ const s=Math.max(0,Math.floor(ms/1000)),h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60,p=n=>String(n).padStart(2,'0'); return h>0?`${h}:${p(m)}:${p(sec)}`:`${m}:${p(sec)}`; }
-function tickAges(){ const now=Date.now(); document.querySelectorAll('.rc-age[data-ts]').forEach(el=>{ const ts=Number(el.dataset.ts); if(!ts)return; const ms=now-ts; el.textContent=fmtAge(ms); const min=ms/60000; el.style.color=min>=30?'#dc2626':min>=15?'#b45309':'#0e7490'; }); }
+function tickAges(){ const now=Date.now(); document.querySelectorAll('.rc-age[data-ts]').forEach(el=>{ const ts=Number(el.dataset.ts); if(!ts)return; const ms=now-ts; el.textContent=fmtAge(ms); const min=ms/60000; el.style.color=min>=30?'#fca5a5':min>=15?'#fcd34d':'#67e8f9'; }); }
 setInterval(tickAges,1000);
 function inlineItemsHtml(items){
   if(!items) return '<span class="it-load">—</span>';
@@ -383,7 +393,7 @@ async function loadFollowups(){
 }
 
 // ===== البحث والتقسيم =====
-function onSearch(){ searchQ=(document.getElementById('search').value||'').trim().toLowerCase(); page=1; render(); }
+function onSearch(){ searchQ=(document.getElementById('search').value||'').trim().toLowerCase(); page=1; cardIdx=0; render(); }
 function filtered(){
   if(activeTab==='followup'){
     if(!searchQ) return fuRows;
@@ -395,21 +405,43 @@ function filtered(){
 
 function render(){
   const list=filtered();
-  const total=list.length, pages=Math.max(1,Math.ceil(total/PER_PAGE));
-  if(page>pages)page=pages;
-  const slice=list.slice((page-1)*PER_PAGE, page*PER_PAGE);
   const cont=document.getElementById('cards');
-  if(!total){ cont.innerHTML=`<div class="empty">${activeTab==='followup'?'مفيش متابعات معلّقة':activeTab==='done'?'لسه مفيش طلبات اتراجعت':'مفيش طلبات جديدة للمراجعة — أي فاتورة تتطبع هتظهر هنا'}</div>`; document.getElementById('pager').innerHTML=''; return; }
-  cont.innerHTML=slice.map(activeTab==='followup'?fuCardHtml:orderCardHtml).join('');
-  if(activeTab!=='followup') ensureInlineItems(slice);
-  tickAges();
-  renderPager(total,pages);
-  try{document.querySelector('.grid').scrollIntoView({block:'start'});}catch(e){}
+  const nav=document.getElementById('navbar');
+  const pager=document.getElementById('pager');
+  // تبويب المتابعات: قائمة عادية بتقسيم
+  if(activeTab==='followup'){
+    cont.classList.remove('single'); nav.classList.remove('show'); nav.innerHTML='';
+    const total=list.length, pages=Math.max(1,Math.ceil(total/PER_PAGE));
+    if(page>pages)page=pages;
+    if(!total){ cont.innerHTML='<div class="empty">مفيش متابعات معلّقة</div>'; pager.innerHTML=''; return; }
+    const slice=list.slice((page-1)*PER_PAGE, page*PER_PAGE);
+    cont.innerHTML=slice.map(fuCardHtml).join('');
+    renderPager(total,pages);
+    return;
+  }
+  // تبويبات الطلبات: طلب واحد قدام المراجع + تنقّل بينهم
+  cont.classList.add('single'); pager.innerHTML='';
+  const total=list.length;
+  if(!total){ cont.innerHTML=`<div class="empty">${activeTab==='done'?'لسه مفيش طلبات اتراجعت':'مفيش طلبات جديدة للمراجعة — أي فاتورة تتطبع هتظهر هنا'}</div>`; nav.classList.remove('show'); nav.innerHTML=''; return; }
+  if(cardIdx>=total)cardIdx=total-1; if(cardIdx<0)cardIdx=0;
+  const o=list[cardIdx];
+  cont.innerHTML=orderCardHtml(o);
+  ensureInlineItems([o]); tickAges();
+  renderNav(total);
 }
+
+function renderNav(total){
+  const nav=document.getElementById('navbar');
+  nav.classList.add('show');
+  nav.innerHTML=`<button class="nav-btn" onclick="navCard(-1)" ${cardIdx===0?'disabled':''}>‹ السابق</button>
+    <span class="nav-pos">طلب ${cardIdx+1} من ${total}</span>
+    <button class="nav-btn primary" onclick="navCard(1)" ${cardIdx>=total-1?'disabled':''}>التالي ›</button>`;
+}
+function navCard(d){ const n=filtered().length; cardIdx=Math.min(n-1,Math.max(0,cardIdx+d)); render(); window.scrollTo({top:0,behavior:'smooth'}); }
 
 function renderPager(total,pages){
   const p=document.getElementById('pager');
-  if(pages<=1){ p.innerHTML=`<span class="pg">${total} ${activeTab==='followup'?'متابعة':'طلب'}</span>`; return; }
+  if(pages<=1){ p.innerHTML=`<span class="pg">${total} متابعة</span>`; return; }
   p.innerHTML=`<button onclick="goPage(1)" ${page===1?'disabled':''}>«</button>
     <button onclick="goPage(${page-1})" ${page===1?'disabled':''}>‹</button>
     <span class="pg">صفحة ${page} من ${pages} · ${total}</span>
@@ -417,9 +449,15 @@ function renderPager(total,pages){
     <button onclick="goPage(${pages})" ${page===pages?'disabled':''}>»</button>`;
 }
 function goPage(n){ page=n; render(); window.scrollTo({top:0,behavior:'smooth'}); }
+// تنقّل بالكيبورد بين الطلبات (مش وقت الكتابة في حقل)
+document.addEventListener('keydown',e=>{
+  if(activeTab==='followup')return;
+  if(/^(INPUT|TEXTAREA|SELECT)$/.test((e.target&&e.target.tagName)||''))return;
+  if(e.key==='ArrowLeft'){ navCard(1); } else if(e.key==='ArrowRight'){ navCard(-1); }
+});
 
 function setTab(t){
-  activeTab=t; page=1;
+  activeTab=t; page=1; cardIdx=0;
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
   document.getElementById('tab-'+t).classList.add('active');
   loadData();
@@ -438,7 +476,10 @@ function orderCardHtml(o){
   return `<div class="rc ${o.pharmacist_reviewed_at?'reviewed':''}">
     <div class="rc-top">
       <div><div class="rc-cust">👤 ${esc(o.customer_name||'—')}</div><small>كود ${esc(o.cust_code||'—')} · ${esc(SL[o.status]||o.status||'')}</small></div>
-      <div class="rc-amt"><b>${amt.toLocaleString('ar-EG')} ج</b><span>${esc(PL[o.payment_method]||o.payment_method||'كاش')}</span></div>
+      <div class="rc-hd-right">
+        <div class="rc-amt"><b>${amt.toLocaleString('ar-EG')} ج</b><span>${esc(PL[o.payment_method]||o.payment_method||'كاش')}</span></div>
+        ${o.created_at?`<div class="rc-age-box">⏱️ <span class="rc-age" data-ts="${new Date(o.created_at).getTime()}">${fmtAge(Date.now()-new Date(o.created_at).getTime())}</span></div>`:''}
+      </div>
     </div>
     <div class="rc-body">
       <div class="rc-main">
@@ -449,7 +490,7 @@ function orderCardHtml(o){
           <span class="lk lk-items" onclick="openItems('${esc(String(o.bill_no||''))}','${esc(String(o.branch_id||''))}','${o.id}','${esc(String(o.cust_code||''))}')">🧾 التفاصيل</span>
         </div>
         <div class="rc-addr">📍 ${esc(o.customer_address||'—')}${o.cust_region?' · '+esc(o.cust_region):''}</div>
-        <div class="rc-meta">🕒 وقت الطلب: ${fmtDT(o.created_at)}${o.created_at?` · ⏱️ عدّى <span class="rc-age" data-ts="${new Date(o.created_at).getTime()}">${fmtAge(Date.now()-new Date(o.created_at).getTime())}</span>`:''}</div>
+        <div class="rc-meta">🕒 وقت الطلب: ${fmtDT(o.created_at)}</div>
         ${o.deliveryman?`<div class="rc-driver">🚗 على رحلة مع: <b>${esc(o.deliveryman)}</b></div>`:''}
         <div class="rc-ih">🧾 الأصناف</div>
         <div class="rc-items" id="it-${o.id}">${_itemsCache[o.id]?inlineItemsHtml(_itemsCache[o.id]):'<span class="it-load">⏳ جارٍ تحميل الأصناف…</span>'}</div>
