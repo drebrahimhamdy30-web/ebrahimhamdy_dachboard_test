@@ -38,10 +38,16 @@ body{padding:1rem;overflow-y:auto;height:100vh;background:var(--bg)}
 .rc-row{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;font-size:.82rem}
 .rc-addr{font-size:.85rem;font-weight:600;color:var(--text);background:var(--bg);border-radius:8px;padding:.4rem .6rem}
 .rc-meta{font-size:.78rem;color:var(--text-muted);font-weight:700}
-.rc-items{font-size:.78rem;line-height:1.9;background:var(--bg);border-radius:8px;padding:.4rem .55rem}
-.it-chip{display:inline-block;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:.1rem .45rem;margin:.12rem .15rem;font-weight:600}
-.it-chip b{color:#0e7490}
-.it-load{color:#94a3b8;font-size:.76rem}
+.rc-ih{font-size:.76rem;font-weight:800;color:var(--text-muted);margin-top:.1rem}
+.rc-items{max-height:190px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;background:var(--surface)}
+.it-tbl{width:100%;border-collapse:collapse;font-size:.8rem}
+.it-tbl thead th{position:sticky;top:0;background:var(--bg);color:var(--text-muted);font-weight:700;padding:.35rem .55rem;text-align:right;border-bottom:1.5px solid var(--border);z-index:1}
+.it-tbl thead th.q{text-align:center;width:84px}
+.it-tbl td{padding:.32rem .55rem;border-bottom:1px solid var(--border);font-weight:600}
+.it-tbl td.q{text-align:center;font-weight:800;color:#0e7490;white-space:nowrap}
+.it-tbl tr:last-child td{border-bottom:none}
+.it-load{display:block;color:#94a3b8;font-size:.78rem;padding:.5rem;text-align:center}
+.rc-tools{display:flex;flex-direction:column;gap:.5rem;border-top:1px solid var(--border);padding-top:.6rem;margin-top:.15rem}
 .lk{display:inline-flex;align-items:center;gap:.25rem;border-radius:8px;padding:.32rem .6rem;font-weight:700;font-size:.76rem;text-decoration:none;border:1px solid}
 .lk-call{color:#15803d;background:#dcfce7;border-color:#bbf7d0}
 .lk-wa{color:#fff;background:#25D366;border-color:#25D366}
@@ -213,7 +219,9 @@ function fmtDT(t){ return t? new Date(t).toLocaleString('ar-EG',{timeZone:'Afric
 function inlineItemsHtml(items){
   if(!items) return '<span class="it-load">—</span>';
   if(!items.length) return '<span class="it-load">لا توجد أصناف</span>';
-  return '🧾 '+items.map(it=>`<span class="it-chip">${esc(it.name)}${it.qty!=null?` <b>×${esc(it.qty)}</b>`:''}</span>`).join('');
+  return `<table class="it-tbl"><thead><tr><th>الصنف</th><th class="q">الكمية</th></tr></thead><tbody>`+
+    items.map(it=>`<tr><td>${esc(it.name||'—')}</td><td class="q">${it.qty!=null?esc(it.qty)+(it.unit?' '+esc(it.unit):''):'—'}</td></tr>`).join('')+
+    `</tbody></table>`;
 }
 // زر مخصّص (يضيف ملاحظة جاهزة بنصّه) — للطيار=driver_note، داخلي=pharmacy_note
 function cbtn(o,c){ const tag=c.audience==='driver'?'driver_note':'pharmacy_note'; return `<button class="qb" title="زر مخصّص" onclick="applyTag('${o.id}','${tag}',true,'${esc(c.label).replace(/'/g,"\\'")}')">${esc(c.label)}</button>`; }
@@ -433,17 +441,20 @@ function orderCardHtml(o){
       </div>
       <div class="rc-addr">📍 ${esc(o.customer_address||'—')}${o.cust_region?' · '+esc(o.cust_region):''}</div>
       <div class="rc-meta">🕒 وقت الطلب: ${fmtDT(o.created_at)}</div>
-      <div class="rc-items" id="it-${o.id}">${_itemsCache[o.id]?inlineItemsHtml(_itemsCache[o.id]):'<span class="it-load">🧾 جارٍ تحميل الأصناف…</span>'}</div>
+      <div class="rc-ih">🧾 الأصناف</div>
+      <div class="rc-items" id="it-${o.id}">${_itemsCache[o.id]?inlineItemsHtml(_itemsCache[o.id]):'<span class="it-load">⏳ جارٍ تحميل الأصناف…</span>'}</div>
 
-      <div class="grp grp-driver">
-        <div class="grp-h">🚗 ملاحظات تظهر للطيار</div>
-        <div class="qbtns">${DRIVER_TAGS.map(qbtn).join('')}${customButtons.filter(c=>c.audience==='driver').map(c=>cbtn(o,c)).join('')}</div>
-        ${drvTags.length?`<div class="chips">${drvTags.map(chip).join('')}</div>`:''}
-      </div>
-      <div class="grp grp-pharm">
-        <div class="grp-h">💊 ملاحظات داخلية للصيدلية (لا تظهر للطيار)</div>
-        <div class="qbtns">${PHARM_TAGS.map(qbtn).join('')}${customButtons.filter(c=>c.audience==='pharmacy').map(c=>cbtn(o,c)).join('')}</div>
-        ${phTags.length?`<div class="chips">${phTags.map(chip).join('')}</div>`:''}
+      <div class="rc-tools">
+        <div class="grp grp-driver">
+          <div class="grp-h">🚗 ملاحظات تظهر للطيار</div>
+          <div class="qbtns">${DRIVER_TAGS.map(qbtn).join('')}${customButtons.filter(c=>c.audience==='driver').map(c=>cbtn(o,c)).join('')}</div>
+          ${drvTags.length?`<div class="chips">${drvTags.map(chip).join('')}</div>`:''}
+        </div>
+        <div class="grp grp-pharm">
+          <div class="grp-h">💊 ملاحظات داخلية للصيدلية (لا تظهر للطيار)</div>
+          <div class="qbtns">${PHARM_TAGS.map(qbtn).join('')}${customButtons.filter(c=>c.audience==='pharmacy').map(c=>cbtn(o,c)).join('')}</div>
+          ${phTags.length?`<div class="chips">${phTags.map(chip).join('')}</div>`:''}
+        </div>
       </div>
     </div>
     <div class="rc-foot">
