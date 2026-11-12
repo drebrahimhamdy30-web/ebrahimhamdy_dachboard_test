@@ -26,7 +26,21 @@ param(
 $ErrorActionPreference = "Stop"
 $logPath = [System.IO.Path]::ChangeExtension($ConfigPath, ".log")
 $inv = [Globalization.CultureInfo]::InvariantCulture
-function Log($m){ $l = "{0}  {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $m; Add-Content $logPath $l; Write-Host $l }
+<#  السجل بيتكتب UTF-8 بلا BOM.
+    `Add-Content` من غير `-Encoding` بتكتب بترميز ويندوز المحلي،
+    فالعربي كان بيطلع علامات استفهام:
+      [saved_sales/san] ok ??????=0 ????=0
+    وده أول ملف بنفتحه وقت أي عطل — فأي رسالة خطأ عربية كانت بتوصل
+    مشوّهة. (اتكشف 2026-11-12 وإحنا بنلاحق وقفة المحرّك.)
+    بـ`AppendAllText` + `UTF8Encoding($false)` الترميز صريح ومفيش
+    BOM يتكرر مع كل سطر. ومحوّط بـtry عشان قفل على الملف ما يوقّفش
+    الجولة — السجل مايستاهلش إنه يكسر المزامنة.  #>
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+function Log($m){
+  $l = "{0}  {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $m
+  try { [System.IO.File]::AppendAllText($logPath, $l + [Environment]::NewLine, $utf8NoBom) } catch {}
+  Write-Host $l
+}
 
 try { $cfg = Get-Content $ConfigPath -Raw | ConvertFrom-Json } catch { Log "FATAL config: $($_.Exception.Message)"; exit 1 }
 $SB = $cfg.supabaseUrl.TrimEnd('/')
