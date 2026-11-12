@@ -12,11 +12,18 @@
 create table if not exists public.review_shifts(
   id            bigint generated always as identity primary key,
   reviewer_name text not null,
-  branch_id     int,
+  branch_id     uuid,              -- uuid زي orders.branch_id/branches.id (مش int)
   started_at    timestamptz not null default now(),
   ended_at      timestamptz,
   started_by    text
 );
+-- لو الجدول اتعمل قبل كده بـint، صحّح النوع
+do $$ begin
+  if exists(select 1 from information_schema.columns where table_name='review_shifts' and column_name='branch_id' and data_type<>'uuid') then
+    alter table public.review_shifts alter column branch_id drop default;
+    alter table public.review_shifts alter column branch_id type uuid using null;
+  end if;
+end $$;
 alter table public.review_shifts enable row level security;
 grant select, insert, update on public.review_shifts to authenticated;
 grant all on public.review_shifts to service_role;

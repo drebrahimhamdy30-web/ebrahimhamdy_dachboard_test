@@ -248,7 +248,7 @@ async function startShift(){
   if(!name){ toast('اكتب اسمك الأول'); return; }
   load(true);
   try{
-    const {data,error}=await db.from('review_shifts').insert({reviewer_name:name,branch_id:Number(curBranchId),started_by:currentUser?.full_name||name}).select();
+    const {data,error}=await db.from('review_shifts').insert({reviewer_name:name,branch_id:curBranchId,started_by:currentUser?.full_name||name}).select();
     if(error) throw error;
     shift={id:data[0].id, reviewer_name:name, branch_id:curBranchId, started_at:data[0].started_at};
     localStorage.setItem(SHIFT_KEY,JSON.stringify(shift));
@@ -283,7 +283,7 @@ async function loadFeed(){
   // طلبات الفرع من بداية الشيفت — الأقدم فوق. شيفت واحد لفرع واحد فأقل بكتير من السقف.
   let q=db.from('orders')
     .select('id,customer_name,cust_code,customer_phone,customer_address,cust_region,branch_id,status,total_bill_net,extra_collection,payment_method,bill_no,bill_type,created_at,notes,staff_notes,pharmacist_reviewed_at,pharmacist_reviewed_by')
-    .eq('branch_id',Number(curBranchId))
+    .eq('branch_id',curBranchId)
     .gte('created_at',shift.started_at)
     .order('created_at',{ascending: activeTab==='pending'})
     .limit(1000); // data-ok: طلبات شيفت واحد لفرع واحد — أقل بكتير من سقف الألف
@@ -306,10 +306,9 @@ async function loadTags(ids){
 
 async function updateCounts(){
   try{
-    const base=db.from('orders').select('id',{count:'exact',head:true}).eq('branch_id',Number(curBranchId)).gte('created_at',shift.started_at);
     const [pend,done,fu]=await Promise.all([
-      db.from('orders').select('id',{count:'exact',head:true}).eq('branch_id',Number(curBranchId)).gte('created_at',shift.started_at).is('pharmacist_reviewed_at',null),
-      db.from('orders').select('id',{count:'exact',head:true}).eq('branch_id',Number(curBranchId)).gte('created_at',shift.started_at).not('pharmacist_reviewed_at','is',null),
+      db.from('orders').select('id',{count:'exact',head:true}).eq('branch_id',curBranchId).gte('created_at',shift.started_at).is('pharmacist_reviewed_at',null),
+      db.from('orders').select('id',{count:'exact',head:true}).eq('branch_id',curBranchId).gte('created_at',shift.started_at).not('pharmacist_reviewed_at','is',null),
       db.from('order_review_tags').select('id',{count:'exact',head:true}).eq('tag','followup').is('done_at',null)
     ]);
     document.getElementById('c-pending').textContent=pend.count||0;
