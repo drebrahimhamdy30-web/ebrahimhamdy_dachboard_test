@@ -111,20 +111,73 @@ create or replace function public.txn_receipts_for(
   p_ref_ids text[]
 ) returns jsonb
 language sql stable security definer set search_path = public as $$
-  /* الأحدث لكل حركة — لو اترفعت صورة تانية بتحلّ محل اللي قبلها في
-     العرض، والقديمة بتفضل محفوظة. */
-  select coalesce(jsonb_object_agg(ref_id, jsonb_build_object(
-           'id', id, 'path', path, 'mime', mime,
-           'by', uploaded_by,
-           'at', to_char(uploaded_at at time zone 'Africa/Cairo', 'YYYY-MM-DD HH24:MI')
-         )), '{}'::jsonb)
+  /* قائمة لكل حركة — تحويل واحد ممكن يبقى له إيصال وسكرين شوت
+     للرصيد بعده، والاتنين دليل. */
+  select coalesce(jsonb_object_agg(ref_id, imgs), '{}'::jsonb)
   from (
-    select distinct on (ref_id) ref_id, id, path, mime, uploaded_by, uploaded_at
+    select ref_id,
+           jsonb_agg(jsonb_build_object(
+             'id', id, 'path', path, 'mime', mime, 'by', uploaded_by,
+             'at', to_char(uploaded_at at time zone 'Africa/Cairo', 'YYYY-MM-DD HH24:MI')
+           ) order by uploaded_at) as imgs
     from public.txn_receipts
     where kind = p_kind and branch = p_branch and ref_id = any(p_ref_ids)
-    order by ref_id, uploaded_at desc
+    group by ref_id
   ) t;
 $$;
+
+/* ═══ شيل صورة اترفعت بالغلط ═══════════════════════════════════════
+   «مفيش حذف خالص» كان تشدّد في غير محلّه: الموظف يختار صورة غلط من
+   المعرض فتفضل قدام المراجع للأبد. لكن الحذف المفتوح بيلغي معنى
+   الدليل أصلًا. فالوسط:
+     · قبل المراجعة  →  صاحب الصورة (أو الأدمن) يقدر يشيلها.
+     · بعد المراجعة  →  الدليل يتجمّد؛ الأدمن يفكّ المراجعة الأول
+                        لو فيه سبب، والفكّ نفسه متسجّل.
+   والشيل بيمسح صف storage.objects كمان فالصورة ما تتوقّعش تاني. */
+create or replace function public.delete_txn_receipt(p_id bigint)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare rec public.txn_receipts; v_actor text; v_admin boolean; v_reviewed boolean;
+begin
+  if not public.shift_can_review() then
+    raise exception 'غير مصرّح';
+  end if;
+
+  select * into rec from public.txn_receipts where id = p_id;
+  if not found then
+    return jsonb_build_object('success', true);   -- اتشالت قبل كده
+  end if;
+
+  v_actor := public.bank_actor();
+  v_admin := coalesce(public.jwt_app_role(),'') = 'admin';
+  if rec.uploaded_by is distinct from v_actor and not v_admin then
+    raise exception 'الصورة دي مرفوعة من %، ومش من حقك تشيلها', rec.uploaded_by;
+  end if;
+
+  if rec.kind = 'card' then
+    select exists (select 1 from public.shift_txn_reviews r
+                    where r.branch = rec.branch
+                      and r.fh_id::text = rec.ref_id) into v_reviewed;
+  else
+    /* مفتاح المحافظ في الشاشة هو src:row_id */
+    select exists (select 1 from public.wallet_txn_reviews r
+                    where r.src || ':' || r.row_id::text = rec.ref_id) into v_reviewed;
+  end if;
+
+  if v_reviewed then
+    raise exception 'الحركة دي اتراجعت خلاص — الدليل بيتجمّد بعد المراجعة';
+  end if;
+
+  delete from storage.objects where bucket_id = 'receipts' and name = rec.path;
+  delete from public.txn_receipts where id = rec.id;
+  return jsonb_build_object('success', true, 'id', rec.id);
+end $$;
+
+comment on function public.delete_txn_receipt is
+  'شيل صورة تحويل اترفعت بالغلط — قبل المراجعة بس، ولصاحبها أو للأدمن.';
+
+revoke all on function public.delete_txn_receipt(bigint) from public;
+grant execute on function public.delete_txn_receipt(bigint) to authenticated;
 
 revoke all on function public.attach_txn_receipt(text,text,text,text,text,integer) from public;
 revoke all on function public.txn_receipts_for(text,text,text[]) from public;
