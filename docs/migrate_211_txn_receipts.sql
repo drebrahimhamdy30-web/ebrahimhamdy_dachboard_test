@@ -23,8 +23,9 @@
 --  ⚠️ اتطبّق على السحابة 2026-11-13 تحت أسماء migrate_209*
 --     (الرقم ٢٠٩ كان محجوز في `docs/` واتكشف بعدها) — الملف ده هو
 --     المرجع، ولازم يتطبّق على **الذاتي** كمان:
---       docker exec -i supabase-db psql -U postgres -d postgres \
---         < docs/migrate_211_txn_receipts.sql
+--       cd /root/supabase-project && docker exec -i $(docker compose ps -q db) \
+--         psql -U supabase_admin -d postgres -f - \
+--         < /root/phalix-repo/docs/migrate_211_txn_receipts.sql
 -- ═══════════════════════════════════════════════════════════════════
 
 create table if not exists public.txn_receipts (
