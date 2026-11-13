@@ -131,6 +131,17 @@
    «باي موب 7 — إيصال 4471» 171px. فـ200 بتغطّي اللي المراجع بيكتبه
    فعلًا مع هامش. */
 .crnote{width:100%;min-width:200px}
+/* ═══ عمود «صورة التحويل» ═══════════════════
+   الخانة كلها منطقة إفلات: الموظف يسحب صورة التحويل من معرض صوره
+   عليها، أو يضغط فيفتح له المتصفح نافذة الاختيار. ومفيش capture على
+   المُدخل — دي لقطة شاشة محفوظة مش صورة بتتاخد بالكاميرا. */
+td.rcpt{text-align:center;cursor:pointer;min-width:104px}
+td.rcpt.over{outline:2px dashed #0f766e;outline-offset:-3px;background:#f0fdfa}
+.rcpt-add{display:inline-block;padding:3px 9px;border:1px dashed #cbd5e1;border-radius:7px;
+          color:var(--text-muted,#64748b);font-size:.74rem;white-space:nowrap}
+td.rcpt:hover .rcpt-add{border-color:#0f766e;color:#0f766e}
+.rcpt-has{color:#0f766e;font-size:.78rem;text-decoration:none;white-space:nowrap}
+.rcpt-wait{font-size:.74rem;color:var(--text-muted,#64748b)}
 .wrnote{display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin-top:3px}
 .wrnote .inp{border:1px solid var(--border,#cbd5e1);border-radius:6px;padding:.15rem .3rem;
   font-family:inherit;font-size:.72rem;min-width:130px;flex:1}
@@ -233,6 +244,7 @@ async function visiblePoints(points){
   return out;
 }
 async function init(){
+  rcptInit();
   try{ if(typeof Session!=='undefined' && Session.tabAllowed)
          CAN_TOTALS = await Session.tabAllowed('current_shift','totals'); }catch(e){ CAN_TOTALS = true; }
   try{ IS_ADMIN = (typeof Session!=='undefined' && Session.isAdmin) ? Session.isAdmin() : false; }catch(e){ IS_ADMIN = false; }
@@ -371,7 +383,7 @@ function renderCardReview(d){
       <span class="shown" id="shown"></span>
     </div>
     <div class="tablecard"><table class="algn" id="crTable"><thead><tr>
-      <th class="rv">المراجعة</th><th>الحالة</th><th class="r">الدليل</th>
+      <th class="rv">المراجعة</th><th>الحالة</th><th class="r">الدليل</th><th>صورة التحويل</th>
       <th>الوقت</th><th>النوع</th><th>قيمة المدفوع</th><th>القيمة</th><th class="r">من</th><th class="r">الى</th><th class="r">المستخدم</th><th>الجهاز</th><th>الحساب</th><th class="r">رقم الفاتورة</th><th class="r">الإسم</th><th class="r">ملاحظات</th>
     </tr></thead><tbody id="tb"></tbody></table></div>
     <div class="crpager" id="crPager"></div>`;
@@ -696,6 +708,132 @@ function colOrderInit(sel, tag, redraw){
   colOrderApply(t, tag); colOrderEnable(t, tag, redraw);
 }
 
+/* ═══ صورة التحويل ══════════════════════════
+   الموظف اللي عمل التحويل بيرفق صورته ساعتها، والمراجع بيشوفها بعدين
+   جنب «الدليل» المكتوب — فالإقفال بيبقى وراه إثبات، مش كلام.
+
+   ⚠️ الصورة **مش** مخزّنة على صف المراجعة: الموظف بيرفق **قبل** ما
+      المراجعة تحصل، وساعتها صف المراجعة لسه مش موجود. فجدول مستقل
+      txn_receipts مربوط بالحركة نفسها (migrate_209).
+
+   والـbucket خاص مش عام — دي إيصالات فيها مبالغ وأسماء عملاء،
+   والرابط العام بيفضل شغّال للأبد ولأي حد يوصله. العرض برابط موقّع
+   بيعيش ١٠ دقايق.
+
+   ومفيش حذف من المتصفح: الصورة دليل. لو اترفعت صورة غلط بترفع غيرها
+   والشاشة بتعرض الأحدث، والقديمة بتفضل محفوظة. */
+const RCPT = {};
+const RCPT_MAX = 5 * 1024 * 1024;
+const RCPT_OK = ['image/jpeg','image/png','image/webp','image/heic','application/pdf'];
+function rcptKey(kind, br, ref){ return kind + ':' + br + ':' + ref; }
+function rcptCell(kind, br, ref){
+  const k = esc(kind), b = esc(String(br||'')), r = esc(String(ref));
+  return '<td class="rcpt" data-rk="' + k + '" data-rb="' + b + '" data-rr="' + r + '"' +
+         ' title="اسحب صورة التحويل هنا أو اضغط لاختيارها">' + rcptInner(kind, br, ref) + '</td>';
+}
+function rcptInner(kind, br, ref){
+  const r = RCPT[rcptKey(kind, br, ref)];
+  if(!r) return '<span class="rcpt-add">＋ إرفاق</span>';
+  return '<a class="rcpt-has" href="#" onclick="rcptOpen(this);return false">📎 عرض</a>' +
+         '<div class="dsub">' + esc(r.by||'') + (r.at ? ' · ' + esc(r.at) : '') + '</div>';
+}
+/* بنجيب الموجود بعد ما الصفوف تترسم — كده مسار تحميل الحركات نفسه
+   مابيتغيّرش، وأي تبويب بيحط خانة بالكلاس ده بيشتغل تلقائي. */
+async function rcptSync(){
+  const groups = {};
+  document.querySelectorAll('td.rcpt').forEach(td => {
+    const g = td.dataset.rk + '|' + td.dataset.rb;
+    (groups[g] = groups[g] || []).push(String(td.dataset.rr));
+  });
+  const keys = Object.keys(groups);
+  if(!keys.length) return;
+  await Promise.all(keys.map(async g => {
+    const i = g.indexOf('|'), kind = g.slice(0, i), br = g.slice(i + 1);
+    const d = await rpc('txn_receipts_for', { p_kind:kind, p_branch:br, p_ref_ids:groups[g] });
+    if(d) Object.keys(d).forEach(ref => { RCPT[rcptKey(kind, br, ref)] = d[ref]; });
+  }));
+  /* إعادة استعلام مش استخدام العقد القديمة — ممكن الجدول يكون اتعاد
+     رسمه وإحنا مستنيين الرد. */
+  document.querySelectorAll('td.rcpt').forEach(td => {
+    if(RCPT[rcptKey(td.dataset.rk, td.dataset.rb, td.dataset.rr)])
+      td.innerHTML = rcptInner(td.dataset.rk, td.dataset.rb, td.dataset.rr);
+  });
+}
+async function rcptUpload(td, file){
+  const kind = td.dataset.rk, br = td.dataset.rb, ref = td.dataset.rr;
+  if(file.size > RCPT_MAX){ alert('حجم الملف أكبر من ٥ ميجابايت'); return; }
+  if(file.type && RCPT_OK.indexOf(file.type) < 0){ alert('المقبول: صورة أو ملف PDF فقط'); return; }
+  const prev = td.innerHTML;
+  td.innerHTML = '<span class="rcpt-wait">جارٍ الرفع…</span>';
+  const ext = ((file.name||'').split('.').pop()||'jpg').toLowerCase().replace(/[^a-z0-9]/g,'') || 'jpg';
+  const safe = s => String(s).replace(/[^A-Za-z0-9_-]/g, '_');
+  const path = kind + '/' + safe(br) + '/' + safe(ref) + '_' + Date.now() + '.' + ext;
+  try{
+    const r = await fetch(SB_URL_API + '/storage/v1/object/receipts/' + path, {
+      method:'POST',
+      headers: await sbH({ 'Content-Type': file.type || 'application/octet-stream', 'x-upsert':'true' }),
+      body: file });
+    if(!r.ok) throw new Error(await r.text());
+  }catch(e){ td.innerHTML = prev; alert('تعذّر رفع الصورة'); return; }
+  const res = await rpcWrite('attach_txn_receipt', { p_kind:kind, p_branch:br, p_ref_id:String(ref),
+                              p_path:path, p_mime:file.type||null, p_bytes:file.size });
+  if(res.success !== true){ td.innerHTML = prev; alert(res.error); return; }
+  RCPT[rcptKey(kind, br, ref)] = { id:res.id, path:path, mime:file.type,
+                                   by:res.uploaded_by, at:res.uploaded_at };
+  td.innerHTML = rcptInner(kind, br, ref);
+}
+async function rcptOpen(a){
+  const td = a.closest('td.rcpt'); if(!td) return;
+  const r = RCPT[rcptKey(td.dataset.rk, td.dataset.rb, td.dataset.rr)]; if(!r) return;
+  const lbl = a.textContent; a.textContent = '…';
+  try{
+    const resp = await fetch(SB_URL_API + '/storage/v1/object/sign/receipts/' + r.path, {
+      method:'POST', headers: await sbH({'Content-Type':'application/json'}),
+      body: JSON.stringify({ expiresIn: 600 }) });
+    if(!resp.ok) throw new Error('sign');
+    const j = await resp.json();
+    window.open(SB_URL_API + '/storage/v1' + j.signedURL, '_blank', 'noopener');
+  }catch(e){ alert('تعذّر فتح الصورة'); }
+  a.textContent = lbl;
+}
+const rcptIsFile = e => !!(e.dataTransfer &&
+  Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0);
+const rcptTd = e => (e.target && e.target.closest) ? e.target.closest('td.rcpt') : null;
+function rcptInit(){
+  if(document.getElementById('rcptFile')) return;
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.id = 'rcptFile'; inp.accept = 'image/*,application/pdf';
+  inp.style.display = 'none';
+  inp.onchange = () => { const f = inp.files && inp.files[0];
+                         if(f && rcptInit.td) rcptUpload(rcptInit.td, f); };
+  document.body.appendChild(inp);
+
+  document.addEventListener('click', e => {
+    if(!e.target.closest) return;
+    if(e.target.closest('.rcpt-has')) return;      // العرض له رابطه الخاص
+    const td = e.target.closest('td.rcpt'); if(!td) return;
+    rcptInit.td = td; inp.value = ''; inp.click();
+  });
+  /* ⚠️ المنع على مستوى النافذة كمان لما الإفلات يقع **بره** الخانة:
+     من غيره المتصفح بيفتح الصورة مكان الشاشة والموظف يفقد شغله. */
+  window.addEventListener('dragover', e => {
+    if(!rcptIsFile(e)) return;
+    e.preventDefault();
+    const td = rcptTd(e);
+    document.querySelectorAll('td.rcpt.over').forEach(x => { if(x !== td) x.classList.remove('over'); });
+    if(td) td.classList.add('over');
+  });
+  window.addEventListener('dragleave', e => { const td = rcptTd(e); if(td) td.classList.remove('over'); });
+  window.addEventListener('drop', e => {
+    if(!rcptIsFile(e)) return;
+    e.preventDefault();
+    document.querySelectorAll('td.rcpt.over').forEach(x => x.classList.remove('over'));
+    const td = rcptTd(e); if(!td) return;
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if(f) rcptUpload(td, f);
+  });
+}
+
 function crNoteId(t){ return 'cn-' + t.branch + '-' + t.fh_id; }
 function crEvidence(t, lock){
   if(t.evidence) return esc(t.evidence);
@@ -740,6 +878,7 @@ function drawRows(){
     const stCells = (VIEW==='cards')
       ? `<td>${stC?`<span class="pill" style="background:${stC[1]};color:${stC[2]}">${stC[0]}</span>`:'<span class="dash">—</span>'}</td>`
         + `<td class="r ev">${crEvidence(t, lock)}</td>`
+        + rcptCell('card', t.branch||BRANCH, t.fh_id)
       : '';
     /* رقم فاتورة البيع (sth_id) و«الإسم» (visa_name) من eplus —
        تبويب البطاقات بس. eplus بيحط '0' في خانة الإسم لما الكاشير
@@ -755,9 +894,9 @@ function drawRows(){
       `<td class="r">${esc(t.from||'—')}</td><td class="r">${esc(t.to||'—')}</td>`+
       `<td class="r">${esc(t.user_name||'—')}</td><td class="dev">${esc(t.computer||'—')}</td>`+
       `<td class="${iv?'visa':''}">${acct}</td>`+exCells+`<td class="notes">${esc(t.notes||'')}</td></tr>`;
-  }).join('') || `<tr><td colspan="${VIEW==='cards'?15:11}" class="state">لا توجد حركات مطابقة.</td></tr>`;
+  }).join('') || `<tr><td colspan="${VIEW==='cards'?16:11}" class="state">لا توجد حركات مطابقة.</td></tr>`;
   /* الترتيب المحفوظ يتطبّق على الرأس والصفوف بعد كل رسم */
-  if(VIEW==='cards') colOrderInit('#crTable', 'cardreview', drawRows);
+  if(VIEW==='cards'){ colOrderInit('#crTable', 'cardreview', drawRows); rcptSync(); }
   document.querySelectorAll('.eacct').forEach(s=>s.onchange=()=>{
     const t=TXN[+s.dataset.i]; const v=s.value;
     if(v){ t.kind='فيزا'; t.channel=v; if(t.paid==null) t.paid=+t.amount; if(t.manual==null) t.manual=false; } else { t.kind='كاش'; t.channel=''; }
@@ -847,7 +986,13 @@ function wrProof(r){
 async function wrSaveNote(src, id){
   const el = document.getElementById('nt-' + src + ':' + id);
   const note = (el||{}).value || '';
-  if(!note.trim()){ alert('يُرجى كتابة الدليل قبل التأكيد'); return; }
+  /* الدليل المكتوب **أو** صورة التحويل — أيهما كفى. اللي مرفوض هو
+     الإقفال الفاضي: ضغطة من غير نص ولا صورة. */
+  const rcTd = document.querySelector('td.rcpt[data-rk="wallet"][data-rr="' + src + ':' + id + '"]');
+  const hasImg = !!(rcTd && RCPT[rcptKey('wallet', rcTd.dataset.rb, src + ':' + id)]);
+  if(!note.trim() && !hasImg){
+    alert('يُرجى كتابة الدليل أو إرفاق صورة التحويل قبل التأكيد'); return;
+  }
   const nsrc = noteSrcOf(note, el ? el.dataset.sg : '');
   const r = await rpcWrite('wallet_review_set', { p_src:src, p_id:id, p_kind:'noted',
                                                   p_note:note, p_note_src:nsrc });
@@ -880,7 +1025,7 @@ function renderWalletReview(d){
     <div class="tablecard"><table class="algn" id="wrTable"><thead><tr>
       <th>الحالة</th><th>المصدر</th><th>الوقت</th><th class="r">الماكينة / المحفظة</th>
       <th>الفرع</th><th>القيمة</th><th class="r">رقم العملية</th><th>الرصيد بعدها</th>
-      <th>النوع</th><th class="r">الدليل</th>
+      <th>النوع</th><th class="r">الدليل</th><th>صورة التحويل</th>
     </tr></thead><tbody id="wtb"></tbody></table></div>
     <div class="crpager" id="wrPager"></div>`;
   const rows=(d.rows||[]);
@@ -900,10 +1045,12 @@ function renderWalletReview(d){
       `<td class="r ev">${esc(r.ref||'—')}</td>`+
       `<td class="num">${r.balance!=null?fmt(r.balance):'—'}</td>`+
       `<td>${esc(r.kind||'—')}</td>`+
-      `<td class="r ev">${wrProof(r)}</td></tr>`;
-  }).join('') : '<tr><td colspan="10" class="state">لا توجد حركات في هذه الشريحة</td></tr>';
+      `<td class="r ev">${wrProof(r)}</td>`+
+      rcptCell('wallet', r.branch||BRANCH, r.src+':'+r.id)+`</tr>`;
+  }).join('') : '<tr><td colspan="11" class="state">لا توجد حركات في هذه الشريحة</td></tr>';
 
   colOrderInit('#wrTable', 'walletreview', () => renderWalletReview(d));
+  rcptSync();
 
   const go=()=>{ WR.page=1; loadWalletTxns(); };
   document.querySelectorAll('.crst[data-w]').forEach(b=>b.onclick=()=>{
