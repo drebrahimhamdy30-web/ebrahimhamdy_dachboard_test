@@ -568,6 +568,36 @@ async function rpcWrite(fn, body){
   return { success:false, error: (out && (out.message || out.hint || out.error)) || ('فشل العملية ('+r.status+')') };
 }
 
+/* ═══ صرف الفيزا من نقطة البيع لحساب المحفظة ══════════════════════
+   عند «تم» على معاملة فيزا فيها صورة تحويل + «قيمة مدفوع» > 0، بندخّل
+   طلب صرف في طابور سحابي، وعامل على الماستر بيكتب حركة eplus حقيقية
+   (نقطة البيع → حساب المحفظة). بنتابع الحالة ونعرض «تم صرف X لحساب Y».
+   الفروع المفعّلة بس (تجريبي — المعمورة)؛ باقي الفروع تتضاف بعد تجهيز
+   خريطتها وتشغيل العامل عليها. */
+const DISBURSE_BRANCHES = ['mamora'];
+async function maybeDisburse(t){
+  const branch = t.branch || BRANCH;
+  if(!DISBURSE_BRANCHES.includes(branch)) return;
+  const paid = paidOf(t);
+  if(!(t.kind==='فيزا' && t.fh_id && paid>0 && t.channel)) return;
+  const hasImg = ((RCPT[rcptKey('card', branch, t.fh_id)]||[]).length) > 0;
+  if(!hasImg) return;                 // الصرف بشرط صورة تحويل مرفقة
+  const q = await rpcWrite('enqueue_wallet_disbursement',
+              { p_branch:branch, p_fh_id:t.fh_id, p_channel:t.channel, p_paid:paid });
+  if(q.success !== true){ showToast('⚠️ الصرف: ' + (q.error||'تعذّر')); return; }
+  if(q.already && q.status==='done'){ showToast('✓ الصرف اتعمل قبل كده'); return; }
+  showToast('⏳ جاري صرف ' + fmt(paid) + ' لحساب ' + t.channel + '…');
+  for(let k=0; k<45; k++){            // متابعة ~90 ثانية (تغطّي نبضة العامل كل دقيقة)
+    await new Promise(res=>setTimeout(res, 2000));
+    const s = await rpc('wallet_disbursement_status', { p_branch:branch, p_fh_id:t.fh_id });
+    if(s && s.status==='done'){
+      showToast('✓ تم صرف ' + fmt(s.paid||paid) + ' من نقطة البيع لحساب ' + (s.resolved_to_name||t.channel));
+      return;
+    }
+    if(s && s.status==='error'){ showToast('❌ فشل الصرف: ' + (s.error||'')); return; }
+  }
+  showToast('⏳ الصرف في الطابور — هيتم خلال لحظات');
+}
 async function reviewTxn(i){
   const t = TXN[i]; if(!t || t.rv) return;
   const btn = document.querySelector('.btn-rv[data-i="'+i+'"]');
@@ -587,6 +617,7 @@ async function reviewTxn(i){
   /* في تبويب البطاقات الصف بيفضل مكانه ويتقفل — من غير إعادة تحميل
      عشان الموظف ما يفقدش مكانه في القايمة وهو بيراجع ورا بعض. */
   if(VIEW==='cards') drawRows(); else render();
+  maybeDisburse(t);   // صرف تلقائي لو فيزا بصورة + مدفوع>0 (الفروع المفعّلة)
 }
 async function unreviewTxn(i){
   const t = TXN[i]; if(!t || !t.rv) return;
