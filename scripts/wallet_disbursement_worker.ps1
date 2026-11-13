@@ -17,7 +17,15 @@ param(
   [string]$Branch = "mamora",
   [switch]$Apply,
   [int]$Uid = 1,                 # eplus sec_insert_uid for the automated disbursement
-  [int]$Max = 50
+  [int]$Max = 50,
+  # --- eplus write creds (master style: encrypted password file + AES key, task runs as SYSTEM) ---
+  [System.Security.SecureString]$Password,
+  [string]$PasswordFile,         # e.g. C:\phalix\rw.sec  (same as region writeback)
+  [string]$KeyFile,              # e.g. C:\phalix\rw.key
+  [string]$WriterUser,           # default phalix_writer
+  # --- cloud ---
+  [string]$SbUrl,
+  [string]$SbKey = $env:SUPABASE_SERVICE_KEY
 )
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -25,11 +33,32 @@ $ErrorActionPreference = "Stop"
 # pharmacy store id per branch (fh_cost_sto_id), same CASE as sync_jobs
 $COST_STO = @{ mamora = 1; san = 26; bishr = 28; seyouf = 29 }
 
-$cfg = [System.IO.File]::ReadAllText($ConfigPath, [System.Text.Encoding]::UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
-$SB = $cfg.supabaseUrl.TrimEnd('/')
-$KEY = $cfg.serviceKey
-$b = $cfg.branches.$Branch
-if (-not $b) { Write-Host "no branch config for $Branch"; exit 1 }
+# ---- config (optional: used for branch eplus server + fallbacks) ----
+$cfg = $null
+if (Test-Path $ConfigPath) { try { $cfg = [System.IO.File]::ReadAllText($ConfigPath, [System.Text.Encoding]::UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json } catch {} }
+
+# ---- cloud (service_role): -SbKey / env SUPABASE_SERVICE_KEY / config.serviceKey ----
+if (-not $SbKey -and $cfg) { $SbKey = $cfg.serviceKey }
+if ([string]::IsNullOrWhiteSpace($SbKey)) { Write-Host "STOP: no service key (set `$env:SUPABASE_SERVICE_KEY or config.serviceKey)"; exit 1 }
+if (-not $SbUrl) { if ($cfg -and $cfg.supabaseUrl) { $SbUrl = $cfg.supabaseUrl } else { $SbUrl = "https://rxtjoqulmgkkcohmgzgi.supabase.co" } }
+$SB = $SbUrl.TrimEnd('/')
+$KEY = $SbKey
+
+# ---- eplus write creds (phalix_writer): -Password / -PasswordFile(+-KeyFile) / config / prompt ----
+$bcfg = if ($cfg) { $cfg.branches.$Branch } else { $null }
+$server = if ($bcfg -and $bcfg.server) { $bcfg.server } else { "localhost,1433" }
+if (-not $WriterUser) { $WriterUser = if ($bcfg -and $bcfg.writer_user) { $bcfg.writer_user } else { "phalix_writer" } }
+if (-not $Password -and $PasswordFile -and (Test-Path $PasswordFile)) {
+  $enc = (Get-Content $PasswordFile -Raw).Trim()
+  if ($KeyFile -and (Test-Path $KeyFile)) { $Password = $enc | ConvertTo-SecureString -Key (Get-Content $KeyFile -Encoding Byte) }
+  else { $Password = $enc | ConvertTo-SecureString }
+}
+$pw = $null
+if ($Password) { $pw = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($Password)) }
+elseif ($bcfg -and $bcfg.writer_password) { $pw = $bcfg.writer_password }
+if ([string]::IsNullOrWhiteSpace($pw)) { $sec = Read-Host "phalix_writer password" -AsSecureString; $pw = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)) }
+if ([string]::IsNullOrWhiteSpace($pw)) { Write-Host "STOP: no eplus writer password"; exit 1 }
+
 if (-not $COST_STO.ContainsKey($Branch)) { Write-Host "no cost-store mapping for $Branch"; exit 1 }
 $coststo = $COST_STO[$Branch]
 
@@ -40,16 +69,15 @@ function RestPatch($path, $body) {
 }
 
 $mode = if ($Apply) { "APPLY" } else { "DRY-RUN" }
-Write-Host "== wallet disbursement worker ($mode) branch=$Branch ==" -ForegroundColor Cyan
+Write-Host "== wallet disbursement worker ($mode) branch=$Branch  (eplus: $WriterUser@$server) ==" -ForegroundColor Cyan
+
+# open eplus connection first, so even an empty run validates the writer credentials
+$cn = New-Object System.Data.SqlClient.SqlConnection("Server=$server;Database=Genius;User ID=$WriterUser;Password=$pw;Connect Timeout=30")
+try { $cn.Open() } catch { Write-Host "STOP: eplus connect failed ($WriterUser@$server): $($_.Exception.Message)"; exit 1 }
 
 $rows = RestGet "wallet_disbursement_queue?status=eq.pending&branch=eq.$Branch&select=*&order=id.asc&limit=$Max"
-if (-not $rows -or $rows.Count -eq 0) { Write-Host "no pending rows."; exit 0 }
+if (-not $rows -or $rows.Count -eq 0) { Write-Host "no pending rows (eplus + cloud OK)."; $cn.Close(); exit 0 }
 Write-Host ("pending: " + $rows.Count)
-
-$cn = New-Object System.Data.SqlClient.SqlConnection("Server=$($b.server);Database=Genius;User ID=$($b.writer_user);Password=$($b.writer_password);Connect Timeout=30")
-$cn.Open()
-
-function OneRow($v) { $r=$cn.CreateCommand(); $r.CommandText=$args[0] }
 
 foreach ($row in $rows) {
   $id = [int]$row.id; $fh = [long]$row.fh_id
