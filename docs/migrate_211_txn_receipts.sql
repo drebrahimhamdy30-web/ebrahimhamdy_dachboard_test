@@ -126,11 +126,11 @@ language sql stable security definer set search_path = public as $$
   ) t;
 $$;
 
-/* ═══ شيل صورة اترفعت بالغلط ═══════════════════════════════════════
+/* ═══ حذف صورة اترفعت بالغلط ═══════════════════════════════════════
    «مفيش حذف خالص» كان تشدّد في غير محلّه: الموظف يختار صورة غلط من
    المعرض فتفضل قدام المراجع للأبد. لكن الحذف المفتوح بيلغي معنى
    الدليل أصلًا. فالوسط:
-     · قبل المراجعة  →  صاحب الصورة (أو الأدمن) يقدر يشيلها.
+     · قبل المراجعة  →  صاحب الصورة (أو الأدمن) يقدر يحذفها.
      · بعد المراجعة  →  الدليل يتجمّد؛ الأدمن يفكّ المراجعة الأول
                         لو فيه سبب، والفكّ نفسه متسجّل.
    ⚠️ سوبابيز بترفض `delete from storage.objects` من SQL («Direct
@@ -144,18 +144,18 @@ language plpgsql security definer set search_path = public as $$
 declare rec public.txn_receipts; v_actor text; v_admin boolean; v_reviewed boolean;
 begin
   if not public.shift_can_review() then
-    raise exception 'غير مصرّح';
+    raise exception 'غير مصرّح بحذف صور التحويل';
   end if;
 
   select * into rec from public.txn_receipts where id = p_id;
   if not found then
-    return jsonb_build_object('success', true);   -- اتشالت قبل كده
+    return jsonb_build_object('success', true);   -- اتحذفت قبل كده
   end if;
 
   v_actor := public.bank_actor();
   v_admin := coalesce(public.jwt_app_role(),'') = 'admin';
   if rec.uploaded_by is distinct from v_actor and not v_admin then
-    raise exception 'الصورة دي مرفوعة من %، ومش من حقك تشيلها', rec.uploaded_by;
+    raise exception 'الصورة مرفوعة من %، ولا يمكنك حذفها', rec.uploaded_by;
   end if;
 
   if rec.kind = 'card' then
@@ -169,16 +169,16 @@ begin
   end if;
 
   if v_reviewed then
-    raise exception 'الحركة دي اتراجعت خلاص — الدليل بيتجمّد بعد المراجعة';
+    raise exception 'تمت مراجعة هذه الحركة — الدليل يُجمَّد بعد المراجعة ولا يمكن حذفه';
   end if;
 
   delete from public.txn_receipts where id = rec.id;
-  /* الملف نفسه بيتشال من المتصفح بالـStorage API — السطر ده مرجعه */
+  /* الملف نفسه بيتحذف من المتصفح بالـStorage API — السطر ده مرجعه */
   return jsonb_build_object('success', true, 'id', rec.id, 'path', rec.path);
 end $$;
 
 comment on function public.delete_txn_receipt is
-  'شيل صورة تحويل اترفعت بالغلط — قبل المراجعة بس، ولصاحبها أو للأدمن.';
+  'حذف صورة تحويل اترفعت بالغلط — قبل المراجعة بس، ولصاحبها أو للأدمن.';
 
 revoke all on function public.delete_txn_receipt(bigint) from public;
 grant execute on function public.delete_txn_receipt(bigint) to authenticated;
