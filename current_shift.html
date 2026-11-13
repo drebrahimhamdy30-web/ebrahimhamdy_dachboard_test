@@ -148,10 +148,12 @@ td.rcpt.over .rcpt-box{border-color:#0f766e;background:#f0fdfa}
          object-fit:cover;cursor:zoom-in;display:inline-flex;align-items:center;justify-content:center;
          font-size:.6rem;color:#64748b}
 .rcpt-item:hover .rcpt-th{border-color:#0f766e}
-/* ✕ الشيل بتبان على الهوفر بس — عشان ماتتضغطش بالغلط وهو بيكبّر */
-.rcpt-del{position:absolute;top:-6px;left:-6px;width:18px;height:18px;border-radius:50%;
-          border:1px solid #fff;background:#dc2626;color:#fff;font-size:.58rem;line-height:1;
-          padding:0;cursor:pointer;display:none;align-items:center;justify-content:center}
+/* «شيل» بتبان على الهوفر بس — عشان ماتتضغطش بالغلط وهو بيكبّر.
+   كلمة عربية مش رمز ✕: الموظف يقرا بالعربي زي باقي الشاشة. */
+.rcpt-del{position:absolute;top:-7px;left:-7px;height:17px;padding:0 6px;border-radius:9px;
+          border:1px solid #fff;background:#dc2626;color:#fff;font-size:.6rem;line-height:1;
+          font-family:inherit;cursor:pointer;display:none;align-items:center;justify-content:center;
+          white-space:nowrap}
 td.rcpt:hover .rcpt-item .rcpt-del{display:inline-flex}
 .rcpt-plus{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;
            border:1px dashed #cbd5e1;border-radius:7px;color:var(--text-muted,#64748b);
@@ -168,8 +170,10 @@ td.rcpt:hover .rcpt-plus{border-color:#0f766e;color:#0f766e}
           color:#fff;border:0;border-radius:50%;width:42px;height:42px;font-size:1.3rem;cursor:pointer}
 .rcpt-nav:hover{background:rgba(255,255,255,.3)}
 .rcpt-nav.prev{right:18px}.rcpt-nav.next{left:18px}
-.rcpt-x{position:absolute;top:14px;left:18px;background:transparent;border:0;color:#fff;
-        font-size:1.6rem;cursor:pointer;line-height:1}
+.rcpt-x{position:absolute;top:14px;left:18px;background:rgba(255,255,255,.15);border:0;color:#fff;
+        font-size:.82rem;font-family:inherit;cursor:pointer;line-height:1;
+        padding:7px 14px;border-radius:8px}
+.rcpt-x:hover{background:rgba(255,255,255,.3)}
 .wrnote{display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin-top:3px}
 .wrnote .inp{border:1px solid var(--border,#cbd5e1);border-radius:6px;padding:.15rem .3rem;
   font-family:inherit;font-size:.72rem;min-width:130px;flex:1}
@@ -638,7 +642,7 @@ function render(){
       <span class="shown" id="shown"></span>
     </div>
     <div class="tablecard"><table><thead><tr>
-      <th class="rv">المراجعة</th>
+      <th class="rv">المراجعة</th><th>صورة التحويل</th>
       <th>الوقت</th><th>النوع</th><th>قيمة المدفوع</th><th>القيمة</th><th class="r">من</th><th class="r">الى</th><th class="r">المستخدم</th><th>الجهاز</th><th>الحساب</th><th class="r">ملاحظات</th>
     </tr></thead><tbody id="tb"></tbody></table></div>`;
   const pb=document.getElementById('pendBtn');
@@ -778,7 +782,7 @@ function rcptInner(kind, br, ref, locked){
       ? '<span class="rcpt-th">PDF</span>'
       : (u ? '<img class="rcpt-th" src="' + esc(u) + '" alt="">' : '<span class="rcpt-th">…</span>');
     const del = locked ? ''
-      : '<button class="rcpt-del" data-id="' + (r.id || '') + '" title="شيل الصورة دي">✕</button>';
+      : '<button class="rcpt-del" data-id="' + (r.id || '') + '" title="شيل الصورة دي">شيل</button>';
     return '<span class="rcpt-item" data-n="' + i + '" title="' + cap + '">' + img + del + '</span>';
   }).join('');
   return '<div class="rcpt-box">' + th + '<span class="rcpt-plus" title="إضافة صورة">＋</span></div>';
@@ -880,10 +884,21 @@ async function rcptUpload(td, files){
   await rcptSign(fresh);
   rcptRepaint();
 }
+/* ⚠️ سوبابيز بترفض مسح storage.objects من SQL («Direct deletion from
+   storage tables is not allowed») — فالدالة بتشيل **السجل** والمتصفح
+   بيشيل **الملف** بعدها. ومش ثغرة: سياسة الحذف بتسمح بالملف بس لو
+   مفيش سجل بيشاور عليه، والسجل مابيتشالش غير من الدالة بحارسها. */
 async function rcptDel(td, id){
   if(!confirm('شيل الصورة دي؟')) return;
   const res = await rpcWrite('delete_txn_receipt', { p_id: +id });
   if(res.success !== true){ alert(res.error); return; }
+  if(res.path){
+    try{
+      await fetch(SB_URL_API + '/storage/v1/object/receipts/' + res.path,
+                  { method:'DELETE', headers: await sbH() });
+    }catch(e){}   // السجل راح خلاص؛ الملف اليتيم مش بيأذي
+    delete RCPT_URL[res.path];
+  }
   const k = rcptKey(td.dataset.rk, td.dataset.rb, td.dataset.rr);
   RCPT[k] = (RCPT[k] || []).filter(r => String(r.id) !== String(id));
   rcptPaintCell(td);
@@ -913,7 +928,7 @@ function rcptLbDraw(){
   const u = (RCPT_URL[r.path] || {}).url || '';
   const many = RCPT_LB.list.length > 1;
   lb.innerHTML =
-    '<button class="rcpt-x" onclick="rcptClose()" title="إغلاق">✕</button>' +
+    '<button class="rcpt-x" onclick="rcptClose()">إغلاق</button>' +
     (many ? '<button class="rcpt-nav prev" onclick="rcptStep(-1)">›</button>' +
             '<button class="rcpt-nav next" onclick="rcptStep(1)">‹</button>' : '') +
     (rcptIsPdf(r) ? '<iframe src="' + esc(u) + '"></iframe>'
@@ -1019,7 +1034,6 @@ function drawRows(){
     const stCells = (VIEW==='cards')
       ? `<td>${stC?`<span class="pill" style="background:${stC[1]};color:${stC[2]}">${stC[0]}</span>`:'<span class="dash">—</span>'}</td>`
         + `<td class="r ev">${crEvidence(t, lock)}</td>`
-        + rcptCell('card', t.branch||BRANCH, t.fh_id, lock)
       : '';
     /* رقم فاتورة البيع (sth_id) و«الإسم» (visa_name) من eplus —
        تبويب البطاقات بس. eplus بيحط '0' في خانة الإسم لما الكاشير
@@ -1029,15 +1043,16 @@ function drawRows(){
       ? `<td class="r ev">${t.bill_no?esc(String(t.bill_no)):'<span class="dash">—</span>'}</td>`
         + `<td class="r notes">${vName && vName!=='0' ? esc(vName) : '<span class="dash">—</span>'}</td>`
       : '';
-    return `<tr class="${lock?'locked':''}"><td class="rv">${rvCell}</td>${stCells}<td>${esc(t.time)}${t.date?`<div class="dsub">${esc(t.date)}</div>`:''}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
+    return `<tr class="${lock?'locked':''}"><td class="rv">${rvCell}</td>${stCells}${rcptCell('card', t.branch||BRANCH, t.fh_id, lock)}<td>${esc(t.time)}${t.date?`<div class="dsub">${esc(t.date)}</div>`:''}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
       `<td>${paidCell}</td>`+
       `<td class="num ${t.kind==='صرف'?'neg':'pos'}">${t.kind==='صرف'?'−':''}${fmt(t.amount)}</td>`+
       `<td class="r">${esc(t.from||'—')}</td><td class="r">${esc(t.to||'—')}</td>`+
       `<td class="r">${esc(t.user_name||'—')}</td><td class="dev">${esc(t.computer||'—')}</td>`+
       `<td class="${iv?'visa':''}">${acct}</td>`+exCells+`<td class="notes">${esc(t.notes||'')}</td></tr>`;
-  }).join('') || `<tr><td colspan="${VIEW==='cards'?16:11}" class="state">لا توجد حركات مطابقة.</td></tr>`;
+  }).join('') || `<tr><td colspan="${VIEW==='cards'?16:12}" class="state">لا توجد حركات مطابقة.</td></tr>`;
   /* الترتيب المحفوظ يتطبّق على الرأس والصفوف بعد كل رسم */
-  if(VIEW==='cards'){ colOrderInit('#crTable', 'cardreview', drawRows); rcptSync(); }
+  if(VIEW==='cards') colOrderInit('#crTable', 'cardreview', drawRows);
+  rcptSync();
   document.querySelectorAll('.eacct').forEach(s=>s.onchange=()=>{
     const t=TXN[+s.dataset.i]; const v=s.value;
     if(v){ t.kind='فيزا'; t.channel=v; if(t.paid==null) t.paid=+t.amount; if(t.manual==null) t.manual=false; } else { t.kind='كاش'; t.channel=''; }

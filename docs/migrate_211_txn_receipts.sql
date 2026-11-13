@@ -133,7 +133,11 @@ $$;
      · قبل المراجعة  →  صاحب الصورة (أو الأدمن) يقدر يشيلها.
      · بعد المراجعة  →  الدليل يتجمّد؛ الأدمن يفكّ المراجعة الأول
                         لو فيه سبب، والفكّ نفسه متسجّل.
-   والشيل بيمسح صف storage.objects كمان فالصورة ما تتوقّعش تاني. */
+   ⚠️ سوبابيز بترفض `delete from storage.objects` من SQL («Direct
+      deletion from storage tables is not allowed») — فالدالة بتشيل
+      **السجل** بس، والمتصفح بيشيل **الملف** بعدها بالـStorage API.
+      ومش ثغرة: سياسة الحذف تحت بتسمح بالملف **بس لو مفيش سجل بيشاور
+      عليه**، والسجل مابيتشالش غير من الدالة دي بحارسها. */
 create or replace function public.delete_txn_receipt(p_id bigint)
 returns jsonb
 language plpgsql security definer set search_path = public as $$
@@ -168,9 +172,9 @@ begin
     raise exception 'الحركة دي اتراجعت خلاص — الدليل بيتجمّد بعد المراجعة';
   end if;
 
-  delete from storage.objects where bucket_id = 'receipts' and name = rec.path;
   delete from public.txn_receipts where id = rec.id;
-  return jsonb_build_object('success', true, 'id', rec.id);
+  /* الملف نفسه بيتشال من المتصفح بالـStorage API — السطر ده مرجعه */
+  return jsonb_build_object('success', true, 'id', rec.id, 'path', rec.path);
 end $$;
 
 comment on function public.delete_txn_receipt is
@@ -178,6 +182,14 @@ comment on function public.delete_txn_receipt is
 
 revoke all on function public.delete_txn_receipt(bigint) from public;
 grant execute on function public.delete_txn_receipt(bigint) to authenticated;
+
+/* الملف اليتيم بس — اللي مفيش سجل بيشاور عليه */
+drop policy if exists receipts_delete on storage.objects;
+create policy receipts_delete on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'receipts'
+         and not exists (select 1 from public.txn_receipts t
+                          where t.path = storage.objects.name));
 
 revoke all on function public.attach_txn_receipt(text,text,text,text,text,integer) from public;
 revoke all on function public.txn_receipts_for(text,text,text[]) from public;
