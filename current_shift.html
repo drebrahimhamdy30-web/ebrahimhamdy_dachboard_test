@@ -437,7 +437,7 @@ function renderCardReview(d){
     </div>
     <div class="tablecard"><table class="algn" id="crTable"><thead><tr>
       <th class="rv">المراجعة</th><th>الحالة</th><th class="r">الدليل</th><th>صورة التحويل</th>
-      <th>الوقت</th><th>النوع</th><th>قيمة المدفوع</th><th>القيمة</th><th class="r">من</th><th class="r">الى</th><th class="r">المستخدم</th><th>الجهاز</th><th>الحساب</th><th class="r">رقم الفاتورة</th><th class="r">الإسم</th><th class="r">ملاحظات</th>
+      <th>الوقت</th><th>النوع</th><th>قيمة المدفوع</th><th>القيمة</th><th class="r">من</th><th class="r">الى</th><th class="r">المستخدم</th><th>الجهاز</th><th>الحساب</th><th class="r">رقم الفاتورة</th><th class="r">الإسم</th><th class="r">كود العميل</th><th class="r">ملاحظات</th>
     </tr></thead><tbody id="tb"></tbody></table></div>
     <div class="crpager" id="crPager"></div>`;
 
@@ -655,7 +655,7 @@ function render(){
     </div>
     <div class="tablecard"><table><thead><tr>
       <th class="rv">المراجعة</th><th>صورة التحويل</th>
-      <th>الوقت</th><th>النوع</th><th>قيمة المدفوع</th><th>القيمة</th><th class="r">من</th><th class="r">الى</th><th class="r">المستخدم</th><th>الجهاز</th><th>الحساب</th><th class="r">الإسم</th><th class="r">ملاحظات</th>
+      <th>الوقت</th><th>النوع</th><th>قيمة المدفوع</th><th>القيمة</th><th class="r">من</th><th class="r">الى</th><th class="r">المستخدم</th><th>الجهاز</th><th>الحساب</th><th class="r">الإسم</th><th class="r">كود العميل</th><th class="r">ملاحظات</th>
     </tr></thead><tbody id="tb"></tbody></table></div>`;
   const pb=document.getElementById('pendBtn');
   if(pb) pb.onclick=()=>{ pendOnly=!pendOnly; render(); };
@@ -1062,6 +1062,16 @@ function crEvidence(t, lock){
          ` value="${esc(t.suggest||'')}" data-sg="${esc(t.suggest||'')}"` +
          ` onkeydown="if(event.key==='Enter')reviewTxn(${t._i})">`;
 }
+/* «الإسم» = اسم العميل من eplus (cust_id) ولو مفيش عميل بنرجع لخانة
+   visa_name الحرة اللي الكاشير بيكتب فيها ملاحظة. و«كود العميل» بقى
+   عمود مستقل جنبه بدل سطر صغير تحت الاسم (طلب المالك 2026-11-14).
+   eplus بيحط '0' في visa_name لما مايتكتبش حاجة. */
+function custName(t, vName){
+  if (t.cust_name) return esc(t.cust_name);
+  if (vName && vName !== '0') return esc(vName);
+  return '<span class="dash">—</span>';
+}
+
 function drawRows(){
   const q=(document.getElementById('q').value||'').trim().toLowerCase();
   const rows=TXN.filter((t,i)=>{ t._i=i;
@@ -1102,7 +1112,8 @@ function drawRows(){
     const vName = String(t.visa_name==null?'':t.visa_name).trim();
     const exCells = (VIEW==='cards')
       ? `<td class="r ev">${t.bill_no?esc(String(t.bill_no)):'<span class="dash">—</span>'}</td>`
-        + `<td class="r notes">${t.cust_name ? esc(t.cust_name)+(t.cust_code?`<div class="dsub">كود ${esc(String(t.cust_code))}</div>`:'') : (vName && vName!=='0' ? esc(vName) : '<span class="dash">—</span>')}</td>`
+        + `<td class="r notes">${custName(t, vName)}</td>`
+        + `<td class="r ev">${t.cust_code?esc(String(t.cust_code)):'<span class="dash">—</span>'}</td>`
       : '';
     return `<tr class="${lock?'locked':''}"><td class="rv">${rvCell}</td>${stCells}${rcptCell('card', t.branch||BRANCH, t.fh_id, lock)}<td>${esc(t.time)}${t.date?`<div class="dsub">${esc(t.date)}</div>`:''}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
       `<td>${paidCell}</td>`+
@@ -1110,9 +1121,12 @@ function drawRows(){
       `<td class="r">${esc(t.from||'—')}</td><td class="r">${esc(t.to||'—')}</td>`+
       `<td class="r">${esc(t.user_name||'—')}</td><td class="dev">${esc(t.computer||'—')}</td>`+
       `<td class="${iv?'visa':''}">${acct}</td>`+
-      (VIEW!=='cards' ? `<td class="r notes">${t.cust_name?esc(t.cust_name)+(t.cust_code?`<div class="dsub">كود ${esc(String(t.cust_code))}</div>`:''):'<span class="dash">—</span>'}</td>` : '')+
+      (VIEW!=='cards'
+        ? `<td class="r notes">${custName(t, vName)}</td>`
+          + `<td class="r ev">${t.cust_code?esc(String(t.cust_code)):'<span class="dash">—</span>'}</td>`
+        : '')+
       exCells+`<td class="notes">${esc(t.notes||'')}</td></tr>`;
-  }).join('') || `<tr><td colspan="${VIEW==='cards'?16:12}" class="state">لا توجد حركات مطابقة.</td></tr>`;
+  }).join('') || `<tr><td colspan="${VIEW==='cards'?17:14}" class="state">لا توجد حركات مطابقة.</td></tr>`;
   /* الترتيب المحفوظ يتطبّق على الرأس والصفوف بعد كل رسم */
   if(VIEW==='cards') colOrderInit('#crTable', 'cardreview', drawRows);
   rcptSync();
