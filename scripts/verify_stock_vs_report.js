@@ -17,8 +17,21 @@
  *    الجدول بيتحدّث كل 5 دقايق والتقرير لقطة ثابتة، فأي صنف يتباع بعد
  *    التصدير هيبان مختلف وهو سليم تمامًا.
  *
- *    القاعدة:  مختلف و updated_at <  وقت التصدير  →  **مشكلة حقيقية**
- *              مختلف و updated_at >= وقت التصدير  →  طبيعي، إحنا أحدث
+ *    القاعدة:  مختلف و updated_at >= وقت التصدير  →  طبيعي، إحنا أحدث
+ *              مختلف و updated_at <  وقت التصدير  →  **يحتمل** مشكلة
+ *
+ * ⚠️ والاحتمال ده مش يقين — ودي حدود الأداة لازم تتعرف:
+ *    `updated_at` = آخر مرة القيمة **اتغيّرت**، مش آخر مرة **بصّينا**.
+ *    الصنف اللي بصّينا عليه ولقيناه زي ما هو بيفضل بختمه القديم.
+ *    فالصنف اللي اتحرك في eplus بين آخر جولة والتصدير بيبان «فرق
+ *    حقيقي» وهو مجرد تأخّر الـ٥ دقايق العادي.
+ *      (حصل فعلًا 2026-11-14 في سيدي بشر: كودين ختمهم 06:47 وتقرير
+ *       09:23 — واتصلّحوا لوحدهم 09:25. اتنين من 11,499.)
+ *
+ *    `--recheck` هو اللي بيحسم: بيعيد قراءة الأكواد المشكوك فيها من
+ *    القاعدة دلوقتى. ختم اتحرك بعد التصدير = كان تأخّر وخلاص.
+ *    ختم لسه مكانه = فجوة حقيقية محتاجة شغل. شغّله بعد ما جولة
+ *    جديدة على الأقل تكون عدّت.
  *
  * أعمدة التقرير (البيانات فيها عمود أقل من العناوين، فالإزاحة 1):
  *   data[3]=س.البيع  data[5]=الكمية  data[6]=الوحدة
@@ -41,6 +54,7 @@ const BRANCH = val('branch', 'mamora');
 const TOL    = Number(val('tol', '0.01'));
 const CSV    = val('csv', '');
 const AT     = val('at', '');
+const RECHECK = args.includes('--recheck');
 
 if (!XLDIR || !AT) {
   console.error('الاستعمال: node scripts/verify_stock_vs_report.js <مجلد> --at "2026-11-10 14:30" [--branch=mamora] [--csv=out.csv]');
@@ -192,6 +206,38 @@ const eg  = n => Math.round(n).toLocaleString('en-US');
   show('✗ في eplus ومش عندنا', onlyEplus, x => x.code.padEnd(10) + ' كمية=' + String(x.qty).padEnd(9) + '  ' + (x.name || '').slice(0, 34));
   show('✗ عندنا ومش في eplus', onlyUs,   x => x.code.padEnd(10) + ' كمية=' + String(x.qty).padEnd(9) + '  ' + (x.name || '').slice(0, 34));
 
+  /* ── إعادة فحص: تأخّر ولا فجوة؟ ──────────────────────────────────
+     قراءة طازجة للأكواد المشكوك فيها. لو ختمها اتحرك بعد التصدير
+     يبقى جولة لاحقة مسكتها — كان تأخّر مش ثقب. */
+  let lag = 0, stuck = [];
+  if (RECHECK && (real.length || priceDiff.length)) {
+    const codes = [...new Set([...real, ...priceDiff].map(x => x.code))];
+    const q = s => '"' + String(s).replace(/"/g, '\\"') + '"';
+    const now = new Map();
+    for (let i = 0; i < codes.length; i += 150) {   // الـURL ليه طول
+      const part = codes.slice(i, i + 150).map(c => q(c)).join(',');
+      const got = await sbGet(`stock_${BRANCH}?select=itm_code,sto_qty_big,itm_sell_price_big,updated_at`
+                              + `&itm_code=in.(${encodeURIComponent(part)})`);
+      got.forEach(r => now.set(String(r.itm_code), r));
+    }
+    console.log('\n── إعادة فحص (' + codes.length + ' كود) ──');
+    for (const code of codes) {
+      const r = now.get(code);
+      const was = (real.find(x => x.code === code) || priceDiff.find(x => x.code === code) || {});
+      if (!r) { stuck.push({ code, why: 'اختفى من الجدول' }); continue; }
+      if (new Date(r.updated_at) >= CUT) {
+        lag++;
+        console.log('  ✓ ' + code.padEnd(10) + ' اتحدّث ' + r.updated_at.slice(11, 19) +
+          ' (بعد التصدير) → كمية ' + r.sto_qty_big + ' مقابل ' + was.eplus + ' في التقرير');
+      } else {
+        stuck.push({ code, why: 'ختمه لسه ' + r.updated_at.slice(11, 19) });
+        console.log('  ✗ ' + code.padEnd(10) + ' ختمه لسه ' + r.updated_at.slice(11, 19) +
+          ' → لا جولة لمسته. فجوة حقيقية.');
+      }
+    }
+    console.log('  الخلاصة: ' + lag + ' تأخّر عادي · ' + stuck.length + ' فجوة حقيقية');
+  }
+
   if (CSV) {
     const esc = s => '"' + String(s ?? '').replace(/"/g, '""') + '"';
     const lines = ['النوع,الكود,الاسم,eplus,عندنا,الفرق,آخر_تحديث'];
@@ -205,8 +251,11 @@ const eg  = n => Math.round(n).toLocaleString('en-US');
     console.log('\nالتفاصيل الكاملة: ' + CSV);
   }
 
-  const bad = real.length + priceDiff.length + onlyEplus.filter(x => x.qty > 0).length + onlyUs.filter(x => x.qty > 0).length;
+  /* بعد إعادة الفحص اللي اتصلّح مابيتعدّش — كان تأخّر مش خطأ */
+  const bad = (RECHECK ? stuck.length : real.length + priceDiff.length)
+            + onlyEplus.filter(x => x.qty > 0).length + onlyUs.filter(x => x.qty > 0).length;
   console.log('\n' + (bad === 0
     ? 'النتيجة: تطابق تام — ولا فرق واحد غير مفسَّر.'
+      + (RECHECK && lag ? ' (' + lag + ' كان تأخّر جولة واتصلّح لوحده)' : '')
     : 'النتيجة: ' + bad + ' صنف محتاج مراجعة.'));
 })().catch(e => { console.error('✗ ' + e.message); process.exit(1); });
