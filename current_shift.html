@@ -175,6 +175,16 @@ td.rcpt:hover .rcpt-plus{border-color:#0f766e;color:#0f766e}
 .balcard{background:var(--surface,#fff);border:1px solid var(--border,#e2e8f0);border-radius:12px;
          padding:8px 10px;margin-bottom:10px;overflow-x:auto}
 .balhd{font-weight:800;font-size:.82rem;margin-bottom:6px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+/* رسالة منبثقة — كانت showToast بتتنادى في ٦ مواضع وهي مش معرّفة
+   أصلًا، فكل رسايل الصرف كانت بترمي ReferenceError وتختفي. */
+#phToast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);
+  background:#0f172a;color:#fff;padding:11px 20px;border-radius:10px;font-size:.86rem;
+  font-weight:700;box-shadow:0 8px 24px rgba(0,0,0,.28);z-index:9999;opacity:0;
+  pointer-events:none;transition:opacity .2s,transform .2s;max-width:90vw;text-align:center}
+#phToast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+/* كود/اسم العميل: ضغطة واحدة تنسخه */
+td.copyable{cursor:pointer}
+td.copyable:hover{text-decoration:underline dotted;text-underline-offset:3px}
 /* ختم آخر مزامنة لأرصدة eplus — ده المؤشر الوحيد إن المزامنة واقفة،
    فمكبّر ومحاط بإطار عشان يتلاحظ مش رمادي صغير في الركن. */
 .balhd .sub{font-weight:700;font-size:.8rem;color:var(--text-secondary,#475569);
@@ -1095,6 +1105,53 @@ function crEvidence(t, lock){
    visa_name الحرة اللي الكاشير بيكتب فيها ملاحظة. و«كود العميل» بقى
    عمود مستقل جنبه بدل سطر صغير تحت الاسم (طلب المالك 2026-11-14).
    eplus بيحط '0' في visa_name لما مايتكتبش حاجة. */
+/* ⚠️ showToast كانت مستعملة من غير تعريف في الشاشة دي ولا في session.js
+   ولا كان فيه عنصر toast — يعني كل رسايل الصرف (نجاح وفشل) كانت
+   بترمي ReferenceError جوّه maybeDisburse اللي بتتنادى بلا catch،
+   فالموظف مكانش بيشوف حاجة. ده سبب إن رفض الصرف لقناة غير مربوطة
+   عدّى صامت يوم 2026-11-14. */
+function showToast(msg){
+  let t = document.getElementById('phToast');
+  if(!t){ t = document.createElement('div'); t.id = 'phToast'; document.body.appendChild(t); }
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(()=>t.classList.remove('show'), 3500);
+}
+
+/* نسخ كود أو اسم العميل بضغطة. navigator.clipboard بيحتاج سياق آمن،
+   فلو مش متاح بنرجع للطريقة القديمة بدل ما النسخ يقع صامت. */
+async function copyVal(el){
+  const v = String(el.dataset.copy || '').trim();
+  if(!v) return;
+  let ok = false;
+  try{
+    if(navigator.clipboard && window.isSecureContext){ await navigator.clipboard.writeText(v); ok = true; }
+  }catch(e){}
+  if(!ok){
+    const ta = document.createElement('textarea');
+    ta.value = v; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    try{ ok = document.execCommand('copy'); }catch(e){}
+    ta.remove();
+  }
+  showToast(ok ? ('📋 اتنسخ: ' + v) : '⚠️ تعذّر النسخ — انسخه بإيدك');
+}
+
+/* القيمة الخام للنسخ — custName بترجّع HTML مش نص */
+function custNameRaw(t, vName){
+  if(t.cust_name) return String(t.cust_name);
+  if(vName && vName !== '0') return vName;
+  return '';
+}
+
+function copyCell(cls, raw, html){
+  const v = String(raw == null ? '' : raw).trim();
+  return v
+    ? `<td class="r ${cls} copyable" data-copy="${esc(v)}" title="اضغط لنسخ: ${esc(v)}" onclick="copyVal(this)">${html}</td>`
+    : `<td class="r ${cls}">${html}</td>`;
+}
+
 function custName(t, vName){
   if (t.cust_name) return esc(t.cust_name);
   if (vName && vName !== '0') return esc(vName);
@@ -1141,8 +1198,8 @@ function drawRows(){
     const vName = String(t.visa_name==null?'':t.visa_name).trim();
     const exCells = (VIEW==='cards')
       ? `<td class="r ev">${t.bill_no?esc(String(t.bill_no)):'<span class="dash">—</span>'}</td>`
-        + `<td class="r notes">${custName(t, vName)}</td>`
-        + `<td class="r ev">${t.cust_code?esc(String(t.cust_code)):'<span class="dash">—</span>'}</td>`
+        + copyCell('notes', custNameRaw(t, vName), custName(t, vName))
+        + copyCell('ev', t.cust_code, t.cust_code?esc(String(t.cust_code)):'<span class="dash">—</span>')
       : '';
     return `<tr class="${lock?'locked':''}"><td class="rv">${rvCell}</td>${stCells}${rcptCell('card', t.branch||BRANCH, t.fh_id, lock)}<td>${esc(t.time)}${t.date?`<div class="dsub">${esc(t.date)}</div>`:''}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
       `<td>${paidCell}</td>`+
@@ -1151,8 +1208,8 @@ function drawRows(){
       `<td class="r">${esc(t.user_name||'—')}</td><td class="dev">${esc(t.computer||'—')}</td>`+
       `<td class="${iv?'visa':''}">${acct}</td>`+
       (VIEW!=='cards'
-        ? `<td class="r notes">${custName(t, vName)}</td>`
-          + `<td class="r ev">${t.cust_code?esc(String(t.cust_code)):'<span class="dash">—</span>'}</td>`
+        ? copyCell('notes', custNameRaw(t, vName), custName(t, vName))
+          + copyCell('ev', t.cust_code, t.cust_code?esc(String(t.cust_code)):'<span class="dash">—</span>')
         : '')+
       exCells+`<td class="notes">${esc(t.notes||'')}</td></tr>`;
   }).join('') || `<tr><td colspan="${VIEW==='cards'?17:14}" class="state">لا توجد حركات مطابقة.</td></tr>`;
