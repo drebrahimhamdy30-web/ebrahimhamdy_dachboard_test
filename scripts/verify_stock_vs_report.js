@@ -131,11 +131,24 @@ const eg  = n => Math.round(n).toLocaleString('en-US');
   if (String(head[head.length-1]).trim() !== 'الكود') {
     throw new Error('آخر عمود في العناوين مش «الكود» — شكل التقرير اتغيّر، راجعه قبل المقارنة');
   }
+  /* ⚠️ `itm_code` **مش فريد** في eplus — صنفين مختلفين ممكن يشيلوا نفس
+     الكود في نفس المخزن (اتأكد 2026-11-14: 90003805 في السيوف =
+     «قطن لازالة المكياج 70قطعه» سعر 90 **و** «مناديل مبللة بيبي احمر»
+     سعر 13). وجداولنا مفتاحها الكود، فالواحد منهم بس هو اللي ينفع
+     يتخزّن.
+     الخريطة هنا بتبلع المكرّر في صمت زي الجدول بالظبط — وده اللي خلّى
+     السكربت يقول «6,982 صنف» والتقرير فيه 6,983 سطر. بنعدّهم ونصرّخ. */
   const xl = new Map();
+  const dupes = new Map();
+  let xlRows = 0;
   for (const r of rows.slice(2)) {
     const code = String(r[9] ?? '').trim();
     if (!code) continue;
-    xl.set(code, { qty: num(r[5]), price: num(r[3]), name: String(r[8] ?? '').trim() });
+    xlRows++;
+    const rec = { qty: num(r[5]), price: num(r[3]), name: String(r[8] ?? '').trim() };
+    const prev = xl.get(code);
+    if (prev) (dupes.get(code) || dupes.set(code, [prev]).get(code)).push(rec);
+    xl.set(code, rec);
   }
 
   const mine = await sbGet(`stock_${BRANCH}?select=itm_code,itm_name_ar,sto_qty_big,itm_sell_price_big,sto_name,updated_at`);
@@ -143,8 +156,23 @@ const eg  = n => Math.round(n).toLocaleString('en-US');
 
   console.log('الفرع          : ' + BRANCH + ' (' + STORE + ')');
   console.log('وقت التصدير    : ' + AT + ' القاهرة');
-  console.log('تقرير eplus    : ' + xl.size.toLocaleString('en-US') + ' صنف');
+  console.log('تقرير eplus    : ' + xlRows.toLocaleString('en-US') + ' سطر · ' +
+              xl.size.toLocaleString('en-US') + ' كود فريد');
   console.log('جدولنا         : ' + db.size.toLocaleString('en-US') + ' صنف');
+  if (dupes.size) {
+    /* دي مشكلة بيانات في eplus مش في المزامنة: جدولنا مفتاحه الكود
+       فمستحيل يشيل الاتنين. الحل الصح تعديل كود واحد منهم في eplus. */
+    console.log('\n⚠️ ' + dupes.size + ' كود مكرّر في التقرير — أصناف مختلفة بنفس الكود،');
+    console.log('   وجدولنا مفتاحه الكود فواحد منهم بس هو اللي ينفع يتخزّن:');
+    for (const [code, list] of [...dupes].slice(0, 15)) {
+      console.log('   [' + code + ']  ' + list.map(x =>
+        (x.name || '').slice(0, 26) + ' (كمية ' + x.qty + '، سعر ' + x.price + ')').join('   |   '));
+    }
+    if (dupes.size > 15) console.log('   … و' + (dupes.size - 15) + ' غيرهم');
+    const lost = [...dupes.values()].reduce((a, v) =>
+      a + v.slice(0, -1).reduce((s, x) => s + x.qty * x.price, 0), 0);
+    console.log('   قيمة الصفوف اللي مستحيل تتخزّن: ' + eg(lost) + ' ج');
+  }
 
   const real = [], newer = [], priceDiff = [], newerPrice = [], onlyEplus = [], onlyUs = [];
   let same = 0, tEplusQty = 0, tUsQty = 0, tEplusVal = 0, tUsVal = 0;
