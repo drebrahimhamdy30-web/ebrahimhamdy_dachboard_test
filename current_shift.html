@@ -246,7 +246,19 @@ async function loadBranches(){
   try{ const r=await fetch(SB_URL_API+"/rest/v1/branches?select=id,name,sync_key&sync_key=not.is.null&order=name",{headers:{apikey:SB_ANON_API,Authorization:'Bearer '+SB_ANON_API}});
     BRANCHES = r.ok ? (await r.json()) : []; }catch(e){ BRANCHES=[]; }
 }
-const CHANNELS = ['instapay','paymob 1','paymob 7','orange cash','fawry313','fawry 6008','vodafon cash'];
+/* قائمة الحسابات بتتبنى من **الحركات المحفوظة نفسها**، مش مكتوبة.
+   كانت قائمة ثابتة بسبعة أسماء لكل الفروع — فأي حركة قناتها مش فيها
+   كانت بتتعرض «— كاش» لأن المتصفح بيختار أول خيار لما مفيش تطابق،
+   رغم إن الحركة فيزا ومحفوظة صح. كان بيطال 1,672 حركة في سان وحدها
+   و51 في المعمورة بعد ما الحسابات اتسمّت بأرقام المحافظ.
+   كده أي اسم جديد في eplus يظهر لوحده من غير تعديل كود. */
+const CHANNELS_FALLBACK = ['instapay','paymob 1','paymob 7','orange cash','fawry313','fawry 6008','vodafon cash'];
+function channelList(){
+  const s = new Set();
+  (TXN||[]).forEach(t => { const c = String(t.channel==null?'':t.channel).trim(); if(c) s.add(c); });
+  const a = [...s].sort((x,y)=>x.localeCompare(y,'ar'));
+  return a.length ? a : CHANNELS_FALLBACK;   // ماينفعش تفضل فاضية
+}
 const fmt = n => (n<0?'−':'') + Math.abs(Math.round(Number(n)||0)).toLocaleString('en-US');
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 /* ⚠️ بتوكن المستخدم مش بمفتاح anon: الدوال دي بترجّع إجماليات الشيفت،
@@ -610,6 +622,12 @@ async function maybeDisburse(t){
 }
 async function reviewTxn(i){
   const t = TXN[i]; if(!t || t.rv) return;
+  /* ممنوع الترحيل والحساب «كاش»: من غير حساب محدد الصرف مايعرفش
+     يروح فين، والمطابقة مع كشف البنك بتضيع (طلب المالك 2026-11-14). */
+  if(!String(t.channel==null?'':t.channel).trim()){
+    alert('برجاء اختيار الحساب');
+    return;
+  }
   const btn = document.querySelector('.btn-rv[data-i="'+i+'"]');
   if(btn){ btn.disabled = true; btn.textContent = '…'; }
   const nEl = document.getElementById(crNoteId(t));
@@ -1099,7 +1117,7 @@ function drawRows(){
     const lock=!!t.rv;
     const editable=(t.kind==='كاش'||t.kind==='فيزا');
     const acct = editable
-      ? `<select class="e eacct" data-i="${t._i}" ${lock?'disabled':''}><option value="" ${!iv?'selected':''}>— كاش</option>${CHANNELS.map(c=>`<option ${t.channel===c?'selected':''}>${esc(c)}</option>`).join('')}</select>`
+      ? `<select class="e eacct" data-i="${t._i}" ${lock?'disabled':''}><option value="" ${!iv?'selected':''}>— كاش</option>${channelList().map(c=>`<option ${t.channel===c?'selected':''}>${esc(c)}</option>`).join('')}</select>`
       : esc(t.channel||'—');
     const paidCell = iv ? `<input class="e epaid${isManual(t)?'':' auto'}" data-i="${t._i}" type="text" inputmode="decimal" value="${paidOf(t)}" style="width:82px" ${lock?'disabled':''}>` : '';
     /* الكاش والصرف والتوريد مالهمش مراجعة — الفيزا بس هي اللي ممكن
