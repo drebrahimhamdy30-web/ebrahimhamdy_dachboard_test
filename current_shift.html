@@ -279,7 +279,9 @@ let VIEW='shift', SLsc=null, SLcashier=null;  // VIEW: shift | log | detail
    get_current_shift بيشيلها من الرد. */
 let CAN_TOTALS = true;
 let IS_ADMIN = false;        // فكّ قفل المراجعة للأدمن فقط
-let pendOnly = false;        // فلتر «غير المراجَع فقط»
+/* فلتر المراجعة في جدول الشيفت: 'pending' (الافتراضي) · 'done' · null
+   الشاشة تفتح على اللي محتاج «تم» بس — ده شغل الموظف. الباقي بزرار. */
+let rvFilter = 'pending';
 
 /* منع النسخ: الهدف إن الموظف ما ينقلش الحركات لإكسل ويجمّعها.
    ⚠️ ده احتكاك مش جدار — الأرقام ظاهرة على الشاشة فتقدر تتكتب بالإيد
@@ -572,9 +574,8 @@ function kpis(){
 const isReviewable = t => t.kind === 'فيزا' && t.fh_id != null;
 /* شريط «مراجعة الفيزا» وإجمالي المدفوع وشرائط القنوات اتشالوا من
    شاشة الشيفت 2026-11-14 واتحطّ مكانهم جدول «أرصدة الحسابات».
-   المراجعة نفسها (زر «تم ✓» في كل صف) زي ما هي. pendOnly وتوصيلة
-   pendBtn سايبينهم محروسين عشان رجوع زر «غير المراجَع فقط» يبقى
-   سطر واحد لو اتطلب. */
+   المراجعة نفسها (زر «تم ✓» في كل صف) زي ما هي، ورجع فلتر المراجعة
+   كشرائط في شريط الأدوات بافتراضي «محتاج تم». */
 
 /* ⚠️ rpc() العادية بترجّع null عند الفشل فرسالة السيرفر بتضيع — والمراجعة
    رسايلها مهمة («تمت مراجعتها بالفعل»، «غير مصرّح»). الكتابة ليها نداء
@@ -669,6 +670,9 @@ function render(){
     <div class="balcard" id="balbox">${balancesHtml()}</div>
     <div class="toolbar">
       <input type="search" id="q" placeholder="🔎 بحث بالطرف / الملاحظة / المستخدم…">
+      <span class="flabel">المراجعة:</span>
+      ${[['pending','محتاج تم'],['done','تمت'],['','الكل']].map(([v,l])=>
+        `<button class="chip rvf ${(rvFilter||'')===v?'active':''}" data-rv="${v}">${l}</button>`).join('')}
       <span class="flabel">النوع:</span>
       ${['كاش','فيزا','صرف','توريد'].map(t=>`<button class="chip tp ${typeFilter===t?'active':''}" data-t="${t}">${t}</button>`).join('')}
       <span class="flabel">المستخدم:</span>
@@ -679,8 +683,8 @@ function render(){
       <th class="rv">المراجعة</th><th>صورة التحويل</th>
       <th>الوقت</th><th>النوع</th><th>قيمة المدفوع</th><th>القيمة</th><th class="r">من</th><th class="r">الى</th><th class="r">المستخدم</th><th>الجهاز</th><th>الحساب</th><th class="r">الإسم</th><th class="r">كود العميل</th><th class="r">ملاحظات</th>
     </tr></thead><tbody id="tb"></tbody></table></div>`;
-  const pb=document.getElementById('pendBtn');
-  if(pb) pb.onclick=()=>{ pendOnly=!pendOnly; render(); };
+  document.querySelectorAll('.chip.rvf').forEach(c=>c.onclick=()=>{
+    rvFilter = c.dataset.rv || null; render(); });
   document.querySelectorAll('.vch[data-ch]').forEach(c=>c.onclick=()=>{ chFilter=(chFilter===c.dataset.ch?null:c.dataset.ch); render(); });
   document.querySelectorAll('.chip.tp').forEach(c=>c.onclick=()=>{ typeFilter=(typeFilter===c.dataset.t?null:c.dataset.t); drawRows(); document.querySelectorAll('.chip.tp').forEach(x=>x.classList.toggle('active',x.dataset.t===typeFilter)); });
   document.getElementById('q').oninput=drawRows;
@@ -1101,7 +1105,10 @@ function custName(t, vName){
 function drawRows(){
   const q=(document.getElementById('q').value||'').trim().toLowerCase();
   const rows=TXN.filter((t,i)=>{ t._i=i;
-    if(pendOnly && !(isReviewable(t) && !t.rv)) return false;
+    if(VIEW!=='cards'){
+      if(rvFilter==='pending' && !(isReviewable(t) && !t.rv)) return false;
+      if(rvFilter==='done'    && !(isReviewable(t) &&  t.rv)) return false;
+    }
     return (!typeFilter||t.kind===typeFilter) && (!chFilter||t.channel===chFilter) && (!userFilter||t.user_name===userFilter) &&
       (!q||((t.from||'')+' '+(t.to||'')+' '+(t.party||'')+' '+(t.visa_no||'')+' '+(t.notes||'')+' '+(t.user_name||'')
             +' '+(t.bill_no||'')+' '+(t.visa_name||'')+' '+(t.cust_name||'')+' '+(t.cust_code||'')).toLowerCase().includes(q)); });
