@@ -171,6 +171,20 @@ td.rcpt:hover .rcpt-plus{border-color:#0f766e;color:#0f766e}
           color:#fff;border:0;border-radius:50%;width:42px;height:42px;font-size:1.3rem;cursor:pointer}
 .rcpt-nav:hover{background:rgba(255,255,255,.3)}
 .rcpt-nav.prev{right:18px}.rcpt-nav.next{left:18px}
+/* أرصدة الحسابات: eplus مقابل الواقع */
+.balcard{background:var(--surface,#fff);border:1px solid var(--border,#e2e8f0);border-radius:14px;
+         padding:12px 14px;margin-bottom:12px;overflow-x:auto}
+.balhd{font-weight:800;font-size:.9rem;margin-bottom:9px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.balhd .sub{font-weight:600;font-size:.72rem;color:var(--text-muted,#94a3b8)}
+.balmsg{color:var(--text-muted,#94a3b8);font-size:.82rem;padding:10px 0}
+.baltbl{width:100%;border-collapse:collapse;font-size:.84rem;min-width:520px}
+.baltbl th{background:var(--surface-3,#f1f5f9);padding:7px 9px;font-weight:700;white-space:nowrap}
+.baltbl td{padding:7px 9px;border-top:1px solid var(--border,#e2e8f0);text-align:center}
+.baltbl td.r{text-align:right}
+.baltbl td.num{font-variant-numeric:tabular-nums;font-weight:700}
+.baltbl .sub{font-weight:500;font-size:.68rem;color:var(--text-muted,#94a3b8);margin-top:2px}
+.baltbl .dash{color:var(--text-muted,#cbd5e1);font-weight:500}
+.baltbl td.up{color:#b45309}.baltbl td.down{color:#b91c1c}.baltbl td.ok{color:#15803d}
 .rcpt-x{position:absolute;top:14px;left:18px;background:rgba(255,255,255,.15);border:0;color:#fff;
         font-size:.82rem;font-family:inherit;cursor:pointer;line-height:1;
         padding:7px 14px;border-radius:8px}
@@ -534,25 +548,11 @@ function kpis(){
    السطر. ⚠️ قبل كده كان تعديل «الحساب»/«قيمة المدفوع» للعرض بس
    وبيضيع مع أول تحديث — القفل من غير حفظ مالوش معنى. */
 const isReviewable = t => t.kind === 'فيزا' && t.fh_id != null;
-/* ⚠️ الإجمالي ده **مجموع عمود «قيمة المدفوع»** زي ما هو معروض (طلب
-   المالك) — مش زي «إجمالي الفيزا» في جدول الملخّص اللي بيوحّد
-   المعاملات اليدوية المتكررة بنفس القيمة. فالرقمان ممكن يختلفوا. */
-const visaPaidTotal = () => TXN.filter(t=>t.kind==='فيزا').reduce((a,t)=>a+paidOf(t),0);
-
-function reviewBar(){
-  const v = TXN.filter(isReviewable);
-  const ok = v.filter(t=>t.rv).length;
-  const pct = v.length ? (ok/v.length*100) : 100;
-  return `<div class="rvbar">
-    <span class="ttl">✅ مراجعة الفيزا</span>
-    <span class="cnt">${ok} من ${v.length}</span>
-    <span class="prog"><i style="width:${pct.toFixed(0)}%"></i></span>
-    <span class="rest">${v.length && ok===v.length ? '<b class="done">اكتملت المراجعة ✓</b>'
-      : (v.length ? 'باقي ' + (v.length-ok) + ' معاملة' : 'لا توجد معاملات فيزا')}</span>
-    <span class="vtot">إجمالي قيمة المدفوع (فيزا) <b>${fmt(visaPaidTotal())}</b> ج</span>
-    ${v.length ? `<button class="chip ${pendOnly?'active':''}" id="pendBtn">غير المراجَع فقط</button>` : ''}
-  </div>`;
-}
+/* شريط «مراجعة الفيزا» وإجمالي المدفوع وشرائط القنوات اتشالوا من
+   شاشة الشيفت 2026-11-14 واتحطّ مكانهم جدول «أرصدة الحسابات».
+   المراجعة نفسها (زر «تم ✓» في كل صف) زي ما هي. pendOnly وتوصيلة
+   pendBtn سايبينهم محروسين عشان رجوع زر «غير المراجَع فقط» يبقى
+   سطر واحد لو اتطلب. */
 
 /* ⚠️ rpc() العادية بترجّع null عند الفشل فرسالة السيرفر بتضيع — والمراجعة
    رسايلها مهمة («تمت مراجعتها بالفعل»، «غير مصرّح»). الكتابة ليها نداء
@@ -631,12 +631,6 @@ function render(){
   const k=kpis();
   const startTxt = SHIFT.shift_start ? new Date(SHIFT.shift_start).toLocaleString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
   const users=(SHIFT.users||[]).map(esc).join('، ')||'—';
-  const byCh={}; const chS=new Set(); TXN.filter(t=>t.kind==='فيزا').forEach(t=>{const c=t.channel||'—'; byCh[c]=byCh[c]||{t:0,n:0}; const val=paidOf(t); if(isManual(t)){ const k=c+'|m:'+val; if(chS.has(k)) return; chS.add(k);} byCh[c].t+=val; byCh[c].n++;});
-  /* فلتر القنوات بيظهر للكل — هو أداة فرز مش رقم. اللي بيتحجب عن غير
-     المصرَّح له هو **مبلغ** كل قناة، والعدد بيفضل عشان الفلتر يبان نافع. */
-  const chips=Object.entries(byCh).sort((a,b)=>b[1].t-a[1].t).map(([c,v])=>
-    `<span class="vch ${chFilter===c?'on':''}" data-ch="${esc(c)}">${esc(c)} ${CAN_TOTALS?'<b>'+fmt(v.t)+'</b> ':''}(${v.n})</span>`
-  ).join('')||'<span class="vch">—</span>';
   document.getElementById('content').innerHTML = `
     <div class="meta">
       <div class="it"><span class="k">النقطة</span><b>${esc(SHIFT.point)}</b></div>
@@ -644,27 +638,7 @@ function render(){
       <div class="it"><span class="k">عدد المعاملات</span><b>${TXN.length}</b></div>
       <div class="users" title="${users}">👤 ${users}</div>
     </div>
-    ${!CAN_TOTALS ? '' : `
-    <div class="sumcard">
-      <div class="sumtbl"><table>
-        <thead><tr>
-          <th>الرصيد الإفتتاحى</th><th>+ كاش</th><th>+ توريد</th><th>− صرف</th>
-          <th class="net">صافي الكاش المطلوب تسليمه</th><th class="visa">إجمالي الفيزا (للبنك)</th>
-        </tr></thead>
-        <tbody><tr>
-          <td class="plus">${fmt(k.op)}</td>
-          <td class="plus">${fmt(k.cash)}</td>
-          <td class="plus">${fmt(k.tran)}</td>
-          <td class="minus">${fmt(k.sarf)}</td>
-          <td class="net ${k.net<0?'neg':'pos'}" id="k-net">${fmt(k.net)}</td>
-          <td class="visa" id="k-visa">${fmt(k.visa)}</td>
-        </tr></tbody>
-      </table></div>
-    </div>
-    <div class="note">✏️ لو معاملة اتحفظت كاش وهي فيزا: غيّر «الحساب» في صفّها → بتتحوّل فيزا والصافي يتعدّل (تصحيح للعرض، مش بيتحفظ في eplus).</div>`}
-    ${reviewBar()}
-    <div class="chips card-chips" id="vchs"><span class="lbl">${CAN_TOTALS
-      ? 'الفيزا بالقنوات (للمطابقة مع البنك):' : 'فلترة بالقناة:'}</span> ${chips}</div>
+    <div class="balcard" id="balbox">${balancesHtml()}</div>
     <div class="toolbar">
       <input type="search" id="q" placeholder="🔎 بحث بالطرف / الملاحظة / المستخدم…">
       <span class="flabel">النوع:</span>
@@ -684,6 +658,49 @@ function render(){
   document.getElementById('q').oninput=drawRows;
   const us=document.getElementById('userSel'); if(us) us.onchange=()=>{ userFilter=us.value||null; drawRows(); };
   drawRows();
+  loadBalances();
+}
+
+/* ── أرصدة الحسابات: eplus مقابل الواقع ─────────────────────────
+   بديل جدول الملخّص وشريط المراجعة وشرائط القنوات (قرار المالك
+   2026-11-14). المصادر كلها موجودة أصلًا:
+     رصيد eplus   : eplus_safes من F_Cash_Store (كل ٥ دقايق)
+     واقع المحافظ : آخر رسالة فيها رصيد (wallet_sms.balance)
+     واقع الباقي  : آخر رصيد ختامي مكتوب (pos_shift_lines)
+   الربط باسم حساب eplus = رقم/مفتاح الحساب عندنا. الحساب اللي
+   مالوش مقابل في eplus بيظهر «غير مربوط» — مابيختفيش. */
+let BAL = null;
+async function loadBalances(){
+  BAL = await rpc('get_pos_balances', { p_branch: BRANCH || null });
+  const el = document.getElementById('balbox');
+  if (el) el.innerHTML = balancesHtml();
+}
+function balancesHtml(){
+  const HD = 'أرصدة الحسابات — eplus مقابل الواقع';
+  if (!BAL) return '<div class="balhd">' + HD + '</div><div class="balmsg">جارِ التحميل…</div>';
+  const rows = BAL.rows || [];
+  if (!rows.length) return '<div class="balhd">' + HD + '</div>'
+    + '<div class="balmsg">لا توجد حسابات مسجّلة لهذا الفرع في شاشة طرق الدفع.</div>';
+  const SRC = { sms: 'رسالة المحفظة', shift: 'إقفال الشيفت' };
+  const body = rows.map(r => {
+    const e = r.eplus, v = r.real, d = r.diff;
+    const cls = d == null ? '' : (Math.abs(d) < 0.01 ? 'ok' : (d > 0 ? 'up' : 'down'));
+    return '<tr>'
+      + '<td class="r"><b>' + esc(r.name) + '</b>'
+      + (r.enm && r.enm !== r.name ? '<div class="sub">' + esc(r.enm) + '</div>' : '') + '</td>'
+      + '<td>' + (r.type === 'machine' ? 'ماكينة' : 'محفظة') + '</td>'
+      + '<td class="num">' + (e == null ? '<span class="dash">غير مربوط</span>' : fmt(e)) + '</td>'
+      + '<td class="num">' + (v == null ? '<span class="dash">—</span>' : fmt(v))
+      + (r.at ? '<div class="sub">' + esc(SRC[r.src] || '') + ' · ' + esc(r.at) + '</div>' : '') + '</td>'
+      + '<td class="num ' + cls + '">' + (d == null ? '<span class="dash">—</span>'
+          : (d > 0 ? '+' : '') + fmt(d)) + '</td>'
+      + '</tr>';
+  }).join('');
+  return '<div class="balhd">' + HD
+    + (BAL.eplus_at ? '<span class="sub">رصيد eplus محدَّث ' + esc(BAL.eplus_at) + '</span>' : '')
+    + '</div><table class="baltbl"><thead><tr>'
+    + '<th class="r">الحساب</th><th>النوع</th><th>رصيد eplus</th><th>الواقع</th><th>الفرق</th>'
+    + '</tr></thead><tbody>' + body + '</tbody></table>';
 }
 /* الدليل: لو النظام لقى مرجع بيتعرض نص ثابت (واقعة مش رأي).
    ولو مالقاش، المحاسب بيكتبه بنفسه وزر «تم» بيحفظه مع المراجعة
