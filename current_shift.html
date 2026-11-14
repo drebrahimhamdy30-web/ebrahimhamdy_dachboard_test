@@ -172,17 +172,23 @@ td.rcpt:hover .rcpt-plus{border-color:#0f766e;color:#0f766e}
 .rcpt-nav:hover{background:rgba(255,255,255,.3)}
 .rcpt-nav.prev{right:18px}.rcpt-nav.next{left:18px}
 /* أرصدة الحسابات: eplus مقابل الواقع */
-.balcard{background:var(--surface,#fff);border:1px solid var(--border,#e2e8f0);border-radius:14px;
-         padding:12px 14px;margin-bottom:12px;overflow-x:auto}
-.balhd{font-weight:800;font-size:.9rem;margin-bottom:9px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.balhd .sub{font-weight:600;font-size:.72rem;color:var(--text-muted,#94a3b8)}
-.balmsg{color:var(--text-muted,#94a3b8);font-size:.82rem;padding:10px 0}
-.baltbl{width:100%;border-collapse:collapse;font-size:.84rem;min-width:520px}
-.baltbl th{background:var(--surface-3,#f1f5f9);padding:7px 9px;font-weight:700;white-space:nowrap}
-.baltbl td{padding:7px 9px;border-top:1px solid var(--border,#e2e8f0);text-align:center}
-.baltbl td.r{text-align:right}
-.baltbl td.num{font-variant-numeric:tabular-nums;font-weight:700}
-.baltbl .sub{font-weight:500;font-size:.68rem;color:var(--text-muted,#94a3b8);margin-top:2px}
+.balcard{background:var(--surface,#fff);border:1px solid var(--border,#e2e8f0);border-radius:12px;
+         padding:8px 10px;margin-bottom:10px;overflow-x:auto}
+.balhd{font-weight:800;font-size:.82rem;margin-bottom:6px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.balhd .sub{font-weight:600;font-size:.68rem;color:var(--text-muted,#94a3b8)}
+.balmsg{color:var(--text-muted,#94a3b8);font-size:.8rem;padding:8px 0}
+/* الجدول مقلوب: الحسابات أعمدة والصفوف ٣ بس — بياخد ارتفاع أقل بكتير */
+.baltbl{border-collapse:collapse;font-size:.78rem;white-space:nowrap}
+.baltbl th{background:var(--surface-3,#f1f5f9);padding:5px 10px;font-weight:700;
+           border-bottom:1px solid var(--border,#e2e8f0)}
+.baltbl td{padding:5px 10px;border-top:1px solid var(--border,#e2e8f0);text-align:center;
+           font-variant-numeric:tabular-nums;font-weight:700}
+/* عمود التسمية ثابت عشان الأسماء ماتضيعش مع السحب الأفقي */
+.baltbl .rowlb{position:sticky;right:0;background:var(--surface,#fff);text-align:right;
+               font-weight:700;color:var(--text-secondary,#475569);z-index:1;
+               border-inline-start:1px solid var(--border,#e2e8f0)}
+.baltbl th.rowlb{background:var(--surface-3,#f1f5f9)}
+.baltbl .unl{font-weight:500;font-size:.7rem;color:var(--text-muted,#94a3b8)}
 .baltbl .dash{color:var(--text-muted,#cbd5e1);font-weight:500}
 .baltbl td.up{color:#b45309}.baltbl td.down{color:#b91c1c}.baltbl td.ok{color:#15803d}
 .rcpt-x{position:absolute;top:14px;left:18px;background:rgba(255,255,255,.15);border:0;color:#fff;
@@ -677,30 +683,36 @@ async function loadBalances(){
 }
 function balancesHtml(){
   const HD = 'أرصدة الحسابات — eplus مقابل الواقع';
-  if (!BAL) return '<div class="balhd">' + HD + '</div><div class="balmsg">جارِ التحميل…</div>';
+  const hd = v => '<div class="balhd">' + HD + (v || '') + '</div>';
+  if (!BAL) return hd('') + '<div class="balmsg">جارِ التحميل…</div>';
   const rows = BAL.rows || [];
-  if (!rows.length) return '<div class="balhd">' + HD + '</div>'
+  if (!rows.length) return hd('')
     + '<div class="balmsg">لا توجد حسابات مسجّلة لهذا الفرع في شاشة طرق الدفع.</div>';
   const SRC = { sms: 'رسالة المحفظة', shift: 'إقفال الشيفت' };
-  const body = rows.map(r => {
-    const e = r.eplus, v = r.real, d = r.diff;
-    const cls = d == null ? '' : (Math.abs(d) < 0.01 ? 'ok' : (d > 0 ? 'up' : 'down'));
-    return '<tr>'
-      + '<td class="r"><b>' + esc(r.name) + '</b>'
-      + (r.enm && r.enm !== r.name ? '<div class="sub">' + esc(r.enm) + '</div>' : '') + '</td>'
-      + '<td>' + (r.type === 'machine' ? 'ماكينة' : 'محفظة') + '</td>'
-      + '<td class="num">' + (e == null ? '<span class="dash">غير مربوط</span>' : fmt(e)) + '</td>'
-      + '<td class="num">' + (v == null ? '<span class="dash">—</span>' : fmt(v))
-      + (r.at ? '<div class="sub">' + esc(SRC[r.src] || '') + ' · ' + esc(r.at) + '</div>' : '') + '</td>'
-      + '<td class="num ' + cls + '">' + (d == null ? '<span class="dash">—</span>'
-          : (d > 0 ? '+' : '') + fmt(d)) + '</td>'
-      + '</tr>';
+  /* مقلوب: الحسابات أعمدة. التفاصيل (المفتاح · اسم eplus · مصدر
+     الواقع ووقته) في tooltip بدل أسطر تحت كل خانة — نفس المعلومة
+     بربع الارتفاع. وعمود «النوع» اتشال (طلب المالك). */
+  const th = rows.map(r => {
+    const tip = [r.key !== r.name ? r.key : '', r.enm ? 'eplus: ' + r.enm : 'غير مربوط بـeplus']
+      .filter(Boolean).join(' · ');
+    return '<th title="' + esc(tip) + '">' + esc(r.name) + '</th>';
   }).join('');
-  return '<div class="balhd">' + HD
-    + (BAL.eplus_at ? '<span class="sub">رصيد eplus محدَّث ' + esc(BAL.eplus_at) + '</span>' : '')
-    + '</div><table class="baltbl"><thead><tr>'
-    + '<th class="r">الحساب</th><th>النوع</th><th>رصيد eplus</th><th>الواقع</th><th>الفرق</th>'
-    + '</tr></thead><tbody>' + body + '</tbody></table>';
+  const cE = rows.map(r => '<td>' + (r.eplus == null
+    ? '<span class="unl">غير مربوط</span>' : fmt(r.eplus)) + '</td>').join('');
+  const cR = rows.map(r => '<td title="' + esc(r.at ? (SRC[r.src] || '') + ' · ' + r.at : '') + '">'
+    + (r.real == null ? '<span class="dash">—</span>' : fmt(r.real)) + '</td>').join('');
+  const cD = rows.map(r => {
+    const d = r.diff;
+    const cls = d == null ? '' : (Math.abs(d) < 0.01 ? 'ok' : (d > 0 ? 'up' : 'down'));
+    return '<td class="' + cls + '">' + (d == null ? '<span class="dash">—</span>'
+      : (d > 0 ? '+' : '') + fmt(d)) + '</td>';
+  }).join('');
+  return hd(BAL.eplus_at ? '<span class="sub">رصيد eplus محدَّث ' + esc(BAL.eplus_at) + '</span>' : '')
+    + '<table class="baltbl"><thead><tr><th class="rowlb"></th>' + th + '</tr></thead><tbody>'
+    + '<tr><td class="rowlb">رصيد eplus</td>' + cE + '</tr>'
+    + '<tr><td class="rowlb">الواقع</td>'     + cR + '</tr>'
+    + '<tr><td class="rowlb">الفرق</td>'      + cD + '</tr>'
+    + '</tbody></table>';
 }
 /* الدليل: لو النظام لقى مرجع بيتعرض نص ثابت (واقعة مش رأي).
    ولو مالقاش، المحاسب بيكتبه بنفسه وزر «تم» بيحفظه مع المراجعة
