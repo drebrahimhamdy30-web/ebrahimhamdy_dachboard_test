@@ -637,28 +637,43 @@ async function refreshOrderRow(oid){
 }
 
 // ===== الأصناف =====
+// مهلة 15ث على نداء الأصناف — نِت الصيدلية بيتقطّع أحيانًا فكان بيعلّق «جار التحميل» للأبد
 async function fetchItems(billNo,branchId){
-  const r=await fetch(SALES_ITEMS_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch_id:branchId||'',bill_no:String(billNo)})});
-  if(!r.ok) throw new Error('HTTP '+r.status);
-  const data=await r.json();
-  const root=Array.isArray(data)?(data[0]||{}):(data||{});
-  const bills=(root&&root.Data)||[];
-  const bill=bills.find(b=>String(b.bill_no)===String(billNo))||bills[0]||{};
-  return ((bill&&bill.Items)||[]).map(it=>({name:(it.itm_name_ar||it.itm_name_en||'').toString().trim(),qty:it.itm_qty,unit:it.unit_name||'',price:it.unit_price}));
+  const ctrl=new AbortController();
+  const tmo=setTimeout(()=>ctrl.abort(),15000);
+  try{
+    const r=await fetch(SALES_ITEMS_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch_id:branchId||'',bill_no:String(billNo)}),signal:ctrl.signal});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data=await r.json();
+    const root=Array.isArray(data)?(data[0]||{}):(data||{});
+    const bills=(root&&root.Data)||[];
+    const bill=bills.find(b=>String(b.bill_no)===String(billNo))||bills[0]||{};
+    return ((bill&&bill.Items)||[]).map(it=>({name:(it.itm_name_ar||it.itm_name_en||'').toString().trim(),qty:it.itm_qty,unit:it.unit_name||'',price:it.unit_price}));
+  } finally { clearTimeout(tmo); }
 }
-// الأصناف inline على كل كارت الصفحة الحالية (lazy + cache، بدون تكرار نداء)
-function ensureInlineItems(list){
-  (list||[]).forEach(o=>{
-    const el=document.getElementById('it-'+o.id); if(!el) return;
-    if(_itemsCache[o.id]){ el.innerHTML=inlineItemsHtml(_itemsCache[o.id]); return; }
-    if(_itemsInflight.has(o.id)) return;
-    if(!o.bill_no){ el.innerHTML='<span class="it-load">لا يوجد رقم فاتورة</span>'; return; }
-    _itemsInflight.add(o.id);
-    fetchItems(o.bill_no,o.branch_id)
-      .then(items=>{ _itemsCache[o.id]=items; const e2=document.getElementById('it-'+o.id); if(e2) e2.innerHTML=inlineItemsHtml(items); })
-      .catch(()=>{ const e2=document.getElementById('it-'+o.id); if(e2) e2.innerHTML='<span class="it-load">تعذّر تحميل الأصناف</span>'; })
-      .finally(()=>_itemsInflight.delete(o.id));
-  });
+// الأصناف inline (lazy + cache + إعادة محاولة تلقائية مرة لأن أول نداء بيعلّق أحيانًا)
+function ensureInlineItems(list){ (list||[]).forEach(o=>loadOneItems(o,0)); }
+function loadOneItems(o,attempt){
+  const el=document.getElementById('it-'+o.id); if(!el) return;
+  if(_itemsCache[o.id]){ el.innerHTML=inlineItemsHtml(_itemsCache[o.id]); return; }
+  if(!o.bill_no){ el.innerHTML='<span class="it-load">لا يوجد رقم فاتورة</span>'; return; }
+  if(_itemsInflight.has(o.id)) return;
+  _itemsInflight.add(o.id);
+  fetchItems(o.bill_no,o.branch_id)
+    .then(items=>{ _itemsCache[o.id]=items; _itemsInflight.delete(o.id); const e2=document.getElementById('it-'+o.id); if(e2) e2.innerHTML=inlineItemsHtml(items); })
+    .catch(()=>{
+      _itemsInflight.delete(o.id);
+      if((attempt||0)<1){ loadOneItems(o,(attempt||0)+1); return; }   // إعادة محاولة تلقائية مرة
+      const e2=document.getElementById('it-'+o.id);
+      if(e2) e2.innerHTML='<div class="it-load" style="line-height:1.9">تعذّر تحميل الأصناف (النت بطيء)<br><button onclick="retryItems(\''+o.id+'\')" style="background:#0A3D62;color:#fff;border:none;border-radius:7px;padding:.3rem .8rem;font-family:\'Cairo\',sans-serif;font-weight:700;font-size:.78rem;cursor:pointer;margin-top:.3rem">🔄 إعادة المحاولة</button></div>';
+    });
+}
+// إعادة محاولة يدوية لتحميل أصناف طلب معيّن
+function retryItems(oid){
+  _itemsInflight.delete(oid); delete _itemsCache[oid];
+  const el=document.getElementById('it-'+oid); if(el) el.innerHTML='<span class="it-load">⏳ جارٍ تحميل الأصناف…</span>';
+  const o=rows.find(r=>r.id===oid);
+  if(o) loadOneItems(o,0);
 }
 async function openItems(billNo,branchId,oid,cc){
   const body=document.getElementById('itemsBody');
