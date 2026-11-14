@@ -235,12 +235,32 @@ const eg  = n => Math.round(n).toLocaleString('en-US');
   show('✗ عندنا ومش في eplus', onlyUs,   x => x.code.padEnd(10) + ' كمية=' + String(x.qty).padEnd(9) + '  ' + (x.name || '').slice(0, 34));
 
   /* ── إعادة فحص: تأخّر ولا فجوة؟ ──────────────────────────────────
-     قراءة طازجة للأكواد المشكوك فيها. لو ختمها اتحرك بعد التصدير
-     يبقى جولة لاحقة مسكتها — كان تأخّر مش ثقب. */
+     ⚠️ الحكم **بالقيمة مش بالختم**. الختم بيقول «آخر مرة اتغيّرت»،
+        والصف اللي بصّينا عليه ولقيناه زي ما هو بيفضل بختمه القديم —
+        فختم قديم مش دليل على إن حد ما بصّش.
+        (النسخة الأولى حكمت بالختم وقالت «٣ فجوات حقيقية» في المعمورة
+         2026-11-14، والتلاتة اتصلّحوا بعدها بـ٣٠ ثانية.)
+     ولازم **نستنى جولة تعدّي بعد التصدير** قبل ما نحكم أصلًا. */
   let lag = 0, stuck = [];
   if (RECHECK && (real.length || priceDiff.length)) {
     const codes = [...new Set([...real, ...priceDiff].map(x => x.code))];
     const q = s => '"' + String(s).replace(/"/g, '\\"') + '"';
+    const maxStamp = async () => {
+      const r = await sbGet(`stock_${BRANCH}?select=updated_at&order=updated_at.desc&limit=1`);
+      return r.length ? new Date(r[0].updated_at) : new Date(0);
+    };
+    console.log('\n── إعادة فحص (' + codes.length + ' كود) ──');
+    const deadline = Date.now() + 15 * 60000;
+    let last = await maxStamp();
+    while (last <= CUT && Date.now() < deadline) {
+      process.stdout.write('  مستنيين جولة بعد وقت التصدير… (آخر كتابة ' +
+        last.toISOString().slice(11, 19) + ' UTC)\r');
+      await new Promise(r => setTimeout(r, 30000));
+      last = await maxStamp();
+    }
+    if (last <= CUT) console.log('  ⚠️ عدّت 15 دقيقة ومفيش جولة بعد التصدير — الحكم تحت مش نهائي');
+    else console.log('  جولة عدّت الساعة ' + last.toISOString().slice(11, 19) + ' UTC · بنقارن القيم:');
+
     const now = new Map();
     for (let i = 0; i < codes.length; i += 150) {   // الـURL ليه طول
       const part = codes.slice(i, i + 150).map(c => q(c)).join(',');
@@ -248,22 +268,23 @@ const eg  = n => Math.round(n).toLocaleString('en-US');
                               + `&itm_code=in.(${encodeURIComponent(part)})`);
       got.forEach(r => now.set(String(r.itm_code), r));
     }
-    console.log('\n── إعادة فحص (' + codes.length + ' كود) ──');
     for (const code of codes) {
       const r = now.get(code);
-      const was = (real.find(x => x.code === code) || priceDiff.find(x => x.code === code) || {});
-      if (!r) { stuck.push({ code, why: 'اختفى من الجدول' }); continue; }
-      if (new Date(r.updated_at) >= CUT) {
+      const was = real.find(x => x.code === code) || priceDiff.find(x => x.code === code) || {};
+      if (!r) { stuck.push({ code, why: 'اختفى من الجدول' });
+                console.log('  ✗ ' + code.padEnd(10) + ' اختفى من الجدول'); continue; }
+      const nowQty = num(r.sto_qty_big);
+      if (was.eplus !== undefined && Math.abs(nowQty - was.eplus) <= TOL) {
         lag++;
-        console.log('  ✓ ' + code.padEnd(10) + ' اتحدّث ' + r.updated_at.slice(11, 19) +
-          ' (بعد التصدير) → كمية ' + r.sto_qty_big + ' مقابل ' + was.eplus + ' في التقرير');
+        console.log('  ✓ ' + code.padEnd(10) + ' بقى ' + nowQty + ' = اللي في التقرير → كان تأخّر');
       } else {
-        stuck.push({ code, why: 'ختمه لسه ' + r.updated_at.slice(11, 19) });
-        console.log('  ✗ ' + code.padEnd(10) + ' ختمه لسه ' + r.updated_at.slice(11, 19) +
-          ' → لا جولة لمسته. فجوة حقيقية.');
+        stuck.push({ code, why: 'لسه ' + nowQty + ' مقابل ' + was.eplus });
+        console.log('  ✗ ' + code.padEnd(10) + ' لسه ' + String(nowQty).padEnd(10) +
+          ' والتقرير ' + String(was.eplus).padEnd(10) + ' (ختم ' + r.updated_at.slice(11, 19) + ')');
       }
     }
-    console.log('  الخلاصة: ' + lag + ' تأخّر عادي · ' + stuck.length + ' فجوة حقيقية');
+    console.log('  الخلاصة: ' + lag + ' تأخّر عادي · ' + stuck.length + ' محتاج فحص');
+    if (stuck.length) console.log('  ملاحظة: الصنف ممكن يكون اتحرك تاني بعد التصدير — راجعه في eplus قبل ما تعتبره خطأ.');
   }
 
   if (CSV) {
