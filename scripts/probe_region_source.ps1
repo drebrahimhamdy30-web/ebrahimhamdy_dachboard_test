@@ -63,3 +63,37 @@ $r = Q "SELECT COUNT(*) AS n FROM Delivery_cost_region"
 "    Delivery_cost_region: $(if($r.Count){$r[0].n}else{'?'}) صف"
 $r = Q "SELECT TOP 5 dc_id, dc_region_name_ar FROM Delivery_cost_region ORDER BY dc_id"
 $r | Format-Table -AutoSize | Out-String | Write-Host
+Head "4) ليه الاسم مش بيتلاقى؟ - cd_region_id مقابل Delivery_cost_region"
+$r = Q @"
+SELECT TOP 12
+  h.sth_id,
+  cd.cd_region_id,
+  CASE WHEN dcr.dc_id IS NULL THEN 'مش موجود في جدول المناطق' ELSE dcr.dc_region_name_ar END AS النتيجة
+FROM sales_trans_h h
+LEFT JOIN Customer_Delivery cd ON cd.cd_cust_id = h.cust_id
+     AND cd.cd_id = (SELECT MIN(x.cd_id) FROM Customer_Delivery x WHERE x.cd_cust_id = h.cust_id)
+LEFT JOIN Delivery_cost_region dcr ON dcr.dc_id = cd.cd_region_id
+WHERE h.sth_delivery = 1 AND h.sth_flag = 'P'
+ORDER BY h.sth_id DESC
+"@
+$r | Format-Table -AutoSize | Out-String | Write-Host
+
+Head "5) مدى ارقام المناطق"
+$r = Q @"
+SELECT 'المستخدمة في العناوين' AS المصدر, MIN(cd_region_id) AS الاقل, MAX(cd_region_id) AS الاكبر, COUNT(DISTINCT cd_region_id) AS عدد_مختلف
+FROM Customer_Delivery WHERE cd_region_id > 0
+UNION ALL
+SELECT 'الموجودة في جدول المناطق', MIN(dc_id), MAX(dc_id), COUNT(*) FROM Delivery_cost_region
+"@
+$r | Format-Table -AutoSize | Out-String | Write-Host
+
+Head "6) كام عنوان رقم منطقته مش في الجدول"
+$r = Q @"
+SELECT
+  COUNT(*) AS [عناوين بمنطقة],
+  SUM(CASE WHEN dcr.dc_id IS NULL THEN 1 ELSE 0 END) AS [رقمها مش في الجدول]
+FROM Customer_Delivery cd
+LEFT JOIN Delivery_cost_region dcr ON dcr.dc_id = cd.cd_region_id
+WHERE cd.cd_region_id > 0
+"@
+if ($r.Count) { $r[0].PSObject.Properties | ForEach-Object { "    {0,-26} = {1}" -f $_.Name, $_.Value } }
