@@ -914,6 +914,7 @@ const LOG_A={order_created:'تم إنشاء الطلب',driver_assigned:'تم ت
 let allOrders=[],allDrivers=[],activeTrips=[],tripOrdersMap={};
 let unclosedFlags=[]; // طلبات مكتملة على Phalix لكن لم تُغلق على B Connect (trip_review_flags غير المحلولة)
 let unclosedLoading=false; // بيتحمّل دلوقتي؟ (عشان مانعرضش «لا توجد» قبل ما يخلص)
+let unclosedError=false;   // B Connect ما ردّش — نعرض خطأ بدل ما نفضل مستنيين للأبد
 let currentPopupDriverId=null;
 let knownRegions=new Set();
 let regionInfo={}; // name → {min, fee, below} حسب فرع العرض الحالي (لأسعار المناطق + تنبيه الحد الأدنى)
@@ -2028,17 +2029,29 @@ async function togglePrepMode(){
 const UNCLOSED_PENDING_URL='https://agent.ebrahimhamdy.com/webhook/lifependingorder';
 // أرقام الفروع من جدول branches (Branches.ids()) — كانت مكتوبة صريح هنا،
 // يعني أي فرع جديد كان هيفضل مخفي في التبويب ده من غير أي رسالة.
+/* مهلة على نداء B Connect.
+   fetch من غير مهلة ما بيرميش خطأ لو السيرفر استلم الطلب وما ردّش خالص —
+   فالـPromise.all كان بيفضل معلّق للأبد، وunclosedLoading يفضل true،
+   والشاشة تقف على «جاري القراءة من B Connect» من غير ما تقول للمستخدم حاجة. */
+const UNCLOSED_TIMEOUT_MS=20000;
+function fetchUnclosed(bb){
+  const ac=new AbortController();
+  const t=setTimeout(()=>ac.abort(), UNCLOSED_TIMEOUT_MS);
+  return fetch(UNCLOSED_PENDING_URL,{method:'POST',headers:{'Content-Type':'application/json'},
+                 body:JSON.stringify({branch_id:bb}),signal:ac.signal})
+    .then(r=>r.ok?r.json():null).catch(()=>null).finally(()=>clearTimeout(t));
+}
+
 async function refreshUnclosed(){
-  unclosedLoading=true;
+  unclosedLoading=true; unclosedError=false;
   const branchId=currentUser?.role==='admin'?activeBranchId:(currentUser?.branch_id||null);
   const targets=branchId?[branchId]:Branches.ids();
   const grid=document.getElementById('ordersGrid');
   if(grid && currentFilter==='unclosed') grid.innerHTML='<div class="empty-msg">⏳ جاري القراءة من B Connect...</div>';
   let bills=[];
   try{
-    const resps=await Promise.all(targets.map(bb=>
-      fetch(UNCLOSED_PENDING_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch_id:bb})})
-        .then(r=>r.ok?r.json():null).catch(()=>null)));
+    const resps=await Promise.all(targets.map(bb=>fetchUnclosed(bb)));
+    if(resps.length && resps.every(j=>j===null)) unclosedError=true;   // كل الفروع فشلت = الخدمة واقفة
     resps.forEach(j=>{
       if(!j) return;
       const arr=Array.isArray(j)?j:(j.bills||j.Data||[]);
@@ -2063,6 +2076,7 @@ function unclosedTimeAgo(ts){
 function renderUnclosedFlags(){
   const grid=document.getElementById('ordersGrid');
   if(unclosedLoading){ grid.innerHTML='<div class="empty-msg">⏳ جاري القراءة من B Connect...</div>'; return; }  // ماتظهرش «لا توجد» إلا بعد ما يخلص
+  if(unclosedError){ grid.innerHTML='<div class="empty-msg">⚠️ تعذّر الاتصال بـ B Connect — مفيش رد خلال 20 ثانية.<br><button class="btn btn-outline" style="margin-top:.7rem" onclick="refreshUnclosed()">إعادة المحاولة</button></div>'; return; }
   const billQ=(document.getElementById('searchBill')?.value||'').trim().toLowerCase();
   const codeQ=(document.getElementById('searchCode')?.value||'').trim().toLowerCase();
   let rows=[...unclosedFlags];
