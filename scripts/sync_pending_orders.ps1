@@ -139,6 +139,27 @@ foreach ($r in $res.rows) {
   }
 }
 
+Head "2ب) تأكيد عمود المبلغ - مقارنة بقيم الـAPI الحقيقية"
+# القيم دي من رد الـAPI الفعلي اللي اتسجل النهاردة
+$apiNet = @{ "1509513"=32; "1511969"=32; "1513999"=60; "1514068"=100; "1513172"=405; "1514020"=723; "1514014"=467 }
+$ids = "'" + (($apiNet.Keys) -join "','") + "'"
+$amt = Q "SELECT CAST(sth_id AS varchar(40)) AS b, total_bill, total_bill_after_disc, total_bill_net, sth_cash, sth_rest, sth_extra_expenses, sec_update_date FROM sales_trans_h WHERE CAST(sth_id AS varchar(40)) IN ($ids)"
+if ($amt.err) { "  فشل: $($amt.err)" }
+else {
+  "  {0,-10} {1,>8} | {2,>8} {3,>8} {4,>8} {5,>8} {6,>8}" -f "فاتورة","API","total","after_disc","net","cash","rest"
+  foreach ($r in $amt.rows) {
+    $api = $apiNet[$r.b]
+    $mark = @()
+    if ([double]$r.total_bill -eq $api)            { $mark += "total" }
+    if ([double]$r.total_bill_after_disc -eq $api) { $mark += "after_disc" }
+    if ([double]$r.total_bill_net -eq $api)        { $mark += "net" }
+    if ([double]$r.sth_cash -eq $api)              { $mark += "cash" }
+    "  {0,-10} {1,8} | {2,8} {3,8} {4,8} {5,8} {6,8}   -> {7}" -f $r.b, $api, [double]$r.total_bill, [double]$r.total_bill_after_disc, [double]$r.total_bill_net, [double]$r.sth_cash, [double]$r.sth_rest, $(if($mark.Count){ $mark -join "," } else { "مفيش تطابق" })
+  }
+  Write-Host ""
+  Write-Host "  العمود اللي يطابق في كل الصفوف هو الصح."
+  Write-Host "  (لو net مايطابقش غير في بعضها، يبقى الفاتورة اتعدلت بعد ما الـAPI قراها)"
+}
 Head "3) عينة من اللي هيتخزن ($Show من $($payload.Count))"
 $payload | Select-Object -First $Show | ForEach-Object {
   Write-Host ""
