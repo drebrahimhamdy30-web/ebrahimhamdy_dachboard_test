@@ -615,8 +615,15 @@ async function maybeDisburse(t){
   if(!DISBURSE_BRANCHES.includes(branch)) return;
   const paid = paidOf(t);
   if(!(t.kind==='فيزا' && t.fh_id && paid>0 && t.channel)) return;
-  const hasImg = ((RCPT[rcptKey('card', branch, t.fh_id)]||[]).length) > 0;
-  if(!hasImg) return;                 // الصرف بشرط صورة تحويل مرفقة
+  /* الصورة اتفحصت في reviewTxn قبل التأكيد، ودي طبقة تانية. ومابترجعش
+     في صمت زي الأول — الخروج الصامت هنا هو اللي خلّى الصف يتقفل
+     والصرف مايحصلش من غير ما حد يعرف. */
+  const img = await hasReceipt(branch, t.fh_id);
+  if(img !== true){
+    showToast(img === 'error' ? '⚠️ الصرف اتوقف: تعذّر التحقق من الصورة'
+                              : '⚠️ الصرف اتوقف: مفيش صورة تحويل مرفقة');
+    return;
+  }
   const q = await rpcWrite('enqueue_wallet_disbursement',
               { p_branch:branch, p_fh_id:t.fh_id, p_channel:t.channel, p_paid:paid });
   if(q.success !== true){ showToast('⚠️ الصرف: ' + (q.error||'تعذّر')); return; }
@@ -633,6 +640,21 @@ async function maybeDisburse(t){
   }
   showToast('⏳ الصرف في الطابور — هيتم خلال لحظات');
 }
+/* هل للحركة صورة تحويل؟ الكاش المحلي الأول، وقراءة طازجة قبل ما
+   نمنع — عشان صورة اترفعت من جهاز تاني (أو قبل ما الخانة تتزامن)
+   ما تتحسبش ناقصة فنقفل على الموظف غلط.
+   بترجّع true / false / 'error' — والتفرقة مهمة: لو النداء نفسه فشل،
+   رسالة «أرفق صورة» بتبقى مضلّلة والموظف هيدوّر على صورة هو رافعها. */
+async function hasReceipt(branch, fhId){
+  const k = rcptKey('card', branch, fhId);
+  if(((RCPT[k])||[]).length) return true;
+  const d = await rpc('txn_receipts_for',
+              { p_kind:'card', p_branch:branch, p_ref_ids:[String(fhId)] });
+  if(d === null || typeof d !== 'object') return 'error';
+  const list = d[String(fhId)];
+  if(Array.isArray(list) && list.length){ RCPT[k] = list; return true; }
+  return false;
+}
 async function reviewTxn(i){
   const t = TXN[i]; if(!t || t.rv) return;
   /* ممنوع الترحيل والحساب «كاش»: من غير حساب محدد الصرف مايعرفش
@@ -640,6 +662,26 @@ async function reviewTxn(i){
   if(!String(t.channel==null?'':t.channel).trim()){
     alert('برجاء اختيار الحساب');
     return;
+  }
+  /* ⚠️ «قيمة المدفوع» > 0 معناها فلوس اتحوّلت فعلًا لحساب محفظة —
+     فالصورة **شرط للتأكيد نفسه**، مش شرط للصرف بس.
+     كان الحارس جوّه maybeDisburse بـ`if(!hasImg) return;`، فالصف
+     كان بيتراجع ويتقفل والصرف مايحصلش **وولا رسالة تظهر** — إقفال
+     بلا دليل وبلا أثر. (المالك 2026-11-15.) */
+  const paidNow = paidOf(t);
+  if(t.kind === 'فيزا' && paidNow > 0){
+    const btn0 = document.querySelector('.btn-rv[data-i="'+i+'"]');
+    if(btn0){ btn0.disabled = true; btn0.textContent = '…'; }
+    const ok = await hasReceipt(t.branch || BRANCH, t.fh_id);
+    if(btn0){ btn0.disabled = false; btn0.textContent = 'تم ✓'; }
+    if(ok === 'error'){
+      alert('تعذّر التحقق من صورة التحويل — يُرجى المحاولة مرة أخرى.');
+      return;
+    }
+    if(!ok){
+      alert('قيمة المدفوع ' + fmt(paidNow) + ' ج — يُرجى إرفاق صورة التحويل قبل التأكيد.');
+      return;
+    }
   }
   const btn = document.querySelector('.btn-rv[data-i="'+i+'"]');
   if(btn){ btn.disabled = true; btn.textContent = '…'; }
