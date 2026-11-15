@@ -264,9 +264,11 @@ if ($newRows.Count) {
   Write-Host ""
   Write-Host "  -- الطلبات اللي هتتدرج --"
   foreach ($n in $newRows) {
-    $d = $null
-    if ($n.bill_date) { [datetime]::TryParse($n.bill_date, [ref]$d) | Out-Null }
-    $ageH = if ($d) { [math]::Round(((Get-Date) - $d).TotalHours,1) } else { -1 }
+    # TryParse بـ[ref]$null بيفشل في PowerShell 5.1 - نوع المرجع مش محدد
+    $ageH = -1
+    if ($n.bill_date) {
+      try { $ageH = [math]::Round(((Get-Date) - [datetime]$n.bill_date).TotalHours,1) } catch { }
+    }
     $mark = ""
     if ($ageH -gt 24) { $mark = "  <<< اقدم من يوم"; $oldOnes++ }
     Log ("    {0}   {1}   عمرها {2} ساعة{3}" -f $n.bill_no, $n.bill_date, $ageH, $mark)
