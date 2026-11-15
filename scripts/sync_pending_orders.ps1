@@ -90,7 +90,11 @@ if (-not $Server) { $Server = $bcfg.server }
 $cs = "Server=$Server;Database=Genius;User ID=$($bcfg.user);Password=$($bcfg.password);Connect Timeout=15"
 Log "الفرع: $Branch   السيرفر: $Server"
 
-# ملحوظة: لو العميل عنده اكتر من عنوان، نفضل العنوان اللي ليه منطقة
+# العميل ممكن يكون عنده اكتر من عنوان - بناخد اول عنوان **ليه منطقة**.
+# النسخة القديمة كانت فيها NOT EXISTS متداخلة جوه ON، وSQL Server 2000
+# مابيتعاملش معاها صح فكانت بترجع NULL وتدي "يحتاج اضافة منطقة" غلط
+# (سان ستيفانو: 15 من 18 بلا منطقة، والفحص المباشر حلها كلها).
+# العنوان والتليفون بييجوا من sales_deliv_info اصلا، فالجدول ده للمنطقة بس.
 $SQL = @"
 SELECT
   h.sth_id AS bill_no, h.bill_typ, h.sec_insert_date AS bill_date,
@@ -107,10 +111,7 @@ LEFT JOIN Customer c         ON c.cust_id = h.cust_id
 LEFT JOIN Customer_Delivery cd
        ON cd.cd_cust_id = h.cust_id
       AND cd.cd_id = (SELECT MIN(x.cd_id) FROM Customer_Delivery x
-                       WHERE x.cd_cust_id = h.cust_id
-                         AND (x.cd_region_id > 0 OR NOT EXISTS
-                              (SELECT 1 FROM Customer_Delivery y
-                                WHERE y.cd_cust_id = h.cust_id AND y.cd_region_id > 0)))
+                       WHERE x.cd_cust_id = h.cust_id AND x.cd_region_id > 0)
 LEFT JOIN Delivery_cost_region dcr ON dcr.dc_id = cd.cd_region_id
 LEFT JOIN Employee emp             ON emp.e_id = h.emp_id
 WHERE h.sth_delivery = 1 AND h.sth_flag = 'P'
