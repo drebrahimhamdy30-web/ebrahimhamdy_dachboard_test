@@ -28,14 +28,16 @@ param(
   [switch]$Apply,
   [switch]$Install,
   [switch]$Uninstall,
-  [string]$BranchId = "f13f20f2-9847-4c16-9946-668769f7ed20",
-  [string]$Server   = "localhost",
+  [ValidateSet("mamora","san","bishr","seyouf")]
+  [string]$Branch   = "mamora",
+  [string]$BranchId = "",
+  [string]$Server   = "",
   [int]$Show        = 2
 )
 
 $ErrorActionPreference = "Continue"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$TaskName = "Phalix - sync pending orders"
+$TaskName = "Phalix - sync pending orders ($Branch)"
 $LogDir   = "C:\phalix\logs"
 $LogFile  = Join-Path $LogDir "sync_pending_orders.log"
 
@@ -58,7 +60,7 @@ if ($Install) {
   Write-Host "الملف : $self"
   if (-not $Apply) { Write-Host ""; Write-Host "عرض فقط. للتنفيذ: -Install -Apply"; return }
   try {
-    $a = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$self`" -Apply"
+    $a = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$self`" -Branch $Branch -Apply"
     $t = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1)
     $s = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5) -MultipleInstances IgnoreNew
     Register-ScheduledTask -TaskName $TaskName -Action $a -Trigger $t -Settings $s -User "SYSTEM" -RunLevel Highest -Force | Out-Null
@@ -67,12 +69,26 @@ if ($Install) {
   return
 }
 
-# ---------- eplus ----------
-$pwFile = "C:\ProgramData\phalix\pw.txt"
-if (-not (Test-Path $pwFile)) { Log "مالقيتش $pwFile"; return }
-$pw = (Get-Content $pwFile -Raw).Trim()
-$cs = "Server=$Server;Database=Genius;User ID=phalix_reader;Password=$pw;Connect Timeout=15"
-$pw = $null
+# ---------- اعدادات الفرع ----------
+# كل فرع له سيرفر وحساب وكلمة سر خاصة في sync_engine.json
+$cfgPath = "C:\phalix\sync_engine.json"
+if (-not (Test-Path $cfgPath)) { Log "مالقيتش $cfgPath"; return }
+$cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
+
+$BRANCH_IDS = @{
+  mamora = "f13f20f2-9847-4c16-9946-668769f7ed20"
+  san    = "42183044-0e64-4a73-bc66-2c9eea0c0832"
+  bishr  = "cb421699-61f2-4d27-83a9-02ce49d0bf90"
+  seyouf = "73628d95-fea2-4ed5-8afc-efb8299f21e7"
+}
+if (-not $BranchId) { $BranchId = $BRANCH_IDS[$Branch] }
+if (-not $BranchId) { Log "مش عارف BranchId للفرع $Branch"; return }
+
+$bcfg = $cfg.branches.$Branch
+if (-not $bcfg) { Log "مفيش اعدادات للفرع $Branch في $cfgPath"; return }
+if (-not $Server) { $Server = $bcfg.server }
+$cs = "Server=$Server;Database=Genius;User ID=$($bcfg.user);Password=$($bcfg.password);Connect Timeout=15"
+Log "الفرع: $Branch   السيرفر: $Server"
 
 # ملحوظة: لو العميل عنده اكتر من عنوان، نفضل العنوان اللي ليه منطقة
 $SQL = @"
@@ -170,9 +186,6 @@ $rowsOut | Select-Object -First $Show | ForEach-Object {
 }
 
 # ---------- Supabase ----------
-$cfgPath = "C:\phalix\sync_engine.json"
-if (-not (Test-Path $cfgPath)) { Log "مالقيتش $cfgPath"; return }
-$cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
 $SB  = $cfg.supabaseUrl.TrimEnd('/')
 $KEY = $cfg.serviceKey
 if (-not $SB -or -not $KEY) { Log "الاعدادات ناقصة في $cfgPath"; return }
@@ -204,7 +217,7 @@ function Write-SyncRun {
   $ms = [int]((Get-Date) - $RunStart).TotalMilliseconds
   $row = [pscustomobject]@{
     job_id      = "delivery_orders"
-    branch      = "mamora"
+    branch      = $Branch
     kind        = "orders"
     new_rows    = $RunNew
     item_rows   = $RunUpd

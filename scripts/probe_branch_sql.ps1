@@ -32,19 +32,19 @@ else {
 }
 
 Head "2) اختبار الاتصال وعد الطلبات المعلقة"
-$pwFile = "C:\ProgramData\phalix\pw.txt"
-$localPw = if (Test-Path $pwFile) { (Get-Content $pwFile -Raw).Trim() } else { $null }
-
-$targets = @(
-  @{ name="mamora (مرجع)"; server="localhost" },
-  @{ name="san ستيفانو";   server="192.168.192.225" },
-  @{ name="bishr بشر";     server="192.168.192.80" }
-)
+# كل فرع له حساب وكلمة سر خاصة به في sync_engine.json - استخدام كلمة سر
+# الماستر لباقي الفروع بيرجع "Login failed" (اتجرب 2026-11-15).
+$targets = @()
+foreach ($k in @("mamora","san","bishr")) {
+  $b = $cfg.branches.$k
+  if (-not $b) { Write-Host "  مفيش اعدادات للفرع $k"; continue }
+  $targets += @{ name = $k; server = $b.server; user = $b.user; pass = $b.password }
+}
 
 foreach ($t in $targets) {
   Write-Host ""
-  Write-Host "  ---- $($t.name)  [$($t.server)] ----"
-  $cs = "Server=$($t.server);Database=Genius;User ID=phalix_reader;Password=$localPw;Connect Timeout=10"
+  Write-Host "  ---- $($t.name)  [$($t.server)]  user=$($t.user) ----"
+  $cs = "Server=$($t.server);Database=Genius;User ID=$($t.user);Password=$($t.pass);Connect Timeout=10"
   $c = New-Object System.Data.SqlClient.SqlConnection $cs
   $sw = [Diagnostics.Stopwatch]::StartNew()
   try {
