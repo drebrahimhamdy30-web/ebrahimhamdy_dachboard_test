@@ -90,3 +90,29 @@ $r = Q "SELECT COUNT(*) AS n FROM sales_trans_h WHERE sth_delivery=1 AND sth_fla
 if (-not $r.err) { "    طلبات معلقة: {0}   في {1:N2} ثانية" -f $r.rows[0].n, $r.sec }
 Write-Host ""
 Write-Host "    للمقارنة: نداء الـAPI لنفس البيانات بياخد 30 الى 90 ثانية."
+Head "4) جدول Customer_Delivery (مصدر المنطقة غالبا)"
+$r = Q "SELECT c.name, t.name AS typ FROM syscolumns c JOIN systypes t ON t.xtype=c.xtype WHERE c.id=OBJECT_ID('Customer_Delivery') ORDER BY c.colid"
+if ($r.err) { "  مفيش الجدول ده: $($r.err)" } else { $r.rows | ForEach-Object { "    {0,-26} {1}" -f $_.name, $_.typ } }
+
+Head "5) صف العميل 11787 من Customer و Customer_Delivery"
+foreach ($tbl in @("Customer","Customer_Delivery")) {
+  Write-Host ""
+  Write-Host "  ---- $tbl ----"
+  $r = Q "SELECT TOP 1 * FROM [$tbl] WHERE CAST(cust_id AS varchar(40)) = '11787'"
+  if ($r.err) { "    خطأ: $($r.err)" }
+  elseif ($r.rows.Count -eq 0) { "    مالقيتش صف" }
+  else {
+    $r.rows[0].PSObject.Properties | Where-Object { $_.Value -ne $null -and "$($_.Value)".Trim() -ne "" } | ForEach-Object {
+      $v = ("$($_.Value)" -replace "\s+"," "); if ($v.Length -gt 55) { $v = $v.Substring(0,55)+"..." }
+      "      {0,-26} = {1}" -f $_.Name, $v
+    }
+  }
+}
+
+Head "6) انواع الفواتير bill_typ"
+$r = Q "SELECT TOP 10 bill_typ, COUNT(*) AS n FROM sales_trans_h WHERE sth_delivery=1 GROUP BY bill_typ ORDER BY n DESC"
+if (-not $r.err) { $r.rows | ForEach-Object { "    bill_typ = {0}   {1}" -f $_.bill_typ, $_.n } }
+
+Head "7) اعمدة Employee"
+$r = Q "SELECT c.name, t.name AS typ FROM syscolumns c JOIN systypes t ON t.xtype=c.xtype WHERE c.id=OBJECT_ID('Employee') AND (c.name LIKE '%id%' OR c.name LIKE '%name%') ORDER BY c.colid"
+if (-not $r.err) { $r.rows | ForEach-Object { "    {0,-26} {1}" -f $_.name, $_.typ } }
