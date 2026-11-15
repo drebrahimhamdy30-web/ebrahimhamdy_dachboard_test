@@ -28,6 +28,7 @@ param(
   [int]$DriverEmpId = 0,
   [string]$Branch = "mamora",
   [switch]$Apply,
+  [string]$Server,                 # override, e.g. 192.168.192.100,1433
   [string]$ConfigPath = "$env:USERPROFILE\.phalix\sync_engine.json",
   [System.Security.SecureString]$Password,
   [string]$PasswordFile,
@@ -44,7 +45,7 @@ if (Test-Path $ConfigPath) {
   try { $cfg = [System.IO.File]::ReadAllText($ConfigPath, [System.Text.Encoding]::UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json } catch {}
 }
 $bcfg   = if ($cfg) { $cfg.branches.$Branch } else { $null }
-$server = if ($bcfg -and $bcfg.server) { $bcfg.server } else { "localhost,1433" }
+$server = if ($Server) { $Server } elseif ($bcfg -and $bcfg.server) { $bcfg.server } else { "localhost,1433" }
 
 # ---- creds: reading is enough to inspect; writing needs phalix_writer ----
 if (-not $WriterUser) { $WriterUser = if ($bcfg -and $bcfg.writer_user) { $bcfg.writer_user } else { "phalix_writer" } }
@@ -90,10 +91,24 @@ try {
             WHERE d.sth_id = @b" @{ '@b' = $BillNo }
 
   if ($cur.Rows.Count -eq 0) {
+    # Diagnostics: "no row" almost always means we are on the wrong instance /
+    # database, not that the invoice is missing. Say which box we actually hit.
     L "`nNo row in sales_deliv_info for sth_id=$BillNo." Yellow
-    L "Columns of sales_deliv_info (to re-check the key):" Yellow
-    (Q "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='sales_deliv_info' ORDER BY ORDINAL_POSITION").Rows |
-      ForEach-Object { L ("   {0} ({1})" -f $_.COLUMN_NAME, $_.DATA_TYPE) }
+    L "`nWhere am I really connected?" Yellow
+    $d = Q "SELECT @@SERVERNAME AS srv, DB_NAME() AS db, @@VERSION AS ver"
+    L ("   server  = " + $d.Rows[0]['srv'])
+    L ("   db      = " + $d.Rows[0]['db'])
+    L ("   version = " + ($d.Rows[0]['ver'] -split "`n")[0].Trim())
+    $t = Q "SELECT COUNT(*) AS n, MIN(sth_id) AS lo, MAX(sth_id) AS hi FROM sales_deliv_info"
+    L ("   sales_deliv_info rows = " + $t.Rows[0]['n'] + "   sth_id range: " + $t.Rows[0]['lo'] + " .. " + $t.Rows[0]['hi'])
+    L "`n   newest 5 invoices in this table:" Yellow
+    foreach ($row in (Q "SELECT TOP 5 sth_id, deliv_emp_id FROM sales_deliv_info ORDER BY sdi_id DESC").Rows) {
+      L ("     sth_id=" + $row['sth_id'] + "  deliv_emp_id=" + $row['deliv_emp_id'])
+    }
+    L "`n   columns (DataRow indexer, not property access):" Yellow
+    foreach ($row in (Q "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='sales_deliv_info' ORDER BY ORDINAL_POSITION").Rows) {
+      L ("     " + $row['COLUMN_NAME'] + " (" + $row['DATA_TYPE'] + ")")
+    }
     $cn.Close(); exit 2
   }
   if ($cur.Rows.Count -gt 1) {
@@ -102,11 +117,11 @@ try {
   }
 
   $r = $cur.Rows[0]
-  $curId   = if ($r.deliv_emp_id -is [DBNull]) { "<null>" } else { $r.deliv_emp_id }
-  $curName = if ($r.cur_name -is [DBNull])     { "<none>" } else { $r.cur_name }
+  $curId   = if ($r['deliv_emp_id'] -is [DBNull]) { "<null>" } else { $r['deliv_emp_id'] }
+  $curName = if ($r['cur_name'] -is [DBNull])     { "<none>" } else { $r['cur_name'] }
   L "`nCurrent:" Cyan
   L "   deliv_emp_id     = $curId  ($curName)"
-  L "   deliv_emp_acc_id = $(if ($r.deliv_emp_acc_id -is [DBNull]) { '<null>' } else { $r.deliv_emp_acc_id })   <- NOT touched"
+  L "   deliv_emp_acc_id = $(if ($r['deliv_emp_acc_id'] -is [DBNull]) { '<null>' } else { $r['deliv_emp_acc_id'] })   <- NOT touched"
 
   if ($DriverEmpId -le 0) { L "`n(no -DriverEmpId given: inspection only)" Yellow; $cn.Close(); exit 0 }
 
@@ -137,8 +152,8 @@ try {
     (New-Object System.Data.SqlClient.SqlDataAdapter($c2)).Fill($t2) | Out-Null
     $a = $t2.Rows[0]
     L "After (inside the transaction):" Cyan
-    L "   deliv_emp_id     = $($a.deliv_emp_id)  ($($a.e_Name))"
-    L "   deliv_emp_acc_id = $(if ($a.deliv_emp_acc_id -is [DBNull]) { '<null>' } else { $a.deliv_emp_acc_id })"
+    L "   deliv_emp_id     = $($a['deliv_emp_id'])  ($($a['e_Name']))"
+    L "   deliv_emp_acc_id = $(if ($a['deliv_emp_acc_id'] -is [DBNull]) { '<null>' } else { $a['deliv_emp_acc_id'] })"
 
     if ($Apply) { $tx.Commit();   L "`nCOMMITTED. Open the eplus sales-invoices screen and confirm." Green }
     else        { $tx.Rollback(); L "`nROLLED BACK (dry-run). Re-run with -Apply to commit." Yellow }
