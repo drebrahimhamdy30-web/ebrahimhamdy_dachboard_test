@@ -1,80 +1,79 @@
-﻿<#  discover_pending_bills.ps1 - هل نقدر نجيب الفواتير المعلقة من SQL مباشرة؟
+﻿<#  discover_pending_bills.ps1 - ايه الجدول اللي فيه فواتير المبيعات؟
 
-    الليه: تطبيق eplus API بيتسلسل وبياخد لحد 90 ثانية للنداء الواحد، وبيختنق
-    تحت حمل 4 فروع. في المقابل مهام المزامنة اللي بتقرا SQL مباشرة
-    (cashier_txns / shifts / safes) شغالة كل دقيقة وسليمة حتى وقت ما الـAPI
-    كان ميت (2026-11-15). فلو قدرنا نجيب رؤوس الطلبات من SQL مباشرة، نشيل
-    الحمل التقيل عن الـAPI خالص.
+    الليه: القراءة المباشرة اتأكدت إنها أسرع من الـAPI بمئات المرات
+    (6276 فاتورة اتعدّت في 0.22 ثانية مقابل 90 ثانية للـAPI لستين فاتورة).
+    الناقص بس إننا نحدد الجدول والأعمدة. F_Transaction_Header طلع جدول
+    الحركات المالية مش فواتير المبيعات.
 
-    السكربت ده استكشاف فقط - قراءة بحتة بحساب phalix_reader.
-    بياخد ارقام فواتير معروفة من رد الـAPI ويدور عليها في Genius عشان
-    نعرف انهي جدول وانهي عمود فيه كل حقل، ويقيس زمن الاستعلام.
+    السكربت بيدور اوتوماتيك: بيلاقي كل عمود اسمه فيه bill او sth او deliv،
+    وبعدين بيدور على ارقام فواتير حقيقية جوه الاعمدة المرشحة لحد ما يلاقيها.
 
-    الاستخدام:  .\scripts\discover_pending_bills.ps1
+    قراءة بحتة بحساب phalix_reader.
 #>
 param(
-  [string[]]$SampleBills = @('1514068','1514067','1514062','1509513'),
+  [string[]]$SampleBills = @('1514068','1514067','1514020','1513999'),
   [string]$Server = "localhost"
 )
 
 $ErrorActionPreference = "Continue"
-function Head($t){ Write-Host ""; Write-Host ("=" * 68); Write-Host "  $t"; Write-Host ("=" * 68) }
+function Head($t){ Write-Host ""; Write-Host ("=" * 70); Write-Host "  $t"; Write-Host ("=" * 70) }
 
 $pwFile = "C:\ProgramData\phalix\pw.txt"
-if (-not (Test-Path $pwFile)) { Write-Host "مالقيتش ملف كلمة السر: $pwFile"; return }
+if (-not (Test-Path $pwFile)) { Write-Host "مالقيتش $pwFile"; return }
 $pw = (Get-Content $pwFile -Raw).Trim()
 $cs = "Server=$Server;Database=Genius;User ID=phalix_reader;Password=$pw;Connect Timeout=15"
 $pw = $null
 
-function Run($sql, $label) {
+function Q($sql, [int]$timeout = 30) {
   $c = New-Object System.Data.SqlClient.SqlConnection $cs
-  $sw = [Diagnostics.Stopwatch]::StartNew()
   try {
-    $c.Open()
-    $cmd = $c.CreateCommand(); $cmd.CommandText = $sql; $cmd.CommandTimeout = 60
+    $c.Open(); $cmd = $c.CreateCommand(); $cmd.CommandText = $sql; $cmd.CommandTimeout = $timeout
     $rd = $cmd.ExecuteReader()
-    $cols = @(); for ($i=0; $i -lt $rd.FieldCount; $i++) { $cols += $rd.GetName($i) }
+    $cols = @(); for ($i=0;$i -lt $rd.FieldCount;$i++){ $cols += $rd.GetName($i) }
     $rows = @()
-    while ($rd.Read()) {
-      $o = [ordered]@{}
-      for ($i=0; $i -lt $rd.FieldCount; $i++) { $o[$cols[$i]] = $rd.GetValue($i) }
-      $rows += [pscustomobject]$o
-    }
-    $rd.Close(); $sw.Stop()
-    Write-Host ("  [{0}]  {1} صف في {2:N2} ثانية" -f $label, $rows.Count, $sw.Elapsed.TotalSeconds)
-    return $rows
-  } catch { $sw.Stop(); Write-Host ("  [{0}]  فشل بعد {1:N2}ث: {2}" -f $label, $sw.Elapsed.TotalSeconds, $_.Exception.Message); return @() }
-  finally { $c.Close() }
+    while ($rd.Read()) { $o=[ordered]@{}; for ($i=0;$i -lt $rd.FieldCount;$i++){ $o[$cols[$i]]=$rd.GetValue($i) }; $rows += [pscustomobject]$o }
+    $rd.Close(); return ,$rows
+  } catch { return ,@() } finally { $c.Close() }
 }
 
-Head "1) الجداول اللي فيها كلمة Transaction او Bill"
-$t = Run "SELECT name FROM sysobjects WHERE xtype='U' AND (name LIKE '%Transaction%' OR name LIKE '%Bill%') ORDER BY name" "جداول"
-$t | ForEach-Object { "    $($_.name)" }
+Head "1) الاعمدة اللي اسمها فيه bill / sth / deliv"
+$cands = Q "SELECT o.name AS tbl, c.name AS col FROM syscolumns c JOIN sysobjects o ON o.id=c.id WHERE o.xtype='U' AND (c.name LIKE '%bill%' OR c.name LIKE 'sth%' OR c.name LIKE '%deliv%') ORDER BY o.name, c.name"
+$cands | Group-Object tbl | ForEach-Object {
+  "    {0,-34} : {1}" -f $_.Name, (($_.Group | ForEach-Object { $_.col }) -join ", ")
+}
 
-Head "2) اعمدة F_Transaction_Header"
-$c = Run "SELECT c.name, t.name AS typ, c.length FROM syscolumns c JOIN systypes t ON t.xtype=c.xtype WHERE c.id=OBJECT_ID('F_Transaction_Header') ORDER BY c.colid" "اعمدة"
-$c | ForEach-Object { "    {0,-28} {1}({2})" -f $_.name, $_.typ, $_.length }
-
-Head "3) ندور على فاتورة معروفة في F_Transaction_Header"
+Head "2) ندور على ارقام الفواتير الحقيقية في الاعمدة المرشحة"
+$numCols = $cands | Where-Object { $_.col -match 'bill_no|bill_id|^sth_id$|^sth_no$|bill_num' }
 $list = ($SampleBills | ForEach-Object { "'" + $_ + "'" }) -join ","
-$h = Run "SELECT TOP 4 * FROM F_Transaction_Header WHERE CAST(sth_id AS varchar(30)) IN ($list)" "بحث"
-if ($h.Count -eq 0) {
-  Write-Host "    مالقيتهاش بـsth_id - نجرب اعمدة تانية"
-  $h = Run "SELECT TOP 4 * FROM F_Transaction_Header WHERE CAST(sth_no AS varchar(30)) IN ($list)" "بحث sth_no"
+$found = @()
+foreach ($x in $numCols) {
+  $sw=[Diagnostics.Stopwatch]::StartNew()
+  $r = Q "SELECT COUNT(*) AS n FROM [$($x.tbl)] WHERE CAST([$($x.col)] AS varchar(40)) IN ($list)" 20
+  $sw.Stop()
+  $n = if ($r.Count) { $r[0].n } else { 0 }
+  if ($n -gt 0) {
+    "    ✅ {0}.{1}  لقى {2} من {3}   ({4:N2}ث)" -f $x.tbl, $x.col, $n, $SampleBills.Count, $sw.Elapsed.TotalSeconds
+    $found += $x
+  }
 }
-if ($h.Count -gt 0) {
-  Write-Host ""
-  Write-Host "  -- اول صف، الاعمدة غير الفاضية بس --"
-  $r = $h[0]
-  $r.PSObject.Properties | Where-Object { $_.Value -ne $null -and "$($_.Value)".Trim() -ne "" -and "$($_.Value)" -ne "0" } |
-    ForEach-Object { "    {0,-28} = {1}" -f $_.Name, ("$($_.Value)" -replace "\s+"," ").Substring(0, [Math]::Min(55, "$($_.Value)".Length)) }
+if (-not $found) { Write-Host "    مالقيناش الارقام دي في اي عمود مرشح" }
+
+Head "3) الصف الكامل من افضل جدول"
+if ($found) {
+  $best = $found[0]
+  $row = Q "SELECT TOP 1 * FROM [$($best.tbl)] WHERE CAST([$($best.col)] AS varchar(40)) IN ($list)" 20
+  if ($row.Count) {
+    "    الجدول: $($best.tbl)   العمود: $($best.col)"
+    Write-Host ""
+    $row[0].PSObject.Properties | Where-Object { $_.Value -ne $null -and "$($_.Value)".Trim() -ne "" } |
+      ForEach-Object {
+        $v = ("$($_.Value)" -replace "\s+"," ")
+        if ($v.Length -gt 60) { $v = $v.Substring(0,60) + "..." }
+        "      {0,-30} = {1}" -f $_.Name, $v
+      }
+  }
 }
 
-Head "4) زمن عد الفواتير المعلقة (المقارنة مع 90 ثانية بتاعة الـAPI)"
-Run "SELECT COUNT(*) AS n FROM F_Transaction_Header WHERE sec_insert_date > DATEADD(day,-7,GETDATE())" "عد اسبوع" |
-  ForEach-Object { "    فواتير آخر 7 ايام: $($_.n)" }
-
-Head "الخلاصة"
-Write-Host "  لو الاستعلامات فوق رجعت في أقل من ثانية، يبقى القراءة المباشرة"
-Write-Host "  أسرع من الـAPI بمئات المرات، والخطة تنفّذ."
-Write-Host "  الناقص بعدها: تحديد عمود حالة الفاتورة (Pending) وعلم التوصيل."
+Head "4) جداول اسمها فيه sale او deliv او order"
+$t2 = Q "SELECT name FROM sysobjects WHERE xtype='U' AND (name LIKE '%sale%' OR name LIKE '%deliv%' OR name LIKE '%order%') ORDER BY name"
+$t2 | ForEach-Object { "    $($_.name)" }
