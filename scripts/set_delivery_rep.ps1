@@ -75,7 +75,10 @@ function Q($sql, $params) {
   if ($params) { foreach ($k in $params.Keys) { [void]$c.Parameters.AddWithValue($k, $params[$k]) } }
   $t = New-Object System.Data.DataTable
   (New-Object System.Data.SqlClient.SqlDataAdapter($c)).Fill($t) | Out-Null
-  return $t
+  # PowerShell unrolls a DataTable into its rows on output, so the caller gets
+  # DataRow objects and ".Rows" comes back $null. Returning a comma-wrapped
+  # array keeps it an array of rows, whatever the row count.
+  return ,@($t.Rows)
 }
 function Scalar($sql, $params) {
   $c = $cn.CreateCommand(); $c.CommandText = $sql; $c.CommandTimeout = 60
@@ -90,33 +93,33 @@ try {
             LEFT JOIN Employee e ON e.e_id = d.deliv_emp_id
             WHERE d.sth_id = @b" @{ '@b' = $BillNo }
 
-  if ($cur.Rows.Count -eq 0) {
+  if ($cur.Count -eq 0) {
     # Diagnostics: "no row" almost always means we are on the wrong instance /
     # database, not that the invoice is missing. Say which box we actually hit.
     L "`nNo row in sales_deliv_info for sth_id=$BillNo." Yellow
     L "`nWhere am I really connected?" Yellow
     $d = Q "SELECT @@SERVERNAME AS srv, DB_NAME() AS db, @@VERSION AS ver"
-    L ("   server  = " + $d.Rows[0]['srv'])
-    L ("   db      = " + $d.Rows[0]['db'])
-    L ("   version = " + ($d.Rows[0]['ver'] -split "`n")[0].Trim())
+    L ("   server  = " + $d[0]['srv'])
+    L ("   db      = " + $d[0]['db'])
+    L ("   version = " + ($d[0]['ver'] -split "`n")[0].Trim())
     $t = Q "SELECT COUNT(*) AS n, MIN(sth_id) AS lo, MAX(sth_id) AS hi FROM sales_deliv_info"
-    L ("   sales_deliv_info rows = " + $t.Rows[0]['n'] + "   sth_id range: " + $t.Rows[0]['lo'] + " .. " + $t.Rows[0]['hi'])
+    L ("   sales_deliv_info rows = " + $t[0]['n'] + "   sth_id range: " + $t[0]['lo'] + " .. " + $t[0]['hi'])
     L "`n   newest 5 invoices in this table:" Yellow
-    foreach ($row in (Q "SELECT TOP 5 sth_id, deliv_emp_id FROM sales_deliv_info ORDER BY sdi_id DESC").Rows) {
+    foreach ($row in (Q "SELECT TOP 5 sth_id, deliv_emp_id FROM sales_deliv_info ORDER BY sdi_id DESC")) {
       L ("     sth_id=" + $row['sth_id'] + "  deliv_emp_id=" + $row['deliv_emp_id'])
     }
     L "`n   columns (DataRow indexer, not property access):" Yellow
-    foreach ($row in (Q "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='sales_deliv_info' ORDER BY ORDINAL_POSITION").Rows) {
+    foreach ($row in (Q "SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='sales_deliv_info' ORDER BY ORDINAL_POSITION")) {
       L ("     " + $row['COLUMN_NAME'] + " (" + $row['DATA_TYPE'] + ")")
     }
     $cn.Close(); exit 2
   }
-  if ($cur.Rows.Count -gt 1) {
-    L "`nSTOP: $($cur.Rows.Count) rows match sth_id=$BillNo - refusing to touch any." Red
+  if ($cur.Count -gt 1) {
+    L "`nSTOP: $($cur.Count) rows match sth_id=$BillNo - refusing to touch any." Red
     $cn.Close(); exit 3
   }
 
-  $r = $cur.Rows[0]
+  $r = $cur[0]
   $curId   = if ($r['deliv_emp_id'] -is [DBNull]) { "<null>" } else { $r['deliv_emp_id'] }
   $curName = if ($r['cur_name'] -is [DBNull])     { "<none>" } else { $r['cur_name'] }
   L "`nCurrent:" Cyan
