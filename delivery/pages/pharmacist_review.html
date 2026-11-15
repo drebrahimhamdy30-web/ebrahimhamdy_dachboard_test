@@ -236,7 +236,7 @@ let currentUser=getCurrentUser();
 if(!currentUser) window.location.href='../auth.html';
 let branches=[], curBranchId=null, shift=null;
 let activeTab='pending', page=1, cardIdx=0, rows=[], tagsByOrder={}, searchQ='', fuRows=[];
-let _refreshTimer=null, _itemsCache={}, _itemsInflight=new Set(), customButtons=[];
+let _refreshTimer=null, _itemsCache={}, _itemsInflight=new Set(), _itemsFailed=new Set(), customButtons=[];
 
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function waNum(p){let d=String(p||'').replace(/\D/g,'');if(!d)return '';if(d.startsWith('0'))d='2'+d;else if(!d.startsWith('2')&&d.length===10)d='2'+d;return d;}
@@ -637,10 +637,14 @@ async function refreshOrderRow(oid){
 }
 
 // ===== الأصناف =====
-// مهلة 15ث على نداء الأصناف — نِت الصيدلية بيتقطّع أحيانًا فكان بيعلّق «جار التحميل» للأبد
+/* مهلة نداء الأصناف.
+   كانت 15ث والسيرفر بياخد 30-90ث — فكانت بتضمن الفشل وتطلق إعادة محاولة.
+   والأهم: إلغاء الطلب من المتصفح مابيوقفش تنفيذ n8n ولا استعلام eplus، فكل
+   محاولة ملغية بتفضل محجوزة على السيرفر 90 ثانية وبتتراكم فوق بعضها لحد ما
+   السيرفر يختنق (اتشاف 2026-11-15). رفعناها فوق زمن السيرفر. */
 async function fetchItems(billNo,branchId){
   const ctrl=new AbortController();
-  const tmo=setTimeout(()=>ctrl.abort(),15000);
+  const tmo=setTimeout(()=>ctrl.abort(),45000);
   try{
     const r=await fetch(SALES_ITEMS_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch_id:branchId||'',bill_no:String(billNo)}),signal:ctrl.signal});
     if(!r.ok) throw new Error('HTTP '+r.status);
@@ -656,6 +660,7 @@ function ensureInlineItems(list){ (list||[]).forEach(o=>loadOneItems(o,0)); }
 function loadOneItems(o,attempt){
   const el=document.getElementById('it-'+o.id); if(!el) return;
   if(_itemsCache[o.id]){ el.innerHTML=inlineItemsHtml(_itemsCache[o.id]); return; }
+  if(_itemsFailed.has(o.id)){ el.innerHTML=itemsFailHtml(o.id); return; }   // فشل قبل كده - ماينادش تاني لوحده
   if(!o.bill_no){ el.innerHTML='<span class="it-load">لا يوجد رقم فاتورة</span>'; return; }
   if(_itemsInflight.has(o.id)) return;
   _itemsInflight.add(o.id);
@@ -663,14 +668,18 @@ function loadOneItems(o,attempt){
     .then(items=>{ _itemsCache[o.id]=items; _itemsInflight.delete(o.id); const e2=document.getElementById('it-'+o.id); if(e2) e2.innerHTML=inlineItemsHtml(items); })
     .catch(()=>{
       _itemsInflight.delete(o.id);
-      if((attempt||0)<1){ loadOneItems(o,(attempt||0)+1); return; }   // إعادة محاولة تلقائية مرة
+      _itemsFailed.add(o.id);   // ماتعيدش تلقائيا - المستخدم يقرر بالزرار
       const e2=document.getElementById('it-'+o.id);
-      if(e2) e2.innerHTML='<div class="it-load" style="line-height:1.9">تعذّر تحميل الأصناف (النت بطيء)<br><button onclick="retryItems(\''+o.id+'\')" style="background:#0A3D62;color:#fff;border:none;border-radius:7px;padding:.3rem .8rem;font-family:\'Cairo\',sans-serif;font-weight:700;font-size:.78rem;cursor:pointer;margin-top:.3rem">🔄 إعادة المحاولة</button></div>';
+      if(e2) e2.innerHTML=itemsFailHtml(o.id);
     });
+}
+function itemsFailHtml(oid){
+  return '<div class="it-load" style="line-height:1.9">تعذّر تحميل الأصناف (السيرفر بطيء)<br>'
+       + '<button onclick="retryItems(&quot;' + oid + '&quot;)" style="background:#0A3D62;color:#fff;border:none;border-radius:7px;padding:.3rem .8rem;font-family:Cairo,sans-serif;font-weight:700;font-size:.78rem;cursor:pointer;margin-top:.3rem">🔄 إعادة المحاولة</button></div>';
 }
 // إعادة محاولة يدوية لتحميل أصناف طلب معيّن
 function retryItems(oid){
-  _itemsInflight.delete(oid); delete _itemsCache[oid];
+  _itemsInflight.delete(oid); _itemsFailed.delete(oid); delete _itemsCache[oid];
   const el=document.getElementById('it-'+oid); if(el) el.innerHTML='<span class="it-load">⏳ جارٍ تحميل الأصناف…</span>';
   const o=rows.find(r=>r.id===oid);
   if(o) loadOneItems(o,0);
