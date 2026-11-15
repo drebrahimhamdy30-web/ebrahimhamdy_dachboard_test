@@ -177,6 +177,37 @@ if ($unknownType.Count) { Log ("تحذير: bill_typ مش معروف -> " + (($u
 $noReg = ($rowsOut | Where-Object { $_.cust_region -eq "يحتاج إضافة منطقة" }).Count
 Log ("بلا منطقة: {0} من {1}" -f $noReg, $rowsOut.Count)
 
+# تشخيص: القيمة الخام اللي جاية من القاعدة للصفوف اللي اتحسبت بلا منطقة.
+# (القاعدة بتحل 16 من 17 بس العداد بيقول 15 بلا منطقة - التناقض ده لازم يتفسر
+#  قبل أي كتابة، لان البديل بيتكتب في عمود التوزيع بيعتمد عليه.)
+if ($noReg -gt 0) {
+  Write-Host ""
+  Write-Host "  -- تشخيص: اول 5 صفوف بلا منطقة --"
+  $i = 0
+  foreach ($raw in $res.rows) {
+    if ($i -ge 5) { break }
+    $v = $raw.cust_region
+    $isNull = ($v -eq $null)
+    $typ = if ($isNull) { "null" } else { $v.GetType().Name }
+    $len = if ($isNull) { 0 } else { ([string]$v).Length }
+    $resolved = -not $isNull -and ([string]$v).Trim()
+    if (-not $resolved) {
+      "    فاتورة {0}  النوع={1}  الطول={2}  القيمة=[{3}]" -f $raw.bill_no, $typ, $len, $v
+      $i++
+    }
+  }
+  Write-Host "  -- وللمقارنة اول صفين فيهم منطقة --"
+  $j = 0
+  foreach ($raw in $res.rows) {
+    if ($j -ge 2) { break }
+    $v = $raw.cust_region
+    if ($v -ne $null -and ([string]$v).Trim()) {
+      "    فاتورة {0}  النوع={1}  القيمة=[{2}]" -f $raw.bill_no, $v.GetType().Name, $v
+      $j++
+    }
+  }
+}
+
 Head "2) عينة ($Show)"
 $rowsOut | Select-Object -First $Show | ForEach-Object {
   Write-Host ""
