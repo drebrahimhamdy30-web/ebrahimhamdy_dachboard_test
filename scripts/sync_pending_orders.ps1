@@ -113,9 +113,15 @@ function Q($sql, [int]$t = 60) {
   finally { $c.Close() }
 }
 
+$RunStart  = Get-Date
+$RunNew    = 0
+$RunUpd    = 0
+$RunStatus = "ok"
+$RunError  = $null
+
 Head "1) قراءة من eplus"
 $res = Q $SQL
-if ($res.err) { Log "فشل القراءة: $($res.err)"; return }
+if ($res.err) { Log "فشل القراءة: $($res.err)"; $RunStatus="error"; $RunError=$res.err; Write-SyncRun; return }
 Log ("قرأ {0} طلب معلق في {1:N2} ثانية" -f $res.rows.Count, $res.sec)
 if ($res.rows.Count -eq 0) { Log "مفيش طلبات معلقة"; return }
 
@@ -192,6 +198,28 @@ function SbSend($path, $obj, $prefer) {
   }
 }
 
+# تسجيل التشغيل في مركز المزامنة - من غيره المهمة شغالة بس خفية عن الشاشة
+function Write-SyncRun {
+  if (-not $Apply) { return }
+  $ms = [int]((Get-Date) - $RunStart).TotalMilliseconds
+  $row = [pscustomobject]@{
+    job_id      = "delivery_orders"
+    branch      = "mamora"
+    kind        = "orders"
+    new_rows    = $RunNew
+    item_rows   = $RunUpd
+    duration_ms = $ms
+    status      = $RunStatus
+    error       = $RunError
+  }
+  $null = SbSend "sync_runs" @($row) "return=minimal"
+  $patch = @{ last_run_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"); last_status = $RunStatus } | ConvertTo-Json -Compress
+  try {
+    $h2 = $H.Clone(); $h2["Content-Type"] = "application/json; charset=utf-8"; $h2["Prefer"] = "return=minimal"
+    Invoke-RestMethod -Uri "$SB/rest/v1/sync_jobs?id=eq.delivery_orders" -Headers $h2 -Method PATCH -Body ([Text.Encoding]::UTF8.GetBytes($patch)) -TimeoutSec 30 | Out-Null
+  } catch { Log "تحديث sync_jobs فشل: $($_.Exception.Message)" }
+}
+
 Head "3) مقارنة بالموجود"
 $bills   = $rowsOut | ForEach-Object { $_.bill_no }
 $inList  = "(" + ($bills -join ",") + ")"
@@ -218,7 +246,7 @@ if ($newRows.Count) {
   $created = SbSend "orders?on_conflict=bill_no" @($ins) "resolution=merge-duplicates,return=representation"
   if (-not $script:LastPostOk) { Log "فشل ادراج الطلبات الجديدة" }
   if ($created) {
-    Log ("اتدرج {0} طلب جديد" -f @($created).Count)
+    Log ("اتدرج {0} طلب جديد" -f @($created).Count); $RunNew = @($created).Count
     $logs = @($created) | ForEach-Object {
       [pscustomobject]@{
         order_id  = $_.id
@@ -243,8 +271,9 @@ if ($updRows.Count) {
     [pscustomobject]$o
   }
   $null = SbSend "orders?on_conflict=bill_no" @($upd) "resolution=merge-duplicates,return=minimal"
-  if ($script:LastPostOk) { Log ("اتحدث {0} طلب موجود (بدون المساس بالتوزيع)" -f $updRows.Count) }
-  else { Log ("فشل تحديث {0} طلب موجود" -f $updRows.Count) }
+  if ($script:LastPostOk) { Log ("اتحدث {0} طلب موجود (بدون المساس بالتوزيع)" -f $updRows.Count); $RunUpd = $updRows.Count }
+  else { Log ("فشل تحديث {0} طلب موجود" -f $updRows.Count); $RunStatus="error"; $RunError="فشل تحديث الطلبات الموجودة" }
 } else { Log "مفيش طلبات تتحدث" }
 
-Log "خلصت"
+Write-SyncRun
+Log ("خلصت - جديد {0} / محدّث {1} / {2}" -f $RunNew, $RunUpd, $RunStatus)
