@@ -332,9 +332,26 @@ if ($updRows.Count) {
     } | ForEach-Object { $o[$_.Key] = $_.Value }
     [pscustomobject]$o
   }
-  $null = SbSend "orders?on_conflict=bill_no" @($upd) "resolution=merge-duplicates,return=minimal"
-  if ($script:LastPostOk) { Log ("اتحدث {0} طلب موجود (بدون المساس بالتوزيع)" -f $updRows.Count); $RunUpd = $updRows.Count }
-  else { Log ("فشل تحديث {0} طلب موجود" -f $updRows.Count); $RunStatus="error"; $RunError="فشل تحديث الطلبات الموجودة" }
+  # PostgREST بيطلب ان كل الكائنات في نفس الطلب يكون لها **نفس المفاتيح**.
+  # واحنا بنشيل cust_region لو بديل وcustomer_phone لو فاضي، فالصفوف بتختلف
+  # في مفاتيحها ويرجع 400 Bad Request (سان ستيفانو 2026-11-15: الادراج نجح
+  # والتحديث فشل). الحل: نجمّع الصفوف حسب مفاتيحها ونبعت كل مجموعة لوحدها.
+  $groups = @{}
+  foreach ($u in $upd) {
+    $sig = (($u.PSObject.Properties | ForEach-Object { $_.Name }) | Sort-Object) -join ","
+    if (-not $groups.ContainsKey($sig)) { $groups[$sig] = @() }
+    $groups[$sig] += $u
+  }
+  $doneCount = 0; $failedCount = 0
+  foreach ($sig in @($groups.Keys)) {
+    $batch = @($groups[$sig])
+    $null = SbSend "orders?on_conflict=bill_no" $batch "resolution=merge-duplicates,return=minimal"
+    if ($script:LastPostOk) { $doneCount += $batch.Count }
+    else { $failedCount += $batch.Count; Log ("فشلت دفعة فيها {0} طلب" -f $batch.Count) }
+  }
+  $RunUpd = $doneCount
+  if ($failedCount -eq 0) { Log ("اتحدث {0} طلب موجود في {1} دفعة (بدون المساس بالتوزيع)" -f $doneCount, $groups.Count) }
+  else { Log ("اتحدث {0} وفشل {1}" -f $doneCount, $failedCount); $RunStatus="error"; $RunError="فشل تحديث $failedCount طلب" }
 } else { Log "مفيش طلبات تتحدث" }
 
 Write-SyncRun
