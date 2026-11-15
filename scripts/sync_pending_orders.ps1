@@ -177,6 +177,7 @@ function SbGet($path) {
   catch { Log "GET فشل: $($_.Exception.Message)"; return $null }
 }
 function SbSend($path, $obj, $prefer) {
+  $script:LastPostOk = $true
   $json  = $obj | ConvertTo-Json -Depth 6 -Compress
   if ($obj -isnot [array]) { $json = "[$json]" }
   $bytes = [Text.Encoding]::UTF8.GetBytes($json)
@@ -185,7 +186,9 @@ function SbSend($path, $obj, $prefer) {
   catch {
     $d = ""
     if ($_.Exception.Response) { try { $d = (New-Object IO.StreamReader($_.Exception.Response.GetResponseStream())).ReadToEnd() } catch {} }
-    Log "POST فشل: $($_.Exception.Message) $d"; return $null
+    Log "POST فشل: $($_.Exception.Message) $d"
+    $script:LastPostOk = $false
+    return $null
   }
 }
 
@@ -213,6 +216,7 @@ if ($newRows.Count) {
     [pscustomobject]$o
   }
   $created = SbSend "orders?on_conflict=bill_no" @($ins) "resolution=merge-duplicates,return=representation"
+  if (-not $script:LastPostOk) { Log "فشل ادراج الطلبات الجديدة" }
   if ($created) {
     Log ("اتدرج {0} طلب جديد" -f @($created).Count)
     $logs = @($created) | ForEach-Object {
@@ -223,7 +227,11 @@ if ($newRows.Count) {
         user_name = "المزامنة"
       }
     }
-    if ($logs.Count) { $null = SbSend "order_logs" @($logs) "return=minimal"; Log ("اتسجل {0} سطر في order_logs" -f $logs.Count) }
+    if ($logs.Count) {
+      $null = SbSend "order_logs" @($logs) "return=minimal"
+      if ($script:LastPostOk) { Log ("اتسجل {0} سطر في order_logs" -f $logs.Count) }
+      else { Log "تحذير: الطلبات اتدرجت بس order_logs فشل - الطلبات سليمة والسجل بس هو الناقص" }
+    }
   }
 } else { Log "مفيش طلبات جديدة" }
 
@@ -234,8 +242,9 @@ if ($updRows.Count) {
     $_.GetEnumerator() | Where-Object { $_.Key -ne "customer_phone" -or ($_.Value -and $_.Value.Trim()) } | ForEach-Object { $o[$_.Key] = $_.Value }
     [pscustomobject]$o
   }
-  $r = SbSend "orders?on_conflict=bill_no" @($upd) "resolution=merge-duplicates,return=minimal"
-  if ($r -ne $null -or $?) { Log ("اتحدث {0} طلب موجود (بدون المساس بالتوزيع)" -f $updRows.Count) }
+  $null = SbSend "orders?on_conflict=bill_no" @($upd) "resolution=merge-duplicates,return=minimal"
+  if ($script:LastPostOk) { Log ("اتحدث {0} طلب موجود (بدون المساس بالتوزيع)" -f $updRows.Count) }
+  else { Log ("فشل تحديث {0} طلب موجود" -f $updRows.Count) }
 } else { Log "مفيش طلبات تتحدث" }
 
 Log "خلصت"
