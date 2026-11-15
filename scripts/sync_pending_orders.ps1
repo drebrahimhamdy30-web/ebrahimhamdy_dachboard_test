@@ -257,6 +257,25 @@ $newRows = @($rowsOut | Where-Object { -not $exSet.ContainsKey($_.bill_no) })
 $updRows = @($rowsOut | Where-Object { $exSet.ContainsKey($_.bill_no) })
 Log ("جديد: {0}   موجود هيتحدث: {1}" -f $newRows.Count, $updRows.Count)
 
+# الطلبات الجديدة بتواريخها - فاتورة قديمة معلقة في eplus هتظهر في شاشة
+# التوزيع كأنها جديدة والطيار ممكن يروح يسلمها. لازم نشوفها قبل الكتابة.
+if ($newRows.Count) {
+  $oldOnes = 0
+  Write-Host ""
+  Write-Host "  -- الطلبات اللي هتتدرج --"
+  foreach ($n in $newRows) {
+    $d = $null
+    if ($n.bill_date) { [datetime]::TryParse($n.bill_date, [ref]$d) | Out-Null }
+    $ageH = if ($d) { [math]::Round(((Get-Date) - $d).TotalHours,1) } else { -1 }
+    $mark = ""
+    if ($ageH -gt 24) { $mark = "  <<< اقدم من يوم"; $oldOnes++ }
+    Log ("    {0}   {1}   عمرها {2} ساعة{3}" -f $n.bill_no, $n.bill_date, $ageH, $mark)
+  }
+  if ($oldOnes -gt 0) {
+    Log ("تحذير: {0} طلب اقدم من 24 ساعة - هيظهروا في شاشة التوزيع كأنهم جداد" -f $oldOnes)
+  }
+}
+
 if (-not $Apply) {
   Head "الخلاصة"
   Write-Host "  عرض فقط - ماتكتبش حاجة. للتنفيذ: -Apply"
