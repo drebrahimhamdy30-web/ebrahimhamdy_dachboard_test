@@ -283,11 +283,16 @@ if ($updRows.Count) {
   #   status/driver_id/deliveryman : التوزيع
   # n8n كان بيستثني notes كمان - كانت في الادراج بس مش في ON CONFLICT DO UPDATE
   $SKIP_ON_UPDATE = @("notes")
+  # المنطقة: لو ماقدرناش نحلها من القاعدة، ماتكتبش البديل فوق منطقة موجودة.
+  # (سان ستيفانو 2026-11-15: ربطنا حل 3 من 18 بس، بينما الـAPI بيحلها كلها —
+  #  فالكتابة كانت هتمسح «جليم» و«لوران» وتحطها «يحتاج إضافة منطقة» ويبوظ التوزيع.)
+  $NO_REGION = "يحتاج إضافة منطقة"
   $upd = $updRows | ForEach-Object {
     $o = [ordered]@{}
     $_.GetEnumerator() | Where-Object {
       ($SKIP_ON_UPDATE -notcontains $_.Key) -and
-      ($_.Key -ne "customer_phone" -or ($_.Value -and $_.Value.Trim()))
+      ($_.Key -ne "customer_phone" -or ($_.Value -and $_.Value.Trim())) -and
+      ($_.Key -ne "cust_region"    -or $_.Value -ne $NO_REGION)
     } | ForEach-Object { $o[$_.Key] = $_.Value }
     [pscustomobject]$o
   }
