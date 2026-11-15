@@ -265,9 +265,17 @@ if ($newRows.Count) {
 
 # الموجود: تحديث حقول البيانات بس - من غير status/driver_id/deliveryman
 if ($updRows.Count) {
+  # اعمدة ممنوع تتحدث - المستخدم بيكتب فيها من الشاشة:
+  #   notes      : الشاشة بتحط فيها "عاجل" وملاحظات المرسل (dispatch.html:3408,3498)
+  #   status/driver_id/deliveryman : التوزيع
+  # n8n كان بيستثني notes كمان - كانت في الادراج بس مش في ON CONFLICT DO UPDATE
+  $SKIP_ON_UPDATE = @("notes")
   $upd = $updRows | ForEach-Object {
     $o = [ordered]@{}
-    $_.GetEnumerator() | Where-Object { $_.Key -ne "customer_phone" -or ($_.Value -and $_.Value.Trim()) } | ForEach-Object { $o[$_.Key] = $_.Value }
+    $_.GetEnumerator() | Where-Object {
+      ($SKIP_ON_UPDATE -notcontains $_.Key) -and
+      ($_.Key -ne "customer_phone" -or ($_.Value -and $_.Value.Trim()))
+    } | ForEach-Object { $o[$_.Key] = $_.Value }
     [pscustomobject]$o
   }
   $null = SbSend "orders?on_conflict=bill_no" @($upd) "resolution=merge-duplicates,return=minimal"
