@@ -638,53 +638,182 @@ const Session = (function () {
     }).join(' · ');
   }
 
-  function _syncBanner(stale, feeds, hours, gaps) {
+  /* ═══ تنبيه المزامنة ═══════════════════════════════════════════════
+     كان شريطًا عريضًا بيغطّي أول كل شاشة، وبيصفّ **جملة لكل مهمة**:
+     فرع واحد نته فصل = ١٠ جمل في ٦٠٠ حرف، وبتوصل للطيار كمان واللي
+     الرسالة نفسها بتقوله «يُرجى إبلاغ الإدارة».
+
+     دلوقتى:
+      · التجميع **بالسبب** مش بالمهمة — «سيدي بشر غير متصل · ١٠ مزامنات»
+      · شريط رفيع مطوي، والتفاصيل تحت الطلب
+      · التأخير مايتعرضش للطيار أصلًا، وموظف الفرع يشوف فرعه بس
+      · الإخفاء بيفضل مخفي ٤ ساعات ببصمة المشكلة — ولو ظهرت مشكلة
+        **جديدة** يرجع فورًا
+      · الأحمر (بيانات ناقصة/غلط) فاضل عريض وغير قابل للإخفاء */
+  const SYNC_HIDE_K  = 'phalixSyncHide';
+  const SYNC_HIDE_MS = 4 * 60 * 60 * 1000;
+
+  /* بصمة المشكلة: لو اتغيّرت (فرع جديد وقع، أو العطل بقى نوع تاني)
+     الإخفاء بيبطل لوحده. مش بنحط عدد المحاولات ولا الساعات جواها —
+     دول بيزيدوا كل دقيقة والبانر كان هيرجع على طول. */
+  function _syncFp(groups) {
+    return groups.map(function (g) { return g.key + ':' + g.kind; }).sort().join('|');
+  }
+  function _syncHidden(fp) {
+    try {
+      const c = JSON.parse(localStorage.getItem(SYNC_HIDE_K) || 'null');
+      return !!(c && c.fp === fp && (Date.now() - c.at) < SYNC_HIDE_MS);
+    } catch (e) { return false; }
+  }
+  function _syncHide(fp) {
+    try { localStorage.setItem(SYNC_HIDE_K, JSON.stringify({ fp: fp, at: Date.now() })); } catch (e) {}
+  }
+
+  /* مين يشوف إيه. الطيار مالوش دعوة بمزامنة المشتريات، وموظف الفرع
+     مايهمّوش فرع تاني — والاتنين مش قادرين يتصرفوا فيها أصلًا. */
+  /* ⚠️ seesAllBranches دالة **async** — استعمالها بلا await بيرجّع
+     Promise وهو دايمًا truthy، فكل موظف كان هيشوف كل الفروع. */
+  async function _syncAudience() {
+    const r = normRole(role());
+    if (r === 'driver') return { show: false };
+    let all = false;
+    try { all = await seesAllBranches(); } catch (e) { all = isAdmin(); }
+    if (all) return { show: true, only: null };
+    return { show: true, only: branch() || null };
+  }
+
+  /* تجميع: كل فرع سطر واحد مهما كان عدد مهامه الواقعة.
+     المهام اللي مالهاش فرع (تغذيات عامة) بتفضل كل واحدة لوحدها. */
+  function _syncGroups(stale, feeds, only) {
+    const byBranch = {};
+    const loose = [];
+    (feeds || []).forEach(function (f) {
+      const bf = f.branches_failed;
+      if (!bf || !bf.length) { loose.push({ text: f.name || f.key }); return; }
+      bf.forEach(function (b) {
+        if (only && b.code !== only) return;
+        const g = byBranch[b.code] || (byBranch[b.code] = {
+          key: b.code, name: b.name || b.code, kind: b.class || 'job_error',
+          jobs: [], age: b.age_hours, fails: 0
+        });
+        /* فرع واحد ممكن يكون فيه عطل اتصال **وعطل مهمة** مع بعض.
+           الأخطر يكسب في العنوان، والتفاصيل بتبيّن الاتنين. */
+        if ((b.class || 'job_error') === 'job_error') g.kind = 'job_error';
+        g.jobs.push({ name: f.job_name || f.name || f.job, fails: b.fails, cls: b.class });
+        if (b.age_hours != null && (g.age == null || b.age_hours > g.age)) g.age = b.age_hours;
+        if (b.fails > g.fails) g.fails = b.fails;
+      });
+    });
+    /* المخزون المتأخر بينضم لنفس سطر الفرع بدل سطر تاني */
+    (stale || []).forEach(function (b) {
+      if (only && b.code !== only) return;
+      const g = byBranch[b.code] || (byBranch[b.code] = {
+        key: b.code, name: b.name || b.code, kind: 'job_error', jobs: [], age: b.age_hours, fails: 0
+      });
+      g.stock = _syncWhy(b);
+      if (b.age_hours != null && (g.age == null || b.age_hours > g.age)) g.age = b.age_hours;
+    });
+    return { branches: Object.keys(byBranch).map(function (k) { return byBranch[k]; }), loose: loose };
+  }
+
+  function _ageTxt(a) {
+    if (a == null) return '';
+    if (a >= 48) return 'منذ ' + _arCount(Math.round(a / 24), 'يوم', 'يومين', 'أيام', 'يومًا');
+    return 'منذ ' + _arCount(Math.round(a), 'ساعة', 'ساعتين', 'ساعات', 'ساعة');
+  }
+
+  function _syncBanner(stale, feeds, hours, gaps, aud) {
     const show = function () {
       try {
         if (!document.body || document.getElementById('phalix-sync-warn')) return;
-        const names = stale.map(function (b) {
-          return (b.name || b.code) + _syncWhy(b);
-        }).join(' — ');
-        const feedNames = (feeds || []).map(function (b) {
-          return (b.name || b.key) + _syncWhy(b);
-        }).join(' — ');
+        if (!aud || (!aud.show && !(gaps && gaps.length))) return;
+
+        const g = aud.show ? _syncGroups(stale, feeds, aud.only) : { branches: [], loose: [] };
+        const fp = _syncFp(g.branches.concat(g.loose.map(function (l, i) { return { key: 'f' + i, kind: l.text }; })));
+        const hasRed = !!(gaps && gaps.length);
+        if (!g.branches.length && !g.loose.length && !hasRed) return;
+        if (!hasRed && _syncHidden(fp)) return;   // الأحمر مايتخفيش
+
         const box = document.createElement('div');
         box.id = 'phalix-sync-warn';
         box.setAttribute('dir', 'rtl');
         box.setAttribute('role', 'alert');
-        /* تحت شريط «البيانات ناقصة» الأحمر لو ظاهر، عشان مايغطّيهوش */
-        let top = 0;
-        const red = document.getElementById('phalix-data-warn');
-        if (red) { try { top = red.getBoundingClientRect().height || 0; } catch (e) {} }
-        box.style.cssText = 'position:fixed;top:' + top + 'px;left:0;right:0;z-index:99998;' +
-          'background:#b45309;color:#fff;font-family:Cairo,system-ui,sans-serif;font-size:13px;' +
-          'font-weight:700;padding:8px 14px;box-shadow:0 2px 10px rgba(0,0,0,.25);line-height:1.8;';
-        const x = document.createElement('span');
-        x.textContent = '✕';
-        x.style.cssText = 'float:left;cursor:pointer;padding:0 6px';
-        x.addEventListener('click', function () { box.remove(); });
-        box.appendChild(x);
-        /* سطر لكل نوع: المخزون وتغذيات البيانات. الاتنين ممكن يظهروا
-           مع بعض، وكل واحد بصيغته عشان الرسالة تفضل مفهومة.        */
-        const line = function (text) {
-          const el = document.createElement('div');
-          el.textContent = text;
-          box.appendChild(el);
-        };
-        if (stale.length) {
-          line('⚠️ تنبيه: لم يتم تحديث بيانات مخزون ' +
-            (stale.length > 1 ? 'الفروع التالية' : 'فرع') + ' منذ أكثر من ' +
-            _arCount(Math.round(hours), 'ساعة', 'ساعتين', 'ساعات', 'ساعة') +
-            ': ' + names + '. الأرصدة والأسعار المعروضة قد لا تطابق الواقع، يُرجى إبلاغ الإدارة.');
+        box.style.cssText = 'position:fixed;bottom:14px;right:14px;z-index:99998;max-width:min(92vw,520px);' +
+          'font-family:Cairo,system-ui,sans-serif;font-size:12.5px;line-height:1.75;';
+
+        /* ── الأصفر: شريحة صغيرة في الركن، مش شريط يقطع الشاشة ── */
+        if (g.branches.length || g.loose.length) {
+          const n = g.branches.length + g.loose.length;
+          const worst = g.branches.filter(function (x) { return x.kind === 'job_error'; }).length;
+          const pill = document.createElement('div');
+          pill.style.cssText = 'background:#b45309;color:#fff;border-radius:10px;padding:7px 11px;' +
+            'box-shadow:0 4px 14px rgba(0,0,0,.28);cursor:pointer;display:flex;align-items:center;gap:8px';
+          const head = g.branches.length === 1 && !g.loose.length
+            ? (g.branches[0].kind === 'unreachable'
+                ? g.branches[0].name + ' غير متصل'
+                : 'تعذّر تحديث بيانات ' + g.branches[0].name)
+              + ' · ' + _ageTxt(g.branches[0].age)
+              + ' · ' + _arCount(g.branches[0].jobs.length, 'مزامنة', 'مزامنتين', 'مزامنات', 'مزامنة') + ' متوقفة'
+            : '⚠️ ' + _arCount(n, 'تنبيه مزامنة', 'تنبيها مزامنة', 'تنبيهات مزامنة', 'تنبيه مزامنة')
+              + (worst ? ' (منها ' + worst + ' عطل)' : '');
+          const lbl = document.createElement('span');
+          lbl.textContent = (g.branches.length === 1 && !g.loose.length ? '⚠️ ' : '') + head;
+          lbl.style.cssText = 'flex:1;font-weight:700';
+          const x = document.createElement('span');
+          x.textContent = '✕';
+          x.style.cssText = 'cursor:pointer;padding:0 4px;opacity:.85';
+          x.addEventListener('click', function (e) { e.stopPropagation(); _syncHide(fp); box.remove(); });
+          pill.appendChild(lbl); pill.appendChild(x);
+
+          const det = document.createElement('div');
+          det.style.cssText = 'display:none;background:#78350f;color:#fff;border-radius:10px;' +
+            'margin-top:6px;padding:9px 12px;max-height:46vh;overflow:auto;box-shadow:0 4px 14px rgba(0,0,0,.28)';
+          g.branches.forEach(function (b) {
+            const h = document.createElement('div');
+            h.style.cssText = 'font-weight:800;margin-top:6px';
+            h.textContent = (b.kind === 'unreachable' ? '🔌 ' : '⛔ ') + b.name + ' — ' +
+              (b.kind === 'unreachable' ? 'السيرفر غير متصل' : 'عطل في المزامنة') +
+              (b.age != null ? ' · ' + _ageTxt(b.age) : '');
+            det.appendChild(h);
+            if (b.stock) {
+              const s = document.createElement('div');
+              s.textContent = '• المخزون' + b.stock;
+              det.appendChild(s);
+            }
+            b.jobs.forEach(function (j) {
+              const li = document.createElement('div');
+              li.textContent = '• ' + j.name + (j.fails ? ' — ' + j.fails + ' محاولة فاشلة' : '');
+              det.appendChild(li);
+            });
+          });
+          g.loose.forEach(function (l) {
+            const li = document.createElement('div');
+            li.textContent = '• ' + l.text;
+            det.appendChild(li);
+          });
+          const tip = document.createElement('div');
+          tip.style.cssText = 'margin-top:9px;opacity:.85;font-size:11.5px';
+          tip.textContent = g.branches.some(function (b) { return b.kind === 'unreachable'; })
+            ? 'السيرفر غير متصل: يُرجى مراجعة اتصال الفرع.'
+            : 'يُرجى إبلاغ الإدارة.';
+          det.appendChild(tip);
+
+          pill.addEventListener('click', function () {
+            det.style.display = det.style.display === 'none' ? 'block' : 'none';
+          });
+          box.appendChild(pill); box.appendChild(det);
         }
-        if (feedNames) {
-          line('⚠️ تنبيه: لم يتم تحديث ' + feedNames +
-            '. البيانات المعروضة قد لا تطابق الواقع، يُرجى إبلاغ الإدارة.');
+
+        /* ── الأحمر: بيانات ناقصة فعلًا. ده بيفضل بارز ومن غير إخفاء ── */
+        if (hasRed) {
+          const red = document.createElement('div');
+          red.style.cssText = 'background:#b91c1c;color:#fff;border-radius:10px;padding:9px 12px;' +
+            'margin-top:6px;font-weight:700;box-shadow:0 4px 14px rgba(0,0,0,.3)';
+          red.textContent = '⛔ فواتير مبيعات مفقودة لم تصل من eplus: ' + _gapsLine(gaps) +
+            '. التقارير والمطالبات لهذه الفترة ناقصة، يُرجى إبلاغ الإدارة.';
+          box.appendChild(red);
         }
-        if (gaps && gaps.length) {
-          line('⛔ تنبيه: توجد فواتير مبيعات مفقودة لم تصل من نظام eplus: ' +
-            _gapsLine(gaps) + '. التقارير والمطالبات لهذه الفترة ناقصة، يُرجى إبلاغ الإدارة.');
-        }
+
         document.body.appendChild(box);
       } catch (e) {}
     };
@@ -699,6 +828,10 @@ const Session = (function () {
       if (!isLoggedIn() || !tokenValid()) return;
       const p = location.pathname;
       if (/(^|\/)(index|auth)\.html?$/.test(p) || p.charAt(p.length - 1) === '/') return;
+      /* الطيار مايشوفش تنبيهات المزامنة أصلًا — فمفيش داعي حتى للنداء.
+         الرسالة نفسها بتقول «يُرجى إبلاغ الإدارة»، يعني إحنا عارفين
+         إنه مش هيتصرف فيها. */
+      if (normRole(role()) === 'driver') return;
       const d = await syncHealth(hours);
       const stale = ((d && d.branches) || []).filter(function (b) { return b && b.stale; });
       /* feeds ممكن ماتكونش موجودة على قاعدة لسه ماتطبّقش عليها
@@ -708,7 +841,8 @@ const Session = (function () {
          migrate_178 — ساعتها بترجع [] والتنبيهات التانية تفضل شغّالة. */
       const gaps  = ((d && d.sales_gaps) || []).filter(function (g) { return g && g.missing; });
       if (stale.length || feeds.length || gaps.length) {
-        _syncBanner(stale, feeds, (d && d.threshold_hours) || SYNC_HOURS, gaps);
+        const aud = await _syncAudience();
+        _syncBanner(stale, feeds, (d && d.threshold_hours) || SYNC_HOURS, gaps, aud);
       }
     } catch (e) {
       /* الدالة ممكن ماتكونش اتطبّقت على القاعدة دي (التست vs البرودكشن)
