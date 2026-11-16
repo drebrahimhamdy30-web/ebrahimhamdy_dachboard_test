@@ -135,71 +135,12 @@ $RunNew    = 0
 $RunUpd    = 0
 $RunStatus = "ok"
 $RunError  = $null
+# وقت بداية السحبة — بيتختم على كل فاتورة مفتوحة (orders.bill_seen_at) عشان
+# تبويب «لم تُغلق على B Connect» يعرف المفتوح دلوقتي من غير ما ينده B Connect
+$SeenAt    = $RunStart.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
 
-Head "1) قراءة من eplus"
-$res = Q $SQL
-if ($res.err) { Log "فشل القراءة: $($res.err)"; $RunStatus="error"; $RunError=$res.err; Write-SyncRun; return }
-Log ("قرأ {0} طلب معلق في {1:N2} ثانية" -f $res.rows.Count, $res.sec)
-if ($res.rows.Count -eq 0) { Log "مفيش طلبات معلقة"; return }
-
-$TYPE = @{ 1 = "كاش"; 2 = "آجل"; 3 = "فيزا" }
-function Clean-Phone($v) {
-  if (-not $v) { return $null }
-  $p = ([string]$v) -split '[^0-9]+' | Where-Object { $_.Length -ge 7 }
-  if ($p.Count -eq 0) { return $null }
-  return ($p -join ', ')
-}
-
-$rowsOut = @()
-$unknownType = @{}
-foreach ($r in $res.rows) {
-  $bt = $TYPE[[int]$r.bill_typ]
-  if (-not $bt) { $bt = "كاش"; $unknownType[[string]$r.bill_typ] = $true }
-  $rowsOut += [ordered]@{
-    bill_no                  = [string]$r.bill_no
-    bill_type                = $bt
-    bill_date                = $(if ($r.bill_date) { ([datetime]$r.bill_date).ToString("yyyy-MM-dd HH:mm:ss") } else { $null })
-    cust_code                = [string]$r.cust_code
-    customer_name            = $r.customer_name
-    customer_address         = $r.customer_address
-    customer_phone           = Clean-Phone $r.customer_phone
-    cust_region              = $(if ($r.cust_region -and ([string]$r.cust_region).Trim()) { ([string]$r.cust_region).Trim() } else { "يحتاج إضافة منطقة" })
-    count_of_items           = $(if ($r.count_of_items -ne $null) { [int]$r.count_of_items } else { $null })
-    notes                    = $r.notes
-    employee_name            = $r.employee_name
-    total_bill_net           = $(if ($r.total_bill_net -ne $null) { [double]$r.total_bill_net } else { $null })
-    current_customer_balance = $(if ($r.current_customer_balance -ne $null) { [double]$r.current_customer_balance } else { $null })
-    bill_status              = "Pending"
-    additional_expenses      = $(if ($r.additional_expenses -ne $null) { [double]$r.additional_expenses } else { 0 })
-  }
-}
-if ($unknownType.Count) { Log ("تحذير: bill_typ مش معروف -> " + (($unknownType.Keys) -join ", ") + " (اتخزنت كاش)") }
-$noReg = ($rowsOut | Where-Object { $_.cust_region -eq "يحتاج إضافة منطقة" }).Count
-Log ("بلا منطقة: {0} من {1}" -f $noReg, $rowsOut.Count)
-
-# تصنيف سبب غياب المنطقة - ارقام مختصرة بدل سرد طويل ممكن يتقص عند النسخ.
-# (القاعدة بتحل 16 من 17 بينما العداد بيقول 15 بلا منطقة - التناقض ده
-#  لازم يتفسر قبل اي كتابة لان العمود ده التوزيع بيعتمد عليه.)
-$cNull = 0; $cBlank = 0; $cOk = 0
-foreach ($raw in $res.rows) {
-  $v = $raw.cust_region
-  if ($v -eq $null)                     { $cNull++ }
-  elseif (-not ([string]$v).Trim())     { $cBlank++ }
-  else                                  { $cOk++ }
-}
-Log ("تصنيف المنطقة:  فيها اسم={0}   NULL={1}   مسافات فقط={2}   الاجمالي={3}" -f $cOk, $cNull, $cBlank, $res.rows.Count)
-if ($cOk -ne ($rowsOut.Count - $noReg)) {
-  Log ("!! تعارض: القاعدة حلّت {0} والعداد بيقول {1}" -f $cOk, ($rowsOut.Count - $noReg))
-}
-Head "2) عينة ($Show)"
-$rowsOut | Select-Object -First $Show | ForEach-Object {
-  Write-Host ""
-  $_.GetEnumerator() | ForEach-Object {
-    $v = ("$($_.Value)" -replace "\s+"," "); if ($v.Length -gt 46) { $v = $v.Substring(0,46)+"..." }
-    "    {0,-26} = {1}" -f $_.Key, $v
-  }
-}
-
+# (بلوك Supabase اتنقل هنا قبل القراءة: Write-SyncRun كانت بتتنده في مسار
+#  فشل القراءة قبل ما تتعرّف فكانت بتقع، والتشغيل الفاشل ماكانش بيتسجّل)
 # ---------- Supabase ----------
 $SB  = $cfg.supabaseUrl.TrimEnd('/')
 $KEY = $cfg.serviceKey
@@ -247,6 +188,73 @@ function Write-SyncRun {
     Invoke-RestMethod -Uri "$SB/rest/v1/sync_jobs?id=eq.delivery_orders" -Headers $h2 -Method PATCH -Body ([Text.Encoding]::UTF8.GetBytes($patch)) -TimeoutSec 30 | Out-Null
   } catch { Log "تحديث sync_jobs فشل: $($_.Exception.Message)" }
 }
+
+Head "1) قراءة من eplus"
+$res = Q $SQL
+if ($res.err) { Log "فشل القراءة: $($res.err)"; $RunStatus="error"; $RunError=$res.err; Write-SyncRun; return }
+Log ("قرأ {0} طلب معلق في {1:N2} ثانية" -f $res.rows.Count, $res.sec)
+# صفر فواتير مفتوحة = نتيجة صحيحة لازم تتسجّل (من غيرها التبويب يفتكر السحبة واقفة)
+if ($res.rows.Count -eq 0) { Log "مفيش طلبات معلقة"; Write-SyncRun; return }
+
+$TYPE = @{ 1 = "كاش"; 2 = "آجل"; 3 = "فيزا" }
+function Clean-Phone($v) {
+  if (-not $v) { return $null }
+  $p = ([string]$v) -split '[^0-9]+' | Where-Object { $_.Length -ge 7 }
+  if ($p.Count -eq 0) { return $null }
+  return ($p -join ', ')
+}
+
+$rowsOut = @()
+$unknownType = @{}
+foreach ($r in $res.rows) {
+  $bt = $TYPE[[int]$r.bill_typ]
+  if (-not $bt) { $bt = "كاش"; $unknownType[[string]$r.bill_typ] = $true }
+  $rowsOut += [ordered]@{
+    bill_no                  = [string]$r.bill_no
+    bill_type                = $bt
+    bill_date                = $(if ($r.bill_date) { ([datetime]$r.bill_date).ToString("yyyy-MM-dd HH:mm:ss") } else { $null })
+    cust_code                = [string]$r.cust_code
+    customer_name            = $r.customer_name
+    customer_address         = $r.customer_address
+    customer_phone           = Clean-Phone $r.customer_phone
+    cust_region              = $(if ($r.cust_region -and ([string]$r.cust_region).Trim()) { ([string]$r.cust_region).Trim() } else { "يحتاج إضافة منطقة" })
+    count_of_items           = $(if ($r.count_of_items -ne $null) { [int]$r.count_of_items } else { $null })
+    notes                    = $r.notes
+    employee_name            = $r.employee_name
+    total_bill_net           = $(if ($r.total_bill_net -ne $null) { [double]$r.total_bill_net } else { $null })
+    current_customer_balance = $(if ($r.current_customer_balance -ne $null) { [double]$r.current_customer_balance } else { $null })
+    bill_status              = "Pending"
+    bill_seen_at             = $SeenAt
+    additional_expenses      = $(if ($r.additional_expenses -ne $null) { [double]$r.additional_expenses } else { 0 })
+  }
+}
+if ($unknownType.Count) { Log ("تحذير: bill_typ مش معروف -> " + (($unknownType.Keys) -join ", ") + " (اتخزنت كاش)") }
+$noReg = ($rowsOut | Where-Object { $_.cust_region -eq "يحتاج إضافة منطقة" }).Count
+Log ("بلا منطقة: {0} من {1}" -f $noReg, $rowsOut.Count)
+
+# تصنيف سبب غياب المنطقة - ارقام مختصرة بدل سرد طويل ممكن يتقص عند النسخ.
+# (القاعدة بتحل 16 من 17 بينما العداد بيقول 15 بلا منطقة - التناقض ده
+#  لازم يتفسر قبل اي كتابة لان العمود ده التوزيع بيعتمد عليه.)
+$cNull = 0; $cBlank = 0; $cOk = 0
+foreach ($raw in $res.rows) {
+  $v = $raw.cust_region
+  if ($v -eq $null)                     { $cNull++ }
+  elseif (-not ([string]$v).Trim())     { $cBlank++ }
+  else                                  { $cOk++ }
+}
+Log ("تصنيف المنطقة:  فيها اسم={0}   NULL={1}   مسافات فقط={2}   الاجمالي={3}" -f $cOk, $cNull, $cBlank, $res.rows.Count)
+if ($cOk -ne ($rowsOut.Count - $noReg)) {
+  Log ("!! تعارض: القاعدة حلّت {0} والعداد بيقول {1}" -f $cOk, ($rowsOut.Count - $noReg))
+}
+Head "2) عينة ($Show)"
+$rowsOut | Select-Object -First $Show | ForEach-Object {
+  Write-Host ""
+  $_.GetEnumerator() | ForEach-Object {
+    $v = ("$($_.Value)" -replace "\s+"," "); if ($v.Length -gt 46) { $v = $v.Substring(0,46)+"..." }
+    "    {0,-26} = {1}" -f $_.Key, $v
+  }
+}
+
 
 Head "3) مقارنة بالموجود"
 $bills   = $rowsOut | ForEach-Object { $_.bill_no }

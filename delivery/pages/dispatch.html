@@ -915,6 +915,8 @@ let allOrders=[],allDrivers=[],activeTrips=[],tripOrdersMap={};
 let unclosedFlags=[]; // طلبات مكتملة على Phalix لكن لم تُغلق على B Connect (trip_review_flags غير المحلولة)
 let unclosedLoading=false; // بيتحمّل دلوقتي؟ (عشان مانعرضش «لا توجد» قبل ما يخلص)
 let unclosedError=false;   // B Connect ما ردّش — نعرض خطأ بدل ما نفضل مستنيين للأبد
+let unclosedLiveAt=null;   // آخر سحبة مباشرة من eplus (أقدم فرع حيّ) — للعرض جنب العنوان
+let unclosedFailedN=0;     // فروع اتسألت من B Connect وماردّتش (والباقي ظاهر عادي)
 let currentPopupDriverId=null;
 let knownRegions=new Set();
 let regionInfo={}; // name → {min, fee, below} حسب فرع العرض الحالي (لأسعار المناطق + تنبيه الحد الأدنى)
@@ -2043,27 +2045,57 @@ function fetchUnclosed(bb){
 }
 
 async function refreshUnclosed(){
-  unclosedLoading=true; unclosedError=false;
+  unclosedLoading=true; unclosedError=false; unclosedFailedN=0;
   const branchId=currentUser?.role==='admin'?activeBranchId:(currentUser?.branch_id||null);
   const targets=branchId?[branchId]:Branches.ids();
   const grid=document.getElementById('ordersGrid');
-  if(grid && currentFilter==='unclosed') grid.innerHTML='<div class="empty-msg">⏳ جاري القراءة من B Connect...</div>';
-  let bills=[];
+  /* ١) الفروع اللي سكربت المزامنة (sync_pending_orders.ps1) شغال عليها: السكربت بيقرا
+        الفواتير المفتوحة من قاعدة eplus مباشرة كل دقيقة ويختمها bill_seen_at — فالقايمة
+        جاهزة في Supabase من غير نداء B Connect (اللي كان ~7ث ومهلته 20ث). الفرع «حيّ»
+        بس لو آخر سحبة ناجحة أحدث من 3 دقايق وفعلًا ختمت (القرار في الدالة). */
+  let live={}, liveRows=[];
   try{
-    const resps=await Promise.all(targets.map(bb=>fetchUnclosed(bb)));
-    if(resps.length && resps.every(j=>j===null)) unclosedError=true;   // كل الفروع فشلت = الخدمة واقفة
-    resps.forEach(j=>{
-      if(!j) return;
-      const arr=Array.isArray(j)?j:(j.bills||j.Data||[]);
-      arr.forEach(x=>{ const bn=(x&&typeof x==='object')?x.bill_no:x; if(bn!=null&&String(bn).trim()) bills.push(String(bn).trim()); });
-    });
+    const {data,error}=await db.rpc('get_unclosed_from_sync',{p_branch:branchId||null});
+    if(!error&&data){
+      (data.branches||[]).forEach(b=>{ if(b.live) live[b.branch_id]=b.last_run_at; });
+      liveRows=(data.rows||[]).filter(r=>live[r.branch_id]);
+    }
   }catch(e){}
-  try{
-    const {data}=await db.rpc('get_completed_orders_for_bills',{p_branch:branchId||null,p_bills:bills});
-    unclosedFlags=data||[];
-  }catch(e){ unclosedFlags=[]; }
+  const liveTimes=Object.values(live).filter(Boolean).map(t=>new Date(t).getTime());
+  unclosedLiveAt=liveTimes.length?new Date(Math.min(...liveTimes)):null;
+  /* ٢) الباقي (فرع السكربت مش شغال عليه، أو واقف): B Connect زي الأول — فرع فرع، وكل فرع
+        بأرقامه بس (أرقام الفواتير بتتكرر بين الفروع، فـp_branch=null كان ممكن يطابق غلط). */
+  const rest=targets.filter(bb=>!live[bb]);
+  let restRows=[];
+  if(rest.length){
+    if(grid && currentFilter==='unclosed' && !liveRows.length) grid.innerHTML='<div class="empty-msg">⏳ جاري القراءة من B Connect...</div>';
+    const resps=await Promise.all(rest.map(bb=>fetchUnclosed(bb)));
+    unclosedFailedN=resps.filter(j=>j===null).length;
+    if(unclosedFailedN===rest.length && !Object.keys(live).length) unclosedError=true;   // كل الفروع فشلت = الخدمة واقفة
+    const per=await Promise.all(rest.map(async (bb,i)=>{
+      const j=resps[i]; if(!j) return [];
+      const arr=Array.isArray(j)?j:(j.bills||j.Data||[]);
+      const bills=[];
+      arr.forEach(x=>{ const bn=(x&&typeof x==='object')?x.bill_no:x; if(bn!=null&&String(bn).trim()) bills.push(String(bn).trim()); });
+      if(!bills.length) return [];
+      try{ const {data}=await db.rpc('get_completed_orders_for_bills',{p_branch:bb,p_bills:bills}); return data||[]; }
+      catch(e){ return []; }
+    }));
+    restRows=per.flat();
+  }
+  unclosedFlags=[...liveRows,...restRows].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
   unclosedLoading=false;
   if(currentFilter==='unclosed') renderOrders();
+}
+// مصدر القايمة جنب العنوان: قراءة مباشرة (من كام ثانية) + أي فرع B Connect ماردّش
+function unclosedSrcNote(){
+  const parts=[];
+  if(unclosedLiveAt){
+    const sec=Math.max(0,Math.round((Date.now()-unclosedLiveAt.getTime())/1000));
+    parts.push('⚡ قراءة مباشرة من eplus · آخر تحديث منذ '+(sec<60?sec+' ث':Math.round(sec/60)+' د'));
+  }
+  if(unclosedFailedN) parts.push('⚠️ تعذّرت قراءة '+unclosedFailedN+' فرع من B Connect');
+  return parts.length?'<span style="font-size:.72rem;color:#64748b;font-weight:700">'+parts.join(' · ')+'</span>':'';
 }
 function unclosedTimeAgo(ts){
   if(!ts) return '';
@@ -2082,10 +2114,10 @@ function renderUnclosedFlags(){
   let rows=[...unclosedFlags];
   if(billQ.length>=3) rows=rows.filter(f=>String(f.bill_no||'').toLowerCase().includes(billQ));
   if(codeQ.length>=1) rows=rows.filter(f=>matchCodeName(f.cust_code, f.customer_name, codeQ));
-  if(!rows.length){ grid.innerHTML='<div class="empty-msg">✅ لا توجد طلبات غير مغلقة</div>'; return; }
+  if(!rows.length){ grid.innerHTML='<div class="empty-msg">✅ لا توجد طلبات غير مغلقة'+(unclosedSrcNote()?'<br>'+unclosedSrcNote():'')+'</div>'; return; }
   const total=rows.reduce((s,f)=>s+Number(f.amount||0),0);
   const head=`<div style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem;background:var(--surface);border:1px solid #fecaca;border-right:4px solid #b91c1c;border-radius:12px;padding:.6rem .9rem;margin-bottom:.2rem">
-      <span style="font-weight:800;color:#b91c1c;font-size:.88rem">🔴 مكتملة على Phalix ولم تُغلق على B Connect</span>
+      <span style="font-weight:800;color:#b91c1c;font-size:.88rem">🔴 مكتملة على Phalix ولم تُغلق على B Connect</span>${unclosedSrcNote()}
       <span style="font-weight:800;color:#334155;font-size:.82rem">${rows.length} فاتورة · ${total.toLocaleString('ar-EG')} ج</span>
     </div>`;
   const cards=rows.map(f=>{
