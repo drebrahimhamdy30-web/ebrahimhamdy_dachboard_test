@@ -1,5 +1,5 @@
 {
-  "name": "المخزون — فرقي: المعمورة",
+  "name": "مخزون المعموره",
   "nodes": [
     {
       "parameters": {
@@ -15,10 +15,11 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.3,
       "position": [
-        -1620,
-        300
+        -1296,
+        976
       ],
-      "name": "كل شوية"
+      "name": "كل شوية",
+      "id": "74a5518c-3796-4ef2-a8c3-2a9c23894f8d"
     },
     {
       "parameters": {
@@ -39,7 +40,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ p_branches: [\"mamora\"], p_overlap_minutes: 5, p_max_hours: 6 }) }}",
+        "jsonBody": "={{ JSON.stringify({ p_branches: [\"mamora\"], p_overlap_minutes: 180, p_max_hours: 6 }) }}",
         "options": {
           "timeout": 120000
         }
@@ -47,13 +48,14 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1400,
-        300
+        -1072,
+        976
       ],
       "name": "نافذة",
-      "retryOnFail": true,
+      "retryOnFail": false,
       "maxTries": 5,
-      "waitBetweenTries": 15000
+      "waitBetweenTries": 5000,
+      "id": "2159dd99-01dc-4dd1-bfc4-a9339c6b3e50"
     },
     {
       "parameters": {
@@ -62,10 +64,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1180,
-        300
+        -848,
+        976
       ],
-      "name": "تحقق"
+      "name": "تحقق",
+      "id": "dedadd1b-b8f1-4334-b32a-6de55357e380"
     },
     {
       "parameters": {
@@ -83,19 +86,20 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1000,
-        300
+        -624,
+        976
       ],
       "name": "تغيّرات الكمية",
+      "retryOnFail": false,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "id": "94872e21-779c-476e-a74b-47e345d92c5a",
       "credentials": {
         "httpBasicAuth": {
           "id": "uJYS75ZTBXnlYIqg",
           "name": "eplus"
         }
-      },
-      "retryOnFail": true,
-      "maxTries": 5,
-      "waitBetweenTries": 15000
+      }
     },
     {
       "parameters": {
@@ -113,31 +117,66 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -820,
-        300
+        -400,
+        976
       ],
       "name": "تغيّرات الصنف",
+      "retryOnFail": false,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "id": "82993e62-6785-460b-9298-b173762dd2b1",
       "credentials": {
         "httpBasicAuth": {
           "id": "uJYS75ZTBXnlYIqg",
           "name": "eplus"
         }
-      },
-      "retryOnFail": true,
-      "maxTries": 5,
-      "waitBetweenTries": 15000
+      }
     },
     {
       "parameters": {
-        "jsCode": "const MAXCODES = 1500;\n\n/* ── اختيار طريقة البحث: الأطول يكسب ──────────────────────────────\n   البحث في eplus **جزئي** في الحالتين، فتكلفته = كام صنف في\n   الكتالوج فيه النص ده. يعني النص القصير غالي والطويل رخيص، سواء\n   كان كود أو اسم. القياس على 27,821 صنف (2026-11-10):\n\n     كود '6'   → 15,668 صنف   |   اسمه 'ريد اقراص 60 قرص'  →  1\n     كود '7068'→     12 صنف   |   اسمه 'ي'                 → 24,123\n\n   والعيبين **متكاملين**: كل صنف اسمه غالي كوده رخيص والعكس. فمفيش\n   داعي لقايمة استثناءات ولا سؤال للقاعدة — نبص على الطول ونختار.\n   على الـ588 صنف الأصعب (كل اللي اسمه قصير أو كوده قصير): متوسط\n   النتايج 2، وأسوأ نداء 166، وولا واحد فوق 300.\n   التعادل بيروح للكود (قيس: '250مل' بالاسم 366 وبالكود 1).\n\n   والاسم جاي من رد التغيّرات نفسه — يعني اسم eplus الحالي، مش نسخة\n   عندنا ممكن تكون قديمة. ولو الرد ماجابش اسم، بنرجع لخريطة\n   stock_sync_window، وآخر حل الكود. */\nconst HEAVY  = $('تحقق').first().json.heavy || {};\nconst pickName = (code, name) =>\n  (name && name.trim().length > code.length) ? name.trim() : null;\n\n/* مخزن الفرع ده بس. الرد بيرجّع كل المخازن — بتاعتنا وبتاعة غيرنا\n   (طوسون، سندره، العجز) — وكل وركفلو مسؤول عن فرعه لوحده، فبنفلتر\n   هنا عشان مانجيبش رصيد أكواد اتحركت في فرع تاني. */\nconst STORES = [\"الصيدلية\"];\n\n/* مصدرين للتغيير، لأن eplus بتمسك كل واحد في حقل لوحده:\n     last_trans_date → حركة الكمية (بيع/شراء/مرتجع)\n     update_date     → تعديل الصنف نفسه (سعر، اسم، شركة، تصنيف)\n   الاتنين مستقلين: صنف 7228 بيع النهاردة (last_trans 11/10) وآخر\n   تعديل بياناته 7/28. فالسعر اللي بيتغيّر من غير بيع **مش** بيظهر في\n   نداء الكمية خالص — و~25 صنف في اليوم بيتغيّر سعرهم في المعمورة.\n   والصنف الجديد متغطّي هنا كمان: update_date بيتحط وقت الإنشاء\n   (مُتحقَّق على 23,225 صف: ولا واحد update أقدم من insert). */\nconst rows = [];\nfor (const src of ['تغيّرات الكمية', 'تغيّرات الصنف']) {\n  const o = $(src).first().json;\n  if (o.Error || String(o.Message).toLowerCase() === 'fail') {\n    throw new Error('eplus رفض «' + src + '»: ' + (o.Error || o.Message));\n  }\n  for (const r of (o.Data || [])) rows.push(r);\n}\n\n// ⚠️ الكميات في الرد ده **ناقصة** (بتاعة الدفعات اللي اتحركت بس).\n//    إحنا عايزين الأكواد لا غير.\nconst codes = new Map();   // كود → اسم نبحث بيه (أو null = نبحث بالكود)\nlet stuck = [], other = 0;\nfor (const r of rows) {\n  if (!r || r.itm_code === undefined || r.itm_code === null) continue;\n  if (STORES.indexOf(r.sto_name) < 0) { other++; continue; }\n  const c = String(r.itm_code).trim();\n  if (!c) continue;\n  if (codes.has(c)) continue;\n\n  const name = pickName(c, r.itm_name_ar) || pickName(c, HEAVY[c]);\n  /* كود من خانة واحدة بلا اسم أطول منه = مفيش نص انتقائي نبحث بيه.\n     البحث بالكود هيجيب نص الكتالوج، فبيتأجّل للّقطة الكاملة —\n     وبيتكتب في السجل مش بيختفي في السكوت. */\n  if (!name && c.length <= 1) { stuck.push(c); continue; }\n  codes.set(c, name);\n}\n\nif (codes.size > MAXCODES) {\n  throw new Error('عدد الأكواد ' + codes.size + ' فوق الحد ' + MAXCODES +\n    ' — الجولة دي هتتعدّى على اللي بعدها، شغّل اللقطة الكاملة');\n}\n// مفيش تغيير أصلًا = جولة شرعية (ساعة هادية). مش خطأ.\nconst byName = [...codes].filter(e => e[1]).length;\nconsole.log('نافذة ' + $('تحقق').first().json.gap_minutes + 'د · ' + rows.length +\n  ' صف · ' + codes.size + ' كود (' + byName + ' بالاسم · ' +\n  (codes.size - byName) + ' بالكود) · مخازن تانية ' + other +\n  (stuck.length ? ' · اتأجّل للّقطة: ' + stuck.join(',') : ''));\nreturn [...codes].map(([code, name]) =>\n  ({ json: { code: code, name: name, total: codes.size } }));"
+        "method": "POST",
+        "url": "https://rxtjoqulmgkkcohmgzgi.supabase.co/rest/v1/rpc/stock_refresh_pick",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_branch: 'mamora', p_limit: 60, p_rows: [ ...($('تغيّرات الكمية').first().json.Data || []), ...($('تغيّرات الصنف').first().json.Data || []) ].map(r => ({ itm_code: r.itm_code, itm_name_ar: r.itm_name_ar, sto_name: r.sto_name, last_trans_date: r.last_trans_date, update_date: r.update_date })) }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -176,
+        976
+      ],
+      "name": "اختيار",
+      "id": "b6f1c2d4-5e7a-4c3b-9a1d-2f8e6c4b7a90"
+    },
+    {
+      "parameters": {
+        "jsCode": "// رد الـAPI ممكن يكون Fail في body بـ200 — لازم يوقف هنا قبل ما «اختيار» يفتكر مفيش تغيير\nfor (const src of ['تغيّرات الكمية', 'تغيّرات الصنف']) {\n  const o = $(src).first().json;\n  if (o.Error || String(o.Message).toLowerCase() === 'fail') {\n    throw new Error('eplus رفض «' + src + '»: ' + (o.Error || o.Message));\n  }\n}\n\n/* stock_refresh_pick قارن تاريخ آخر حركة/تعديل في eplus بالمحفوظ في\n   stock_mamora ورجّع اللي eplus عنده أحدث بس (الأقدم الأول، بحد 60).\n   الصنف اللي يفشل بحثه بيفضل تاريخه القديم عندنا، فبيرجع هنا في الجولة\n   الجاية لوحده — مفيش طابور تاني.\n\n   البحث في eplus **جزئي** بالكود وبالاسم، فالنص الأطول أرخص:\n   كود '6' بيرجّع ~15 ألف صنف، واسمه بيرجّع 1. التعادل للكود. */\nconst p = $json || {};\nconst pickName = (code, name) =>\n  (name && String(name).trim().length > code.length) ? String(name).trim() : null;\n\nconst out = [], stuck = [];\nfor (const it of (p.items || [])) {\n  const c = String(it.code).trim();\n  if (!c) continue;\n  const name = pickName(c, it.name);\n  // كود خانة واحدة بلا اسم = البحث هيجيب نص الكتالوج؛ يستنى اللقطة الكاملة\n  if (!name && c.length <= 1) { stuck.push(c); continue; }\n  out.push({ json: { code: c, name: name, reason: it.reason, total: p.need } });\n}\n\nconsole.log('مرشّح ' + p.candidates + ' · محتاج تحديث ' + p.need + ' · الجولة دي ' + out.length +\n  (p.need > out.length + stuck.length ? ' · الباقي للجولة الجاية ' + (p.need - out.length - stuck.length) : '') +\n  (stuck.length ? ' · اتأجّل للّقطة: ' + stuck.join(',') : ''));\nreturn out;"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -640,
-        300
+        48,
+        976
       ],
-      "name": "أكواد"
+      "name": "أكواد",
+      "id": "c07ce390-6540-425c-8422-095830d48ab5"
     },
     {
       "parameters": {
@@ -149,43 +188,46 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.name ? { itm_name_ar_search: $json.name } : { itm_code_search: $json.code }) }}",
         "options": {
-          "timeout": 120000,
           "batching": {
             "batch": {
               "batchSize": 1,
-              "batchInterval": 1000
+              "batchInterval": 3000
             }
-          }
+          },
+          "timeout": 120000
         }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -460,
-        300
+        272,
+        976
       ],
       "name": "رصيد",
+      "retryOnFail": false,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "id": "c2f734de-160f-419f-91fb-be97fb4bfc11",
       "credentials": {
         "httpBasicAuth": {
           "id": "uJYS75ZTBXnlYIqg",
           "name": "eplus"
         }
       },
-      "retryOnFail": true,
-      "maxTries": 5,
-      "waitBetweenTries": 15000
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "jsCode": "// فرع الوركفلو ده بس — نفس اللي في «نافذة» (مصدر واحد في البانى)\nconst BRANCHES_ON = [\"mamora\"];\n\nconst BR = {\n  'الصيدلية':        'mamora',\n  'ابراهيم حمدي 2':  'san',\n  'ابراهيم حمدي 3':  'bishr',\n  'السيوف':          'seyouf',\n};\n\n// الأكواد اللي طلبناها — عشان نفلتر الرد الجزئي على الكود بالحرف\nconst asked = new Set($('أكواد').all().map(i => String(i.json.code)));\n\nconst map = new Map();   // مفتاح فرع|كود\nconst got = new Set();   // كود رجع فعلًا — حتى لو فرعه مقفول\nlet seen = 0, stray = 0;\nfor (const it of $('رصيد').all()) {\n  const o = it.json;\n  if (o.Error || String(o.Message).toLowerCase() === 'fail') {\n    throw new Error('eplus رفض بحث كود: ' + (o.Error || o.Message));\n  }\n  for (const r of (o.Data || [])) {\n    seen++;\n    const code = String((r && r.itm_code) ?? '');\n    // ⚠️ البحث جزئي: \"7220\" بيرجّع 57220 و72200 كمان. بناخد المطابق بس.\n    if (!asked.has(code)) { stray++; continue; }\n    got.add(code);\n    const br = BR[r.sto_name];\n    if (!br || BRANCHES_ON.indexOf(br) < 0) continue;\n    map.set(br + '|' + code, r);\n  }\n}\n\nif (map.size === 0) {\n  throw new Error('ولا صف مطابق من ' + seen + ' صف رجعوا — راجع الفلترة');\n}\n\n/* كود طلبناه و**ولا صف رجع ليه خالص**. السبب الوارد: اسمه اتغيّر في\n   eplus بعد آخر مزامنة فالبحث بالاسم مالقاهوش. بيتكتب في السجل عشان\n   ما يختفيش في السكوت.\n   ⚠️ الكود اللي رجع بس فرعه مقفول **مش** ضايع — عشان كده \"got\"\n   بتتملى جوّه اللفة قبل فلتر الفرع، مش من \"map\". */\nconst lost = [...asked].filter(c => !got.has(c));\n\nconst byBranch = {};\nfor (const [k, r] of map) {\n  const br = k.split('|')[0];\n  (byBranch[br] = byBranch[br] || []).push(r);\n}\n\nconsole.log('رجع ' + seen + ' صف · مطابق ' + map.size + ' · مرفوض ' + stray +\n  ' · ' + Object.keys(byBranch).map(b => b + '=' + byBranch[b].length).join(' ') +\n  (lost.length ? ' · مارجعش: ' + lost.slice(0, 20).join(',') : ''));\n\nconst out = [];\nfor (const br of Object.keys(byBranch)) {\n  const list = byBranch[br];\n  for (let i = 0; i < list.length; i += 2000) {\n    out.push({ json: { p_branch: br, p_rows: list.slice(i, i + 2000) } });\n  }\n}\nreturn out;"
+        "jsCode": "// الفروع المفتوحة للكتابة — نفس قايمة «نافذة» (مصدر واحد في البانى)\nconst BRANCHES_ON = [\"mamora\"];\n\nconst BR = {\n  'الصيدلية':        'mamora',\n  'ابراهيم حمدي 2':  'san',\n  'ابراهيم حمدي 3':  'bishr',\n  'السيوف':          'seyouf',\n};\n\n// الأكواد اللي طلبناها — بنفس ترتيب العناصر اللي دخلت «رصيد»\nconst askedList = $('أكواد').all().map(i => String(i.json.code));\nconst asked = new Set(askedList);\n\nconst map = new Map();   // مفتاح فرع|كود\nconst got = new Set();   // كود رجع فعلًا — حتى لو فرعه مقفول\nconst failed = [];       // أكواد البحث عنها فشل — بتتسجّل ومش بتوقف الجولة\nlet seen = 0, stray = 0;\n\n$('رصيد').all().forEach((it, idx) => {\n  const o = it.json || {};\n  // صنف واحد فاشل مايوقعش الجولة كلها ويرمي نتايج الباقي\n  if (o.error || o.Error || String(o.Message).toLowerCase() === 'fail') {\n    failed.push(askedList[idx]);\n    return;\n  }\n  for (const r of (o.Data || [])) {\n    seen++;\n    const code = String((r && r.itm_code) ?? '');\n    // ⚠️ البحث جزئي: \"7220\" بيرجّع 57220 و72200 كمان. بناخد المطابق بس.\n    if (!asked.has(code)) { stray++; continue; }\n    got.add(code);\n    const br = BR[r.sto_name];\n    if (!br || BRANCHES_ON.indexOf(br) < 0) continue;\n    map.set(br + '|' + code, r);\n  }\n});\n\nif (failed.length) console.log('فشل ' + failed.length + ': ' + failed.slice(0, 30).join(','));\n// لو أغلب الأصناف فشلت يبقى السيرفر واقع — نوقف من غير كتابة عشان المؤشّر مايتقدّمش\nif (failed.length > askedList.length / 2) {\n  throw new Error('أكتر من نص الأصناف فشلت (' + failed.length + ' من ' + askedList.length + ') — السيرفر غالبًا واقع');\n}\nif (map.size === 0) {\n  throw new Error('ولا صف مطابق من ' + seen + ' صف رجعوا — راجع الفلترة');\n}\n\n// كود رجع منه ولا صف (ومش من الفاشلين) — غالبًا اسمه اتغيّر في eplus\nconst failedSet = new Set(failed);\nconst lost = askedList.filter(c => !got.has(c) && !failedSet.has(c));\n\nconst byBranch = {};\nfor (const [k, r] of map) {\n  const br = k.split('|')[0];\n  (byBranch[br] = byBranch[br] || []).push(r);\n}\n\nconsole.log('رجع ' + seen + ' صف · مطابق ' + map.size + ' · مرفوض ' + stray +\n  ' · ' + Object.keys(byBranch).map(b => b + '=' + byBranch[b].length).join(' ') +\n  (lost.length ? ' · مارجعش: ' + lost.slice(0, 20).join(',') : ''));\n\nconst out = [];\nfor (const br of Object.keys(byBranch)) {\n  const list = byBranch[br];\n  for (let i = 0; i < list.length; i += 2000) {\n    out.push({ json: { p_branch: br, p_rows: list.slice(i, i + 2000) } });\n  }\n}\nreturn out;"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -280,
-        300
+        496,
+        976
       ],
-      "name": "تقسيم"
+      "name": "تقسيم",
+      "id": "afcdeae6-501a-40f7-982c-0d39219fd792"
     },
     {
       "parameters": {
@@ -214,13 +256,14 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -100,
-        300
+        720,
+        976
       ],
       "name": "كتابة",
-      "retryOnFail": true,
+      "retryOnFail": false,
       "maxTries": 5,
-      "waitBetweenTries": 15000
+      "waitBetweenTries": 5000,
+      "id": "70899fbd-0aa8-4290-84ab-1a048176116b"
     }
   ],
   "connections": {
@@ -272,7 +315,7 @@
       "main": [
         [
           {
-            "node": "أكواد",
+            "node": "اختيار",
             "type": "main",
             "index": 0
           }
@@ -311,7 +354,23 @@
           }
         ]
       ]
+    },
+    "اختيار": {
+      "main": [
+        [
+          {
+            "node": "أكواد",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": 720
   },
   "pinData": {}
 }
