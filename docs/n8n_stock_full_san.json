@@ -1,0 +1,292 @@
+{
+  "name": "المخزون — كامل: سان ستيفانو",
+  "nodes": [
+    {
+      "name": "كل نص ساعة",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "1,31 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "8fb7b9d2-6e7b-44dd-b9d8-cf216ce2f4ff"
+    },
+    {
+      "name": "تشغيل يدوي",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "<random>",
+      "parameters": {
+        "path": "<random>",
+        "httpMethod": "GET",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "1f6f1016-4d36-47fe-aff2-25f9032d6179"
+    },
+    {
+      "name": "كوزمو",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        100
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://eplus1.ebrahimhamdy.com/api/Item/SearchItem",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "itm_ismedicine_search",
+              "value": "0"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "uJYS75ZTBXnlYIqg",
+          "name": "eplus"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "id": "494a9cab-254d-4d3b-9a8f-608f09ec9db9"
+    },
+    {
+      "name": "ادوية",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        100
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://eplus1.ebrahimhamdy.com/api/Item/SearchItem",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "itm_ismedicine_search",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "uJYS75ZTBXnlYIqg",
+          "name": "eplus"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "id": "acce3c70-ef6a-47cd-bf98-7146bfa5ad17"
+    },
+    {
+      "name": "تجهيز",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// وضع التجربة: true = يقارن بس ومايكتبش. يتقلب false بعد يوم مقارنة ناجح.\nconst DRY = true;\nconst BRANCH = 'san';\nconst STORES = ['ابراهيم حمدي 2', 'سان'];\nconst COLS = [\"itm_code\",\"itnl_code\",\"itm_name_ar\",\"itm_name_en\",\"u_name_big\",\"sto_name\",\"sto_qty_big\",\"itm_sell_price_big\",\"itm_ismedicine\",\"Company_Name_Ar\",\"insert_date\",\"update_date\",\"last_trans_date\",\"u_name_small\",\"u_name_medium\",\"sto_qty_small\",\"sto_qty_medium\",\"itm_sell_price_small\",\"itm_sell_price_medium\",\"unit_big_medium_coeff\",\"unit_big_small_coeff\"];\n\nconst rows = [];\nlet total = 0;\nfor (const [node, med] of [['كوزمو', '0'], ['ادوية', '1']]) {\n  const j = $(node).first().json;\n  if (!j || !Array.isArray(j.Data) || String(j.Message).toLowerCase() === 'fail') {\n    throw new Error('eplus رد غلط في «' + node + '»: ' + ((j && (j.Error || j.Message)) || 'من غير Data'));\n  }\n  total += j.Data.length;\n  for (const r of j.Data) {\n    if (!STORES.includes(r.sto_name)) continue;\n    rows.push(COLS.map(c => (c === 'itm_ismedicine' && (r[c] === undefined || r[c] === null)) ? med : (r[c] ?? null)));\n  }\n}\nif (!rows.length) throw new Error('مفيش ولا صنف لمخازن ' + STORES.join(' / ') + ' من ' + total + ' صف');\nreturn [{ json: { branch: BRANCH, dry: DRY, cols: COLS, rows: JSON.stringify(rows), n: rows.length, total } }];"
+      },
+      "id": "7053e73b-399f-4793-ac4f-275593383ba9"
+    },
+    {
+      "name": "كتابة",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        900,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "rijAXrGxz9zhfKOb",
+          "name": "Postgres account"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select public.stock_full_replace($1, $2::text[], $3::jsonb, 0.8, $4::boolean) as r",
+        "options": {
+          "queryReplacement": "={{ [ $json.branch, $json.cols, $json.rows, $json.dry ] }}"
+        }
+      },
+      "id": "c77d4af8-bcab-4640-a36b-f257a8ae51c2"
+    },
+    {
+      "name": "مش تجربة؟",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1120,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c1",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json.r.dry_run }}",
+              "rightValue": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f31c6502-e832-437c-83ac-ac9ef87a6e8c"
+    },
+    {
+      "name": "علامات التصنيف",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1340,
+        60
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "rijAXrGxz9zhfKOb",
+          "name": "Postgres account"
+        }
+      },
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "delete from public.jard_category_flags where branch = 'سان ستيفانو';\n\ninsert into public.jard_category_flags (branch, category, itm_code)\nselect distinct 'سان ستيفانو', js.category, st.itm_code\nfrom public.stock_san st\ncross join public.jard_settings js\nwhere st.sto_qty_big::numeric > 0\n  and (\n    (js.keywords_ar is not null and array_length(js.keywords_ar, 1) > 0\n     and exists (select 1 from unnest(js.keywords_ar) as kw\n                 where translate(lower(st.itm_name_ar), 'إأآاىةث', 'اااايهت')\n                       like '%' || translate(lower(kw), 'إأآاىةث', 'اااايهت') || '%'))\n    or\n    (js.keywords_en is not null and array_length(js.keywords_en, 1) > 0\n     and exists (select 1 from unnest(js.keywords_en) as kw\n                 where lower(st.itm_name_en) like '%' || lower(kw) || '%'))\n    or\n    (js.category = 'غوالى' and js.min_price is not null\n     and st.itm_sell_price_big::numeric > js.min_price::numeric)\n  );",
+        "options": {}
+      },
+      "id": "a1b25ee9-5075-4e87-8737-923896ab3e2f"
+    }
+  ],
+  "connections": {
+    "كل نص ساعة": {
+      "main": [
+        [
+          {
+            "node": "كوزمو",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تشغيل يدوي": {
+      "main": [
+        [
+          {
+            "node": "كوزمو",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "كوزمو": {
+      "main": [
+        [
+          {
+            "node": "ادوية",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ادوية": {
+      "main": [
+        [
+          {
+            "node": "تجهيز",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "تجهيز": {
+      "main": [
+        [
+          {
+            "node": "كتابة",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "كتابة": {
+      "main": [
+        [
+          {
+            "node": "مش تجربة؟",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "مش تجربة؟": {
+      "main": [
+        [
+          {
+            "node": "علامات التصنيف",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Africa/Cairo",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  }
+}
