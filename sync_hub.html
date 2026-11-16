@@ -33,6 +33,14 @@
     .tgl{ width:38px; height:21px; border-radius:20px; background:var(--sync-teal); position:relative; display:inline-block; cursor:pointer; vertical-align:middle; border:none; }
     .tgl.o{ background:#cbd5e1; } .tgl::after{ content:""; position:absolute; width:17px; height:17px; border-radius:50%; background:#fff; top:2px; left:2px; transition:.15s; } .tgl.o::after{ left:auto; right:2px; }
     .acts{ display:flex; gap:6px; flex-wrap:wrap; }
+    .imp-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:1px; background:var(--border); border:1px solid var(--border); border-radius:var(--radius-md); overflow:hidden; margin-top:12px; }
+    .imp-grid>div{ background:var(--surface); padding:9px 12px; }
+    .imp-grid .k{ font-size:.68rem; color:var(--text-muted); font-weight:700; white-space:nowrap; }
+    .imp-grid .v{ font-size:1rem; font-weight:800; font-variant-numeric:tabular-nums; margin-top:2px; }
+    .imp-grid .warn .v{ color:#dc2626; } .imp-grid .good .v{ color:#16a34a; }
+    .imp-note{ font-size:.73rem; color:var(--text-muted); margin-top:8px; line-height:1.8; }
+    .imp-err{ background:#fef2f2; color:#dc2626; border:1px solid #fecaca; border-radius:var(--radius-md); padding:9px 12px; font-weight:700; font-size:.8rem; margin-top:10px; }
+    .imp-ok{ background:#dcfce7; color:#15803d; border:1px solid #bbf7d0; border-radius:var(--radius-md); padding:9px 12px; font-weight:700; font-size:.8rem; margin-top:10px; }
     .bgrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(215px,1fr)); gap:12px; margin-top:6px; }
     .bcard{ border:1.5px solid var(--border); border-radius:var(--radius-md); padding:13px; background:var(--surface); }
     .bcard.off{ opacity:.78; }
@@ -99,6 +107,25 @@
       </div>
     </div>
 
+    <div class="card" id="impCard" style="display:none">
+      <div class="sec-h"><i class="fas fa-file-arrow-up"></i> رفع مخزون يدوي — بديل وقت تعطّل الـAPI</div>
+      <div class="ctrls">
+        <div class="fld"><label>الفرع</label><select class="inp" id="impBranch" onchange="impReset()"></select></div>
+        <div class="fld"><label>تقرير المخزون (xlsx)</label>
+          <input class="inp" type="file" id="impFile" accept=".xlsx" onchange="impPick(this)"></div>
+        <button class="btn-sync sm" id="impPrevBtn" onclick="impPreview()" disabled><i class="fas fa-eye"></i> معاينة</button>
+        <button class="btn-sync sm" id="impApplyBtn" onclick="impApply(false)" style="display:none"><i class="fas fa-check"></i> تطبيق</button>
+        <span class="jsrc" id="impState" style="align-self:center"></span>
+      </div>
+      <div id="impMsg"></div>
+      <div class="imp-grid" id="impStats" style="display:none"></div>
+      <div class="imp-note">
+        التقرير المطلوب: <b>مخزون الفرع</b> من eplus بإعداد «<b>الوحدة كبرى</b>» — الكميات بالعلبة.
+        الرفع بيحدّث <b>الكمية والسعر والاسم والشركة</b> بس؛ الباركود وعلم «دواء» ومعاملات الوحدات بتتحفظ زي ما هي.
+        والمزامنة الآلية لما ترجع بتكمّل فوقه عادي.
+      </div>
+    </div>
+
     <div class="card">
       <div class="sec-h"><i class="fas fa-scroll"></i> سجل الجولات</div>
       <div style="overflow-x:auto">
@@ -112,6 +139,7 @@
   </div>
   <div id="toast"></div>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="config.js?v=20260904c"></script>
   <script src="session.js?v=20261030b"></script>
   <script src="branches.js?v=20260904d"></script>
@@ -271,6 +299,167 @@
       const r = await sbRpc('sync_request', { p_job: expandedJob, p_branch: br, p_kind:'backfill', p_from:f, p_to:t });
       if(r.ok){ toast('تم طلب سحب الفترة'); } else { toast('فشل الطلب'); }
     }
+    /* ══════════════ رفع المخزون يدويًا ══════════════════════════
+       المتصفح بيقرا الملف ويبعت ٦ حقول بس لكل صف على دفعات، والدمج
+       كله على السيرفر — جدول الفرع ٢٨ ألف صف وماينفعش يتجاب هنا.
+       أعمدة التقرير ثابتة (نفس اللي سكربت load_stock_xlsx بيستعملها):
+         3=س.البيع · 5=الكمية · 6=الوحدة · 7=الشركة · 8=الإسم · 9=الكود */
+    let IMP = { rows:null, token:null, branch:'' };
+
+    function impMsg(html, cls){
+      document.getElementById('impMsg').innerHTML = html ? '<div class="'+cls+'">'+html+'</div>' : '';
+    }
+    /* تغيير الفرع بيلغي المعاينة (بتاعة الفرع القديم) بس **مايمسحش
+       الملف** — الترتيب الطبيعي إن الواحد يختار الملف الأول، وكان
+       اختيار الفرع بعده بيضيّعه ويخلّي الزرار مقفول بلا سبب ظاهر. */
+    function impReset(){
+      IMP.token = null; IMP.branch = '';
+      document.getElementById('impApplyBtn').style.display = 'none';
+      document.getElementById('impStats').style.display = 'none';
+      document.getElementById('impState').textContent =
+        IMP.rows ? ('اتقرا ' + num(IMP.rows.length) + ' صنف') : '';
+      document.getElementById('impPrevBtn').disabled =
+        !(IMP.rows && document.getElementById('impBranch').value);
+      impMsg('');
+    }
+
+    function impPick(input){
+      impMsg('');
+      document.getElementById('impApplyBtn').style.display = 'none';
+      document.getElementById('impStats').style.display = 'none';
+      const f = input.files && input.files[0];
+      if(!f) return;
+      const rd = new FileReader();
+      rd.onload = e => {
+        try{
+          const wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' });
+          const sh = wb.Sheets[wb.SheetNames[0]];
+          const g  = XLSX.utils.sheet_to_json(sh, { header:1, raw:true, defval:'' });
+          if(!g || g.length < 3)
+            return impMsg('تعذّرت قراءة الملف كجدول إكسل.', 'imp-err');
+          /* ⚠️ الأعمدة بتتقرا من **رأس الجدول** مش مفترضة بأرقام ثابتة.
+             تقرير «أصناف المخازن تفصيلى» عنوانه كمان «الوحدة كبرى»
+             وأعمدته بتتلاقى بالصدفة مع المتوقع — فحارس العنوان لوحده
+             عدّاه، وصفوف التشغيلات فيه كانت هتدخل **كود المورّد ككود
+             صنف** وتاريخ الشراء كسعر. رأس الجدول هو الفرق الحقيقي.
+             والإزاحة ١ لأن صفوف البيانات فيها عمود أقل من العناوين. */
+          const hdr = (g[1]||[]).map(x => String(x==null?'':x).trim());
+          const WANT = { price:'س.البيع', qty:'الكمية', unit:'الوحدة',
+                         company:'الشركة', name:'الإسم', code:'الكود' };
+          const ix = {}, missing = [];
+          for(const k in WANT){
+            const i = hdr.indexOf(WANT[k]);
+            if(i < 1) missing.push(WANT[k]); else ix[k] = i - 1;
+          }
+          if(missing.length)
+            return impMsg('الملف ده مش تقرير مخزون الفرع — أعمدة ناقصة: ' + esc(missing.join('، '))
+                        + '. المطلوب تقرير «مخزون الفرع» بإعداد «الوحدة كبرى».', 'imp-err');
+          const rows = [];
+          for(let i=2;i<g.length;i++){
+            const r = g[i] || [];
+            const code = String(r[ix.code]==null?'':r[ix.code]).trim();
+            if(!code) continue;
+            rows.push({ code, qty:Number(r[ix.qty])||0, price:Number(r[ix.price])||0,
+                        unit:String(r[ix.unit]==null?'':r[ix.unit]).trim(),
+                        company:String(r[ix.company]==null?'':r[ix.company]).trim(),
+                        name:String(r[ix.name]==null?'':r[ix.name]).trim() });
+          }
+          if(rows.length < 100)
+            return impMsg('الملف فيه '+rows.length+' صف بكود — أقل من المتوقع بكتير. اتأكد إنه تقرير المخزون الصح.', 'imp-err');
+          const named = rows.filter(r => r.name).length;
+          if(named < rows.length * 0.9)
+            return impMsg('أعمدة الملف مش زي المتوقع (أسماء ناقصة في '+(rows.length-named)+' صف).', 'imp-err');
+          IMP.rows = rows;
+          document.getElementById('impState').textContent = 'اتقرا '+num(rows.length)+' صنف';
+          document.getElementById('impPrevBtn').disabled = !document.getElementById('impBranch').value;
+        }catch(err){ impMsg('تعذّرت قراءة الملف: '+esc(err.message||err), 'imp-err'); }
+      };
+      rd.readAsArrayBuffer(f);
+    }
+
+    /* نداء بيوصّل رسالة الحارس من السيرفر — fetchPage بترجّع الحالة بس */
+    async function impRpc(fn, body){
+      const r = await fetch(PHALIX_CONFIG.supabaseUrl + '/rest/v1/rpc/' + fn, {
+        method:'POST', headers: await Session.headers(), body: JSON.stringify(body||{}) });
+      let out = null; try{ out = await r.json(); }catch(e){}
+      if(r.ok) return { ok:true, data:out };
+      return { ok:false, msg:(out && (out.message||out.hint)) || ('خطأ '+r.status) };
+    }
+
+    async function impPreview(){
+      const br = document.getElementById('impBranch').value;
+      if(!br) return impMsg('اختار الفرع الأول.', 'imp-err');
+      if(!IMP.rows) return impMsg('اختار الملف الأول.', 'imp-err');
+      const btn = document.getElementById('impPrevBtn'); btn.disabled = true;
+      impMsg('');
+      try{
+        const b = await impRpc('stock_import_begin', { p_branch: br });
+        if(!b.ok) throw new Error(b.msg);
+        IMP.token = b.data; IMP.branch = br;
+        const CH = 3000;
+        for(let i=0;i<IMP.rows.length;i+=CH){
+          const p = await impRpc('stock_import_push',
+            { p_token: IMP.token, p_branch: br, p_rows: IMP.rows.slice(i, i+CH) });
+          if(!p.ok) throw new Error(p.msg);
+          document.getElementById('impState').textContent =
+            'جارٍ الرفع… ' + num(Math.min(i+CH, IMP.rows.length)) + ' / ' + num(IMP.rows.length);
+        }
+        const pv = await impRpc('stock_import_preview', { p_token: IMP.token });
+        if(!pv.ok) throw new Error(pv.msg);
+        impShow(pv.data);
+        document.getElementById('impState').textContent = 'جاهز للتطبيق';
+        document.getElementById('impApplyBtn').style.display = '';
+      }catch(err){ impMsg(esc(err.message||err), 'imp-err'); document.getElementById('impState').textContent=''; }
+      btn.disabled = false;
+    }
+
+    function impShow(d){
+      const drop = Number(d.drop_pct)||0;
+      const cells = [
+        { k:'أصناف في الملف', v:num(d.rows) },
+        { k:'موجودة عندنا',  v:num(d.matched) },
+        { k:'وصفها من فرع تاني', v:num(d.from_donor) },
+        { k:'بيانات شحيحة', v:num(d.bare), cls: Number(d.bare)>0?'warn':'good' },
+        { k:'كميتها هتتغيّر', v:num(d.changed) },
+        { k:'قيمة المخزون قبل', v:num(d.val_before) },
+        { k:'بعد', v:num(d.val_after) },
+        { k: drop>0?'هتنزل':'هتزيد', v: Math.abs(drop)+'٪', cls: drop>30?'warn':'good' }
+      ];
+      const g = document.getElementById('impStats');
+      g.innerHTML = cells.map(c=>'<div class="'+(c.cls||'')+'"><div class="k">'+c.k+'</div><div class="v">'+c.v+'</div></div>').join('');
+      g.style.display = '';
+    }
+
+    async function impApply(force){
+      if(!IMP.token) return;
+      const brName = document.getElementById('impBranch').selectedOptions[0].textContent;
+      if(!confirm('تطبيق مخزون «'+brName+'» من الملف؟\nده بيدوس على أرصدة الفرع الحالية.')) return;
+      const btn = document.getElementById('impApplyBtn'); btn.disabled = true;
+      impMsg(''); document.getElementById('impState').textContent = 'جارٍ التطبيق…';
+      const r = await impRpc('stock_import_apply', { p_token: IMP.token, p_force: !!force });
+      btn.disabled = false;
+      if(!r.ok){
+        /* حارس السيرفر رفض — نوري السبب ونسيب القرار للمستخدم */
+        document.getElementById('impState').textContent = '';
+        impMsg(esc(r.msg) + ' <button class="btn-sync sm" style="margin-right:8px" onclick="impApply(true)">تأكيد وتجاوز</button>', 'imp-err');
+        return;
+      }
+      const w = (r.data && r.data.written) || {};
+      impMsg('تم التطبيق ✓ — اتكتب ' + num(w.kept != null ? w.kept : r.data.rows) + ' صنف على ' + esc(brName), 'imp-ok');
+      document.getElementById('impState').textContent = '';
+      document.getElementById('impApplyBtn').style.display = 'none';
+      IMP.token = null;
+      document.getElementById('impFile').value = '';
+    }
+
+    function impInit(){
+      const sel = document.getElementById('impBranch');
+      /* نفس مصدر باقي الشاشة — ALL_BRANCHES/BR_NAMES */
+      sel.innerHTML = '<option value="">— اختر الفرع —</option>'
+        + ALL_BRANCHES.map(c=>'<option value="'+esc(c)+'">'+esc(BR_NAMES[c]||c)+'</option>').join('');
+      document.getElementById('impCard').style.display = canEdit ? '' : 'none';
+    }
+
     async function toggleJob(id, en){ if(!canEdit) return; await sbRpc('sync_set_job',{p_id:id,p_enabled:en}); await loadAll(); }
     async function toggleBranch(job, br, en){ if(!canEdit) return; await sbRpc('sync_set_branch',{p_job:job,p_branch:br,p_enabled:en}); await loadAll(); }
 
@@ -278,6 +467,7 @@
       if(!u && typeof checkAuth==='function') return;
       const role = (typeof Session!=='undefined' && Session.role)?Session.role():'';
       canEdit = (role==='admin' || role==='manager');
+      impInit();
       await loadAll();
       setInterval(loadAll, 30000); // تحديث صامت كل 30ث
     }).catch(async()=>{ await loadAll(); });
