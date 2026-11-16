@@ -38,7 +38,8 @@ param(
   [string]$WriterUser,
   [string]$SbUrl,
   [string]$SbKey = $env:SUPABASE_SERVICE_KEY,
-  [string]$LogPath
+  [string]$LogPath,
+  [string]$BackupPath          # csv of the OLD values before writing (default: %TEMP%)
 )
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -137,6 +138,25 @@ if ($todo.Count -gt 10) { L ("   ... and " + ($todo.Count - 10) + " more") }
 if (-not $Apply) { L "`nDRY-RUN: nothing written. Re-run with -Apply." Yellow; $cn.Close(); exit 0 }
 
 # ---- 4) write --------------------------------------------------------------
+# Snapshot the OLD values first. The sweep overwrites deliv_emp_id with no undo,
+# and the first run rewrites thousands of rows - a 40 KB csv is cheap insurance.
+# Restore = feed it back through this script's UPDATE, or straight SQL.
+if (-not $BackupPath) {
+  $BackupPath = Join-Path ([System.IO.Path]::GetTempPath()) ("delivery_rep_before_" + $Branch + "_" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".csv")
+}
+try {
+  $bk = @("bill_no,old_emp_id,new_emp_id,driver")
+  foreach ($w in $todo) {
+    $old = $have[$w.bill_no]
+    $bk += ('{0},{1},{2},"{3}"' -f $w.bill_no, $(if ($null -eq $old) { '' } else { $old }), $w.emp_id, ($w.driver -replace '"', '""'))
+  }
+  [System.IO.File]::WriteAllLines($BackupPath, $bk, (New-Object System.Text.UTF8Encoding($true)))
+  L ("backup of old values: " + $BackupPath) Cyan
+} catch {
+  L "STOP: could not write the backup file - refusing to overwrite without one: $($_.Exception.Message)" Red
+  $cn.Close(); exit 1
+}
+
 # One statement per row, committed as it goes: a partial run leaves correct rows
 # correct, and the next sweep picks up whatever is left.
 $done = 0; $fail = 0
