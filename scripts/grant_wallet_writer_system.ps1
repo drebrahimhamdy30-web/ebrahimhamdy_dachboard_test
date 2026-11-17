@@ -32,7 +32,10 @@ $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIden
            ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) { L "STOP: open PowerShell as Administrator first."; exit 1 }
 
-$tmp = Join-Path $env:TEMP ("phx_" + [guid]::NewGuid().ToString("N").Substring(0,8))
+# Use C:WindowsTemp, NOT the user's TEMP: the task runs as SYSTEM, and a path
+# under "C:UsersNew PC..." both has a space in it and belongs to another
+# profile - that is why the first attempt produced no output at all.
+$tmp = Join-Path $env:SystemRoot ("Temp\phx_" + [guid]::NewGuid().ToString("N").Substring(0,8))
 New-Item -ItemType Directory -Path $tmp -Force | Out-Null
 $sqlFile = Join-Path $tmp "grant.sql"
 $batFile = Join-Path $tmp "run.bat"
@@ -53,7 +56,17 @@ SELECT 'server=' + @@SERVERNAME + ' db=' + DB_NAME()
 GO
 "@
 [IO.File]::WriteAllText($sqlFile, $sql, [Text.Encoding]::Default)
-[IO.File]::WriteAllText($batFile, "osql -E -S . -i `"$sqlFile`" -o `"$outFile`"`r`n", [Text.Encoding]::ASCII)
+# osql ships with SQL Server 2000; newer installs only have sqlcmd. Try both and
+# always leave something in the output file so a silent failure is visible.
+$bat = "@echo off`r`n" +
+       "echo === grant run %DATE% %TIME% === > `"$outFile`"`r`n" +
+       "osql -E -S . -i `"$sqlFile`" >> `"$outFile`" 2>&1`r`n" +
+       "if errorlevel 1 (`r`n" +
+       "  echo [osql failed or missing - trying sqlcmd] >> `"$outFile`"`r`n" +
+       "  sqlcmd -E -S . -i `"$sqlFile`" >> `"$outFile`" 2>&1`r`n" +
+       ")`r`n" +
+       "echo === done === >> `"$outFile`"`r`n"
+[IO.File]::WriteAllText($batFile, $bat, [Text.Encoding]::ASCII)
 
 $task = "phx_grant_" + (Get-Random -Maximum 99999)
 try {
@@ -70,7 +83,7 @@ try {
   } else { L "WARN: no output - the task probably did not run." }
 } finally {
   & schtasks /delete /tn $task /f 2>$null | Out-Null
-  Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+  try { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue } catch {}
   L "Temp task and files cleaned up."
 }
 
