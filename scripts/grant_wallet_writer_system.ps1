@@ -48,19 +48,52 @@ SELECT 'server=' + @@SERVERNAME
 GO
 "@
 [IO.File]::WriteAllText($sqlFile, $sql, [Text.Encoding]::Default)
-[IO.File]::WriteAllText($batFile, "osql -E -S . -i `"$sqlFile`" -o `"$outFile`"`r`n", [Text.Encoding]::ASCII)
+
+# ⚠️ المهمة بتشغّل powershell.exe، مش .bat ولا osql.exe مباشرة.
+#    على MASTER2 (سان) أي مهمة SYSTEM بتشغّل باتش أو osql بترجّع
+#    0xC0000142 وماتطلّعش أي ناتج — غالبًا سياسة تقييد تطبيقات.
+#    والدليل إن الشكل ده شغّال: مهمة Phalix_Region_Apply على نفس
+#    الجهاز بتشغّل powershell.exe بحساب SYSTEM كل دقيقة وناجحة.
+$psRun = @'
+$out = '__OUTFILE__'
+'=== start ' + (Get-Date -Format 'HH:mm:ss') + ' ===' | Set-Content -LiteralPath $out -Encoding UTF8
+try {
+  $cn = New-Object System.Data.SqlClient.SqlConnection('Server=localhost,1433;Database=Genius;Integrated Security=SSPI;Connect Timeout=20')
+  $cn.Open()
+  $w = $cn.CreateCommand(); $w.CommandText = "SELECT SUSER_SNAME()+' | '+@@SERVERNAME+' | '+DB_NAME()"
+  ('connected as: ' + $w.ExecuteScalar()) | Add-Content -LiteralPath $out -Encoding UTF8
+  foreach ($g in @('GRANT SELECT, INSERT, UPDATE ON F_Transaction_Header TO phalix_writer','GRANT SELECT, UPDATE ON F_Cash_Store TO phalix_writer','GRANT SELECT ON Employee TO phalix_writer')) {
+    try { $c = $cn.CreateCommand(); $c.CommandText = $g; $c.ExecuteNonQuery() | Out-Null
+          ('OK   ' + $g) | Add-Content -LiteralPath $out -Encoding UTF8 }
+    catch { ('FAIL ' + $g + ' -> ' + $_.Exception.Message) | Add-Content -LiteralPath $out -Encoding UTF8 }
+  }
+  $c2 = $cn.CreateCommand()
+  $c2.CommandText = 'SELECT fcs_id, fcs_code, fcs_name_ar FROM F_Cash_Store WHERE fcs_type = 3 ORDER BY fcs_id'
+  $r = $c2.ExecuteReader()
+  while ($r.Read()) { ('WALLET ' + $r.GetValue(0) + ' | ' + $r.GetValue(1) + ' | ' + $r.GetValue(2)) | Add-Content -LiteralPath $out -Encoding UTF8 }
+  $r.Close(); $cn.Close()
+} catch { ('CONNECT FAILED: ' + $_.Exception.Message) | Add-Content -LiteralPath $out -Encoding UTF8 }
+'=== end ===' | Add-Content -LiteralPath $out -Encoding UTF8
+'@
+# ⚠️ الكتلة فوق **حرفية** (@'...'@): لو كانت @"..."@ كان PowerShell
+#    هيفكّ $cn و$out وكل المتغيّرات في السكربت الخارجي (وهي فاضية هناك)
+#    والملف المتولّد يطلع مكسور. المسار الوحيد اللي محتاج يتحقن
+#    بيتحط بعلامة نائبة.
+$psRun = $psRun.Replace('__OUTFILE__', $outFile)
+$runFile = Join-Path $tmp "run.ps1"
+[IO.File]::WriteAllText($runFile, $psRun, (New-Object System.Text.UTF8Encoding($false)))
 
 $task = "phx_grant_" + (Get-Random -Maximum 99999)
 try {
   L "بعمل مهمة مؤقتة تشتغل كـSYSTEM..."
-  & schtasks /create /tn $task /tr "`"$batFile`"" /sc once /st 23:59 /ru SYSTEM /rl HIGHEST /f | Out-Null
+  & schtasks /create /tn $task /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$runFile`"" /sc once /st 23:59 /ru SYSTEM /rl HIGHEST /f | Out-Null
   & schtasks /run /tn $task | Out-Null
   L "بتشغّل وبستنى..."
   $waited = 0
   while (-not (Test-Path $outFile) -and $waited -lt 60) { Start-Sleep -Seconds 2; $waited += 2 }
   Start-Sleep -Seconds 3
   if (Test-Path $outFile) {
-    L "ناتج osql:"
+    L "ناتج المهمة:"
     Get-Content $outFile | Where-Object { $_.Trim() } | ForEach-Object { "    $_" }
   } else { L "⚠️ مطلعش ناتج — المهمة غالبًا ماشتغلتش." }
 } finally {
