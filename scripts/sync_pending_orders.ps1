@@ -148,8 +148,9 @@ if (-not $SB -or -not $KEY) { Log "الاعدادات ناقصة في $cfgPath";
 
 $H = @{ apikey = $KEY; Authorization = "Bearer $KEY" }
 function SbGet($path) {
+  $script:LastGetOk = $true
   try { return Invoke-RestMethod -Uri "$SB/rest/v1/$path" -Headers $H -Method GET -TimeoutSec 60 }
-  catch { Log "GET فشل: $($_.Exception.Message)"; return $null }
+  catch { $script:LastGetOk = $false; Log "GET فشل: $($_.Exception.Message)"; return $null }
 }
 function SbSend($path, $obj, $prefer) {
   $script:LastPostOk = $true
@@ -260,6 +261,12 @@ Head "3) مقارنة بالموجود"
 $bills   = $rowsOut | ForEach-Object { $_.bill_no }
 $inList  = "(" + ($bills -join ",") + ")"
 $existing = SbGet ("orders?select=bill_no&bill_no=in." + $inList)
+# فشل استعلام الفحص (نت متقطّع) ماينفعش نكمّل: هيعتبر كل الفواتير "جديدة"
+# ويكتب فوق الطلبات الموجودة المتسلّمة ويرجّعها pending. نوقف ونعيد المحاولة الدورة الجاية.
+if (-not $script:LastGetOk) {
+  Log "فشل استعلام الفحص (الموجود) — إيقاف الكتابة لتفادي إعادة إنشاء طلبات موجودة"
+  $RunStatus = "error"; $RunError = "فشل فحص الموجود (GET)"; Write-SyncRun; return
+}
 $exSet = @{}; if ($existing) { $existing | ForEach-Object { $exSet[[string]$_.bill_no] = $true } }
 $newRows = @($rowsOut | Where-Object { -not $exSet.ContainsKey($_.bill_no) })
 $updRows = @($rowsOut | Where-Object { $exSet.ContainsKey($_.bill_no) })
@@ -300,7 +307,10 @@ if ($newRows.Count) {
     $o["branch_id"] = $BranchId; $o["driver_id"] = $null; $o["deliveryman"] = $null; $o["status"] = "pending"
     [pscustomobject]$o
   }
-  $created = SbSend "orders?on_conflict=bill_no" @($ins) "resolution=merge-duplicates,return=representation"
+  # ignore-duplicates (ON CONFLICT DO NOTHING): لو فاتورة اتصنّفت "جديدة" غلط وهي موجودة،
+  # الإدراج يبقى بلا أثر — مايكتبش فوق حالة/طيار طلب موجود أبدًا. return=representation يرجّع
+  # الصفوف اللي اتدرجت فعلًا بس، فسجل order_created بيتكتب للجديد الحقيقي فقط.
+  $created = SbSend "orders?on_conflict=bill_no" @($ins) "resolution=ignore-duplicates,return=representation"
   if (-not $script:LastPostOk) { Log "فشل ادراج الطلبات الجديدة" }
   if ($created) {
     Log ("اتدرج {0} طلب جديد" -f @($created).Count); $RunNew = @($created).Count
