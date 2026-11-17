@@ -133,7 +133,27 @@ function Run-JobBranch($job, $branch, $mode, $from, $to){
     # تحديث الـwatermark (للتزايدي فقط)
     $patch=@{ last_sync_at=(Get-Date).ToUniversalTime().ToString('o'); last_status='ok'; rows_last=$res.new; updated_at=(Get-Date).ToUniversalTime().ToString('o') }
     if($mode -ne 'backfill'){
-      if($null -ne $curMax -and $curMax -gt $lastPth){ $patch.last_pth=$curMax }
+      # 🔴 العلامة المائية تتقدّم من جولة where_new **بس**.
+      #
+      # ليه: where_new شرطها «fh_id > last_pth» فبتسحب **كل** رقم فوق
+      # العلامة — فمستحيل تسيب حفرة تحتها، والتقدّم لـcurMax مضمون.
+      # أما where_window فبتسحب **بالوقت** (sec_insert_date >= cut)،
+      # فلو الفرع كان مقطوع أطول من النافذة بتسحب الجزء الحديث بس
+      # وتسيب الأقدم — ولو رفعنا العلامة وقتها بتتقفل الحفرة للأبد
+      # لأن المسار التزايدي بقى بيبدأ من فوقها.
+      #
+      # الحادثة (2026-11-16/17، سيدي بشر): النت قطع 37 ساعة. الجولة
+      # اللي رجعت كانت جولة نافذة، فسحبت من cut = الآن−24س وبعدين
+      # رفعت العلامة فوق الحفرة. **81 مستند بـ35,350.93 ج** اتفقدوا
+      # في صمت، وخط القطع طابق حدود الفجوة بالدقيقة: 42939 في 14:09
+      # ضاع (قبل الـcut 14:26) و42940 في 14:38 نجا.
+      #
+      # بالشرط ده: الجولة الراجعة بتحدّث البيانات الحديثة وماتلمسش
+      # العلامة، والجولة اللي بعدها بدقيقة تبقى where_new من 42858
+      # فتجيب كل اللي بعده مهما طال الانقطاع. الضمان بقى رياضي مش
+      # اعتماد على إن الانقطاع أقصر من نافذة ثابتة — أي نافذة ثابتة
+      # بيكسرها انقطاع أطول منها.
+      if($whereKey -eq 'where_new' -and $null -ne $curMax -and $curMax -gt $lastPth){ $patch.last_pth=$curMax }
       if($whereKey -eq 'where_window'){ $patch.last_window_at=(Get-Date).ToUniversalTime().ToString('o') }
     }
     Sb-Patch "sync_branch_state?job_id=eq.$($job.id)&branch=eq.$branch" $patch
