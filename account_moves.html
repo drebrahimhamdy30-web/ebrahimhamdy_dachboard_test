@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>حركات الحسابات - Phalix</title>
+  <title>حركات الحسابات البنكية - Phalix</title>
   <link rel="stylesheet" href="tokens.css?v=20260906">
   <script>/* phalix-theme-stamp — يختم الثيم قبل الرسم عشان مفيش وميض */
   try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_dark")==="1"?"dark":"light");document.documentElement.setAttribute("data-theme",_t==="dark"?"dark":"light");}catch(e){}</script>
@@ -33,6 +33,7 @@
 
     .am-accts{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
     .am-acct{ background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius-md); padding:8px 12px; cursor:pointer; min-width:150px; }
+        .am-acct.zero{ opacity:.45; }
     .am-acct.on{ border-color:var(--primary); box-shadow:0 0 0 2px rgba(13,148,136,.15); }
     .am-acct .nm{ font-weight:800; font-size:0.85rem; }
     .am-acct .br{ font-size:0.72rem; color:var(--text-muted); }
@@ -77,20 +78,12 @@
   <div class="container">
     <div class="card">
       <div class="page-header">
-        <div class="page-title"><i class="fas fa-right-left"></i> حركات الحسابات</div>
+        <div class="page-title"><i class="fas fa-right-left"></i> حركات الحسابات البنكية</div>
         <button class="btn btn-primary" onclick="load()"><i class="fas fa-sync-alt"></i> تحديث</button>
       </div>
 
       <div class="am-bar">
         <div class="am-fld"><label>الفرع</label><select id="f-branch"></select></div>
-        <div class="am-fld"><label>نوع الحساب</label>
-          <select id="f-atype">
-            <option value="">الكل</option>
-            <option value="3">محافظ وماكينات</option>
-            <option value="1">نقاط البيع</option>
-            <option value="2">الخزن</option>
-          </select>
-        </div>
         <div class="am-fld"><label>الحساب</label><select id="f-acct"><option value="">كل الحسابات</option></select></div>
         <div class="am-fld"><label>من</label><input type="date" id="f-from"></div>
         <div class="am-fld"><label>إلى</label><input type="date" id="f-to"></div>
@@ -117,7 +110,7 @@
       </div>
 
       <div class="am-pg" id="pager"></div>
-      <div class="muted" style="margin-top:6px">اضغط على أي حركة لعرض كل تفاصيلها. التحويل بين حسابين بيظهر مرتين — مرة «خارج» من الحساب المحوِّل ومرة «داخل» للحساب المستقبِل.</div>
+      <div class="muted" style="margin-top:6px">الشاشة دي بتعرض <b>اللي اتحفظ فعلًا على الحسابات البنكية</b> (المحافظ والماكينات وفوري وانستاباي) — مفيش نسبة ولا استنتاج. الفاتورة اللي بتتقفل على نقطة البيع مش بتظهر هنا إلا لما تتحوّل للحساب. والتحويل بيظهر مرتين: «خارج» من الحساب المحوِّل و«داخل» للمستقبِل.</div>
     </div>
   </div>
 
@@ -139,7 +132,6 @@
       expense:'مصروفات', ledger:'قيد دفتري', other:'أخرى'
     };
     const PTYPE_AR = { 1:'عميل', 2:'مورد', 3:'حساب', 4:'حساب عام', 5:'بند مصروف', 8:'عميل (بطاقة)', 10:'حساب دفتري' };
-    const ATYPE_AR = { 1:'نقطة بيع', 2:'خزنة', 3:'محفظة/ماكينة' };
 
     let page = 0, LAST = null, kindFilter = '';
 
@@ -170,11 +162,11 @@
     /* ── الفلاتر: كلها فورية، والبحث بـdebounce ─────────────── */
     let tQ = null;
     function onFilter(){ page = 0; load(); }
-    ['f-branch','f-atype','f-acct','f-from','f-to','f-dir'].forEach(id => $(id).addEventListener('change', onFilter));
+    ['f-branch','f-acct','f-from','f-to','f-dir'].forEach(id => $(id).addEventListener('change', onFilter));
     $('f-q').addEventListener('input', () => { clearTimeout(tQ); tQ = setTimeout(onFilter, 300); });
 
     function resetFilters(){
-      $('f-branch').value=''; $('f-atype').value=''; $('f-acct').value='';
+      $('f-branch').value=''; $('f-acct').value='';
       $('f-dir').value=''; $('f-q').value=''; kindFilter='';
       $('f-from').value = todayCairo(); $('f-to').value = todayCairo();
       onFilter();
@@ -183,7 +175,6 @@
     function body(){
       const b = {
         p_branch: $('f-branch').value || null,
-        p_acct_type: $('f-atype').value ? +$('f-atype').value : null,
         p_account: $('f-acct').value ? +$('f-acct').value : null,
         p_from: $('f-from').value || null,
         p_to: $('f-to').value || null,
@@ -239,9 +230,9 @@
       $('f-acct').innerHTML = '<option value="">كل الحسابات</option>' +
         list.map(a => `<option value="${a.acct_id}" ${String(a.acct_id)===cur?'selected':''}>${esc(a.name)} — ${esc(Branches.toName(a.branch)||a.branch)}</option>`).join('');
       $('accts').innerHTML = list.map(a => `
-        <div class="am-acct ${String(a.acct_id)===cur?'on':''}" onclick="pickAcct('${a.acct_id}')">
+        <div class="am-acct ${String(a.acct_id)===cur?'on':''} ${a.n?'':'zero'}" onclick="pickAcct('${a.acct_id}')">
           <div class="nm">${esc(a.name)} ${a.active===0?'<span class="muted">(موقوف)</span>':''}</div>
-          <div class="br">${esc(Branches.toName(a.branch)||a.branch)} · ${esc(ATYPE_AR[a.type]||'—')} · ${a.n} حركة</div>
+          <div class="br">${esc(Branches.toName(a.branch)||a.branch)} · كود ${esc(a.code||'—')} · ${a.n} حركة</div>
           <div class="vv"><span class="in">+${money(a.in)}</span> &nbsp; <span class="out">−${money(a.out)}</span></div>
         </div>`).join('') || '<div class="muted">لا توجد حسابات في هذه الفترة.</div>';
     }
@@ -262,7 +253,7 @@
         return `<tr onclick="openRow(${i})">
           <td class="muted">${fmtDT(x.dt)}</td>
           <td>${esc(Branches.toName(x.branch)||x.branch)}</td>
-          <td><b>${esc(x.acct_name)}</b> <span class="muted">${esc(ATYPE_AR[x.acct_type]||'')}</span></td>
+          <td><b>${esc(x.acct_name)}</b></td>
           <td>${dirT}</td>
           <td class="num ${x.dir==='in'?'in':'out'}">${money(x.amount)}</td>
           <td><span class="tag t-k">${esc(KIND_AR[x.kind]||x.kind)}</span> ${tags.join(' ')}</td>
@@ -310,7 +301,7 @@
       const add = (k,v) => { if(v!==null && v!==undefined && v!=='' ) kv.push(`<div class="k">${k}</div><div class="v">${v}</div>`); };
       add('التاريخ والوقت', esc(x.dt));
       add('الفرع', esc(Branches.toName(x.branch)||x.branch));
-      add('الحساب', `${esc(x.acct_name)} <span class="muted">(${esc(ATYPE_AR[x.acct_type]||'—')} · رقم داخلي ${x.acct_id}${x.acct_code?' · كود '+esc(x.acct_code):''}${x.acct_active===0?' · موقوف':''})</span>`);
+      add('الحساب', `${esc(x.acct_name)} <span class="muted">(رقم داخلي ${x.acct_id}${x.acct_code?' · كود '+esc(x.acct_code):''}${x.acct_active===0?' · موقوف':''})</span>`);
       add('الاتجاه', x.dir==='in' ? '<span class="tag t-in">داخل ↓</span>' : '<span class="tag t-out">خارج ↑</span>');
       add('المبلغ', `<b class="${x.dir==='in'?'in':'out'}">${money(x.amount)} ج</b>`);
       add('نوع الحركة', esc(KIND_AR[x.kind]||x.kind));
