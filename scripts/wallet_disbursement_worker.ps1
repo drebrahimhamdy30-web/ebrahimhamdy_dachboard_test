@@ -16,7 +16,10 @@ param(
   [string]$ConfigPath = "$env:USERPROFILE\.phalix\sync_engine.json",
   [string]$Branch = "mamora",
   [switch]$Apply,
-  [int]$Uid = 1,                 # eplus sec_insert_uid for the automated disbursement
+  # NOTE: sec_insert_uid is no longer a fixed id. It is resolved per row from the
+  # employee who issued the bill (see the Employee lookup below). This parameter
+  # is kept only so old scheduled-task command lines do not break; it is unused.
+  [int]$Uid = 0,
   [int]$Max = 50,
   # --- eplus write creds (master style: encrypted password file + AES key, task runs as SYSTEM) ---
   [System.Security.SecureString]$Password,
@@ -79,14 +82,43 @@ $rows = RestGet "wallet_disbursement_queue?status=eq.pending&branch=eq.$Branch&s
 if (-not $rows -or $rows.Count -eq 0) { Write-Host "no pending rows (eplus + cloud OK)."; $cn.Close(); exit 0 }
 Write-Host ("pending: " + $rows.Count)
 
+# Mark one queue row as failed, with the reason, so it shows up in the screen
+# instead of disappearing. Same shape as the catch block below.
+function Fail($rowId, $msg) {
+  Write-Host ("  ERROR: $msg") -ForegroundColor Red
+  if ($Apply) { try { RestPatch "wallet_disbursement_queue?id=eq.$rowId" @{ status='error'; error=$msg } | Out-Null } catch {} }
+}
+
 foreach ($row in $rows) {
   $id = [int]$row.id; $fh = [long]$row.fh_id
   $from = [int]$row.from_fcs_id; $to = [int]$row.resolved_to_fcs_id
   $val = [decimal]$row.paid
   $acct = ("" + $row.requested_by)
-  $note = ("" + $row.bill_no + "-" + $row.employee + "-" + $acct)
+  # note = "<bill_no>-<phalix account that pressed Done>".
+  # The eplus employee who issued the bill is no longer in the note - he is now
+  # the row's USER (sec_insert_uid), which is where eplus shows him.
+  $note = ("" + $row.bill_no + "-" + $acct)
   Write-Host ""
   Write-Host ("row id=$id fh=$fh  $from -> $to  val=$val  note=[$note]  channel=$($row.channel)") -ForegroundColor Yellow
+
+  # ---- who eplus will show as the USER of this row -------------------------
+  # Was a fixed -Uid (1), and e_id 1 is the owner: every automated disbursement
+  # was stamped with his name, at hours he was not even there. The honest value
+  # is the employee who issued the bill - and that name already comes FROM eplus
+  # (cashier_transactions.user_name), so it matches exactly. Checked on all 18
+  # names seen so far: 18/18 matched one active employee, 0 missing.
+  # No match -> fail this row loudly. Never fall back to someone else's name.
+  $empName = ("" + $row.employee).Trim()
+  if (-not $empName) { Fail $id "no employee on the queue row - cannot attribute the write"; continue }
+  if (-not $script:EmpCache) { $script:EmpCache = @{} }
+  if (-not $script:EmpCache.ContainsKey($empName)) {
+    $ec = $cn.CreateCommand()
+    $ec.CommandText = "SELECT e_id FROM Employee WHERE LTRIM(RTRIM(e_Name)) = @n AND e_active = 1"
+    $ep = $ec.Parameters.Add('@n', [System.Data.SqlDbType]::NVarChar, 200); $ep.Value = $empName
+    $script:EmpCache[$empName] = $ec.ExecuteScalar()
+  }
+  $uidVal = $script:EmpCache[$empName]
+  if ($null -eq $uidVal) { Fail $id ("no active eplus employee named '" + $empName + "' - refusing to write under another name"); continue }
 
   # ---- claim (APPLY only): pending -> processing, skip if someone else took it ----
   if ($Apply) {
@@ -146,7 +178,7 @@ SELECT 'result' AS phase, @newid AS fcs_id, CAST(NULL AS money) AS fcs_current_b
     $c.Parameters.Add("@to",[System.Data.SqlDbType]::Int).Value = $to
     $c.Parameters.Add("@val",[System.Data.SqlDbType]::Money).Value = $val
     $c.Parameters.Add("@note",[System.Data.SqlDbType]::VarChar,200).Value = $note
-    $c.Parameters.Add("@uid",[System.Data.SqlDbType]::VarChar,50).Value = ("" + $Uid)
+    $c.Parameters.Add("@uid",[System.Data.SqlDbType]::VarChar,50).Value = ("" + $uidVal)
     $c.Parameters.Add("@coststo",[System.Data.SqlDbType]::Int).Value = $coststo
     $newfh = $null
     $r = $c.ExecuteReader()
