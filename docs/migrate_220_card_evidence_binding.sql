@@ -55,7 +55,7 @@ grant select, insert, update, delete on table public.card_evidence_links to serv
 alter table public.org_settings add column if not exists card_bind_since timestamptz;
 comment on column public.org_settings.card_bind_since is
   'من اللحظة دي والمعاملات بتتربط بدليلها ويتسجّل. اللي قبلها على الحساب الحي.';
-update public.org_settings set card_bind_since = now() where id = 1 and card_bind_since is null;
+update public.org_settings set card_bind_since = coalesce(card_unpaid_since, timestamp '2026-11-14 09:00' at time zone 'Africa/Cairo') where id = 1 and card_bind_since is null;   -- قرار المالك: نمشي على كل اللي من أول التشغيل
 
 create index if not exists ix_wallet_sms_created on public.wallet_sms ("createdAt");
 create index if not exists ix_wallet_created     on public.wallet ("createdAt");
