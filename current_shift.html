@@ -228,6 +228,9 @@ td.copyable:hover{text-decoration:underline dotted;text-underline-offset:3px}
 .crall input{cursor:pointer}
 .crbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0 10px}
 .crbar select,.crbar input[type=date]{padding:.35rem .5rem;border:1px solid var(--border,#cbd5e1);border-radius:8px;font-family:inherit;font-size:.78rem;background:var(--surface,#fff);color:inherit}
+tr.oldrow>td{background:#faf5ff}
+tr.oldrow.locked>td{background:#f1f5f9}
+.oldtag{color:#6d28d9;font-weight:800;font-size:.68rem}
 .bklog{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px;padding:.55rem .8rem;
   border:1px solid #ddd6fe;background:#f5f3ff;border-radius:10px;font-size:.82rem;font-weight:700;color:#5b21b6}
 .bklog b{font-size:.95rem}
@@ -273,7 +276,7 @@ async function loadBranches(){
 const CHANNELS_FALLBACK = ['instapay','paymob 1','paymob 7','orange cash','fawry313','fawry 6008','vodafon cash'];
 function channelList(){
   const s = new Set();
-  (TXN||[]).forEach(t => { const c = String(t.channel==null?'':t.channel).trim(); if(c) s.add(c); });
+  (allTxns()||[]).forEach(t => { const c = String(t.channel==null?'':t.channel).trim(); if(c) s.add(c); });
   const a = [...s].sort((x,y)=>x.localeCompare(y,'ar'));
   return a.length ? a : CHANNELS_FALLBACK;   // ماينفعش تفضل فاضية
 }
@@ -305,7 +308,12 @@ let unpaidOnly = true;
    «أرصدة الحسابات» فوقه محسوبة على نفس الحركات دي. فحشر معاملات
    شيفتات قديمة جوّه الجدول كان هيضرب المقارنة. بدل كده بنعرض شريط
    بيقول فيه كام متأخرة ويودّيك على تبويب المراجعة اللي بيصرفها. */
-let BACKLOG = null;
+let BACKLOG = null, OLD = [];
+/* المصدر الموحّد **للعرض والتعديل** في جدول نقطة البيع: حركات الشيفت
+   + المتأخرات. أي حتة بتحسب مجاميع (kpis و«أرصدة الحسابات» و«عدد
+   المعاملات») بتفضل على TXN وحدها — وإلا المتأخرات تدخل في مقارنة
+   eplus مقابل الواقع وتضرب قفل الشيفت. */
+function allTxns(){ return OLD.length ? TXN.concat(OLD) : TXN; }
 
 /* منع النسخ: الهدف إن الموظف ما ينقلش الحركات لإكسل ويجمّعها.
    ⚠️ ده احتكاك مش جدار — الأرقام ظاهرة على الشاشة فتقدر تتكتب بالإيد
@@ -686,7 +694,7 @@ async function hasReceipt(branch, fhId){
   return false;
 }
 async function reviewTxn(i){
-  const t = TXN[i]; if(!t || t.rv) return;
+  const t = allTxns()[i]; if(!t || t.rv) return;
   /* ممنوع الترحيل والحساب «كاش»: من غير حساب محدد الصرف مايعرفش
      يروح فين، والمطابقة مع كشف البنك بتضيع (طلب المالك 2026-11-14). */
   if(!String(t.channel==null?'':t.channel).trim()){
@@ -733,7 +741,7 @@ async function reviewTxn(i){
   maybeDisburse(t);   // صرف تلقائي لو فيزا بصورة + مدفوع>0 (الفروع المفعّلة)
 }
 async function unreviewTxn(i){
-  const t = TXN[i]; if(!t || !t.rv) return;
+  const t = allTxns()[i]; if(!t || !t.rv) return;
   if(!confirm('فكّ قفل المراجعة لهذه الحركة؟')) return;
   const r = await rpcWrite('unreview_shift_txn', { p_branch:(t.branch||BRANCH), p_fh_id:t.fh_id });
   if(r.success !== true){ alert(r.error); return; }
@@ -759,7 +767,7 @@ function render(){
       <span class="flabel">النوع:</span>
       ${['كاش','فيزا','صرف','توريد'].map(t=>`<button class="chip tp ${typeFilter===t?'active':''}" data-t="${t}">${t}</button>`).join('')}
       <span class="flabel">المستخدم:</span>
-      <select id="userSel" class="usel"><option value="">الكل</option>${[...new Set(TXN.map(t=>t.user_name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ar')).map(u=>`<option value="${esc(u)}" ${userFilter===u?'selected':''}>${esc(u)}</option>`).join('')}</select>
+      <select id="userSel" class="usel"><option value="">الكل</option>${[...new Set(allTxns().map(t=>t.user_name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ar')).map(u=>`<option value="${esc(u)}" ${userFilter===u?'selected':''}>${esc(u)}</option>`).join('')}</select>
       <span class="shown" id="shown"></span>
     </div>
     <div class="tablecard"><table><thead><tr>
@@ -787,11 +795,25 @@ function render(){
 let BAL = null;
 /* رصيد المعاملات اللي لم تُصرف — من نفس دالة تبويب المراجعة عشان
    الرقمين مايختلفوش. بتفشل بهدوء لو الدور مش مصرّح له بالمراجعة. */
+const BACKLOG_MAX = 200;   // سقف الدالة نفسها؛ الباقي من تبويب المراجعة
 async function loadBacklog(){
+  OLD = [];
   BACKLOG = await rpc('get_card_review', { p_branch: BRANCH || null, p_state: 'unpaid',
-                                           p_limit: 1, p_offset: 0 });
-  const el = document.getElementById('backlogBox');
-  if (el) el.innerHTML = backlogHtml();
+                                           p_limit: BACKLOG_MAX, p_offset: 0 });
+  if (BACKLOG && Array.isArray(BACKLOG.rows)){
+    /* نفس الحركة ممكن تكون في الشيفت المفتوح وفي المتأخرات — بنشيل
+       المكرّر بالمفتاح الحقيقي (فرع + fh_id) مش بالقيمة. */
+    const seen = new Set(TXN.map(t => (t.branch||BRANCH) + '#' + t.fh_id));
+    OLD = BACKLOG.rows
+      .filter(r => !seen.has((r.branch||BRANCH) + '#' + r.fh_id))
+      .map(r => {
+        const x = {...r, old:true};
+        if(x.rv){ if(x.rv.channel) x.channel=x.rv.channel;
+                  if(x.rv.paid!=null){ x.paid=+x.rv.paid; x.manual=true; } }
+        return x;
+      });
+  }
+  render();   // الصفوف بتتحط في الجدول بعد ما يكون ظهر — مش بنأخّر العرض عشانها
 }
 function backlogHtml(){
   if(!BACKLOG) return '';
@@ -799,11 +821,13 @@ function backlogHtml(){
   if(!n) return '';
   const v = +BACKLOG.unpaid_val || 0;
   const since = crWinLabel(BACKLOG.unpaid_since);
+  const more = Math.max(0, (+BACKLOG.total || 0) - BACKLOG_MAX);
   return '<div class="bklog">💸 <span>فيه <b>' + fmt(n) + '</b> معاملة لم تُصرف'
        + (v ? ' بقيمة <b>' + fmt(v) + ' ج</b>' : '')
        + (since ? ' من ' + esc(since) : '')
-       + ' — مش كلها من الشيفت ده.</span>'
-       + '<button onclick="goUnpaidBacklog()">افتح المراجعة</button></div>';
+       + ' — ظاهرة تحت بخلفية بنفسجية مع حركات الشيفت.'
+       + (more ? ' <b>باقي ' + fmt(more) + '</b> أقدم مش ظاهرين هنا.' : '')
+       + '</span><button onclick="goUnpaidBacklog()">افتح المراجعة</button></div>';
 }
 function goUnpaidBacklog(){
   const tabs = document.getElementById('tabs');
@@ -1263,16 +1287,24 @@ function custName(t, vName){
 
 function drawRows(){
   const q=(document.getElementById('q').value||'').trim().toLowerCase();
-  const rows=TXN.filter((t,i)=>{ t._i=i;
+  /* تبويب البطاقات بيجيب صفوفه بنفسه — المتأخرات هنا لنقطة البيع بس */
+  const SRC = (VIEW==='cards') ? TXN : allTxns();
+  const rows=SRC.filter((t,i)=>{ t._i=i;
+    if(t.old && !unpaidOnly) return false;   // «لم يصرف» مقفول = حركات الشيفت بس
     if(VIEW!=='cards' && unpaidOnly && !(isReviewable(t) && !t.rv)) return false;
     return (!typeFilter||t.kind===typeFilter) && (!chFilter||t.channel===chFilter) && (!userFilter||t.user_name===userFilter) &&
       (!q||((t.from||'')+' '+(t.to||'')+' '+(t.party||'')+' '+(t.visa_no||'')+' '+(t.notes||'')+' '+(t.user_name||'')
             +' '+(t.bill_no||'')+' '+(t.visa_name||'')+' '+(t.cust_name||'')+' '+(t.cust_code||'')).toLowerCase().includes(q)); });
   /* ⚠️ «مجموع المعروض» ده إجمالي كمان — وأسهل واحد كمان لأنه بيتجمّع
      حسب الفلتر. لازم يختفي مع باقي الإجماليات، مش العدد. */
-  const sum=rows.reduce((a,t)=>a+(t.kind==='صرف'?-1:1)*(+t.amount),0);
+  /* بنفصل مجموع الشيفت عن مجموع المتأخرات عن قصد — رقم واحد مجمّع
+     كان هيتقارن غلط بجدول «أرصدة الحسابات» اللي فوقه. */
+  const cur=rows.filter(t=>!t.old), old=rows.filter(t=>t.old);
+  const sum=cur.reduce((a,t)=>a+(t.kind==='صرف'?-1:1)*(+t.amount),0);
+  const oldSum=old.reduce((a,t)=>a+paidOf(t),0);
   document.getElementById('shown').textContent =
-    'المعروض: '+rows.length + (CAN_TOTALS ? ' · مجموع: '+fmt(sum)+' ج' : '');
+    'المعروض: '+rows.length + (old.length ? ' (الشيفت '+cur.length+' · سابقة '+old.length+')' : '')
+    + (CAN_TOTALS ? ' · مجموع الشيفت: '+fmt(sum)+' ج' + (old.length ? ' · سابقة: '+fmt(oldSum)+' ج' : '') : '');
   /* الترتيب المحفوظ بيتطبّق بعد كل رسم عشان الصفوف الجديدة
      تمشي عليه زي الرأس. */
   document.getElementById('tb').innerHTML = rows.map(t=>{
@@ -1304,7 +1336,10 @@ function drawRows(){
         + copyCell('notes', custNameRaw(t, vName), custName(t, vName))
         + copyCell('ev', t.cust_code, t.cust_code?esc(String(t.cust_code)):'<span class="dash">—</span>')
       : '';
-    return `<tr class="${lock?'locked':''}"><td class="rv">${rvCell}</td>${stCells}${rcptCell('card', t.branch||BRANCH, t.fh_id, lock)}<td>${esc(t.time)}${t.date?`<div class="dsub">${esc(t.date)}</div>`:''}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
+    const timeSub = t.date
+      ? `<div class="dsub${t.old?' oldtag':''}">${t.old?'شيفت سابق · ':''}${esc(t.date)}</div>`
+      : (t.old ? '<div class="dsub oldtag">شيفت سابق</div>' : '');
+    return `<tr class="${lock?'locked ':''}${t.old?'oldrow':''}"><td class="rv">${rvCell}</td>${stCells}${rcptCell('card', t.branch||BRANCH, t.fh_id, lock)}<td>${esc(t.time)}${timeSub}</td><td><span class="pill ${cls}">${esc(t.kind)}</span></td>`+
       `<td>${paidCell}</td>`+
       `<td class="num ${t.kind==='صرف'?'neg':'pos'}">${t.kind==='صرف'?'−':''}${fmt(t.amount)}</td>`+
       `<td class="r">${esc(t.from||'—')}</td><td class="r">${esc(t.to||'—')}</td>`+
@@ -1320,12 +1355,12 @@ function drawRows(){
   if(VIEW==='cards') colOrderInit('#crTable', 'cardreview', drawRows);
   rcptSync();
   document.querySelectorAll('.eacct').forEach(s=>s.onchange=()=>{
-    const t=TXN[+s.dataset.i]; const v=s.value;
+    const t=allTxns()[+s.dataset.i]; const v=s.value;
     if(v){ t.kind='فيزا'; t.channel=v; if(t.paid==null) t.paid=+t.amount; if(t.manual==null) t.manual=false; } else { t.kind='كاش'; t.channel=''; }
     render();
   });
   document.querySelectorAll('.epaid').forEach(inp=>inp.onchange=()=>{
-    const t=TXN[+inp.dataset.i]; const v=toNum(inp.value);
+    const t=allTxns()[+inp.dataset.i]; const v=toNum(inp.value);
     /* ⚠️ كان الشرط `v>1`، فأي قيمة جنيه أو أقل كانت بترجع لقيمة النظام
        بصمت — سحبة بـ١ ج أو ٠.٥ ج مستحيل تتكتب. الصفر والأقل من جنيه
        قيم مشروعة؛ اللي بيرجّع للأصل هو الخانة الفاضية بس. */
