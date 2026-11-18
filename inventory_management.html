@@ -715,6 +715,7 @@
         BR_KEYS.forEach(function(k){
           salesMap[code][k] = {
             avg:    parseFloat(row[k+'_av'])  || 0,
+            base:   parseFloat(row[k+'_base']) || 0,
             savg:   parseFloat(row[k+'_sur']) || 0,
             active: parseInt(row[k+'_active']) || 0
           };
@@ -725,6 +726,7 @@
         BR_KEYS.forEach(function(br){
           var c=sale[br]||{};
           map[code][br].avg    = c.avg  || 0;
+          map[code][br].base   = c.base || 0;   /* الاستهلاك الخام — للعرض بس */
           map[code][br].savg   = c.savg || 0;
           map[code][br].active = c.active || 0;
           map[code][br].daily  = (c.avg  || 0) / 30;
@@ -1544,6 +1546,9 @@
       shown.forEach(function(it){
         var totStock=brs.reduce(function(s,b){return s+(it[b].stock||0);},0);
         var totAvg  =brs.reduce(function(s,b){return s+(it[b].avg||0);},0);
+        var totBase =brs.reduce(function(s,b){return s+(it[b].base||0);},0);
+        /* التغطية بالاستهلاك الحقيقي — ده الرقم اللي بيقول المخزون يكفي كام شهر */
+        var covTxt  = totBase>0 ? ' · التغطية: <b>'+r1(totStock/totBase)+'</b> شهر' : '';
         html+='<div style="border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;background:var(--surface)">'+
           '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:10px;flex-wrap:wrap">'+
             '<div><div style="font-weight:800;font-size:0.95rem">'+(it.name||'—')+'</div>'+
@@ -1553,15 +1558,21 @@
           '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">'+
             brs.map(function(b){
               var st=it[b].stock||0, av=it[b].avg||0, pr=it[b].price||0, has=it[b].has;
+              var bs=it[b].base||0;
+              /* av = هدف الشراء (الخام × شريحة الفئة)، bs = الاستهلاك الفعلي.
+                 بنوضّح المضاعف عشان الفرق يبقى مفهوم مش مفاجأة. */
+              var mul=(bs>0 && av>0) ? (av/bs) : 0;
+              var mulTxt=(mul>1.01) ? ' <span style="color:var(--text-muted);font-weight:400">(×'+(Math.round(mul*100)/100)+')</span>' : '';
               return '<div style="border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center;background:'+(has?'#f8fafc':'#fef2f2')+'">'+
                 '<div style="font-weight:700;font-size:0.82rem;margin-bottom:6px">'+BRANCHES[b]+'</div>'+
                 '<div style="font-size:0.78rem">الرصيد: <b>'+r1(st)+'</b></div>'+
-                '<div style="font-size:0.78rem">معدل الاستهلاك: <b>'+r1(av)+'</b></div>'+
+                '<div style="font-size:0.78rem">معدل الاستهلاك: <b>'+r1(bs)+'</b></div>'+
+                '<div style="font-size:0.78rem">هدف الشراء: <b>'+r1(av)+'</b>'+mulTxt+'</div>'+
                 '<div style="font-size:0.78rem">سعر البيع: <b>'+r1(pr)+'</b></div>'+
               '</div>';
             }).join('')+
           '</div>'+
-          '<div style="margin-top:8px;font-size:0.74rem;color:var(--text-muted);text-align:left">الإجمالي — الرصيد: <b>'+r1(totStock)+'</b> · المعدل الشهري: <b>'+r1(totAvg)+'</b></div>'+
+          '<div style="margin-top:8px;font-size:0.74rem;color:var(--text-muted);text-align:left">الإجمالي — الرصيد: <b>'+r1(totStock)+'</b> · الاستهلاك الشهري: <b>'+r1(totBase)+'</b> · هدف الشراء: <b>'+r1(totAvg)+'</b>'+covTxt+'</div>'+
         '</div>';
       });
       if(matches.length>LOOKUP_MAX) html+='<div style="text-align:center;color:var(--text-muted);font-size:0.78rem;padding:8px">... و '+(matches.length-LOOKUP_MAX)+' نتيجة أخرى — ضيّق البحث</div>';
