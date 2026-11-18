@@ -36,6 +36,9 @@
     .cr-code { color:var(--primary);font-weight:700; }
     .cr-v { font-weight:800; }
     .cr-act { font-size:0.72rem;color:var(--text-muted); }
+    /* السطر التحتاني في خلية الفرع: هدف الشراء = الاستهلاك × شريحة الفئة */
+    .cr-tg { font-size:0.7rem;font-weight:600;color:var(--text-muted);margin-top:2px;white-space:nowrap; }
+    .cr-mul { font-weight:400;opacity:0.8; }
     .cr-up-btn { background:var(--primary);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-family:inherit;font-size:0.8rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px; }
     /* الصفحات */
     .cr-pager { display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:12px;padding-top:10px;border-top:1px solid var(--surface-3); }
@@ -874,7 +877,10 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
       document.querySelectorAll('th[data-br-heads]').forEach(th => {
         const tr = th.parentElement;
         BR_KEYS.forEach(k => {
-          const c = document.createElement('th'); c.textContent = BR[k]; tr.insertBefore(c, th);
+          const c = document.createElement('th');
+          /* عمودين في خلية واحدة: الاستهلاك فوق وهدف الشراء تحت */
+          c.innerHTML = esc(BR[k]) + '<div class="cr-tg">استهلاك / هدف الشراء</div>';
+          tr.insertBefore(c, th);
         });
         th.remove();
       });
@@ -2509,11 +2515,13 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
     function buildQuery(offset) {
       const q = document.getElementById('cr-search').value.trim();
       const br = document.getElementById('cr-branch').value;
-      const consCols = BR_KEYS.map(k => 'av_' + k).concat(BR_KEYS.map(k => 'act_' + k)).join(',');
+      const consCols = BR_KEYS.map(k => 'av_' + k)
+        .concat(BR_KEYS.map(k => 'base_' + k))   /* الخام — معدل الاستهلاك الفعلي */
+        .concat(BR_KEYS.map(k => 'act_' + k)).join(',');
       let url = REST + 'consumption_flat?select=code,itm_name,' + consCols
         + '&order=itm_name.asc&limit=' + CR_SIZE + '&offset=' + offset;
       if (q) { const e = encodeURIComponent(q); url += '&or=(itm_name.ilike.*' + e + '*,code.ilike.*' + e + '*)'; }
-      if (br) url += '&av_' + br + '=gt.0';
+      if (br) url += '&base_' + br + '=gt.0';
       return url;
     }
 
@@ -2531,7 +2539,14 @@ body,.container{ font-family:'Cairo',system-ui,sans-serif; }
           '<tr onclick="openDetail(\'' + String(r.code).replace(/'/g, "\\'") + '\')" title="اضغط لتفاصيل الاشتقاق">'
           + '<td style="text-align:right;font-weight:600;">' + esc(r.itm_name) + '</td>'
           + '<td class="cr-code">' + esc(r.code) + '</td>'
-          + BR_KEYS.map(k => '<td class="cr-v">' + numv(r['av_' + k]) + '</td>').join('')
+          + BR_KEYS.map(k => {
+              const bs = Number(r['base_' + k]) || 0, av = Number(r['av_' + k]) || 0;
+              const mul = (bs > 0 && av > 0) ? Math.round(av / bs * 100) / 100 : 0;
+              return '<td class="cr-v">' + numv(bs)
+                + '<div class="cr-tg">' + numv(av)
+                + (mul > 1.01 ? ' <span class="cr-mul">×' + mul + '</span>' : '')
+                + '</div></td>';
+            }).join('')
           + '<td class="cr-act">' + BR_KEYS.map(k => (r['act_' + k] || 0)).join(' / ') + '</td>'
           + '</tr>').join('');
         renderPager();
