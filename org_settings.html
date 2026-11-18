@@ -207,6 +207,26 @@
         <div id="exp-state" style="font-size:.72rem;color:var(--text-muted);margin-top:10px;line-height:1.7"></div>
       </div>
 
+      <!-- بداية العمل بنظام صرف الفيزا -->
+      <div class="os-card">
+        <h3><i class="fas fa-credit-card"></i> مراجعة تحصيل البطاقات</h3>
+        <div style="font-size:.78rem;color:var(--text-secondary);margin-bottom:10px;line-height:1.8">
+          شريط «لم يصرف» في تفاصيل الشيفت بيجمع كل معاملات الفيزا اللي لسه
+          ما اتصرفتش — من اللحظة دي لغاية النهاردة، مهما كان التاريخ المختار
+          في الشاشة. اللي قبل اللحظة دي متأخرات تاريخية مش هتتصرف، فمابتدخلش
+          العدّاد عشان ما تغرقش الأرقام الحقيقية.
+          <br><span style="font-size:.74rem;color:var(--text-muted)">قدّمها لقدام بعد أي تصفية كاملة — كده الشريط بيفضل خفيف والشاشة بتفضل سريعة.</span>
+        </div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+          <label style="display:block">
+            <span style="display:block;font-size:.76rem;color:var(--text-muted);margin-bottom:4px">بداية الاحتساب (بتوقيت القاهرة)</span>
+            <input type="datetime-local" id="cu-since" style="font-family:inherit;padding:.4rem .5rem;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:inherit">
+          </label>
+          <button class="btn btn-primary" onclick="cuSave()"><i class="fas fa-save"></i> حفظ</button>
+          <span id="cu-msg" class="os-msg"></span>
+        </div>
+      </div>
+
       <!-- فحص قيم الفروع في البيانات -->
       <div class="os-card">
         <h3><i class="fas fa-triangle-exclamation"></i> فحص قيم الفروع</h3>
@@ -316,6 +336,7 @@
       try {
         var d = (await (await fetch(REST+'org_settings?select=*&id=eq.1', { headers: await H() })).json())[0];
         try { document.getElementById('trf-enabled').checked = !!(d && d.transfer_defaults_enabled); } catch(e){}
+        try { document.getElementById('cu-since').value = d && d.card_unpaid_since ? cuToCairoInput(d.card_unpaid_since) : ''; } catch(e){}
         if (!d) return;
         document.getElementById('f-name').value = d.company_name || '';
         document.getElementById('f-tagline').value = d.company_tagline || '';
@@ -402,6 +423,42 @@
                      body: JSON.stringify({ transfer_default_branch_id: val }) });
         if (cur) cur.transfer_default_branch_id = val;
       }
+    }
+
+    /* ═══ بداية احتساب «لم يصرف» ════════════════════════════════════
+       العمود timestamptz، وخانة datetime-local بتدّي نص بلا منطقة —
+       لو بعتناه زي ما هو السيرفر هيقراه UTC ويزيحه ساعتين. فبنحسب
+       إزاحة القاهرة للحظة دي بنفسها (مش رقم ثابت، عشان الصيفي/الشتوي)
+       ونلزّقها على النص. */
+    function cuCairoOffset(ms){
+      try {
+        var s = new Intl.DateTimeFormat('en-US',{ timeZone:'Africa/Cairo', timeZoneName:'longOffset' }).format(new Date(ms));
+        var m = s.match(/GMT([+-]\d{2}:\d{2})/);
+        if (m) return m[1];
+      } catch(e){}
+      return '+02:00';
+    }
+    function cuToCairoInput(iso){
+      var d = new Date(iso); if (isNaN(d.getTime())) return '';
+      var p = new Intl.DateTimeFormat('en-CA',{ timeZone:'Africa/Cairo', year:'numeric', month:'2-digit',
+                day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false }).formatToParts(d);
+      var g = function(t){ var x = p.find(function(y){ return y.type===t; }); return x ? x.value : '00'; };
+      var hh = g('hour') === '24' ? '00' : g('hour');
+      return g('year')+'-'+g('month')+'-'+g('day')+'T'+hh+':'+g('minute');
+    }
+    async function cuSave(){
+      var msg = document.getElementById('cu-msg');
+      var v = document.getElementById('cu-since').value;
+      if (!v){ msg.textContent = 'اختار التاريخ والوقت الأول'; msg.style.color = 'var(--danger)'; return; }
+      // التفسير كقاهرة: ناخد الإزاحة عند نفس اللحظة تقريبًا وبعدين نثبّتها
+      var naiveUtc = Date.parse(v + 'Z');
+      var val = v + ':00' + cuCairoOffset(naiveUtc);
+      try {
+        var r = await fetch(REST+'org_settings?id=eq.1', { method:'PATCH', headers: await HW({ Prefer:'return=minimal' }),
+                             body: JSON.stringify({ card_unpaid_since: val }) });
+        if (!r.ok) throw new Error(await r.text());
+        msg.textContent = 'تم الحفظ ✓'; msg.style.color = '#16a34a';
+      } catch(e){ msg.textContent = 'تعذّر الحفظ'; msg.style.color = 'var(--danger)'; }
     }
 
     async function saveSettings(){

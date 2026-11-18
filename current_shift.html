@@ -228,6 +228,9 @@ td.copyable:hover{text-decoration:underline dotted;text-underline-offset:3px}
 .crall input{cursor:pointer}
 .crbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0 10px}
 .crbar select,.crbar input[type=date]{padding:.35rem .5rem;border:1px solid var(--border,#cbd5e1);border-radius:8px;font-family:inherit;font-size:.78rem;background:var(--surface,#fff);color:inherit}
+.crwin{display:inline-flex;align-items:center;gap:5px;font-size:.74rem;font-weight:700;color:#6d28d9;
+  background:#ede9fe;border:1px solid #ddd6fe;border-radius:8px;padding:.3rem .55rem;line-height:1.5}
+.crbar input[type=date]:disabled{opacity:.45;cursor:not-allowed}
 .crpager{display:flex;gap:5px;justify-content:center;align-items:center;margin-top:10px;flex-wrap:wrap}
 .crpager button{min-width:30px;height:30px;border:1px solid var(--border,#cbd5e1);background:var(--surface,#fff);border-radius:7px;cursor:pointer;font-weight:700;font-family:inherit}
 .crpager button.on{background:#0f766e;color:#fff;border-color:#0f766e}
@@ -423,6 +426,7 @@ function crChips(d){
   const pill = (key, label, bg, fg, n, v) =>
     `<button class="crst${cur===key?' on':''}" data-s="${key}" style="--b:${bg};--f:${fg}">` +
     `${label}<b>${fmt(n||0)}</b>${v?`<span class="v">${fmt(v)} ج</span>`:''}</button>`;
+  // الشريط ده رصيد متأخرات من بداية التشغيل — مش رقم اليوم المعروض
   let h = pill('unpaid','💸 لم يصرف','#ede9fe','#6d28d9', d.unpaid_n||0, d.unpaid_val||0);
   h += pill('pending','🔴 يتطلب مراجعة','#fee2e2','#b91c1c', d.needs_review||0, d.needs_review_val||0);
   h += pill('all','الكل','#e2e8f0','#334155',
@@ -431,7 +435,19 @@ function crChips(d){
     h += pill(k, c[0], c[1], c[2], x[0], x[1]); });
   return h;
 }
+/* «لم يصرف» = رصيد متأخرات، مش تقرير يوم. السيرفر بيوسّع النافذة من
+   org_settings.card_unpaid_since لحد النهاردة ويرجّعها في win_from/win_to،
+   والشاشة بتعرضها وتقفل الخانتين بدل ما تسيبهم يقولوا يوم واحد وهو مش ده. */
+function crWinLabel(sinceStr){
+  if(!sinceStr) return '';
+  const t = String(sinceStr).replace(' ','T');
+  const dt = new Date(t);
+  if(isNaN(dt.getTime())) return sinceStr;
+  return dt.toLocaleDateString('ar-EG',{day:'numeric',month:'long'})
+       + ' ' + dt.toLocaleTimeString('ar-EG',{hour:'numeric',minute:'2-digit'});
+}
 function renderCardReview(d){
+  const unpaidView = CR.state === 'unpaid';
   const pages = Math.max(1, Math.ceil(CR.total / CR.size));
   if(CR.page > pages) CR.page = pages;
   const brName = (BRANCHES.find(b=>b.sync_key===BRANCH)||{}).name || '';
@@ -449,8 +465,9 @@ function renderCardReview(d){
   document.getElementById('content').innerHTML = `
     <div class="crbar">
       <span class="crbr">${CR.allBr ? 'كل الفروع' : esc(brName)}</span>${brBox}
-      <input type="date" id="crFrom" value="${CR.from}"> <span style="font-size:.78rem">←</span>
-      <input type="date" id="crTo" value="${CR.to}">
+      <input type="date" id="crFrom" value="${unpaidView ? (d.win_from||CR.from) : CR.from}" ${unpaidView?'disabled':''}> <span style="font-size:.78rem">←</span>
+      <input type="date" id="crTo" value="${unpaidView ? (d.win_to||CR.to) : CR.to}" ${unpaidView?'disabled':''}>
+      ${unpaidView ? `<span class="crwin">💸 كل اللي لم يُصرف من <b>${esc(crWinLabel(d.unpaid_since))}</b> لغاية النهاردة — التاريخ مش مؤثر هنا</span>` : ''}
     </div>
     <div class="crstates">${crChips(d)}
     </div>
@@ -473,8 +490,10 @@ function renderCardReview(d){
 
   const go = () => { CR.page=1; loadCardTxns(); };
   const ab=document.getElementById('crAll'); if(ab) ab.onchange = e => { CR.allBr=e.target.checked; go(); };
-  document.getElementById('crFrom').onchange = e => { CR.from=e.target.value||crToday(); go(); };
-  document.getElementById('crTo').onchange   = e => { CR.to=e.target.value||crToday(); go(); };
+  if(!unpaidView){
+    document.getElementById('crFrom').onchange = e => { CR.from=e.target.value||crToday(); go(); };
+    document.getElementById('crTo').onchange   = e => { CR.to=e.target.value||crToday(); go(); };
+  }
   document.querySelectorAll('.crst[data-s]').forEach(b=>b.onclick=()=>{
     CR.state = (b.dataset.s==='all' ? null : b.dataset.s); go(); });
   document.querySelectorAll('.vch[data-ch]').forEach(c=>c.onclick=()=>{
