@@ -447,6 +447,9 @@ function crChips(d){
   // الشريط ده رصيد متأخرات من بداية التشغيل — مش رقم اليوم المعروض
   let h = pill('unpaid','💸 لم يصرف','#ede9fe','#6d28d9', d.unpaid_n||0, d.unpaid_val||0);
   h += pill('pending','🔴 يتطلب مراجعة','#fee2e2','#b91c1c', d.needs_review||0, d.needs_review_val||0);
+  /* الوجه التاني: اتضغط عليها «تم» والفلوس مالهاش أثر في كشف المصدر.
+     «يتطلب مراجعة» بتستبعد المُراجَع، فدي كانت بتخرج من الشاشة للأبد. */
+  h += pill('paid_nomatch','⚠️ صُرفت بلا دليل','#ffedd5','#c2410c', d.paid_nomatch_n||0, d.paid_nomatch_val||0);
   h += pill('all','الكل','#e2e8f0','#334155',
         Object.values(st).reduce((a,x)=>a+(x[0]||0),0), 0);
   Object.keys(CR_STATE).forEach(k=>{ const c=CR_STATE[k], x=st[k]||[0,0];
@@ -464,8 +467,12 @@ function crWinLabel(sinceStr){
   return dt.toLocaleDateString('ar-EG',{day:'numeric',month:'long'})
        + ' ' + dt.toLocaleTimeString('ar-EG',{hour:'numeric',minute:'2-digit'});
 }
+/* الشريحتان دول رصيد متراكم مش تقرير يوم — السيرفر بيوسّع نافذتهم
+   من بداية التشغيل لحد النهاردة، فالشاشة بتعرض النافذة وتقفل الخانتين. */
+const CR_WIDE = { unpaid: 'كل اللي لم يُصرف', paid_nomatch: 'كل اللي اتصرف ومالوش أثر في الكشف' };
 function renderCardReview(d){
-  const unpaidView = CR.state === 'unpaid';
+  const wideLbl = CR_WIDE[CR.state] || '';
+  const unpaidView = !!wideLbl;
   const pages = Math.max(1, Math.ceil(CR.total / CR.size));
   if(CR.page > pages) CR.page = pages;
   const brName = (BRANCHES.find(b=>b.sync_key===BRANCH)||{}).name || '';
@@ -485,7 +492,7 @@ function renderCardReview(d){
       <span class="crbr">${CR.allBr ? 'كل الفروع' : esc(brName)}</span>${brBox}
       <input type="date" id="crFrom" value="${unpaidView ? (d.win_from||CR.from) : CR.from}" ${unpaidView?'disabled':''}> <span style="font-size:.78rem">←</span>
       <input type="date" id="crTo" value="${unpaidView ? (d.win_to||CR.to) : CR.to}" ${unpaidView?'disabled':''}>
-      ${unpaidView ? `<span class="crwin">💸 كل اللي لم يُصرف من <b>${esc(crWinLabel(d.unpaid_since))}</b> لغاية النهاردة — التاريخ مش مؤثر هنا</span>` : ''}
+      ${unpaidView ? `<span class="crwin">${CR.state==='unpaid'?'💸':'⚠️'} ${esc(wideLbl)} من <b>${esc(crWinLabel(d.unpaid_since))}</b> لغاية النهاردة — التاريخ مش مؤثر هنا</span>` : ''}
     </div>
     <div class="crstates">${crChips(d)}
     </div>
@@ -822,20 +829,27 @@ function backlogHtml(){
   const v = +BACKLOG.unpaid_val || 0;
   const since = crWinLabel(BACKLOG.unpaid_since);
   const more = Math.max(0, (+BACKLOG.total || 0) - BACKLOG_MAX);
+  /* paid_nomatch_n جاي من نفس النداء، وبما إن p_state='unpaid' بيوسّع
+     النافذة لبداية التشغيل فالرقمين على نفس المدى — مش رقم يوم. */
+  const pn = +BACKLOG.paid_nomatch_n || 0, pv = +BACKLOG.paid_nomatch_val || 0;
   return '<div class="bklog">💸 <span>فيه <b>' + fmt(n) + '</b> معاملة لم تُصرف'
        + (v ? ' بقيمة <b>' + fmt(v) + ' ج</b>' : '')
        + (since ? ' من ' + esc(since) : '')
        + ' — ظاهرة تحت بخلفية بنفسجية مع حركات الشيفت.'
        + (more ? ' <b>باقي ' + fmt(more) + '</b> أقدم مش ظاهرين هنا.' : '')
-       + '</span><button onclick="goUnpaidBacklog()">افتح المراجعة</button></div>';
+       + '</span>'
+       + (pn ? '<button style="background:#c2410c" onclick="goUnpaidBacklog(\'paid_nomatch\')">⚠️ '
+               + fmt(pn) + ' صُرفت بلا دليل' + (pv ? ' · ' + fmt(pv) + ' ج' : '') + '</button>' : '')
+       + '<button onclick="goUnpaidBacklog()">افتح المراجعة</button></div>';
 }
-function goUnpaidBacklog(){
+function goUnpaidBacklog(state){
   const tabs = document.getElementById('tabs');
   const cb = tabs && tabs.querySelector('.tab[data-mode="cards"]');
   if(!cb){ alert('تبويب مراجعة تحصيل البطاقات غير متاح لدورك.'); return; }
   tabs.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active', x===cb));
   chFilter=null; typeFilter=null; userFilter=null;
-  CR.state='unpaid'; CR.page=1;
+  CR.state = (state === 'paid_nomatch') ? 'paid_nomatch' : 'unpaid';
+  CR.page=1;
   showCardReview();
 }
 async function loadBalances(){
