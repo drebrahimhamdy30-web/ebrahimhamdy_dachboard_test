@@ -58,7 +58,10 @@ global.sbFailMsg = (base) => base;
 global.Branches = { all:()=>[{name:'المعمورة'},{name:'سان ستيفانو'},{name:'سيدى بشر'},{name:'السيوف'}],
   codeMap:()=>({mamora:'المعمورة',san:'سان ستيفانو',bishr:'سيدى بشر',seyouf:'السيوف'}),
   keys:()=>['mamora','san','bishr','seyouf'], names:()=>['المعمورة','سان ستيفانو','سيدى بشر','السيوف'],
-  nameOf:c=>c, codeOf:n=>n, ready:async()=>{} };
+  nameOf:c=>c, codeOf:n=>n, ready:async()=>{},
+  /* شاشات بتشترك في تغيّر قايمة الفروع (org_settings) — من غير الستَب ده
+     السموك بيقع بـ«Branches.onChange is not a function» على شاشة سليمة. */
+  onChange(){}, offChange(){}, reload:async()=>{}, letterMap:()=>({}), toName:c=>c, toCode:n=>n };
 global.XLSX = { utils:{}, writeFile(){} };
 global.SB_URL_API = 'http://x'; global.SB_ANON_API = 'k'; global.PHALIX_CONFIG = { supabaseUrl:'http://x' };
 global.sbH = async () => ({}); global.sbTaskInsert = async () => ({ok:true}); global.sbFailMsg = m => m;

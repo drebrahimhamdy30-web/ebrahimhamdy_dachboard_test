@@ -194,7 +194,12 @@
             <button id="type-cosmo" class="active" onclick="setType('cosmo')">🧴 كوزمو</button>
             <button id="type-paper" onclick="setType('paper')">📄 ورقيات</button>
             <button id="type-medicine" onclick="setType('medicine')">💊 دوا</button>
+            <button id="type-supplies" onclick="setType('supplies')">🩹 مستلزمات طبية</button>
           </div>
+          <button class="btn cos-btn cos-btn-ghost" id="sc-open-btn" style="display:none"
+                  onclick="scOpen()" title="حدّد الشركات اللي تتحسب مستلزمات طبية">
+            <i class="fas fa-building"></i> شركات المستلزمات
+          </button>
         </div>
 
         <!-- سطر واحد: بحث + شركات + حالة -->
@@ -271,6 +276,29 @@
   </div>
 
   <!-- اختيار شركاتي المتابَعة -->
+  <!-- شركات المستلزمات الطبية — بتكتب في company_category -->
+  <div class="pc-bg" id="sc-bg" onclick="if(event.target===this)scClose()">
+    <div class="pc-box">
+      <div class="pc-head">
+        <b>شركات المستلزمات الطبية</b>
+        <span style="font-size:.74rem;color:var(--text-muted)">أي شركة هنا أصنافها تتحسب مستلزمات وتظهر في تبويبها</span>
+        <span class="x" onclick="scClose()">&times;</span>
+      </div>
+      <div class="pc-tools">
+        <input id="sc-search" placeholder="ابحث عن شركة…" oninput="scRender()">
+        <button class="btn cos-btn cos-btn-ghost" onclick="scAllVisible(true)">علّم الظاهر</button>
+        <button class="btn cos-btn cos-btn-ghost" onclick="scAllVisible(false)">امسح الظاهر</button>
+      </div>
+      <div class="pc-list" id="sc-list"></div>
+      <div class="pc-foot">
+        <span class="cnt" id="sc-count"></span>
+        <span style="margin-inline-start:auto"></span>
+        <button class="btn cos-btn cos-btn-ghost" onclick="scClose()">إلغاء</button>
+        <button class="btn cos-btn cos-btn-excel" id="sc-save" onclick="scSave()">حفظ</button>
+      </div>
+    </div>
+  </div>
+
   <div class="pc-bg" id="pc-bg" onclick="if(event.target===this)pcClose()">
     <div class="pc-box">
       <div class="pc-head">
@@ -329,8 +357,8 @@
        تصنيف قائم بذاته (شركة «ورقيات») وليها شريحتها في إعدادات المؤسسة،
        فكانت بتتخلط مع الكوزمو. التصنيف نفسه = item_category في القاعدة. */
     var currentType = 'cosmo';                                  // cosmo | paper | medicine
-    var TYPE_CAT = { cosmo:'cos', paper:'paper', medicine:'med' };
-    var TYPE_AR  = { cosmo:'الكوزمو', paper:'الورقيات', medicine:'الدوا' };
+    var TYPE_CAT = { cosmo:'cos', paper:'paper', medicine:'med', supplies:'sup' };
+    var TYPE_AR  = { cosmo:'الكوزمو', paper:'الورقيات', medicine:'الدوا', supplies:'المستلزمات الطبية' };
     /* الفروع كلها من جدول الفروع — مفيش اسم فرع مكتوب في الملف ده.
        بتتملى في initBranches() بعد Branches.ready()، مش وقت تحميل
        السكربت: أول زيارة بكاش فاضي كانت هتدّي قايمة فاضية. */
@@ -435,11 +463,13 @@
     function setType(type){
       if(currentType === type) return;
       currentType = type;
-      ['cosmo','paper','medicine'].forEach(function(t){
+      ['cosmo','paper','medicine','supplies'].forEach(function(t){
         var b = document.getElementById('type-' + t);
         if (b) b.classList.toggle('active', type === t);
       });
       document.getElementById('list-title').textContent = 'قائمة طلبيات ' + TYPE_AR[type];
+      var scBtn = document.getElementById('sc-open-btn');
+      if (scBtn) scBtn.style.display = (type === 'supplies') ? '' : 'none';
       // إعادة ضبط فلتر الشركات وإعادة الحساب
       selectedCompanies = [];
       document.getElementById('company-input').value = '';
@@ -608,9 +638,24 @@ saveQty();
       return true;
     }
 
-    /* نفس تصنيف item_category في القاعدة بالحرف: شركة «ورقيات» تغلب على med */
+    /* تعيين الشركات للتصنيفات — بيتحمّل مرة من company_category.
+       لازم يفضل مطابق لـitem_category في القاعدة بالحرف، لأن الشاشة
+       بتفلتر بيه والقاعدة بتحسب بيه؛ أي اختلاف = الشاشة تعرض صنف
+       والطلبية تحسبه في تصنيف تاني. */
+    var companyCat = {};
+    async function loadCompanyCat(){
+      try {
+        var rows = await Session.getAll('company_category?select=company,category');
+        companyCat = {};
+        (rows||[]).forEach(function(x){ companyCat[String(x.company||'').trim()] = x.category; });
+      } catch(e){ companyCat = {}; }   /* الفشل = نرجع للمنطق المحفور، مش نوقف الشاشة */
+    }
+    /* نفس تصنيف item_category في القاعدة بالحرف:
+       التعيين الصريح أولًا، وبعده «ورقيات» المحفورة، وبعده med. */
     function catOf(company, med){
-      if (String(company||'').trim() === 'ورقيات') return 'paper';
+      var c = String(company||'').trim();
+      if (companyCat[c]) return companyCat[c];
+      if (c === 'ورقيات') return 'paper';
       return (parseInt(med)||0) === 1 ? 'med' : 'cos';
     }
     function calcSetOf(branchName, cat){
@@ -624,7 +669,8 @@ saveQty();
         var r = await Promise.all([
           getStockSummary(),
           getSalesSummary(),
-          loadTransferRefs()
+          loadTransferRefs(),
+          loadCompanyCat()
         ]);
         stockSummary=Array.isArray(r[0])?r[0]:[];
         salesData   =Array.isArray(r[1])?r[1]:[];
@@ -775,7 +821,7 @@ saveQty();
        مطبّقة على السيرفر جوّه get_consumption_rates، فالشاشة بقت
        بتعرضها بس. قبل كده كانت في جدول في المتصفح **مش محفوظ**،
        فكل جلسة ممكن تحسب بقواعد مختلفة. */
-    const CAT_AR = { med:'أدوية', cos:'كوزمو', paper:'ورقيات' };
+    const CAT_AR = { med:'أدوية', cos:'كوزمو', paper:'ورقيات', sup:'مستلزمات طبية' };
     async function loadRulesView(){
       var el = document.getElementById('rules-view');
       if (!el) return;
@@ -1032,6 +1078,96 @@ saveQty();
         PINNED = new Set(Array.isArray(j) ? j.map(function(x){ return x.company; }) : []);
       } catch(e){ PINNED = new Set(); }
       pinnedLoaded = true;
+    }
+
+    /* ═════ شركات المستلزمات الطبية ═════
+       التعيين بالشركة مش بالصنف — ده اللي المالك طلبه: أي شركة جوّه
+       التصنيف، مشتريات المستلزمات هي اللي تطلبها. */
+    var scDraft = null, scPool = [];
+
+    /* الشركات من الكتالوج كله مش من نتائج الحساب، لأن شركة مستلزمات
+       ممكن ماتكونش ظهرت في أي تبويب اتحسب لسه. */
+    async function scLoadPool(){
+      var by = {};
+      try {
+        var rows = await Session.rpcAll('get_company_catalog', {});
+        (rows||[]).forEach(function(x){
+          var c = String(x.company||'').trim(); if(!c) return;
+          by[c] = Number(x.n_items)||0;
+        });
+      } catch(e){
+        /* الرجوع لنتائج الحساب لو الدالة لسه ماوصلتش للقاعدة دي */
+        allResults.forEach(function(i){
+          var c = (i.company||'').trim(); if(!c) return;
+          by[c] = (by[c]||0) + 1;
+        });
+      }
+      Object.keys(companyCat).forEach(function(c){ if(by[c] === undefined) by[c] = 0; });
+      scPool = Object.keys(by).map(function(c){ return { c:c, n:by[c] }; })
+                     .sort(function(a,b){ return b.n - a.n || a.c.localeCompare(b.c,'ar'); });
+    }
+
+    async function scOpen(){
+      document.getElementById('sc-search').value = '';
+      document.getElementById('sc-list').innerHTML = '<div style="padding:18px;text-align:center;color:var(--text-muted);font-size:.8rem">جارٍ التحميل…</div>';
+      document.getElementById('sc-bg').classList.add('open');
+      await scLoadPool();
+      /* نسخة شغل منفصلة — الإلغاء مايأثرش على المعروض */
+      scDraft = new Set(Object.keys(companyCat).filter(function(c){ return companyCat[c] === 'sup'; }));
+      scRender();
+    }
+    function scClose(){ document.getElementById('sc-bg').classList.remove('open'); scDraft = null; }
+
+    function scVisible(){
+      var q = (document.getElementById('sc-search').value||'').trim().toLowerCase();
+      return scPool.filter(function(x){ return !q || x.c.toLowerCase().includes(q); });
+    }
+
+    function scRender(){
+      if (!scDraft) return;
+      var rows = scVisible();
+      document.getElementById('sc-list').innerHTML = rows.length
+        ? rows.map(function(x){
+            /* شركة معيّنة لتصنيف تاني — نوضّحها عشان ما يحصلش سحب بالغلط */
+            var other = companyCat[x.c] && companyCat[x.c] !== 'sup'
+              ? ' <span style="color:var(--text-muted);font-size:.7rem">(' + (CAT_AR[companyCat[x.c]]||companyCat[x.c]) + ')</span>' : '';
+            return '<label class="pc-row"><input type="checkbox"' + (scDraft.has(x.c) ? ' checked' : '')
+                 + ' onchange="scToggle(' + JSON.stringify(x.c).replace(/"/g, '&quot;') + ',this.checked)">'
+                 + '<span>' + escHtml(x.c) + other + '</span><span class="n">' + x.n + '</span></label>';
+          }).join('')
+        : '<div style="padding:18px;text-align:center;color:var(--text-muted);font-size:.8rem">مفيش نتائج</div>';
+      document.getElementById('sc-count').textContent = 'مختار ' + scDraft.size + ' من ' + scPool.length;
+    }
+
+    function scToggle(name, on){ on ? scDraft.add(name) : scDraft.delete(name); scRender(); }
+    function scAllVisible(on){
+      scVisible().forEach(function(x){ on ? scDraft.add(x.c) : scDraft.delete(x.c); });
+      scRender();
+    }
+
+    async function scSave(){
+      var btn = document.getElementById('sc-save'), old = btn.innerHTML;
+      btn.disabled = true; btn.innerHTML = 'جارٍ الحفظ…';
+      try {
+        var res = await fetch(SB_URL_API + '/rest/v1/rpc/set_company_category', {
+          method:'POST', headers: await sbH({ 'Content-Type':'application/json' }),
+          body: JSON.stringify({ p_companies: [...scDraft], p_category: 'sup' })
+        });
+        if (!res.ok) {
+          var t = await res.text();
+          throw new Error(t.slice(0,200) || ('HTTP ' + res.status));
+        }
+        await loadCompanyCat();
+        scClose();
+        /* التصنيف اتغيّر فالنتائج المحسوبة بقت على تصنيف قديم */
+        allResults = []; scopedResults = []; filteredResults = [];
+        document.getElementById('result-container').innerHTML =
+          '<div class="loading-overlay">✅ اتحفظ — اضغط "احسب" عشان النتائج تتحدّث.<br>'
+          + '<span style="font-size:.78rem;color:var(--text-muted)">معدلات الأصناف دي هتتظبط على شرائح المستلزمات بعد إعادة حساب المعدل من شاشة الطلبيات.</span></div>';
+        document.getElementById('result-count').textContent = '';
+      } catch(e){
+        alert('تعذّر الحفظ: ' + (e && e.message ? e.message : e));
+      } finally { btn.disabled = false; btn.innerHTML = old; }
     }
 
     function pcOpen(){
