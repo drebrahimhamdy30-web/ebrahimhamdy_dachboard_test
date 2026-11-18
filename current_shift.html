@@ -274,10 +274,29 @@ async function loadBranches(){
    و51 في المعمورة بعد ما الحسابات اتسمّت بأرقام المحافظ.
    كده أي اسم جديد في eplus يظهر لوحده من غير تعديل كود. */
 const CHANNELS_FALLBACK = ['instapay','paymob 1','paymob 7','orange cash','fawry313','fawry 6008','vodafon cash'];
+/* تطبيع للمقارنة بس — مش للعرض. eplus بيكتب «paymob 1» بمسافة
+   وسجل طرق الدفع بيكتبه «paymob1» من غيرها؛ الاتنين نفس الحساب. */
+const chNorm = x => String(x==null?'':x).trim().toLowerCase()
+  .replace(/\s+/g,'').replace(/ى/g,'ي')
+  /* «فورى 313» في السجل و«fawry313» في eplus — نفس الحساب بأبجديتين،
+     ومن غير التوحيد ده القايمة بتعرضهم كأنهم حسابين. */
+  .replace(/فوري/g,'fawry');
 function channelList(){
-  const s = new Set();
-  (allTxns()||[]).forEach(t => { const c = String(t.channel==null?'':t.channel).trim(); if(c) s.add(c); });
-  const a = [...s].sort((x,y)=>x.localeCompare(y,'ar'));
+  /* مصدرين: إملاء eplus من الحركات الفعلية (ده المرجع)، وسجل حسابات
+     الفرع من جدول «أرصدة الحسابات» اللي بيملا الحسابات اللي مفيش
+     عليها حركة في الشيفت ده — زي paymob 7 في شيفت ماحصلش عليه بيع،
+     وكان مش بيظهر خالص فمكانش ينفع تنقل حركة ليه. */
+  const by = new Map();   // المفتاح المطبّع -> الإملاء المعروض
+  (allTxns()||[]).forEach(t => { const c = String(t.channel==null?'':t.channel).trim();
+    if(c) by.set(chNorm(c), c); });
+  /* الأفضلية للإملاء اللي eplus نفسه بيكتبه (اسم الخزنة enm) قبل
+     مفتاحنا الداخلي — eplus بيكتب «paymob 7» بمسافة واحنا «paymob7». */
+  (((typeof BAL!=='undefined' && BAL) ? BAL.rows : null) || []).forEach(r => {
+    const k = String(r.key==null?'':r.key).trim();
+    const e = String(r.enm==null?'':r.enm).trim();
+    const v = e || k;
+    if(k && !by.has(chNorm(k)) && !by.has(chNorm(v))) by.set(chNorm(k), v); });
+  const a = [...by.values()].sort((x,y)=>x.localeCompare(y,'ar'));
   return a.length ? a : CHANNELS_FALLBACK;   // ماينفعش تفضل فاضية
 }
 const fmt = n => (n<0?'−':'') + Math.abs(Math.round(Number(n)||0)).toLocaleString('en-US');
@@ -859,6 +878,9 @@ async function loadBalances(){
   BAL = await rpc('get_pos_balances', { p_branch: BRANCH || null });
   const el = document.getElementById('balbox');
   if (el) el.innerHTML = balancesHtml();
+  /* القايمة بتتبني من BAL كمان، وBAL بيوصل بعد أول رسم — فنعيد رسم
+     الصفوف عشان حسابات الفرع تظهر في قايمة «الحساب». */
+  if (VIEW !== 'cards' && document.getElementById('tb')) drawRows();
 }
 function balancesHtml(){
   const HD = 'أرصدة الحسابات — eplus مقابل الواقع';
