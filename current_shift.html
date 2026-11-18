@@ -236,6 +236,13 @@ tr.oldrow.locked>td{background:#f1f5f9}
 .bklog b{font-size:.95rem}
 .bklog button{margin-inline-start:auto;border:none;background:#6d28d9;color:#fff;border-radius:8px;
   padding:.35rem .8rem;font-family:inherit;font-weight:700;font-size:.78rem;cursor:pointer}
+.mrv-box{margin-top:4px;display:flex;gap:4px;align-items:center;flex-wrap:wrap}
+.mrv-btn{border:1px solid var(--border,#cbd5e1);background:var(--surface,#fff);color:var(--text-secondary,#475569);
+  border-radius:7px;padding:.15rem .45rem;font-family:inherit;font-size:.66rem;font-weight:700;cursor:pointer;white-space:nowrap}
+.mrv-btn.ok{background:#4338ca;color:#fff;border-color:#4338ca}
+.mrv-in{min-width:140px;font-size:.7rem;padding:.2rem .4rem}
+.mrv-ok{display:inline-flex;align-items:center;gap:4px;font-size:.66rem;font-weight:700;color:#4338ca}
+.mrv-note{font-size:.66rem;color:var(--text-muted,#64748b);line-height:1.5;max-width:220px}
 .crwin{display:inline-flex;align-items:center;gap:5px;font-size:.74rem;font-weight:700;color:#6d28d9;
   background:#ede9fe;border:1px solid #ddd6fe;border-radius:8px;padding:.3rem .55rem;line-height:1.5}
 .crbar input[type=date]:disabled{opacity:.45;cursor:not-allowed}
@@ -472,6 +479,10 @@ function crChips(d){
      تحت الفحص) باين في عمود «الحالة»، فالتفصيل ما ضاعش. */
   let h = pill('review','🔴 يحتاج مراجعة','#fee2e2','#b91c1c', d.review_n||0, d.review_val||0);
   h += pill('matched','✅ مطابق','#dcfce7','#15803d', d.matched_n||0, d.matched_val||0);
+  /* اللي المراجع بصّ عليها وكتب سبب — بتخرج من الطابور وتيجي هنا.
+     الشريحة مابتظهرش أصلًا لو مفيش ولا واحدة. */
+  if((d.confirmed_n||0) > 0 || cur === 'confirmed')
+    h += pill('confirmed','📝 راجعتها بملاحظة','#e0e7ff','#4338ca', d.confirmed_n||0, d.confirmed_val||0);
   /* لو الشاشة اتفتحت من شريط نقطة البيع بفلتر تاني، نعرض شريحته عشان
      المستخدم يعرف هو شايف إيه — وتختفي أول ما يرجع للشريحتين. */
   const EXTRA = {
@@ -480,7 +491,7 @@ function crChips(d){
     all:          ['الكل',              '#e2e8f0','#334155',
                    (d.matched_n||0)+(d.review_n||0), (d.matched_val||0)+(d.review_val||0)]
   };
-  const MAIN = { review:1, matched:1 };   // دول اتعرضوا فوق — مايتكرروش
+  const MAIN = { review:1, matched:1, confirmed:1 };   // دول اتعرضوا فوق — مايتكرروش
   const x = MAIN[cur] ? null
           : (EXTRA[cur] || (CR_STATE[cur] ? [CR_STATE[cur][0], CR_STATE[cur][1], CR_STATE[cur][2],
                                              (st[cur]||[0,0])[0], (st[cur]||[0,0])[1]] : null));
@@ -1266,6 +1277,49 @@ function rcptInit(){
 }
 
 function crNoteId(t){ return 'cn-' + t.branch + '-' + t.fh_id; }
+/* ── المراجعة اليدوية ────────────────────────────────────────────
+   المعاملة غير المطابقة ممكن تكون سليمة لأسباب برّا النظام (فورى
+   مفيهاش كشف · العميل حوّل لحساب تاني · الرسالة ضاعت). المراجع
+   بيأكّد ويكتب السبب، فتخرج من الطابور **من غير ما حالتها تتغيّر** —
+   إقرار إن حد اتعامل معاها، مش ادّعاء إنها اتطابقت.
+   الملاحظة إلزامية على السيرفر كمان مش في الواجهة بس. */
+function crManual(t){
+  if(VIEW!=='cards' || t.state==='matched') return '';
+  if(t.rn) return '<span class="mrv-ok" title="'+esc(t.rn.note)+'">✓ '+esc(t.rn.by)+' · '+esc(t.rn.at)+'</span>'
+    + '<button class="mrv-btn" onclick="manualEdit('+t._i+')" title="تعديل الملاحظة">✎</button>'
+    + '<button class="mrv-btn" onclick="manualClear('+t._i+')" title="شيل المراجعة">✕</button>'
+    + '<div class="mrv-note">'+esc(t.rn.note)+'</div>';
+  return '<button class="mrv-btn" onclick="manualEdit('+t._i+')">📝 راجعت</button>';
+}
+function manualEdit(i){
+  const t = allTxns()[i]; if(!t) return;
+  const box = document.getElementById('mrv-'+i); if(!box) return;
+  box.innerHTML = '<input class="inp mrv-in" id="mi-'+i+'" placeholder="سبب المراجعة…" value="'
+    + esc((t.rn && t.rn.note) || '') + '" onkeydown="if(event.key===\'Enter\')manualSave('+i+');'
+    + ' if(event.key===\'Escape\')drawRows()">'
+    + '<button class="mrv-btn ok" onclick="manualSave('+i+')">حفظ</button>'
+    + '<button class="mrv-btn" onclick="drawRows()">إلغاء</button>';
+  const el = document.getElementById('mi-'+i); if(el){ el.focus(); el.select(); }
+}
+async function manualSave(i){
+  const t = allTxns()[i]; if(!t) return;
+  const el = document.getElementById('mi-'+i);
+  const note = el ? (el.value||'').trim() : '';
+  if(note.length < 3){ alert('اكتب ملاحظة توضّح سبب المراجعة'); if(el) el.focus(); return; }
+  const r = await rpcWrite('confirm_card_review',
+              { p_branch:(t.branch||BRANCH), p_fh_id:t.fh_id, p_note:note });
+  if(r.success !== true){ alert(r.error || 'تعذّر الحفظ'); return; }
+  t.rn = { by:r.by, note:r.note, at:r.at };
+  drawRows();   /* الصف بيفضل مكانه لحد أول تحديث — المراجع ما يفقدش مكانه */
+}
+async function manualClear(i){
+  const t = allTxns()[i]; if(!t) return;
+  if(!confirm('شيل المراجعة اليدوية عن الحركة دي؟ هترجع لطابور «يحتاج مراجعة».')) return;
+  const r = await rpcWrite('unconfirm_card_review',
+              { p_branch:(t.branch||BRANCH), p_fh_id:t.fh_id });
+  if(r.success !== true){ alert(r.error || 'تعذّر'); return; }
+  delete t.rn; drawRows();
+}
 function crEvidence(t, lock){
   if(t.evidence) return esc(t.evidence);
   if(lock) return (t.rv && t.rv.note ? esc(t.rv.note) : '<span class="dash">—</span>') +
@@ -1372,7 +1426,8 @@ function drawRows(){
     /* العمودين دول في تبويب البطاقات بس — جدول الشيفت نفس الراسم */
     const stC = CR_STATE[t.state] || null;
     const stCells = (VIEW==='cards')
-      ? `<td>${stC?`<span class="pill" style="background:${stC[1]};color:${stC[2]}">${stC[0]}</span>`:'<span class="dash">—</span>'}</td>`
+      ? `<td>${stC?`<span class="pill" style="background:${stC[1]};color:${stC[2]}">${stC[0]}</span>`:'<span class="dash">—</span>'}`
+        + `<div class="mrv-box" id="mrv-${t._i}">${crManual(t)}</div></td>`
         + `<td class="r ev">${crEvidence(t, lock)}</td>`
       : '';
     /* رقم فاتورة البيع (sth_id) و«الإسم» (visa_name) من eplus —
