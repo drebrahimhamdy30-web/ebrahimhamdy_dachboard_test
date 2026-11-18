@@ -430,7 +430,8 @@ const CR_STATE = {
   no_feed:     ['لا يوجد كشف',  '#fef9c3', '#a16207']
 };
 let SEES_ALL = false;
-let CR = { from:'', to:'', allBr:false, state:'pending', page:1, size:50, total:0, states:{} };
+/* بتفتح على «يحتاج مراجعة» — ده سؤال الشاشة (قرار المالك 2026-11-18) */
+let CR = { from:'', to:'', allBr:false, state:'review', page:1, size:50, total:0, states:{} };
 function crToday(){ const c=new Date(new Date().toLocaleString('en-US',{timeZone:'Africa/Cairo'}));
   const p=n=>String(n).padStart(2,'0'); return `${c.getFullYear()}-${p(c.getMonth()+1)}-${p(c.getDate())}`; }
 
@@ -466,16 +467,24 @@ function crChips(d){
   const pill = (key, label, bg, fg, n, v) =>
     `<button class="crst${cur===key?' on':''}" data-s="${key}" style="--b:${bg};--f:${fg}">` +
     `${label}<b>${fmt(n||0)}</b>${v?`<span class="v">${fmt(v)} ج</span>`:''}</button>`;
-  // الشريط ده رصيد متأخرات من بداية التشغيل — مش رقم اليوم المعروض
-  let h = pill('unpaid','💸 لم يصرف','#ede9fe','#6d28d9', d.unpaid_n||0, d.unpaid_val||0);
-  h += pill('pending','🔴 يتطلب مراجعة','#fee2e2','#b91c1c', d.needs_review||0, d.needs_review_val||0);
-  /* الوجه التاني: اتضغط عليها «تم» والفلوس مالهاش أثر في كشف المصدر.
-     «يتطلب مراجعة» بتستبعد المُراجَع، فدي كانت بتخرج من الشاشة للأبد. */
-  h += pill('paid_nomatch','⚠️ صُرفت بلا دليل','#ffedd5','#c2410c', d.paid_nomatch_n||0, d.paid_nomatch_val||0);
-  h += pill('all','الكل','#e2e8f0','#334155',
-        Object.values(st).reduce((a,x)=>a+(x[0]||0),0), 0);
-  Object.keys(CR_STATE).forEach(k=>{ const c=CR_STATE[k], x=st[k]||[0,0];
-    h += pill(k, c[0], c[1], c[2], x[0], x[1]); });
+  /* شريحتين بس (قرار المالك 2026-11-18): الشاشة سؤالها واحد — إيه اللي
+     محتاج مراجعة؟ سبب كل سطر (بلا تفسير · المصدر ناقص · لا يوجد كشف ·
+     تحت الفحص) باين في عمود «الحالة»، فالتفصيل ما ضاعش. */
+  let h = pill('review','🔴 يحتاج مراجعة','#fee2e2','#b91c1c', d.review_n||0, d.review_val||0);
+  h += pill('matched','✅ مطابق','#dcfce7','#15803d', d.matched_n||0, d.matched_val||0);
+  /* لو الشاشة اتفتحت من شريط نقطة البيع بفلتر تاني، نعرض شريحته عشان
+     المستخدم يعرف هو شايف إيه — وتختفي أول ما يرجع للشريحتين. */
+  const EXTRA = {
+    unpaid:       ['💸 لم يصرف',        '#ede9fe','#6d28d9', d.unpaid_n,       d.unpaid_val],
+    paid_nomatch: ['⚠️ صُرفت بلا دليل','#ffedd5','#c2410c', d.paid_nomatch_n, d.paid_nomatch_val],
+    all:          ['الكل',              '#e2e8f0','#334155',
+                   (d.matched_n||0)+(d.review_n||0), (d.matched_val||0)+(d.review_val||0)]
+  };
+  const MAIN = { review:1, matched:1 };   // دول اتعرضوا فوق — مايتكرروش
+  const x = MAIN[cur] ? null
+          : (EXTRA[cur] || (CR_STATE[cur] ? [CR_STATE[cur][0], CR_STATE[cur][1], CR_STATE[cur][2],
+                                             (st[cur]||[0,0])[0], (st[cur]||[0,0])[1]] : null));
+  if(x) h += pill(cur, x[0], x[1], x[2], x[3]||0, x[4]||0);
   return h;
 }
 /* «لم يصرف» = رصيد متأخرات، مش تقرير يوم. السيرفر بيوسّع النافذة من
