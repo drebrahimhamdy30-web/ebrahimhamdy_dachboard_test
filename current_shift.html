@@ -228,6 +228,11 @@ td.copyable:hover{text-decoration:underline dotted;text-underline-offset:3px}
 .crall input{cursor:pointer}
 .crbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0 10px}
 .crbar select,.crbar input[type=date]{padding:.35rem .5rem;border:1px solid var(--border,#cbd5e1);border-radius:8px;font-family:inherit;font-size:.78rem;background:var(--surface,#fff);color:inherit}
+.bklog{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px;padding:.55rem .8rem;
+  border:1px solid #ddd6fe;background:#f5f3ff;border-radius:10px;font-size:.82rem;font-weight:700;color:#5b21b6}
+.bklog b{font-size:.95rem}
+.bklog button{margin-inline-start:auto;border:none;background:#6d28d9;color:#fff;border-radius:8px;
+  padding:.35rem .8rem;font-family:inherit;font-weight:700;font-size:.78rem;cursor:pointer}
 .crwin{display:inline-flex;align-items:center;gap:5px;font-size:.74rem;font-weight:700;color:#6d28d9;
   background:#ede9fe;border:1px solid #ddd6fe;border-radius:8px;padding:.3rem .55rem;line-height:1.5}
 .crbar input[type=date]:disabled{opacity:.45;cursor:not-allowed}
@@ -296,6 +301,11 @@ let IS_ADMIN = false;        // فكّ قفل المراجعة للأدمن فق
    اللي لسه محتاج صرف بس. ضغطة تانية تعرض كل حركات الشيفت.
    «تم» عند الصيادلة = تم الصرف، فالعلامة دي هي مقياس الصرف. */
 let unpaidOnly = true;
+/* جدول نقطة البيع مقصور على الشيفت المفتوح — ده تعريفه، ومجاميع
+   «أرصدة الحسابات» فوقه محسوبة على نفس الحركات دي. فحشر معاملات
+   شيفتات قديمة جوّه الجدول كان هيضرب المقارنة. بدل كده بنعرض شريط
+   بيقول فيه كام متأخرة ويودّيك على تبويب المراجعة اللي بيصرفها. */
+let BACKLOG = null;
 
 /* منع النسخ: الهدف إن الموظف ما ينقلش الحركات لإكسل ويجمّعها.
    ⚠️ ده احتكاك مش جدار — الأرقام ظاهرة على الشاشة فتقدر تتكتب بالإيد
@@ -570,6 +580,7 @@ async function loadShift(){
     return x;
   });
   render();
+  loadBacklog();   // مش محجوز عليه: الجدول بيظهر الأول والشريط بيلحق
 }
 // معاملة فيزا «مكتوبة يدويًا» (قيمة مدفوع مميّزة) مقابل أوتوماتيك (أخدت القيمة)
 function isManual(t){ return (t.manual===true) || (t.manual==null && Number(t.visa_no)>1); }
@@ -741,6 +752,7 @@ function render(){
       <div class="users" title="${users}">👤 ${users}</div>
     </div>
     <div class="balcard" id="balbox">${balancesHtml()}</div>
+    <div id="backlogBox">${backlogHtml()}</div>
     <div class="toolbar">
       <input type="search" id="q" placeholder="🔎 بحث بالطرف / الملاحظة / المستخدم…">
       <button class="chip rvf ${unpaidOnly?'active':''}" id="unpaidBtn">لم يصرف</button>
@@ -773,6 +785,35 @@ function render(){
    الربط باسم حساب eplus = رقم/مفتاح الحساب عندنا. الحساب اللي
    مالوش مقابل في eplus بيظهر «غير مربوط» — مابيختفيش. */
 let BAL = null;
+/* رصيد المعاملات اللي لم تُصرف — من نفس دالة تبويب المراجعة عشان
+   الرقمين مايختلفوش. بتفشل بهدوء لو الدور مش مصرّح له بالمراجعة. */
+async function loadBacklog(){
+  BACKLOG = await rpc('get_card_review', { p_branch: BRANCH || null, p_state: 'unpaid',
+                                           p_limit: 1, p_offset: 0 });
+  const el = document.getElementById('backlogBox');
+  if (el) el.innerHTML = backlogHtml();
+}
+function backlogHtml(){
+  if(!BACKLOG) return '';
+  const n = +BACKLOG.unpaid_n || 0;
+  if(!n) return '';
+  const v = +BACKLOG.unpaid_val || 0;
+  const since = crWinLabel(BACKLOG.unpaid_since);
+  return '<div class="bklog">💸 <span>فيه <b>' + fmt(n) + '</b> معاملة لم تُصرف'
+       + (v ? ' بقيمة <b>' + fmt(v) + ' ج</b>' : '')
+       + (since ? ' من ' + esc(since) : '')
+       + ' — مش كلها من الشيفت ده.</span>'
+       + '<button onclick="goUnpaidBacklog()">افتح المراجعة</button></div>';
+}
+function goUnpaidBacklog(){
+  const tabs = document.getElementById('tabs');
+  const cb = tabs && tabs.querySelector('.tab[data-mode="cards"]');
+  if(!cb){ alert('تبويب مراجعة تحصيل البطاقات غير متاح لدورك.'); return; }
+  tabs.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active', x===cb));
+  chFilter=null; typeFilter=null; userFilter=null;
+  CR.state='unpaid'; CR.page=1;
+  showCardReview();
+}
 async function loadBalances(){
   BAL = await rpc('get_pos_balances', { p_branch: BRANCH || null });
   const el = document.getElementById('balbox');
