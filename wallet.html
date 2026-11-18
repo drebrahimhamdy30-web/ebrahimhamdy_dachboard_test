@@ -1103,6 +1103,7 @@
     const _bank = { files: [] };   // [{name, rows:[{id,gross,fees,net,term,fbranch,date,order,isRefund,isVoid}]}]
     let _bankWallet = new Map();   // id -> {branch, settled}
     let _BANK_TERM2BR = {};        // term -> branch (من المطابَق)
+    let _BANK_TERM2NAME = {};      // term -> اسم المكينة (من wallet.machine_name)
     function closeBank(){ document.getElementById('bankModal').style.display='none'; }
     function _bankId(v){ return String(v==null?'':v).trim().replace(/\.0+$/,'').replace(/[^0-9]/g,''); }
     function _bankNum(v){ return parseFloat(String(v==null?'':v).replace(/,/g,'').trim()) || 0; }
@@ -1181,9 +1182,9 @@
       document.getElementById('bankModal').style.display='flex';
       for(let i=0;i<ids.length;i+=400){
         const chunk=ids.slice(i,i+400).map(Number);
-        const { data, error } = await db.from('wallet').select('id,branch,bank_settled').in('id',chunk);
+        const { data, error } = await db.from('wallet').select('id,branch,bank_settled,machine_name').in('id',chunk);
         if(error){ body.innerHTML='<div class="cmp-ok" style="color:#b91c1c;">خطأ في القراءة: '+error.message+'</div>'; return; }
-        (data||[]).forEach(r=>_bankWallet.set(String(r.id),{ branch:r.branch, settled:!!r.bank_settled }));
+        (data||[]).forEach(r=>_bankWallet.set(String(r.id),{ branch:r.branch, settled:!!r.bank_settled, mname:r.machine_name||'' }));
       }
       renderBank();
     }
@@ -1204,9 +1205,19 @@
       g.totfee=g.fees+g.xfer+g.sub;             // إجمالى الرسوم = fees + رسوم التحويل + اشتراك باي موب
       g.transfer=g.netsales-g.totfee;           // إجمالى التحويل = صافى المبيعات − إجمالى الرسوم
       return g; }
+    /* تقسيم مبلغ على أوزان — بالقروش عشان مجموع السطور الفرعية يساوي سطر الأب بالظبط،
+       مش تقريب كل سطر لوحده (اللي بيسيب فرق قرش أو اتنين في الإجمالي). */
+    function _splitCents(total, weights){
+      const cents=Math.round((total||0)*100);
+      const tw=weights.reduce(function(a,w){ return a+w; },0);
+      const out=weights.map(function(w,i){ return tw>0 ? Math.round(cents*(w/tw)) : (i===0?cents:0); });
+      const drift=cents-out.reduce(function(a,v){ return a+v; },0);
+      if(drift!==0&&out.length){ let bi=0; weights.forEach(function(w,i){ if(w>weights[bi]) bi=i; }); out[bi]+=drift; }
+      return out.map(function(v){ return v/100; });
+    }
     // أعمدة موحّدة: قيمة المبيعات | المرتجعات | صافى المبيعات | fees | إجمالى الرسوم | نسبة الرسوم | إجمالى التحويل
-    function _aggRowHtml(label,g,strong,extra){ const st=strong?'style="font-weight:800;background:var(--surface-3);"':''; extra=extra||'';
-      return '<tr '+st+'><td><b>'+label+'</b></td>'
+    function _aggRowHtml(label,g,strong,extra,attrs){ const st=strong?'style="font-weight:800;background:var(--surface-3);"':''; extra=extra||''; attrs=attrs||'';
+      return '<tr '+st+' '+attrs+'><td><b>'+label+'</b></td>'
         +'<td>'+g.n+'</td>'
         +'<td><b>'+_fmt2(g.sales)+'</b></td>'
         +'<td style="color:#7c3aed;">'+(g.ref?_fmt2(g.ref):'0.00')+'</td>'
@@ -1220,7 +1231,10 @@
     function renderBank(){
       const all=_allRows();
       _BANK_TERM2BR={};
-      all.forEach(r=>{ const w=_bankWallet.get(r.id); if(w&&w.branch&&r.term&&!_BANK_TERM2BR[r.term]) _BANK_TERM2BR[r.term]=w.branch; });
+      _BANK_TERM2NAME={};
+      all.forEach(r=>{ const w=_bankWallet.get(r.id); if(!w||!r.term) return;
+        if(w.branch&&!_BANK_TERM2BR[r.term]) _BANK_TERM2BR[r.term]=w.branch;
+        if(w.mname&&!_BANK_TERM2NAME[r.term]) _BANK_TERM2NAME[r.term]=w.mname; });
       const total=all.length;
       const voidN=all.filter(r=>r.isVoid).length;
       const refundN=all.filter(r=>r.isRefund&&!r.isVoid).length;
@@ -1253,9 +1267,12 @@
         +'<br><span style="color:var(--text-muted);">المحوّل فعليًا للبنك: <b style="color:#15803d;">'+_fmt2(GT.transfer)+'</b> — والمرتجعات (<b>'+_fmt2(GT.ref)+'</b>) رجعت للعملاء (مش خصم).</span></div>';
 
       // (2) لكل صيدلية (على كل المعاملات، بدون تكرار id)
-      const by={};
+      const by={}, byM={};   // byM: صيدلية -> مكينة -> نفس التجميع بالظبط
       all.forEach(r=>{ if(r.isVoid||r.isSub) return; const b=_bankBranchOf(r); const g=by[b]||(by[b]={n:0,sales:0,ref:0,fees:0,net:0});
-        if(r.isRefund){ g.ref+=r.gross; return; } g.n++; g.sales+=r.gross; g.fees+=r.fees; g.net+=r.net; });
+        const t=r.term||'—', mm=byM[b]||(byM[b]={}), m=mm[t]||(mm[t]={n:0,sales:0,ref:0,fees:0,net:0});
+        if(r.isRefund){ g.ref+=r.gross; m.ref+=r.gross; return; }
+        g.n++; g.sales+=r.gross; g.fees+=r.fees; g.net+=r.net;
+        m.n++; m.sales+=r.gross; m.fees+=r.fees; m.net+=r.net; });
       // رسوم التحويل (3ج/تحويلة) موزّعة على الفروع بنسبة مبيعاتها عشان إجمالي المتوقع يطابق جدول الملفات
       const _totXfer=_bank.files.length*BANK_XFER_FEE;
       const _totSales=Object.values(by).reduce((s,g)=>s+g.sales,0);
@@ -1267,13 +1284,27 @@
       if(subTotal&&_subBr.length){ const cents=Math.round(subTotal*100), base=Math.floor(cents/_subBr.length); let rem=cents-base*_subBr.length;
         _subBr.forEach(b=>{ by[b].sub=(base+(rem>0?1:0))/100; if(rem>0) rem--; }); }
       Object.values(by).forEach(g=>{ g.xfer=_totSales>0?_totXfer*(g.sales/_totSales):0; g.netsales=g.sales-g.ref; g.totfee=g.fees+g.xfer+g.sub; g.transfer=g.netsales-g.totfee; });
-      let btbl='<div class="cmp-sec-title" style="color:#0369a1;margin-top:14px;"><i class="fas fa-store"></i> لكل صيدلية <span style="font-weight:400;font-size:0.72rem;color:var(--text-muted);">(رسوم التحويل موزّعة بنسبة المبيعات · اشتراك باي موب بالتساوي على الفروع · زر يضيف صافى المبيعات كصرف في سجل الإغلاقات)</span></div>'
+      // المكينة بتاخد نصيبها من رسوم التحويل واشتراك الفرع بنسبة مبيعاتها — والمجموع بيطابق سطر الفرع بالقرش
+      Object.keys(byM).forEach(function(b){ const mm=byM[b], ks=Object.keys(mm);
+        const ws=ks.map(function(k){ return mm[k].sales; });
+        const xs=_splitCents(by[b].xfer, ws), ss=_splitCents(by[b].sub, ws);
+        ks.forEach(function(k,i){ const m=mm[k];
+          m.xfer=xs[i]; m.sub=ss[i]; m.netsales=m.sales-m.ref;
+          m.totfee=m.fees+m.xfer+m.sub; m.transfer=m.netsales-m.totfee; }); });
+      let btbl='<div class="cmp-sec-title" style="color:#0369a1;margin-top:14px;"><i class="fas fa-store"></i> لكل صيدلية <span style="font-weight:400;font-size:0.72rem;color:var(--text-muted);">(اضغط على أي صيدلية لتفصيل كل مكينة · رسوم التحويل موزّعة بنسبة المبيعات · اشتراك باي موب بالتساوي على الفروع · زر يضيف صافى المبيعات كصرف في سجل الإغلاقات)</span></div>'
         +'<div class="cmp-scroll"><table class="cmp-tbl"><thead><tr><th>الصيدلية</th><th>عدد المبيعات</th><th>قيمة المبيعات</th><th>المرتجعات</th><th>صافى المبيعات</th><th>الرسوم (fees)</th><th>اشتراك باي موب</th><th>إجمالى الرسوم</th><th>نسبة الرسوم</th><th>إجمالى التحويل</th><th>صرف بالإغلاقات</th></tr></thead><tbody>';
       const PT={n:0,sales:0,ref:0,fees:0,netsales:0,totfee:0,transfer:0,sub:0};
-      Object.keys(by).sort().forEach(b=>{ const g=by[b]; PT.n+=g.n;PT.sales+=g.sales;PT.ref+=g.ref;PT.netsales+=g.netsales;PT.fees+=g.fees;PT.transfer+=g.transfer;PT.sub+=g.sub;
+      Object.keys(by).sort().forEach(function(b,bi){ const g=by[b]; PT.n+=g.n;PT.sales+=g.sales;PT.ref+=g.ref;PT.netsales+=g.netsales;PT.fees+=g.fees;PT.transfer+=g.transfer;PT.sub+=g.sub;
         var _amt=Math.round(g.netsales*100)/100;
-        var _ex='<td><button class="btn" style="padding:4px 10px;font-size:0.7rem;background:#0f766e;color:#fff;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;" onclick="bankAddExpense(\''+b.replace(/'/g,"\\'")+'\','+_amt+',this)"><i class="fas fa-plus"></i> صافى المبيعات</button></td>';
-        btbl+=_aggRowHtml(b,g,false,_ex); });
+        var _ex='<td><button class="btn" style="padding:4px 10px;font-size:0.7rem;background:#0f766e;color:#fff;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;" onclick="event.stopPropagation();bankAddExpense(\''+b.replace(/'/g,"\\'")+'\','+_amt+',this)"><i class="fas fa-plus"></i> صافى المبيعات</button></td>';
+        var _ms=byM[b]||{}, _mk=Object.keys(_ms).sort(function(x,y){ return _ms[y].sales-_ms[x].sales; });
+        var _cr='<i class="bk-caret fas fa-chevron-left" style="font-size:0.6rem;color:#0369a1;margin-left:6px;"></i>';
+        btbl+=_aggRowHtml(_cr+b,g,false,_ex,'class="bk-br" data-open="0" title="اضغط لتفصيل كل مكينة" onclick="bankToggleBranch('+bi+',this)" style="cursor:pointer;"');
+        _mk.forEach(function(t){ var m=_ms[t], nm=_BANK_TERM2NAME[t]||'';
+          var _lbl='<span style="font-weight:600;color:var(--text-secondary);">&#8627; '
+            +(nm?nm+' <span class="mono" style="opacity:.6;">'+t+'</span>':'مكينة <span class="mono">'+t+'</span>')+'</span>';
+          btbl+=_aggRowHtml(_lbl,m,false,'<td></td>','class="bk-m bk-m-'+bi+'" style="display:none;background:rgba(3,105,161,.05);"'); });
+      });
       PT.xfer=_totXfer; PT.totfee=PT.fees+_totXfer+PT.sub;
       btbl+='</tbody><tfoot>'+_aggRowHtml('الإجمالي',PT,true,'<td></td>')+'</tfoot></table></div>';
 
@@ -1291,6 +1322,15 @@
         +'</div>';
       const note='<div class="cmp-note">صافى المبيعات = <b>المبيعات − المرتجعات</b> · إجمالى الرسوم = <b>fees + 3ج رسوم تحويل + اشتراك باي موب</b> (الاشتراك الشهري = القيمة + رسومها، بيتوزّع بالتساوي على الفروع) · <b>إجمالى التحويل = صافى المبيعات − إجمالى الرسوم</b> — ده اللي المفروض يطابق كشف البنك لكل ملف، وإجماليه = إجمالي التحويلات. الملغي مُستبعد. (رسوم التحويل الثابتة 3ج مش موجودة في الملف — لو اتغيّرت عدّلها في BANK_XFER_FEE.) <b>تعليم «محوّل من البنك» بيحسبها محصّلة تلقائيًا فتختفي من «غير المحصّل».</b> زر «صافى المبيعات» في جدول الصيدليات بيسجّلها صرف في سجل الإغلاقات (الرصيد الحالى) على طول — مع حماية من التكرار.</div>';
       document.getElementById('bank-body').innerHTML='<style>#bankModal .cmp-box{max-width:min(1320px,97vw);}#bank-body .cmp-tbl{font-size:0.7rem;}#bank-body .cmp-tbl th,#bank-body .cmp-tbl td{padding:4px 6px;}#bank-body .cmp-tbl th{top:0;}</style>'+note+kpis+btbl+ftbl+rateBox+miss+actions;
+    }
+    /* فتح/قفل سطور المكن تحت الصيدلية. سطور المكن متولّدة مع الجدول ومخفية —
+       مفيش أي نداء شبكة عند الضغط، كل الأرقام محسوبة من نفس الملف. */
+    function bankToggleBranch(i, tr){
+      const open = tr.getAttribute('data-open')==='1';
+      document.querySelectorAll('#bank-body tr.bk-m-'+i).forEach(function(r){ r.style.display = open ? 'none' : ''; });
+      tr.setAttribute('data-open', open?'0':'1');
+      const c = tr.querySelector('.bk-caret');
+      if(c) c.className = 'bk-caret fas fa-chevron-'+(open?'left':'down');
     }
     function bankClear(){ _bank.files=[]; _bankWallet=new Map(); closeBank(); }
     // خريطة أسماء الفروع: wallet بيكتب «سيدي بشر» وسجل الإغلاقات «سيدى بشر»
