@@ -236,6 +236,7 @@ tr.oldrow.locked>td{background:#f1f5f9}
 .bklog b{font-size:.95rem}
 .bklog button{margin-inline-start:auto;border:none;background:#6d28d9;color:#fff;border-radius:8px;
   padding:.35rem .8rem;font-family:inherit;font-weight:700;font-size:.78rem;cursor:pointer}
+.ovr-tag{margin-inline-start:4px;font-size:.7rem;color:#c2410c;font-weight:800;cursor:help}
 .mrv-box{margin-top:4px;display:flex;gap:4px;align-items:center;flex-wrap:wrap}
 .mrv-btn{border:1px solid var(--border,#cbd5e1);background:var(--surface,#fff);color:var(--text-secondary,#475569);
   border-radius:7px;padding:.15rem .45rem;font-family:inherit;font-size:.66rem;font-weight:700;cursor:pointer;white-space:nowrap}
@@ -462,6 +463,7 @@ async function loadCardTxns(){
     /* نفس منطق الشيفت: المُراجَع بيسترجع قيمته المؤكَّدة من المراجعة */
     if(x.rv){ if(x.rv.channel) x.channel=x.rv.channel; if(x.rv.paid!=null){ x.paid=+x.rv.paid; x.manual=true; } }
     return x; });
+  await applyChannelOverrides(CR.allBr ? null : (BRANCH || null));
   renderCardReview(d);
 }
 
@@ -636,6 +638,7 @@ async function loadShift(){
     }
     return x;
   });
+  await applyChannelOverrides(BRANCH || null);
   render();
   loadBacklog();   // مش محجوز عليه: الجدول بيظهر الأول والشريط بيلحق
 }
@@ -893,6 +896,17 @@ function goUnpaidBacklog(state){
   CR.state = (state === 'paid_nomatch') ? 'paid_nomatch' : 'unpaid';
   CR.page=1;
   showCardReview();
+}
+/* التصحيحات المحفوظة بتترجع وتتطبّق على الصفوف بعد كل تحميل — عشان
+   التصحيح يفضل ظاهر لأي حد يفتح الشاشة، مش للي عمله بس. */
+async function applyChannelOverrides(br){
+  const m = await rpc('get_card_channels', { p_branch: br || null, p_days: 14 });
+  if(!m) return;
+  allTxns().forEach(t=>{
+    if(!t.fh_id) return;
+    const o = m[(t.branch||BRANCH) + ':' + t.fh_id];
+    if(o && o.ch){ t.channel = o.ch; t.kind = 'فيزا'; t.chOvr = { by:o.by, at:o.at }; }
+  });
 }
 async function loadBalances(){
   BAL = await rpc('get_pos_balances', { p_branch: BRANCH || null });
@@ -1415,6 +1429,7 @@ function drawRows(){
     const editable=(t.kind==='كاش'||t.kind==='فيزا');
     const acct = editable
       ? `<select class="e eacct" data-i="${t._i}" ${lock?'disabled':''}><option value="" ${!iv?'selected':''}>— كاش</option>${channelList().map(c=>`<option ${t.channel===c?'selected':''}>${esc(c)}</option>`).join('')}</select>`
+        + (t.chOvr ? `<span class="ovr-tag" title="الحساب اتصحّح — ${esc(t.chOvr.by)} · ${esc(t.chOvr.at)}">✎</span>` : '')
       : esc(t.channel||'—');
     const paidCell = iv ? `<input class="e epaid${isManual(t)?'':' auto'}" data-i="${t._i}" type="text" inputmode="decimal" value="${paidOf(t)}" style="width:82px" ${lock?'disabled':''}>` : '';
     /* الكاش والصرف والتوريد مالهمش مراجعة — الفيزا بس هي اللي ممكن
@@ -1457,9 +1472,22 @@ function drawRows(){
   /* الترتيب المحفوظ يتطبّق على الرأس والصفوف بعد كل رسم */
   if(VIEW==='cards') colOrderInit('#crTable', 'cardreview', drawRows);
   rcptSync();
-  document.querySelectorAll('.eacct').forEach(s=>s.onchange=()=>{
-    const t=allTxns()[+s.dataset.i]; const v=s.value;
+  document.querySelectorAll('.eacct').forEach(s=>s.onchange=async()=>{
+    const t=allTxns()[+s.dataset.i]; const v=s.value; const was=t.channel;
     if(v){ t.kind='فيزا'; t.channel=v; if(t.paid==null) t.paid=+t.amount; if(t.manual==null) t.manual=false; } else { t.kind='كاش'; t.channel=''; }
+    /* 🔑 بيتحفظ فورًا مش مستني «تم». قبل كده كان في ذاكرة المتصفح بس،
+       فأول فشل في الحفظ (أشهره حارس «أرفق صورة التحويل») بيضيّع
+       التصحيح، وبعدين الصرف بيروح للحساب الغلط — بلاغ المالك
+       2026-11-19، فاتورة 1516554 اتصرفت على paymob 1 والصح paymob 7. */
+    if(v && t.fh_id){
+      const r = await rpcWrite('set_card_channel',
+                  { p_branch:(t.branch||BRANCH), p_fh_id:t.fh_id, p_channel:v });
+      if(r.success !== true){
+        t.channel = was; alert(r.error || 'تعذّر حفظ تغيير الحساب'); render(); return;
+      }
+      t.chOvr = { by:r.by, at:r.at };
+      showToast('✓ الحساب اتغيّر لـ' + v + (r.unlinked ? ' — واتلغى الربط القديم' : ''));
+    }
     render();
   });
   document.querySelectorAll('.epaid').forEach(inp=>inp.onchange=()=>{
