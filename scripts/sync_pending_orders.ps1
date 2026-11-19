@@ -98,7 +98,10 @@ Log "الفرع: $Branch   السيرفر: $Server"
 $SQL = @"
 SELECT
   h.sth_id AS bill_no, h.bill_typ, h.sec_insert_date AS bill_date,
-  h.cust_id AS cust_code, h.temp_col4 AS customer_name,
+  -- كود العميل الظاهر (Customer.cust_code) مش المعرّف الداخلي (cust_id).
+  -- h.cust_id هو الـPK الداخلي (المسلسل) وبيختلف عن الكود اللي الكاشير بيعرفه،
+  -- وده كان بيخلي orders.cust_code مايطابقش customers.cust_code فيبوّظ البحث والرصيد.
+  COALESCE(c.cust_code, CONVERT(varchar(20), h.cust_id)) AS cust_code, h.temp_col4 AS customer_name,
   d.address AS customer_address, d.tel AS customer_phone,
   dcr.dc_region_name_ar AS cust_region,
   h.no_of_items AS count_of_items, h.sth_notice AS notes,
