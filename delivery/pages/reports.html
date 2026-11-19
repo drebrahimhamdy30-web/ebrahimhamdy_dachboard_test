@@ -168,6 +168,10 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
   <button id="tabBtn-incentives" onclick="switchTab('incentives')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">حوافز الطيارين</button>
   <button id="tabBtn-jard" onclick="switchTab('jard')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تقارير الجرد</button>
   <button id="tabBtn-prep" onclick="switchTab('prep')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">تحضير الطلبات</button>
+  <!-- تقرير أخطاء المراجعة: للإدارة بس. مخفي افتراضيًا وبيظهر من revErrGate()
+       للدور admin بالظبط — نفس شرط الحارس في الدالة على السيرفر، عشان ما
+       يبانش تبويب بيرجّع 403 (الإخفاء وحده مش حماية، فالدالة محروسة كمان). -->
+  <button id="tabBtn-rev_err" onclick="switchTab('rev_err')" style="display:none;background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">أخطاء المراجعة</button>
   <!-- تبويبات المبيعات — الظهور من شاشة الصلاحيات زي باقي التبويبات؛ الشريط بيختفي لو كلها ممنوعة -->
   <span id="saTabsBar" style="display:none;gap:.5rem;border-right:1px solid var(--border);padding-right:.5rem;margin-right:.25rem">
     <button id="tabBtn-sa_overview" onclick="switchTab('sa_overview')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">نظرة عامة المبيعات</button>
@@ -175,6 +179,19 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
     <button id="tabBtn-sa_price" onclick="switchTab('sa_price')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">مراجعة الأسعار<span class="sa-cnt" id="saCnt-price" style="display:none">0</span></button>
     <button id="tabBtn-sa_disc" onclick="switchTab('sa_disc')" style="background:none;border:none;border-bottom:3px solid transparent;color:var(--text-muted);font-weight:700;font-size:.85rem;padding:.6rem 1rem;cursor:pointer">فواتير الخصومات<span class="sa-cnt" id="saCnt-disc" style="display:none">0</span></button>
   </span>
+</div>
+
+<!-- ========== TAB: أخطاء المراجعة (للإدارة) ========== -->
+<div id="tab-rev_err" style="display:none">
+  <div class="card" style="margin-bottom:1rem;background:#fef2f2;border-color:#fecaca">
+    <div class="card-body" style="font-size:.74rem;color:#7f1d1d;line-height:1.7">
+      ⚠️ <strong>أخطاء مراجعة الصيدلي</strong> — من تقييم الصيدلي للطلب في شاشة المراجعة، منسوبة لـ<strong>طابع الطلب</strong> (الدكتور اللي طبعه).
+      <strong>النسبة</strong> = أخطاؤه ÷ إجمالي طلباته في نفس الفترة والفرع — دكتور ٧ أخطاء في ٢٨٠ طلب مش زي واحد ٧ في ٣٠، فالرقم المطلق لوحده بيظلم أكتر واحد شغّال.
+      أنواع الأخطاء بتتزوّد من شاشة المراجعة نفسها.
+    </div>
+  </div>
+  <div id="revErrSum" style="margin-bottom:1rem"></div>
+  <div class="card"><div class="card-body" style="overflow-x:auto"><div id="revErrBody"></div></div></div>
 </div>
 
 <!-- ========== TAB: تقارير الطيارين ========== -->
@@ -440,7 +457,7 @@ body { padding: 1.25rem; overflow-y: auto; height: 100vh; background: var(--bg);
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../../config.js?v=20260903"></script>
-<script src="../../session.js?v=20261116b"></script>
+<script src="../../session.js?v=20261119"></script>
 <script src="../../branches.js?v=20260904"></script>
 <script src="../../pages.js?v=20260905"></script>
 <script src="../../brand.js?v=20261017n"></script>
@@ -474,6 +491,50 @@ async function initBranchFilter() {
     (data||[]).map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
   sel.onchange = loadReport;
 }
+/* ═══ أخطاء المراجعة — للإدارة ═══════════════════════════════════
+   الدالة على السيرفر بترفض غير الأدمن بـ42501، فالإخفاء هنا للشكل
+   بس مش حماية. بنقيس على RUSER.role بالظبط مش RIS_ADMIN، لأن
+   RIS_ADMIN معناها «بيشوف كل الفروع» (ممكن تتدي لمشرف) — ولو
+   اعتمدنا عليها كان هيبان تبويب بيرجّع 403. */
+function revErrGate(){
+  if ((RUSER.role||'') !== 'admin') return;
+  const b=document.getElementById('tabBtn-rev_err'); if(b) b.style.display='';
+}
+async function loadRevErrTab(from, to){
+  const sum=document.getElementById('revErrSum'), body=document.getElementById('revErrBody');
+  if(!sum||!body) return;
+  body.innerHTML='<div class="empty-tab"><i class="fas fa-spinner fa-spin"></i> جاري التحميل...</div>'; sum.innerHTML='';
+  try{
+    const br=effectiveBranch();
+    const {data,error}=await db.rpc('get_review_error_report',
+      {p_from:from||null, p_to:to||null, p_branch:br||null});
+    if(error) throw error;
+    const d=data||{}, rows=(d.rows||[]).filter(r=>r.errors>0);
+    const kinds=Object.keys(d.kinds||{}).sort((a,b)=>(d.kinds[b]-d.kinds[a]));
+    sum.innerHTML='<div style="display:flex;gap:.6rem;flex-wrap:wrap">'+
+      `<div class="card" style="flex:1;min-width:140px"><div class="card-body" style="text-align:center;padding:.7rem">
+         <div style="font-size:1.4rem;font-weight:800;color:#b91c1c">${(d.total_errors||0).toLocaleString('ar-EG')}</div>
+         <div style="font-size:.72rem;color:var(--text-muted)">إجمالي الأخطاء</div></div></div>`+
+      `<div class="card" style="flex:1;min-width:140px"><div class="card-body" style="text-align:center;padding:.7rem">
+         <div style="font-size:1.4rem;font-weight:800">${(d.total_orders||0).toLocaleString('ar-EG')}</div>
+         <div style="font-size:.72rem;color:var(--text-muted)">إجمالي الطلبات</div></div></div>`+
+      kinds.map(k=>`<div class="card" style="flex:1;min-width:140px"><div class="card-body" style="text-align:center;padding:.7rem">
+         <div style="font-size:1.4rem;font-weight:800">${d.kinds[k].toLocaleString('ar-EG')}</div>
+         <div style="font-size:.72rem;color:var(--text-muted)">${saEsc(k)}</div></div></div>`).join('')+'</div>';
+    if(!rows.length){ body.innerHTML='<div class="empty-tab">مفيش أخطاء مسجّلة في الفترة دي 👌</div>'; return; }
+    body.innerHTML='<table><thead><tr><th>طابع الطلب</th><th>الأخطاء</th><th>طلباته</th><th>النسبة</th>'+
+      kinds.map(k=>'<th>'+saEsc(k)+'</th>').join('')+'</tr></thead><tbody>'+
+      rows.map(r=>'<tr><td><b>'+saEsc(r.doctor)+'</b></td>'+
+        '<td style="color:#b91c1c;font-weight:800">'+r.errors+'</td>'+
+        '<td>'+Number(r.orders).toLocaleString('ar-EG')+'</td>'+
+        '<td>'+Number(r.rate).toFixed(1)+'%</td>'+
+        kinds.map(k=>'<td>'+((r.by_kind||{})[k]||'—')+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+  }catch(e){
+    console.error('loadRevErrTab',e);
+    body.innerHTML='<div class="empty-tab">'+((e&&e.code==='42501')?'التقرير ده للإدارة فقط':'تعذّر تحميل التقرير')+'</div>';
+  }
+}
+
 function effectiveBranch() {
   if (RIS_ADMIN) return document.getElementById('branchFilter').value || '';
   return RUSER.branch_id || '';
@@ -526,7 +587,7 @@ let currentTab = 'drivers';
 // كل التبويبات: تقارير التوصيل + تبويبات المبيعات المدموجة.
 // أزرار المبيعات ممكن تكون مخفية (مش مسموح للمستخدم) فبنتخطّى الناقص
 // بدل ما نكتب كل تاب صريح زي قبل كده.
-const ALL_TABS = ['drivers','orders','incentives','jard','prep','sa_overview','sa_emp','sa_price','sa_disc'];
+const ALL_TABS = ['drivers','orders','incentives','jard','prep','rev_err','sa_overview','sa_emp','sa_price','sa_disc'];
 function switchTab(tab) {
   currentTab = tab;
   for (const t of ALL_TABS) {
@@ -563,6 +624,7 @@ const MAIN_TAB_STEPS = {
   incentives: (f, t) => [() => loadIncentivesTab(f, t)],
   jard:       (f, t) => [() => loadJardTab(f, t)],
   prep:       (f, t) => [() => loadPrepTab(f, t)],
+  rev_err:    (f, t) => [() => loadRevErrTab(f, t)],
 
 };
 
@@ -2509,7 +2571,7 @@ initBranchFilter().then(setToday);
 Promise.all([
   Branches.ready(),
   Session.guardTabs('reports').catch(e => { console.error('guardTabs', e); return new Set(); })
-]).then(([, denied]) => initSalesTabs(denied))
+]).then(([, denied]) => { revErrGate(); return initSalesTabs(denied); })
   .catch(e => console.error('initSalesTabs', e));
 </script>
 </body>

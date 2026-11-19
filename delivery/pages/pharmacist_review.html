@@ -88,6 +88,12 @@ body{padding:1rem;overflow-y:auto;height:100vh;background:var(--bg)}
 .chip{display:flex;align-items:center;justify-content:space-between;gap:.4rem;border-radius:7px;padding:.25rem .45rem;font-size:.72rem;font-weight:700}
 .chip-driver{background:#e0f2fe;color:#075985;border:1px solid #bae6fd}
 .chip-pharm{background:#fffbeb;color:#92400e;border:1px solid #fde68a}
+.grp-err .grp-h{color:#b91c1c}
+.chip-err{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
+.rc-bal{font-size:.72rem;font-weight:800;border-radius:7px;padding:.18rem .45rem;display:inline-block;margin-top:.2rem}
+.rc-bal.owes{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca}
+.rc-bal.cred{background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0}
+.rc-bal small{font-weight:600;opacity:.8}
 .chip x,.chip .x{cursor:pointer;font-weight:900;opacity:.6;flex-shrink:0}
 .chip .x:hover{opacity:1}
 .rc-foot{display:flex;gap:.5rem;padding:.65rem .9rem;border-top:1px solid var(--border);margin-top:auto}
@@ -180,7 +186,7 @@ body{padding:1rem;overflow-y:auto;height:100vh;background:var(--bg)}
       <div style="border-top:1px solid var(--border);padding-top:.7rem">
         <div class="form-group" style="margin-bottom:.5rem"><label>نص الزر الجديد</label><input class="form-control" id="nb-label" placeholder="مثلاً: اتصل قبل التوصيل" maxlength="40"></div>
         <div class="form-group" style="margin-bottom:.6rem"><label>النوع</label>
-          <select class="form-control" id="nb-aud"><option value="driver">🚗 يظهر للطيار</option><option value="pharmacy">💊 داخلي للصيدلية</option></select>
+          <select class="form-control" id="nb-aud"><option value="driver">🚗 يظهر للطيار</option><option value="pharmacy">💊 داخلي للصيدلية</option><option value="review">⚠️ تقييم الطلب (نوع خطأ)</option></select>
         </div>
         <button class="btn btn-primary" style="width:100%" onclick="addCustomButton()">➕ إضافة الزر</button>
       </div>
@@ -192,7 +198,7 @@ body{padding:1rem;overflow-y:auto;height:100vh;background:var(--bg)}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../../config.js?v=20260903"></script>
-<script src="../../session.js?v=20261116b"></script>
+<script src="../../session.js?v=20261119"></script>
 <script src="../../branches.js?v=20260904"></script>
 <script src="../../pages.js?v=20260905"></script>
 <script src="../../brand.js?v=20261017n"></script>
@@ -228,6 +234,7 @@ function chipText(t){
     case 'driver_note': return '💼 '+(t.note||'ملاحظة للطيار');
     case 'followup': return '💙 متابعة'+n;
     case 'pharmacy_note': return '📝 '+(t.note||'ملاحظة داخلية');
+    case 'review_error': return '⚠️ '+(t.note||'خطأ');
     default: return t.tag+n;
   }
 }
@@ -237,6 +244,7 @@ if(!currentUser) window.location.href='../auth.html';
 let branches=[], curBranchId=null, shift=null;
 let activeTab='pending', page=1, cardIdx=0, rows=[], tagsByOrder={}, searchQ='', fuRows=[];
 let _refreshTimer=null, _itemsCache={}, _itemsInflight=new Set(), _itemsFailed=new Set(), customButtons=[];
+let _balCache={};   // cust_code → {total, byBranch}
 
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function waNum(p){let d=String(p||'').replace(/\D/g,'');if(!d)return '';if(d.startsWith('0'))d='2'+d;else if(!d.startsWith('2')&&d.length===10)d='2'+d;return d;}
@@ -253,7 +261,9 @@ function inlineItemsHtml(items){
     `</tbody></table>`;
 }
 // زر مخصّص (يضيف ملاحظة جاهزة بنصّه) — للطيار=driver_note، داخلي=pharmacy_note
-function cbtn(o,c){ const tag=c.audience==='driver'?'driver_note':'pharmacy_note'; return `<button class="qb" title="زر مخصّص" onclick="applyTag('${o.id}','${tag}',true,'${esc(c.label).replace(/'/g,"\\'")}')">${esc(c.label)}</button>`; }
+/* الليبل بيتخزّن في note والـtag ثابت لكل مجموعة — كده أي نوع خطأ
+   جديد المالك يضيفه بيشتغل من غير تعديل كود (ده معنى «قابلة للزيادة») */
+function cbtn(o,c){ const tag=c.audience==='driver'?'driver_note':(c.audience==='review'?'review_error':'pharmacy_note'); return `<button class="qb" title="زر مخصّص" onclick="applyTag('${o.id}','${tag}',true,'${esc(c.label).replace(/'/g,"\\'")}')">${esc(c.label)}</button>`; }
 function load(s){document.getElementById('lo').classList.toggle('show',s);}
 function toast(msg){let t=document.getElementById('_t');if(!t){t=document.createElement('div');t.id='_t';t.style.cssText='position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:.6rem 1.25rem;border-radius:10px;font-size:.82rem;font-weight:700;z-index:9999;display:none;box-shadow:0 8px 30px rgba(0,0,0,.2)';document.body.appendChild(t);}t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',2500);}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
@@ -363,9 +373,46 @@ async function loadFeed(){
   const {data}=await q;
   rows=data||[];
   await loadTags(rows.map(r=>r.id));
+  await loadBalances(rows);
   // عدّادات (على كل بيانات الشيفت مش الصفحة)
   updateCounts();
   page=1; render();
+}
+
+/* ===== مديونية العميل =====
+   الأعمدة في customers نصّية ولكل فرع عمود: balance(المعمورة) و
+   balance_san/bishr/seyouf. اتأكدنا من اتجاه الإشارة بالفواتير
+   الآجلة (عميل عليه فاتورة آجلة 24,582 رصيده 22,390): **الموجب =
+   العميل عليه، والسالب = له**. وبنعرض الإجمالي على الأربع فروع
+   لأن العميل واحد والفلوس واحدة.
+   التقطيع 150 كود/نداء — بعيد خالص عن سقف الألف. */
+function _bnum(v){ const n=Number(String(v==null?'':v).trim()); return isFinite(n)?n:0; }
+async function loadBalances(list){
+  const codes=[...new Set((list||[]).map(r=>String(r.cust_code||'').trim()).filter(c=>c && !(c in _balCache)))];
+  if(!codes.length) return;
+  for(let i=0;i<codes.length;i+=150){
+    const chunk=codes.slice(i,i+150);
+    try{
+      const {data}=await db.from('customers')
+        .select('cust_code,balance,balance_san,balance_bishr,balance_seyouf')
+        .in('cust_code',chunk); // data-ok: مقطّع 150 كود/نداء
+      (data||[]).forEach(c=>{
+        const by={'المعمورة':_bnum(c.balance),'سان ستيفانو':_bnum(c.balance_san),
+                  'سيدي بشر':_bnum(c.balance_bishr),'السيوف':_bnum(c.balance_seyouf)};
+        const total=Object.values(by).reduce((a,b)=>a+b,0);
+        _balCache[String(c.cust_code)]={total,by};
+      });
+    }catch(e){ console.warn('أرصدة العملاء:',e.message); }
+    chunk.forEach(c=>{ if(!(c in _balCache)) _balCache[c]=null; });  // مالوش رصيد = مانعيدش النداء
+  }
+}
+function balHtml(code){
+  const b=_balCache[String(code||'').trim()];
+  if(!b || !b.total || Math.round(b.total)===0) return '';
+  const owes=b.total>0, amt=Math.abs(Math.round(b.total)).toLocaleString('ar-EG');
+  const many=Object.entries(b.by).filter(([,v])=>Math.round(v)!==0);
+  const det=many.length>1 ? ' <small>('+many.map(([k,v])=>esc(k)+' '+Math.round(v).toLocaleString('ar-EG')).join(' · ')+')</small>' : '';
+  return `<div class="rc-bal ${owes?'owes':'cred'}">${owes?'⚠️ عليه':'💚 له'} ${amt} ج${det}</div>`;
 }
 
 async function loadTags(ids){
@@ -482,12 +529,14 @@ function orderCardHtml(o){
   const tags=tagsByOrder[o.id]||[];
   const drvTags=tags.filter(t=>t.audience==='driver');
   const phTags=tags.filter(t=>t.audience==='pharmacy');
+  const errTags=tags.filter(t=>t.audience==='review');
   const isOn=(k)=>tags.some(t=>t.tag===k);
   const qbtn=(t)=>`<button class="qb ${t.toggle&&isOn(t.key)?'on':''}" onclick="onTag('${o.id}','${t.key}',${t.toggle?!isOn(t.key):true},${t.prompt?`'${esc(t.prompt).replace(/'/g,"\\'")}'`:'null'})">${t.label}${t.toggle&&isOn(t.key)?' ✓':''}</button>`;
-  const chip=(t)=>`<div class="chip ${t.audience==='driver'?'chip-driver':'chip-pharm'}"><span>${esc(chipText(t))}</span><span class="x" onclick="removeTag('${o.id}','${t.tag}',${t.id})">✕</span></div>`;
+  const chipCls=(t)=>t.audience==='driver'?'chip-driver':(t.audience==='review'?'chip-err':'chip-pharm');
+  const chip=(t)=>`<div class="chip ${chipCls(t)}"><span>${esc(chipText(t))}</span><span class="x" onclick="removeTag('${o.id}','${t.tag}',${t.id},'${esc(String(t.note||'')).replace(/'/g,"\'")}')">✕</span></div>`;
   return `<div class="rc ${o.pharmacist_reviewed_at?'reviewed':''}">
     <div class="rc-top">
-      <div><div class="rc-cust">👤 ${esc(o.customer_name||'—')}</div><small>كود ${esc(o.cust_code||'—')} · ${esc(SL[o.status]||o.status||'')}</small></div>
+      <div><div class="rc-cust">👤 ${esc(o.customer_name||'—')}</div><small>كود ${esc(o.cust_code||'—')} · ${esc(SL[o.status]||o.status||'')}</small>${balHtml(o.cust_code)}</div>
       <div class="rc-hd-right">
         <div class="rc-amt"><b>${amt.toLocaleString('ar-EG')} ج</b><span>${esc(PL[o.payment_method]||o.payment_method||'كاش')}</span></div>
         ${o.created_at?`<div class="rc-age-box">⏱️ <span class="rc-age" data-ts="${new Date(o.created_at).getTime()}">${fmtAge(Date.now()-new Date(o.created_at).getTime())}</span></div>`:''}
@@ -518,6 +567,11 @@ function orderCardHtml(o){
           <div class="grp-h">💊 داخلي</div>
           <div class="sbtns">${PHARM_TAGS.map(qbtn).join('')}${customButtons.filter(c=>c.audience==='pharmacy').map(c=>cbtn(o,c)).join('')}</div>
           ${phTags.length?`<div class="chips">${phTags.map(chip).join('')}</div>`:''}
+        </div>
+        <div class="grp-err">
+          <div class="grp-h">⚠️ تقييم الطلب</div>
+          <div class="sbtns">${customButtons.filter(c=>c.audience==='review').map(c=>cbtn(o,c)).join('')}</div>
+          ${errTags.length?`<div class="chips">${errTags.map(chip).join('')}</div>`:''}
         </div>
       </div>
     </div>
@@ -570,7 +624,9 @@ async function applyTag(oid,tag,on,note){
   }catch(e){ console.error(e); toast('تعذّر الحفظ'); }
   load(false);
 }
-function removeTag(oid,tag,tagId){ applyTag(oid,tag,false,null); }
+/* الـnote جزء من هوية الخطأ: review_error بيتشال بـ(tag+note) عشان
+   «نسيان صنف» ماتشيلش «خطأ تركيز» على نفس الطلب */
+function removeTag(oid,tag,tagId,note){ applyTag(oid,tag,false,note||null); }
 
 function openNote(oid,tag,label){
   document.getElementById('nt-oid').value=oid;
@@ -717,7 +773,7 @@ function renderBtnsList(){
   const box=document.getElementById('btnsList');
   if(!customButtons.length){ box.innerHTML='<div style="color:var(--text-muted);font-size:.8rem;text-align:center;padding:.5rem">مفيش أزرار مخصّصة لسه</div>'; return; }
   box.innerHTML=customButtons.map(c=>`<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.4rem .6rem">
-    <span style="font-weight:700;font-size:.82rem">${c.audience==='driver'?'🚗':'💊'} ${esc(c.label)}</span>
+    <span style="font-weight:700;font-size:.82rem">${c.audience==='driver'?'🚗':(c.audience==='review'?'⚠️':'💊')} ${esc(c.label)}</span>
     <span style="cursor:pointer;color:#b91c1c;font-weight:900" title="حذف" onclick="removeCustomButton(${c.id})">✕</span>
   </div>`).join('');
 }
