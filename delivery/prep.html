@@ -49,6 +49,19 @@ body.dark .ptab.active{background:#0f2748}
 .tag-drv{background:#e0e7ff;color:#4338ca}
 .tag-pool{background:#fef3c7;color:#b45309}
 .tag-warn{background:#fee2e2;color:#b91c1c}
+/* شريط الشيفت */
+.shiftbar{max-width:640px;margin:.6rem auto 0;padding:0 .8rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.sb-inp{flex:1;min-width:120px;padding:.55rem .7rem;border-radius:10px;border:1.5px solid var(--border,#e5e7eb);background:var(--surface,#fff);color:var(--text,#0f172a);font-family:'Cairo',sans-serif;font-size:.9rem}
+.sb-go{background:var(--primary,#1a56db);color:#fff;border:none;border-radius:10px;padding:.55rem 1.1rem;font-weight:800;font-family:'Cairo',sans-serif;cursor:pointer}
+.sb-on{flex:1;display:flex;align-items:center;gap:.4rem;background:#ecfdf5;color:#15803d;border:1px solid #bbf7d0;border-radius:10px;padding:.45rem .7rem;font-size:.82rem;font-weight:800}
+.sb-end{background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;border-radius:9px;padding:.45rem .85rem;font-weight:700;font-family:'Cairo',sans-serif;cursor:pointer;white-space:nowrap}
+.needshift{max-width:640px;margin:0 auto;text-align:center;padding:2.5rem 1rem;color:var(--text-muted,#64748b);font-size:.95rem;line-height:1.9}
+/* بانر الإشعار */
+.notif{position:fixed;top:62px;left:50%;transform:translateX(-50%);width:92%;max-width:600px;background:#16a34a;color:#fff;border-radius:12px;padding:.7rem 1rem;font-weight:800;font-size:.92rem;box-shadow:0 10px 34px rgba(0,0,0,.28);z-index:30;display:none;cursor:pointer;text-align:center}
+.notif.show{display:block;animation:nfpop .25s}
+@keyframes nfpop{from{transform:translate(-50%,-12px);opacity:0}to{transform:translate(-50%,0);opacity:1}}
+.card.fresh{box-shadow:0 0 0 3px #16a34a inset;animation:flash 1.2s ease-in-out 2}
+@keyframes flash{0%,100%{box-shadow:0 0 0 3px #16a34a inset}50%{box-shadow:0 0 0 3px rgba(22,163,74,.2) inset}}
 /* مودال الأصناف */
 .ov{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:20;display:none;align-items:flex-end;justify-content:center}
 .ov.open{display:flex}
@@ -73,6 +86,10 @@ body.dark .ptab.active{background:#0f2748}
   <div><h1>🧪 تحضير الطلبات</h1><div class="b" id="branchLbl"></div></div>
   <button class="logout" onclick="doLogout()">خروج</button>
 </div>
+<div class="shiftbar" id="shiftbar"></div>
+<div class="notif" id="notif" onclick="onNotifClick()"></div>
+<div class="needshift" id="noShift" style="display:none">⏱️ اكتب اسمك وابدأ شيفت التحضير عشان تبدأ،<br>وهيوصلك إشعار بأي طلب جديد يدخل التحضير أثناء الشيفت.</div>
+<div id="main" style="display:none">
 <div class="bar">
   <div class="tabs">
     <button class="ptab active" data-t="prep" onclick="setTab('prep')">🧪 تحت التجهيز <span class="cnt" id="cnt-prep">0</span></button>
@@ -86,6 +103,7 @@ body.dark .ptab.active{background:#0f2748}
   <div class="count" id="count">جاري التحميل…</div>
   <div id="list"></div>
 </div>
+</div><!-- /#main -->
 <div class="ov" id="itemsOv" onclick="if(event.target===this)closeItems()">
   <div class="sheet">
     <div class="sheet-hd"><h3 id="itemsTitle">أصناف الطلب</h3><button class="sheet-x" onclick="closeItems()">✕</button></div>
@@ -102,6 +120,130 @@ body.dark .ptab.active{background:#0f2748}
 <script>
 let currentUser=null, branchId=null, tab='prep', allRows=[];
 function doLogout(){ try{ logout(); }catch(e){ location.href='auth.html'; } }
+
+/* ===== شيفت التحضير + الإشعارات (نفس فكرة شاشة المراجعة) ===== */
+let prepShift=null;          // { id, preparer_name, started_at }
+let pollTimer=null;          // مؤقّت التحديث — يشتغل أثناء الشيفت بس
+let prevPrepIds=null;        // أكواد طلبات التحضير في آخر فحص (للإشعار)
+let notifTarget=null;        // الطلب اللي الإشعار بيوجّهله
+let titleTimer=null;
+const SHIFT_KEY='phalix_prep_shift';
+const TITLE_BASE='تحضير الطلبات';
+
+// اسم من يُنسب له الإجراء: اسم شيفت التحضير أولًا، وإلا حساب الدخول
+function actorName(){ return (prepShift&&prepShift.preparer_name) || (currentUser&&currentUser.full_name) || 'المحضّر'; }
+function fmtClock(iso){ try{ return new Date(iso).toLocaleTimeString('ar-EG',{timeZone:'Africa/Cairo',hour:'numeric',minute:'2-digit',hour12:true}); }catch(e){ return ''; } }
+
+function renderShiftBar(){
+  const bar=document.getElementById('shiftbar');
+  if(prepShift){
+    bar.innerHTML=`<div class="sb-on">🟢 شيفت التحضير: <b>${esc(prepShift.preparer_name)}</b> — من ${fmtClock(prepShift.started_at)}</div>
+      <button class="sb-end" onclick="endShift()">إنهاء الشيفت</button>`;
+  }else{
+    bar.innerHTML=`<input class="sb-inp" id="prepName" placeholder="اسم المحضّر" value="${esc((currentUser&&currentUser.full_name)||'')}" onkeydown="if(event.key==='Enter')startShift()">
+      <button class="sb-go" onclick="startShift()">ابدأ شيفت التحضير</button>`;
+  }
+}
+
+async function startShift(){
+  const el=document.getElementById('prepName');
+  const nm=(el&&el.value||'').trim();
+  if(!nm){ alert('اكتب اسم المحضّر الأول'); return; }
+  const btn=document.querySelector('.sb-go'); if(btn){ btn.disabled=true; btn.textContent='…'; }
+  try{
+    const { data, error } = await db.from('prep_shifts')
+      .insert({ preparer_name:nm, branch_id:branchId, started_by:(currentUser&&currentUser.full_name)||nm })
+      .select().single();
+    if(error) throw error;
+    prepShift={ id:data.id, preparer_name:data.preparer_name, started_at:data.started_at };
+    try{ localStorage.setItem(SHIFT_KEY, JSON.stringify(prepShift)); }catch(_){}
+    applyShiftUI();
+  }catch(e){ if(btn){ btn.disabled=false; btn.textContent='ابدأ شيفت التحضير'; } alert('تعذّر بدء الشيفت: '+(e.message||'حاول تاني')); }
+}
+
+async function endShift(){
+  if(!confirm('إنهاء شيفت التحضير؟')) return;
+  const id=prepShift&&prepShift.id;
+  prepShift=null; prevPrepIds=null;
+  try{ localStorage.removeItem(SHIFT_KEY); }catch(_){}
+  hideNotif();
+  applyShiftUI();
+  if(id){ try{ await db.from('prep_shifts').update({ ended_at:new Date().toISOString() }).eq('id',id); }catch(_){} }
+}
+
+// يفتح/يقفل محتوى الشاشة حسب وجود شيفت فعّال، ويضبط مؤقّت التحديث
+function applyShiftUI(){
+  renderShiftBar();
+  const on=!!prepShift;
+  document.getElementById('main').style.display = on?'block':'none';
+  document.getElementById('noShift').style.display = on?'none':'block';
+  if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
+  if(on){
+    prevPrepIds=null;           // أول فحص بيسجّل الأساس من غير إشعار
+    load(); notifyCheck();
+    pollTimer=setInterval(()=>{ load(); notifyCheck(); }, 20000);
+  }
+}
+
+/* ===== الإشعار المرئي بظهور طلب جديد للتحضير ===== */
+// فحص خفيف مستقل عن التبويب الحالي: لو ظهر طلب جديد في طابور التحضير
+// بعد بدء الشيفت → بانر إشعار + وميض عنوان التبويب (الصوت مؤجّل لحد
+// ما نحوّلها لتطبيق). بيشتغل على نفس مؤقّت الـ20 ثانية.
+async function notifyCheck(){
+  if(!prepShift) return;
+  try{
+    let q=db.from('orders').select('id,customer_name,cust_name,created_at')
+      .is('prep_done_at',null).not('prep_hold','is',true).is('prep_excluded_at',null)
+      .in('status',['pending','assigned','postponed']);
+    if(branchId) q=q.eq('branch_id',branchId);
+    const { data, error } = await q.limit(400);
+    if(error) return;
+    const rows=data||[];
+    const ids=new Set(rows.map(r=>r.id));
+    if(prevPrepIds===null){ prevPrepIds=ids; return; }   // الأساس
+    const started=new Date(prepShift.started_at).getTime();
+    const fresh=rows.filter(r=> !prevPrepIds.has(r.id) && new Date(r.created_at).getTime() >= started-1000);
+    prevPrepIds=ids;
+    if(fresh.length) notifyNew(fresh);
+  }catch(e){}
+}
+
+function notifyNew(fresh){
+  const newest=fresh[fresh.length-1];
+  notifTarget=newest.id;
+  const nm=esc(newest.customer_name||newest.cust_name||'عميل');
+  const extra=fresh.length>1?` <span style="opacity:.85">(+${fresh.length-1} كمان)</span>`:'';
+  const n=document.getElementById('notif');
+  n.innerHTML=`🔔 طلب جديد للتحضير: <b>${nm}</b>${extra} — اضغط للعرض`;
+  n.classList.add('show');
+  flashTitle(fresh.length);
+}
+function hideNotif(){ const n=document.getElementById('notif'); if(n) n.classList.remove('show'); }
+function flashTitle(n){
+  if(titleTimer) clearInterval(titleTimer);
+  let on=false, t=0;
+  titleTimer=setInterval(()=>{
+    document.title = on ? TITLE_BASE : ('🔔 '+n+' طلب جديد للتحضير');
+    on=!on;
+    if(++t>8){ clearInterval(titleTimer); titleTimer=null; document.title=TITLE_BASE; }
+  }, 700);
+}
+// الضغط على البانر: يروح لتبويب التحضير ويوصّل للطلب ويلوّنه
+function onNotifClick(){
+  const target=notifTarget; hideNotif();
+  if(tab!=='prep') setTab('prep');
+  let tries=0;
+  const iv=setInterval(()=>{ if(highlightOrder(target) || ++tries>25){ clearInterval(iv); } }, 150);
+}
+function highlightOrder(id){
+  if(!id) return true;
+  const el=document.querySelector('[data-oid="'+id+'"]');
+  if(!el) return false;
+  el.scrollIntoView({behavior:'smooth',block:'center'});
+  el.classList.add('fresh');
+  setTimeout(()=>el.classList.remove('fresh'), 3200);
+  return true;
+}
 function _mins(t){ return Math.max(0, Math.floor((Date.now()-new Date(t))/60000)); }
 function fm(m){ return m<60?(m+' د'):(Math.floor(m/60)+':'+String(m%60).padStart(2,'0')+' س'); }
 // اسم الدكتور اللي عمل الفاتورة (موجود في الطلب نفسه) — المحضّر
@@ -248,7 +390,7 @@ function render(){
              <button class="btn btn-resume" onclick="event.stopPropagation();resumeOrder('${o.id}',this)">▶ استئناف التحضير</button>
              ${skipBtn}
            </div>`;
-      return `<div class="card ${old?'old':''} ${tab==='hold'?'held':''}" onclick="openItems('${o.id}')">
+      return `<div class="card ${old?'old':''} ${tab==='hold'?'held':''}" data-oid="${o.id}" onclick="openItems('${o.id}')">
         <div class="nm">${esc(o.customer_name||o.cust_name||'—')}</div>
         <div class="meta">
           🧾 <b>${esc(o.bill_no||'—')}</b> · كود ${esc(o.cust_code||'—')} · 💰 ${Number(o.total_bill_net||0).toLocaleString()} ج<br>
@@ -263,7 +405,7 @@ function render(){
       </div>`;
     }else if(tab==='skipped'){
       const w=_mins(o.prep_excluded_at);
-      return `<div class="card held" onclick="openItems('${o.id}')">
+      return `<div class="card held" data-oid="${o.id}" onclick="openItems('${o.id}')">
         <div class="nm">${esc(o.customer_name||o.cust_name||'—')}</div>
         <div class="meta">
           🧾 <b>${esc(o.bill_no||'—')}</b> · كود ${esc(o.cust_code||'—')} · 💰 ${Number(o.total_bill_net||0).toLocaleString()} ج<br>
@@ -277,7 +419,7 @@ function render(){
     }else{
       const w=_mins(o.prep_done_at);
       const withDrv=!!o.driver_id;
-      return `<div class="card ready" onclick="openItems('${o.id}')">
+      return `<div class="card ready" data-oid="${o.id}" onclick="openItems('${o.id}')">
         <div class="nm">${esc(o.customer_name||o.cust_name||'—')}</div>
         <div class="meta">
           🧾 <b>${esc(o.bill_no||'—')}</b> · كود ${esc(o.cust_code||'—')} · 💰 ${Number(o.total_bill_net||0).toLocaleString()} ج<br>
@@ -299,7 +441,7 @@ async function markDone(id, btn){
     const _now=new Date().toISOString();
     const { error } = await db.from('orders').update({ prep_done_at:_now }).eq('id',id);
     if(error) throw error;
-    try{ await db.from('order_logs').insert({ order_id:id, event:'order_prepared', details:{ by:'prep' }, user_name:(currentUser&&currentUser.full_name)||'المحضّر' }); }catch(_){}
+    try{ await db.from('order_logs').insert({ order_id:id, event:'order_prepared', details:{ by:'prep', shift_id:(prepShift&&prepShift.id)||null }, user_name:actorName() }); }catch(_){}
     allRows=allRows.filter(o=>o.id!==id);
     render();
   }catch(e){ btn.disabled=false; btn.textContent='✓ تم التحضير'; alert('تعذّر الحفظ — حاول تاني'); }
@@ -313,7 +455,7 @@ async function excludeOrder(id, btn){
   if(!confirm('إزالة الطلب من شاشة التحضير؟\n\nالطلب هيفضل زي ما هو بالظبط (حالته ورحلته) — هو بس هيختفي من الشاشة دي، ومش هيتحسب تحضير.')) return;
   btn.disabled=true; btn.textContent='…';
   try{
-    const { data, error } = await db.rpc('prep_exclude_order',{ p_order_id:id, p_user_name:(currentUser&&currentUser.full_name)||'' });
+    const { data, error } = await db.rpc('prep_exclude_order',{ p_order_id:id, p_user_name:actorName() });
     if(error) throw error;
     if(data && data.success===false) throw new Error(data.error||'تعذّر');
     allRows=allRows.filter(o=>o.id!==id); render(); refreshCounts();
@@ -325,7 +467,7 @@ async function excludeOrder(id, btn){
 async function unexcludeOrder(id, btn){
   btn.disabled=true; btn.textContent='…';
   try{
-    const { data, error } = await db.rpc('prep_unexclude_order',{ p_order_id:id, p_user_name:(currentUser&&currentUser.full_name)||'' });
+    const { data, error } = await db.rpc('prep_unexclude_order',{ p_order_id:id, p_user_name:actorName() });
     if(error) throw error;
     if(data && data.success===false) throw new Error(data.error||'تعذّر');
     allRows=allRows.filter(o=>o.id!==id); render(); refreshCounts();
@@ -352,7 +494,7 @@ async function returnToPrep(id, btn){
   if(!confirm('رجوع الطلب للتحضير؟ لو على رحلة هيتشال من الطيار ويرجع «قيد التحضير» في التوزيع لحد ما يتحضّر تاني.')) return;
   btn.disabled=true; btn.textContent='… جاري الرجوع';
   try{
-    const { data, error } = await db.rpc('prep_return_to_prep',{ p_order_id:id, p_user_name:currentUser.full_name||'المحضّر' });
+    const { data, error } = await db.rpc('prep_return_to_prep',{ p_order_id:id, p_user_name:actorName() });
     if(error) throw error;
     if(data && data.success===false) throw new Error(data.error||'تعذّر الرجوع');
     allRows=allRows.filter(o=>o.id!==id);
@@ -370,8 +512,16 @@ window.addEventListener('DOMContentLoaded', async()=>{
   sessionStorage.removeItem('jwtRefreshDone');
   document.getElementById('branchLbl').textContent = currentUser.branch || (currentUser.role==='admin'?'كل الفروع':'');
   branchId = await resolveBranch();
-  await load();
-  setInterval(load, 20000);
+  // استرجاع شيفت مفتوح (لو الصفحة اترفريشت) — نتأكد إنه لسه مش منتهي
+  try{
+    const saved=JSON.parse(localStorage.getItem(SHIFT_KEY)||'null');
+    if(saved&&saved.id){
+      const { data } = await db.from('prep_shifts').select('id,preparer_name,started_at,ended_at').eq('id',saved.id).maybeSingle();
+      if(data && !data.ended_at){ prepShift={ id:data.id, preparer_name:data.preparer_name, started_at:data.started_at }; }
+      else { localStorage.removeItem(SHIFT_KEY); }
+    }
+  }catch(_){}
+  applyShiftUI();
 });
 </script>
 </body>
