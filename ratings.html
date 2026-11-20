@@ -15,8 +15,9 @@
                   التغيّر عن الفترة السابقة) + التقييمات يومًا بيوم + توزيع
                   النجوم + الفروع + ترتيب الصيادلة والمندوبين بنجوم واتجاه
                   آخر 4 أسابيع. كله من rating_overview (نداء واحد، jsonb).
-    • التعليقات — الإدارة (أو الصيادلة لو الإعداد مفعّل). 50/صفحة.
-    • الإعدادات — الأدمن: صلاحية الرابط بعد فتحه، ورؤية الصيادلة للتعليقات.
+    • التعليقات — أي دور له صلاحية فتح الشاشة (can_view) يشوفها عادي. 50/صفحة.
+                  الحارس على السيرفر (rating_comments) بيتأكد من can_view.
+    • الإعدادات — الأدمن: صلاحية الرابط بعد فتحه.
   مفيش دفعة يومية ولا روابط بتتبعت (migrate_156) — الدوال فاضلة مقفولة.
   الحراسة الحقيقية على السيرفر؛ الإخفاء هنا للواجهة.
   ════════════════════════════════════════════════════════════════
@@ -199,7 +200,6 @@
     <div class="card"><div class="bd">
       <div class="set">
         <label>صلاحية الرابط بعد فتحه (يوم)<small>من لحظة إدخال رقم الفاتورة</small></label><input type="number" id="s_valid" min="1" max="30">
-        <label>الصيادلة يرون التعليقات النصية<small>الافتراضي: لا، للإدارة فقط</small></label><select id="s_see"><option value="false">لا</option><option value="true">نعم</option></select>
       </div>
       <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
         <button class="btn teal" id="saveBtn" onclick="saveSettings()">حفظ الإعدادات</button>
@@ -763,8 +763,8 @@ async function openReport(){
 async function loadSettings(){
   try { SETTINGS = await rpc('rating_settings_get'); } catch (e) { el('sMsg').textContent = e.message; el('sMsg').style.color = 'var(--red)'; return; }
   const s = SETTINGS;
-  el('s_valid').value = s.link_valid_days; el('s_see').value = String(!!s.pharmacists_see_comments);
-  const ro = !IS_ADMIN; ['s_valid','s_see'].forEach(id => el(id).disabled = ro);
+  el('s_valid').value = s.link_valid_days;
+  const ro = !IS_ADMIN; ['s_valid'].forEach(id => el(id).disabled = ro);
   el('saveBtn').style.display = ro ? 'none' : '';
   el('sMsg').textContent = ro ? 'العرض فقط — التعديل للأدمن.' : (s.updated_by ? 'آخر تعديل: ' + s.updated_by + ' · ' + fmtDT(s.updated_at) : '');
   el('sMsg').style.color = 'var(--muted)';
@@ -777,7 +777,7 @@ async function loadSettings(){
   } catch (e) {}
 }
 async function saveSettings(){
-  const p = { link_valid_days: +el('s_valid').value, pharmacists_see_comments: el('s_see').value === 'true' };
+  const p = { link_valid_days: +el('s_valid').value };
   el('saveBtn').disabled = true;
   try { SETTINGS = await rpc('rating_settings_set', { p }); toast('تم حفظ الإعدادات'); loadSettings(); }
   catch (e) { el('sMsg').textContent = e.message; el('sMsg').style.color = 'var(--red)'; }
@@ -794,8 +794,9 @@ async function init(){
   BRANCH_ID = Session.branchId ? Session.branchId() : '';
 
   if (!IS_ADMIN) el('tab-settings').style.display = 'none';
-  const canComments = IS_ADMIN || ROLE === 'manager' || CAN_EDIT;
-  if (!canComments) el('tab-comments').style.display = 'none';
+  /* التعليقات: اللي الشاشة مفتوحة له يشوفها عادي (قرار المالك 2026-11-20).
+     الوصول للصفحة نفسه محروس بالصلاحيات، والسيرفر (rating_comments) بيتأكد
+     إن للدور can_view على ratings.html — فمفيش داعي لإخفاء التبويب. */
   /* التقرير مقصور على الأدمن — ده إخفاء للواجهة بس،
      المنع الحقيقي في rating_report_gate على السيرفر. */
   if (IS_ADMIN) el('repBtn').style.display = '';
