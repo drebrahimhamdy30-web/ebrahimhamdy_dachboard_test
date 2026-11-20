@@ -205,6 +205,11 @@ td.copyable:hover{text-decoration:underline dotted;text-underline-offset:3px}
 .baltbl .unl{font-weight:500;font-size:.7rem;color:var(--text-muted,#94a3b8)}
 .baltbl .dash{color:var(--text-muted,#cbd5e1);font-weight:500}
 .baltbl td.up{color:#b45309}.baltbl td.down{color:#b91c1c}.baltbl td.ok{color:#15803d}
+/* صف «إجمالي معاملات الشيفت» = قيمة الصرف آخر الشيفت — مميّز بخط
+   فاصل أعلى وخلفية خفيفة عشان يتقرا كأنه السطر الفعلي للتنفيذ */
+.baltbl tr.shifttot td{border-top:2px solid var(--primary,#0d9488);
+  background:var(--surface-2,#f8fafc);color:var(--primary,#0d9488);font-weight:800}
+.baltbl tr.shifttot td.rowlb{background:var(--surface-2,#f8fafc)}
 .rcpt-x{position:absolute;top:14px;left:18px;background:rgba(255,255,255,.15);border:0;color:#fff;
         font-size:.82rem;font-family:inherit;cursor:pointer;line-height:1;
         padding:7px 14px;border-radius:8px}
@@ -946,11 +951,34 @@ function balancesHtml(){
     return '<td class="' + cls + '">' + (d == null ? '<span class="dash">—</span>'
       : (d > 0 ? '+' : '') + fmt(d)) + '</td>';
   }).join('');
+  /* إجمالي معاملات الشيفت الحالي لكل حساب (المدفوع المراجَع) = قيمة
+     الصرف آخر الشيفت للفروع اليدوية (بتصرف من داخل eplus مش من الشاشة).
+     المعمورة بتصرف آليًا لكل معاملة فالصف مالوش معنى ليها فبيختفي
+     (قرار المالك 2026-11-20). على TXN وحدها = الشيفت الحالي، مش
+     المتأخرات — عشان مفيش ترحيل لشيفت بعده (زي باقي مجاميع الجدول).
+     بيطابق قناة الحركة بمفتاح الحساب أو اسم eplus بنفس التطبيع. */
+  const showShift = !DISBURSE_BRANCHES.includes(BRANCH);
+  let cS = '';
+  if (showShift) {
+    const sums = new Map();
+    (TXN || []).forEach(t => {
+      if (t.kind !== 'فيزا') return;
+      const c = chNorm(t.channel); if (!c) return;
+      sums.set(c, (sums.get(c) || 0) + paidOf(t));
+    });
+    cS = rows.map(r => {
+      const keys = [...new Set([chNorm(r.key), chNorm(r.enm)].filter(Boolean))];
+      let v = null;
+      keys.forEach(k => { if (sums.has(k)) v = (v || 0) + sums.get(k); });
+      return '<td>' + (v == null ? '<span class="dash">—</span>' : fmt(v)) + '</td>';
+    }).join('');
+  }
   return hd(BAL.eplus_at ? '<span class="sub">رصيد eplus محدَّث ' + esc(BAL.eplus_at) + '</span>' : '')
     + '<table class="baltbl"><thead><tr><th class="rowlb"></th>' + th + '</tr></thead><tbody>'
     + '<tr><td class="rowlb">رصيد eplus</td>' + cE + '</tr>'
     + '<tr><td class="rowlb">الواقع</td>'     + cR + '</tr>'
     + '<tr><td class="rowlb">الفرق</td>'      + cD + '</tr>'
+    + (showShift ? '<tr class="shifttot"><td class="rowlb" title="مجموع المدفوع لمعاملات الشيفت الحالي لكل حساب — قيمة الصرف آخر الشيفت (الفروع اليدوية بتصرف من داخل eplus)">إجمالي معاملات الشيفت</td>' + cS + '</tr>' : '')
     + '</tbody></table>';
 }
 /* الدليل: لو النظام لقى مرجع بيتعرض نص ثابت (واقعة مش رأي).
