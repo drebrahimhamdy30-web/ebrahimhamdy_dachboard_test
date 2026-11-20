@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>الفواتير المحذوفة - Phalix</title>
+  <link rel="stylesheet" href="tokens.css?v=20260906">
+  <script>try{var _t=localStorage.getItem("phalix_theme")||(localStorage.getItem("phalix_dark")==="1"?"dark":"light");document.documentElement.setAttribute("data-theme",_t==="dark"?"dark":"light");}catch(e){}</script>
+  <link rel="stylesheet" href="style.css?v=20261011b">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    .db-pills { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+    .db-pill { background:var(--surface-2); border:1px solid var(--border); border-radius:12px; padding:9px 16px; min-width:150px; }
+    .db-pill .lbl { font-size:.74rem; color:var(--text-secondary); font-weight:700; }
+    .db-pill .val { font-size:1.35rem; font-weight:800; display:block; margin-top:2px; }
+    .db-pill.danger { background:#fef2f2; border-color:#fecaca; } .db-pill.danger .val { color:#b91c1c; }
+    .db-pill.warn   { background:#fff7ed; border-color:#fed7aa; } .db-pill.warn .val { color:#c2410c; }
+    .db-filters { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+    .db-tab { border:1px solid var(--border); background:var(--surface-2); color:var(--text-secondary); border-radius:10px; padding:7px 14px; cursor:pointer; font-family:inherit; font-size:.82rem; font-weight:700; }
+    .db-tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+    .db-sel, .db-search { border:1px solid var(--border); background:var(--surface-3); color:var(--text-primary); border-radius:8px; padding:7px 10px; font-family:inherit; font-size:.82rem; }
+    .db-search { min-width:220px; flex:1; }
+    .db-tbl { width:100%; border-collapse:collapse; font-size:.8rem; white-space:nowrap; }
+    .db-tbl th { background:var(--surface-3); padding:8px 10px; font-weight:700; border-bottom:1px solid var(--border); position:sticky; top:0; }
+    .db-tbl td { padding:7px 10px; border-top:1px solid var(--border); font-variant-numeric:tabular-nums; }
+    .db-tbl tr.delivered { background:#fef2f2; }
+    .db-tbl tr.delivered td { color:#7f1d1d; }
+    .db-tbl tr.reviewed { background:var(--surface-2); opacity:.72; }
+    .db-del-by { font-weight:800; color:#b91c1c; }
+    .db-deliv { font-weight:800; color:#b45309; }
+    .db-badge { display:inline-block; padding:2px 9px; border-radius:20px; font-size:.7rem; font-weight:800; }
+    .b-red { background:#fee2e2; color:#991b1b; } .b-gray { background:var(--surface-3); color:var(--text-muted); } .b-green { background:#dcfce7; color:#15803d; }
+    .db-note { border:1px solid var(--border); border-radius:6px; padding:3px 7px; font-family:inherit; font-size:.72rem; width:130px; background:var(--surface-3); color:var(--text-primary); }
+    .db-ok { background:var(--success); color:#fff; border:none; border-radius:6px; padding:4px 11px; cursor:pointer; font-size:.76rem; font-weight:800; font-family:inherit; }
+    .db-ok:hover { opacity:.85; }
+    .db-pager { display:flex; gap:5px; align-items:center; justify-content:center; margin-top:14px; flex-wrap:wrap; }
+    .db-pager button { border:1px solid var(--border); background:var(--surface-2); color:var(--text-primary); border-radius:7px; padding:5px 11px; cursor:pointer; font-family:inherit; font-weight:700; }
+    .db-pager button:disabled { opacity:.4; cursor:default; }
+    .db-msg { text-align:center; color:var(--text-muted); padding:26px; }
+  </style>
+</head>
+<body>
+  <div class="nav-bar"></div>
+  <div class="container">
+    <div class="card">
+      <div class="page-header">
+        <div class="page-title"><i class="fas fa-trash-can-arrow-up"></i> الفواتير المحذوفة</div>
+        <button class="btn btn-primary" onclick="load()"><i class="fas fa-sync-alt"></i> تحديث</button>
+      </div>
+
+      <div class="db-pills" id="pills"></div>
+
+      <div class="db-filters">
+        <button class="db-tab active" data-state="delivered" onclick="setState('delivered',this)">🚩 محذوف بعد توصيل</button>
+        <button class="db-tab" data-state="unreviewed" onclick="setState('unreviewed',this)">⏳ محتاج مراجعة</button>
+        <button class="db-tab" data-state="reviewed" onclick="setState('reviewed',this)">✓ تمت مراجعته</button>
+        <button class="db-tab" data-state="" onclick="setState('',this)">كل المحذوف</button>
+        <select class="db-sel" id="days" onchange="setDays(this.value)">
+          <option value="7">آخر 7 أيام</option>
+          <option value="14">آخر 14 يوم</option>
+          <option value="30" selected>آخر 30 يوم</option>
+          <option value="60">آخر 60 يوم</option>
+          <option value="90">آخر 90 يوم</option>
+        </select>
+        <input class="db-search" id="q" placeholder="بحث: رقم الفاتورة / العميل / من حذف..." oninput="onSearch(this.value)">
+      </div>
+
+      <div style="overflow-x:auto">
+        <table class="db-tbl">
+          <thead><tr>
+            <th>رقم الفاتورة</th><th>المحل</th><th>العميل</th><th>القيمة</th><th>النوع</th>
+            <th>أنشأها</th><th>حذفها</th><th>وقت الإنشاء</th><th>وقت الحذف</th><th>الجهاز</th>
+            <th>التوصيل</th><th>المراجعة</th>
+          </tr></thead>
+          <tbody id="tb"><tr><td colspan="12" class="db-msg">جارِ التحميل…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="db-pager" id="pager"></div>
+    </div>
+  </div>
+
+  <script src="config.js?v=20260904c"></script>
+  <script src="session.js?v=20261119"></script>
+  <script src="branches.js?v=20260904d"></script>
+  <script src="pages.js?v=20260904d"></script>
+  <script src="brand.js?v=20261017n"></script>
+  <script src="api.js?v=20260926dl"></script>
+  <script>
+    const PAGE = 40;
+    let STATE = 'delivered', DAYS = 30, SEARCH = '', PAGE_NO = 1, LAST = null, _t = null;
+    const fmt = n => (Math.round(Number(n)||0)).toLocaleString('en-US');
+    const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const dt = s => { if(!s) return '—'; const p = String(s).split(' '); return p.length>1 ? (p[0].slice(5)+' '+p[1]) : s; };
+
+    async function rpc(fn, body){
+      try{ const r = await fetch(SB_URL_API + '/rest/v1/rpc/' + fn, { method:'POST',
+        headers: await sbH({ 'Content-Type':'application/json' }), body: JSON.stringify(body||{}) });
+        if(!r.ok) return null; return await r.json(); }catch(e){ return null; }
+    }
+
+    function setState(s, btn){ STATE = s; PAGE_NO = 1;
+      document.querySelectorAll('.db-tab').forEach(x => x.classList.toggle('active', x===btn)); load(); }
+    function setDays(v){ DAYS = +v; PAGE_NO = 1; load(); }
+    function onSearch(v){ clearTimeout(_t); _t = setTimeout(() => { SEARCH = v.trim(); PAGE_NO = 1; load(); }, 300); }
+
+    async function load(){
+      document.getElementById('tb').innerHTML = '<tr><td colspan="12" class="db-msg">جارِ التحميل…</td></tr>';
+      const d = await rpc('get_deleted_bills', { p_state: STATE || null, p_days: DAYS, p_limit: PAGE, p_offset: (PAGE_NO-1)*PAGE, p_search: SEARCH || null });
+      if(!d){ document.getElementById('tb').innerHTML = '<tr><td colspan="12" class="db-msg">تعذّر التحميل أو لا صلاحية لديك.</td></tr>'; document.getElementById('pills').innerHTML=''; document.getElementById('pager').innerHTML=''; return; }
+      LAST = d; render(d);
+    }
+
+    function pill(lbl, val, cls){ return '<div class="db-pill '+(cls||'')+'"><span class="lbl">'+lbl+'</span><span class="val">'+val+'</span></div>'; }
+    function render(d){
+      document.getElementById('pills').innerHTML =
+        pill('محذوف اتوصّل (المدة)', fmt(d.delivered_n), 'danger') +
+        pill('محتاج مراجعة', fmt(d.pending_review_n), 'warn') +
+        pill('نتيجة الفلتر', fmt(d.total), '');
+
+      const rows = d.rows || [];
+      if(!rows.length){ document.getElementById('tb').innerHTML = '<tr><td colspan="12" class="db-msg">لا توجد فواتير في هذا الفلتر.</td></tr>'; renderPager(d.total); return; }
+      document.getElementById('tb').innerHTML = rows.map((r,i) => {
+        const cls = r.rv ? 'reviewed' : (r.delivered ? 'delivered' : '');
+        const typ = r.bill_type === 'visa' ? 'فيزا' : 'كاش';
+        const deliv = r.delivered
+          ? '<span class="db-deliv">'+esc(r.deliveryman||'طيار')+'</span><br><span style="font-size:.7rem">'+dt(r.delivered_at)+'</span>'
+          : '<span class="db-badge b-gray">لم يتوصّل'+(r.order_status?' ('+esc(r.order_status)+')':'')+'</span>';
+        const rv = r.rv
+          ? '<span class="db-badge b-green">تمّت ✓</span><br><span style="font-size:.68rem;color:var(--text-muted)">'+esc(r.rv.by||'')+' · '+esc(r.rv.at||'')+(r.rv.note?' · '+esc(r.rv.note):'')+'</span>'
+          : '<input class="db-note" id="n_'+i+'" placeholder="ملاحظة (اختياري)"> <button class="db-ok" onclick="review('+i+')">تم</button>';
+        return '<tr class="'+cls+'">'
+          + '<td><b>'+esc(r.bill_no)+'</b></td>'
+          + '<td>'+esc(r.store||'—')+'</td>'
+          + '<td>'+esc(r.cust||'—')+'</td>'
+          + '<td>'+fmt(r.total)+'</td>'
+          + '<td>'+typ+'</td>'
+          + '<td>'+esc(r.created_by||'—')+'</td>'
+          + '<td class="db-del-by">'+esc(r.deleted_by||'—')+'</td>'
+          + '<td>'+dt(r.created_at)+'</td>'
+          + '<td>'+dt(r.deleted_at)+'</td>'
+          + '<td style="font-size:.72rem">'+esc(r.device||'—')+'</td>'
+          + '<td>'+deliv+'</td>'
+          + '<td>'+rv+'</td>'
+          + '</tr>';
+      }).join('');
+      renderPager(d.total);
+    }
+
+    function renderPager(total){
+      const pages = Math.max(1, Math.ceil((total||0)/PAGE));
+      if(pages<=1){ document.getElementById('pager').innerHTML = total ? '<span style="color:var(--text-muted);font-size:.8rem">'+fmt(total)+' فاتورة</span>' : ''; return; }
+      let h = '<button onclick="go(1)" '+(PAGE_NO===1?'disabled':'')+'>«</button>'
+            + '<button onclick="go('+(PAGE_NO-1)+')" '+(PAGE_NO===1?'disabled':'')+'>‹</button>'
+            + '<span style="font-size:.82rem;font-weight:700;padding:0 8px">صفحة '+PAGE_NO+' من '+pages+' · '+fmt(total)+' فاتورة</span>'
+            + '<button onclick="go('+(PAGE_NO+1)+')" '+(PAGE_NO===pages?'disabled':'')+'>›</button>'
+            + '<button onclick="go('+pages+')" '+(PAGE_NO===pages?'disabled':'')+'>»</button>';
+      document.getElementById('pager').innerHTML = h;
+    }
+    function go(p){ PAGE_NO = p; load(); window.scrollTo({top:0,behavior:'smooth'}); }
+
+    async function review(i){
+      const r = LAST && LAST.rows && LAST.rows[i]; if(!r) return;
+      const note = (document.getElementById('n_'+i)||{}).value || '';
+      const btn = document.querySelector('#n_'+i) ? document.querySelector('#n_'+i).nextElementSibling : null;
+      if(btn){ btn.disabled = true; btn.textContent = '…'; }
+      const res = await rpc('review_deleted_bill', { p_branch: r.branch, p_bill_no: r.bill_no, p_note: note || null });
+      if(!res || res.success !== true){ alert((res && res.error) || 'تعذّر حفظ المراجعة — تأكد من صلاحيتك.'); if(btn){ btn.disabled=false; btn.textContent='تم'; } return; }
+      load();
+    }
+
+    (async function init(){
+      try{ await Session.ready?.(); }catch(e){}
+      load();
+    })();
+  </script>
+</body>
+</html>
