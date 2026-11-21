@@ -176,6 +176,8 @@
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <button class="btn-imp" id="btnImport" style="display:none" onclick="document.getElementById('xlsxFile').click()" title="رفع تصدير «مشتريات تفصيلي» لتحديث أكواد وأسماء الأصناف"><i class="fas fa-file-import"></i> استيراد شيت المشتريات</button>
           <input type="file" id="xlsxFile" accept=".xlsx" style="display:none" onchange="importSheet(this.files[0]); this.value=''">
+          <button class="btn-imp" id="btnConflicts" style="display:none" onclick="showConflicts()"
+                  title="أكواد اتنسبت لأكتر من رقم صنف داخلي — ربطها موقوف لحد ما يتصلّح"><i class="fas fa-triangle-exclamation"></i> الربط المتعارض</button>
           <button class="btn-p" onclick="load(1)"><i class="fas fa-sync-alt"></i> تحديث</button>
         </div>
       </div>
@@ -1137,6 +1139,47 @@
       if(!r.ok) throw new Error((await r.text()) || ('HTTP '+r.status));
       const t = await r.text(); return t ? JSON.parse(t) : null;
     }
+    /* الأكواد المتعارضة: كود واحد على أكتر من رقم صنف داخلي في نفس
+       الفرع — مستحيل يكون صح لأن الرقم الداخلي مستقل لكل فرع.
+       ربطها بيتسجّل «مشكوك» وما بيتطبّقش، فالبنود بتفضل غير مكوّدة. */
+    async function showConflicts(){
+      try{
+        toast('بجيب الربط المتعارض…', 0);
+        const rows = await rpcAuth('get_code_map_conflicts') || [];
+        const list = Array.isArray(rows) ? rows : [];
+        if(!list.length){ toast('مفيش ربط متعارض ✓', 5000); return; }
+        const body = list.map(r =>
+          '<tr><td><span class="brtag">'+(BR[r.branch]||r.branch)+'</span></td>'
+          + '<td class="num">'+esc(r.itm_code)+'</td>'
+          + '<td class="num">'+f0(r.n_ids)+'</td>'
+          + '<td style="font-size:.72rem">'+esc(r.itm_ids||'')+'</td>'
+          + '<td>'+esc(r.names||'—')+'</td>'
+          + '<td class="num">'+f0(r.n_lines)+'</td></tr>').join('');
+        const w = window.open('', '_blank');
+        if(!w){ toast('المتصفح منع فتح النافذة — اسمح بالنوافذ المنبثقة', 6000); return; }
+        w.document.write(
+          '<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8">'
+          + '<title>الربط المتعارض</title>'
+          + '<style>body{font-family:Cairo,system-ui,sans-serif;padding:18px;background:#f8fafc;color:#0f172a}'
+          + 'h2{margin:0 0 4px}p{margin:0 0 14px;color:#64748b;font-size:.82rem;line-height:1.7}'
+          + 'table{border-collapse:collapse;width:100%;background:#fff;font-size:.82rem}'
+          + 'th,td{border:1px solid #e2e8f0;padding:7px 9px;text-align:right}'
+          + 'th{background:#0f766e;color:#fff;font-weight:700}.num{font-variant-numeric:tabular-nums}'
+          + '.brtag{background:#ccfbf1;color:#115e59;padding:1px 7px;border-radius:999px;font-size:.72rem}</style>'
+          + '</head><body><h2>الربط المتعارض — ' + list.length + ' كود</h2>'
+          + '<p>الكود اتنسب لأكتر من رقم صنف داخلي في نفس الفرع. الرقم الداخلي مستقل لكل فرع،'
+          + ' فواحد منهم غلط قطعًا. ربطهم موقوف والبنود بتظهر «غير مكوّدة» بدل اسم غلط.'
+          + '<br>الإصلاح: وحّد الصنف المكرّر في eplus، وبعدين استورد شيت «مشتريات تفصيلي» تاني.</p>'
+          + '<table><thead><tr><th>الفرع</th><th>الكود</th><th>عدد الأصناف</th>'
+          + '<th>الأرقام الداخلية</th><th>الأسماء المنسوبة</th><th>بنود متأثرة</th></tr></thead>'
+          + '<tbody>' + body + '</tbody></table></body></html>');
+        w.document.close();
+        toast('', 1);
+      }catch(e){
+        toast('تعذّر جلب التقرير: ' + String((e&&e.message)||e), 6000);
+      }
+    }
+
     async function importSheet(file){
       if(!file) return;
       try{
@@ -1151,9 +1194,17 @@
           const s2=(row[1]==null?'':String(row[1])).trim();
           if((s2==='موردين'||s2==='أفراد') && SHEET_BRMAP[s1]){ branch=SHEET_BRMAP[s1]; stores[s1]=1; continue; }
           if(s1==='ملاحظات'){ curPth=row[23]; continue; }
-          const code=row[17], name=(row[16]==null?'':String(row[16])).trim();
-          if(branch && curPth!=null && code!=null && name!=='' && (typeof code==='number' || /^\d+$/.test(String(code).trim()))){
-            recs.push({ branch, pth_id:Math.trunc(Number(curPth)), code:String(Math.trunc(Number(code))), name, qty:Number(row[11])||0, pur:Number(row[5])||0 });
+          const name=(row[16]==null?'':String(row[16])).trim();
+          /* الكود ممكن يكون حروف (fr, na…) — ٣١٢ صنف في المخزون كده.
+             الشرط القديم /^\d+$/ كان بيرميهم، فالرقم الداخلي بتاعهم
+             كان بيتطابق بكود رقمي غلط. التطبيع للأرقام بس عشان
+             5801.0 ما تتقراش «5801.0». و«0» علامة المالك فمرفوضة. */
+          const rawCode = row[17];
+          const code = (typeof rawCode === 'number')
+            ? String(Math.trunc(rawCode))
+            : String(rawCode == null ? '' : rawCode).trim();
+          if(branch && curPth!=null && code !== '' && !/^0+$/.test(code) && name !== ''){
+            recs.push({ branch, pth_id:Math.trunc(Number(curPth)), code, name, qty:Number(row[11])||0, pur:Number(row[5])||0 });
           }
         }
         if(!recs.length){ toast('مفيش بنود صالحة — اتأكد إن الملف «مشتريات تفصيلي»', 5000); return; }
@@ -1163,7 +1214,9 @@
         for(let i=0;i<recs.length;i+=CH){ await rpcAuth('purchase_stage_add', { p_rows: recs.slice(i,i+CH) }); }
         const res = await rpcAuth('purchase_map_build');
         const d = Array.isArray(res)?res[0]:res;
-        toast(`تم ✓ اتكوّد/اتحدّث ${f0(d&&d.mapped)} صنف، واتطبّق على ${f0(d&&d.applied)} بند.`, 7000);
+        const conf = Number(d && d.conflict) || 0;
+        toast(`تم ✓ اتكوّد/اتحدّث ${f0(d&&d.mapped)} صنف، واتطبّق على ${f0(d&&d.applied)} بند.`
+          + (conf ? ` ⚠ ${f0(conf)} ربط متعارض اتسجّل «مشكوك» وماتطبّقش.` : ''), 9000);
         load(curPage);
       }catch(e){
         const msg = String((e&&e.message)||e);
@@ -1174,6 +1227,7 @@
       try{
         const p = (typeof Session!=='undefined' && Session.can) ? await Session.can('purchase_invoices.html') : { edit:true };
         if(p && p.edit) document.getElementById('btnImport').style.display='inline-flex';
+      if(p && p.edit){ const b=document.getElementById('btnConflicts'); if(b) b.style.display='inline-flex'; }
       }catch(e){}
     }
 
