@@ -2459,27 +2459,65 @@ async function saLoadEmployees() {
 }
 
 /* ── تاب: مراجعة الأسعار ───────────────────────────────────────── */
+/* الرقم الخام كان مضلّل: أغلب «فروق الأسعار» **اختلاف وحدة** مش تلاعب
+   (سرنجة 10سم اتباعت بـ4 والكتالوج 100 = سرنجة مقابل علبة 25).
+   الدالة بقت بترجّع diff_kind والنسبة والجهاز (migrate_226)، والشاشة
+   بتخفي اختلافات الوحدة افتراضيًا عشان العين تروح على التلاعب الحقيقي. */
+let SA_PRICE_ROWS = [];
+let SA_PRICE_KIND = 'real';   // real = تعديل سعر + محتاج فحص · unit · all
+
+const SA_KIND_AR = { price_edit:'تعديل سعر', unit:'اختلاف وحدة', check:'محتاج فحص' };
+
+function saPriceVisible() {
+  if (SA_PRICE_KIND === 'all')  return SA_PRICE_ROWS;
+  if (SA_PRICE_KIND === 'unit') return SA_PRICE_ROWS.filter(r => r.diff_kind === 'unit');
+  return SA_PRICE_ROWS.filter(r => r.diff_kind !== 'unit');
+}
+function saSetPriceKind(k) { SA_PRICE_KIND = k; saRenderPrice(); }
+
 async function saLoadPrice() {
-  const wrap = document.getElementById('saWrap_price');
   saSpin('saWrap_price');
-  const rows = await saPriceReview(saFrom(), saTo(), saStore());
-  saSetCnt('price', rows.length);
-  if (!rows.length) { wrap.innerHTML = '<div class="empty-tab">✅ لا توجد مخالفات أسعار للمراجعة</div>'; return; }
-  wrap.innerHTML = `<table><thead><tr>
-    <th>رقم الفاتورة</th><th>التاريخ والوقت</th><th>الموظف</th><th>العميل</th><th>الصنف</th><th>الوحدة</th>
-    <th>سعر البيع</th><th>سعر المخزون</th><th>الفرق</th><th>مراجعة</th></tr></thead><tbody>
+  SA_PRICE_ROWS = await saPriceReview(saFrom(), saTo(), saStore());
+  saSetCnt('price', SA_PRICE_ROWS.length);
+  saRenderPrice();
+}
+
+function saRenderPrice() {
+  const wrap = document.getElementById('saWrap_price');
+  if (!wrap) return;
+  const all = SA_PRICE_ROWS, rows = saPriceVisible();
+  const n = k => all.filter(r => r.diff_kind === k).length;
+  const btn = (k, label, cnt) => `<button onclick="saSetPriceKind('${k}')" style="background:${SA_PRICE_KIND===k?'var(--primary)':'var(--surface)'};color:${SA_PRICE_KIND===k?'#fff':'var(--text)'};border:1px solid var(--border);border-radius:8px;padding:.3rem .7rem;font-family:'Cairo',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer">${label}${cnt!=null?' ('+cnt+')':''}</button>`;
+
+  const bar = `<div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin-bottom:.7rem">
+      ${btn('real','🔴 تعديل سعر ومحتاج فحص', n('price_edit')+n('check'))}
+      ${btn('unit','⚪ اختلاف وحدة', n('unit'))}
+      ${btn('all','الكل', all.length)}
+      <span style="font-size:.72rem;color:var(--text-muted);margin-right:auto">اختلاف الوحدة = الصنف اتباع بالوحدة وسعر المخزون بالعلبة — مش فرق سعر حقيقي</span>
+    </div>`;
+
+  if (!all.length) { wrap.innerHTML = '<div class="empty-tab">✅ لا توجد مخالفات أسعار للمراجعة</div>'; return; }
+  if (!rows.length) { wrap.innerHTML = bar + '<div class="empty-tab">مفيش أسطر في التصنيف ده</div>'; return; }
+
+  wrap.innerHTML = bar + `<table><thead><tr>
+    <th>رقم الفاتورة</th><th>التاريخ والوقت</th><th>الموظف</th><th>الجهاز</th><th>العميل</th><th>الصنف</th><th>الوحدة</th>
+    <th>الكمية</th><th>سعر البيع</th><th>سعر المخزون</th><th>النسبة</th><th>الفرق</th><th>النوع</th><th>مراجعة</th></tr></thead><tbody>
     ${rows.map(r => `<tr id="sa-pr-${r.id}">
       <td><b>${saEsc(r.bill_no)}</b></td>
       <td style="white-space:nowrap">${saFmtDT(r.bill_date)}</td>
       <td>${saEsc(r.employee_name || '—')}</td>
+      <td style="white-space:nowrap;font-size:.74rem">${r.device ? saEsc(r.device) : '<span style="color:var(--text-muted)">—</span>'}</td>
       <td style="text-align:right">${(r.cust_name || r.cust_code)
           ? saEsc(r.cust_name || '—') + (r.cust_code ? `<div style="font-size:.7rem;color:var(--text-muted)">${saEsc(r.cust_code)}</div>` : '')
           : '<span style="color:var(--text-muted)">—</span>'}</td>
       <td style="text-align:right;font-weight:600">${r.itm_code ? `<span style="color:var(--text-muted);font-weight:700;margin-left:5px">${saEsc(r.itm_code)}</span>` : ''}${saEsc(r.itm_name_ar || '—')}</td>
       <td>${saEsc(r.unit_name || '—')}</td>
+      <td>${saNum(r.itm_qty)}</td>
       <td>${saNum(r.unit_price)}</td>
       <td>${saNum(r.stock_unit_price)}</td>
+      <td style="font-size:.74rem;color:var(--text-muted)">${r.ratio != null ? '×' + Number(r.ratio).toFixed(2) : '—'}</td>
       <td class="${Number(r.price_diff) >= 0 ? 'diff-pos' : 'diff-neg'}">${Number(r.price_diff) >= 0 ? '+' : ''}${saNum(r.price_diff)}</td>
+      <td style="font-size:.72rem;font-weight:700;color:${r.diff_kind==='unit'?'var(--text-muted)':(r.diff_kind==='price_edit'?'#b91c1c':'#b45309')}">${SA_KIND_AR[r.diff_kind] || '—'}</td>
       <td><button class="rev-btn" onclick="saDoPriceReviewed('${saEsc(r.id)}')"><i class="fas fa-check"></i> تمت</button></td>
     </tr>`).join('')}
   </tbody></table>`;
@@ -2490,8 +2528,9 @@ async function saDoPriceReviewed(id) {
     .update({ price_reviewed: true, price_reviewed_at: new Date().toISOString(), price_reviewed_by: Session.username() || null })
     .eq('id', id);
   if (error) { console.error('saDoPriceReviewed', error); alert('تعذّر الحفظ'); return; }
-  const tr = document.getElementById('sa-pr-' + id); if (tr) tr.remove();
-  saSetCnt('price', document.querySelectorAll('#saWrap_price tbody tr').length);
+  SA_PRICE_ROWS = SA_PRICE_ROWS.filter(r => String(r.id) !== String(id));
+  saSetCnt('price', SA_PRICE_ROWS.length);   // العدّاد على الكل مش على المعروض
+  saRenderPrice();
 }
 
 /* ── تاب: فواتير الخصومات ──────────────────────────────────────── */
