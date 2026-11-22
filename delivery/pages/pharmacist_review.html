@@ -123,7 +123,6 @@ body{padding:1rem;overflow-y:auto;height:100vh;background:var(--bg)}
     <button class="tab active" id="tab-pending" onclick="setTab('pending')">🔍 للمراجعة <span class="cnt" id="c-pending">0</span></button>
     <button class="tab" id="tab-done" onclick="setTab('done')">✅ تمت المراجعة <span class="cnt" id="c-done">0</span></button>
     <button class="tab" id="tab-followup" onclick="setTab('followup')">💙 متابعات العملاء <span class="cnt" id="c-followup">0</span></button>
-    <button class="tab" id="tab-receipt" onclick="setTab('receipt')">🧾 مراجعة الريسيت <span class="cnt" id="c-receipt">0</span></button>
   </div>
   <div class="searchwrap"><input type="text" id="search" placeholder="🔍 بحث بالاسم أو الكود أو التليفون" oninput="onSearch()"></div>
   <div class="navbar" id="navbar"></div>
@@ -248,7 +247,7 @@ function chipText(t){
 let currentUser=getCurrentUser();
 if(!currentUser) window.location.href='../auth.html';
 let branches=[], curBranchId=null, shift=null;
-let activeTab='pending', page=1, cardIdx=0, rows=[], tagsByOrder={}, searchQ='', fuRows=[], rcRows=[];
+let activeTab='pending', page=1, cardIdx=0, rows=[], tagsByOrder={}, searchQ='', fuRows=[];
 let _refreshTimer=null, _itemsCache={}, _itemsInflight=new Set(), _itemsFailed=new Set(), customButtons=[];
 let _balCache={};   // cust_code → {total, byBranch}
 
@@ -296,7 +295,7 @@ async function init(){
     restoreShift();
     if(curBranchId) renderShiftArea();
     if(shift){ document.getElementById('main').style.display='block'; document.getElementById('noShift').style.display='none'; await loadData(); }
-    else { showReceiptOnly(); }
+    else { document.getElementById('main').style.display='none'; document.getElementById('noShift').style.display=curBranchId?'block':'none'; }
   }catch(e){console.error(e);}
   load(false);
   if(_refreshTimer)clearInterval(_refreshTimer);
@@ -309,7 +308,7 @@ function onBranchChange(){
   restoreShift();
   renderShiftArea();
   if(shift){ document.getElementById('main').style.display='block'; document.getElementById('noShift').style.display='none'; loadData(); }
-  else { showReceiptOnly(); }
+  else { document.getElementById('main').style.display='none'; document.getElementById('noShift').style.display=curBranchId?'block':'none'; }
 }
 
 // ===== الشيفت =====
@@ -357,11 +356,10 @@ async function endShift(){
 
 // ===== تحميل البيانات =====
 async function loadData(silent){
-  if(!shift && activeTab!=='receipt'){ return; }
+  if(!shift){ return; }
   if(!silent) load(true);
   try{
     if(activeTab==='followup'){ await loadFollowups(); }
-    else if(activeTab==='receipt'){ await loadReceiptNotes(); }
     else { await loadFeed(); }
   }catch(e){ console.error(e); }
   if(!silent) load(false);
@@ -431,82 +429,15 @@ async function loadTags(ids){
 
 async function updateCounts(){
   try{
-    const since = shift ? shift.started_at : null;
     const [pend,done,fu]=await Promise.all([
-      since? db.from('orders').select('id',{count:'exact',head:true}).eq('branch_id',curBranchId).gte('created_at',since).is('pharmacist_reviewed_at',null) : {count:0},
-      since? db.from('orders').select('id',{count:'exact',head:true}).eq('branch_id',curBranchId).gte('created_at',since).not('pharmacist_reviewed_at','is',null) : {count:0},
+      db.from('orders').select('id',{count:'exact',head:true}).eq('branch_id',curBranchId).gte('created_at',shift.started_at).is('pharmacist_reviewed_at',null),
+      db.from('orders').select('id',{count:'exact',head:true}).eq('branch_id',curBranchId).gte('created_at',shift.started_at).not('pharmacist_reviewed_at','is',null),
       db.from('order_review_tags').select('id',{count:'exact',head:true}).eq('tag','followup').is('done_at',null)
     ]);
-    const rc=document.getElementById('c-receipt'); if(rc) rc.textContent=rcRows.length;
     document.getElementById('c-pending').textContent=pend.count||0;
     document.getElementById('c-done').textContent=done.count||0;
     document.getElementById('c-followup').textContent=fu.count||0;
   }catch(e){}
-}
-
-/* ═══ تبويب «مراجعة الريسيت» ═══════════════════════════════════
-   المراجع التاني بيراجع الطلب **من الورقة** مش من شاشة الصيدلي.
-   فملاحظات الصيدلي اللي المفروض تكون متكتبة على الريسيت (فيزا ·
-   العنوان متغيّر · عاجل · رقم للاتصال · ملاحظة للطيار · هيحوّل)
-   بتتعرض هنا الأحدث فوق، وهو بيبص على الورقة ويتأكد.
-   **عرض بس بقرار المالك** — مفيش أزرار ولا طابور ولا حالة.
-   الملاحظات الداخلية (متابعة · ملاحظة داخلية · تقييم) مستثناة لأنها
-   أصلًا مش المفروض تتكتب على الريسيت. */
-async function loadReceiptNotes(){
-  const {data}=await db.from('order_review_tags')
-    .select('*').eq('audience','driver')
-    .order('created_at',{ascending:false}).limit(500); // data-ok: ~15 ملاحظة/يوم
-  const tgs=data||[];
-  const ids=[...new Set(tgs.map(t=>t.order_id))];
-  let omap={};
-  if(ids.length){
-    for(let i=0;i<ids.length;i+=150){
-      /* كل فرع بفرعه: الفلترة على الطلبات مش على الملاحظات (الملاحظة
-         مالهاش عمود فرع)، والملاحظة اللي طلبها مش في الفرع بتتسقط في
-         التجميع تحت. الأدمن قبل ما يختار فرع بيشوف الكل. */
-      let oq=db.from('orders')
-        .select('id,customer_name,cust_code,customer_phone,customer_address,bill_no,branch_id,created_at,deliveryman')
-        .in('id',ids.slice(i,i+150)); // data-ok: مقطّع 150
-      if(curBranchId) oq=oq.eq('branch_id',curBranchId);
-      const {data:ods}=await oq;
-      (ods||[]).forEach(o=>omap[o.id]=o);
-    }
-  }
-  /* تجميع بالطلب: المراجع بيمسك ريسيت واحد، فالأنسب يشوف كل ملاحظاته
-     مع بعض بدل ما يدوّر عليها متفرقة */
-  const byOrder=new Map();
-  tgs.forEach(t=>{
-    const o=omap[t.order_id]; if(!o) return;
-    if(!byOrder.has(t.order_id)) byOrder.set(t.order_id,{order:o,tags:[],last:t.created_at});
-    const g=byOrder.get(t.order_id); g.tags.push(t);
-    if(t.created_at>g.last) g.last=t.created_at;
-  });
-  rcRows=[...byOrder.values()].sort((a,b)=> a.last<b.last?1:-1);
-  updateCounts();
-  page=1; render();
-}
-
-function rcCardHtml(g){
-  const o=g.order||{}, t=String(g.last||'').replace('T',' ');
-  const wa=waNum(o.customer_phone);
-  return `<div class="rc">
-    <div class="rc-top">
-      <div><div class="rc-cust">👤 ${esc(o.customer_name||'—')}</div>
-        <small>فاتورة ${esc(String(o.bill_no||'—'))} · كود ${esc(o.cust_code||'—')}</small></div>
-      <div class="rc-hd-right"><div class="rc-age-box">🕒 ${esc(t.slice(0,16))}</div></div>
-    </div>
-    <div class="rc-body"><div class="rc-main">
-      <div class="rc-row">
-        <span style="font-weight:700;direction:ltr">${esc(o.customer_phone||'—')}</span>
-        ${o.customer_phone?`<a class="lk lk-call" href="tel:${esc(o.customer_phone)}">📞 اتصال</a>`:''}
-        ${wa?`<a class="lk lk-wa" href="https://wa.me/${wa}" target="_blank" rel="noopener">🟢 واتساب</a>`:''}
-      </div>
-      <div class="rc-addr">📍 ${esc(o.customer_address||'—')}</div>
-      ${o.deliveryman?`<div class="rc-driver">🚗 ${esc(o.deliveryman)}</div>`:''}
-      <div class="rc-ih">🧾 المفروض يكون على الريسيت</div>
-      <div class="chips">${g.tags.map(x=>`<div class="chip chip-driver"><span>${esc(chipText(x))}</span></div>`).join('')}</div>
-    </div></div>
-  </div>`;
 }
 
 async function loadFollowups(){
@@ -532,15 +463,6 @@ function filtered(){
     if(!searchQ) return fuRows;
     return fuRows.filter(r=>{const o=r.order||{};return (o.customer_name||'').toLowerCase().includes(searchQ)||String(o.cust_code||'').includes(searchQ)||String(o.customer_phone||'').includes(searchQ)||(r.note||'').toLowerCase().includes(searchQ);});
   }
-  if(activeTab==='receipt'){
-    if(!searchQ) return rcRows;
-    return rcRows.filter(g=>{const o=g.order||{};
-      return (o.customer_name||'').toLowerCase().includes(searchQ)
-          || String(o.cust_code||'').includes(searchQ)
-          || String(o.bill_no||'').includes(searchQ)
-          || String(o.customer_phone||'').includes(searchQ)
-          || g.tags.some(t=>(t.note||'').toLowerCase().includes(searchQ));});
-  }
   if(!searchQ) return rows;
   return rows.filter(o=>(o.customer_name||'').toLowerCase().includes(searchQ)||String(o.cust_code||'').includes(searchQ)||String(o.customer_phone||'').includes(searchQ));
 }
@@ -551,15 +473,6 @@ function render(){
   const nav=document.getElementById('navbar');
   const pager=document.getElementById('pager');
   // تبويب المتابعات: قائمة عادية بتقسيم
-  if(activeTab==='receipt'){
-    cont.classList.remove('single'); nav.classList.remove('show'); nav.innerHTML='';
-    const total=list.length, pages=Math.max(1,Math.ceil(total/PER_PAGE));
-    if(page>pages)page=pages;
-    if(!total){ cont.innerHTML='<div class="empty">مفيش ملاحظات من الصيدلي</div>'; pager.innerHTML=''; return; }
-    cont.innerHTML=list.slice((page-1)*PER_PAGE, page*PER_PAGE).map(rcCardHtml).join('');
-    renderPager(total,pages);
-    return;
-  }
   if(activeTab==='followup'){
     cont.classList.remove('single'); nav.classList.remove('show'); nav.innerHTML='';
     const total=list.length, pages=Math.max(1,Math.ceil(total/PER_PAGE));
@@ -606,21 +519,6 @@ document.addEventListener('keydown',e=>{
   if(/^(INPUT|TEXTAREA|SELECT)$/.test((e.target&&e.target.tagName)||''))return;
   if(e.key==='ArrowLeft'){ navCard(1); } else if(e.key==='ArrowRight'){ navCard(-1); }
 });
-
-/* من غير وردية: الشاشة كانت بتتقفل بالكامل. تبويب الريسيت مالوش علاقة
-   بالوردية (بيعرض ملاحظات الصيدلي الأحدث فوق)، فبنفتحه لوحده ونخفي
-   تبويبات الوردية — عشان المراجع التاني يدخل يشوف من غير ما يفتح وردية
-   مش بتاعته. */
-function showReceiptOnly(){
-  document.getElementById('main').style.display='block';
-  document.getElementById('noShift').style.display='none';
-  ['pending','done','followup'].forEach(k=>{
-    const b=document.getElementById('tab-'+k); if(b) b.style.display='none'; });
-  activeTab='receipt';
-  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
-  const rb=document.getElementById('tab-receipt'); if(rb) rb.classList.add('active');
-  loadData();
-}
 
 function setTab(t){
   activeTab=t; page=1; cardIdx=0;
