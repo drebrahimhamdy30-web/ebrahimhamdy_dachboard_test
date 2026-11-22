@@ -1556,7 +1556,7 @@ const WR_STATE = {
 /* الحالة اللي السيرفر لسه بيرجّعها قبل ترحيل الإلغاء بتتعامل
    كأنها «بلا مقابل» — فالشاشة شغّالة سواء الترحيل اتطبّق أو لأ. */
 function wrState(r){ return (r.state==='candidate'||r.state==='flagged') ? 'no_sale' : r.state; }
-let WR = { from:'', to:'', state:'no_sale', page:1, size:50, total:0 };
+let WR = { from:'', to:'', state:'no_sale', page:1, size:50, total:0, src:null, party:null };
 
 function showWalletReview(){
   VIEW='wallets';
@@ -1567,6 +1567,7 @@ async function loadWalletTxns(){
   document.getElementById('content').innerHTML='<div class="state">جارِ التحميل…</div>';
   const d = await rpc('get_wallet_review', { p_branch: WR.allBr ? null : (BRANCH||null),
       p_from: WR.from, p_to: WR.to, p_state: WR.state || null,
+      p_src: WR.src || null, p_party: WR.party || null,
       p_limit: WR.size, p_offset: (WR.page-1)*WR.size });
   if(!d){ document.getElementById('content').innerHTML='<div class="state">تعذّر التحميل — تأكد من صلاحيتك.</div>'; return; }
   WR.total = +d.total || 0;
@@ -1574,6 +1575,32 @@ async function loadWalletTxns(){
 }
 /* كشف البنك بيترفع يدويًا كل فترة، فصفوف إنستاباي مغطّاة لحد تاريخ
    معيّن بس. بنقولها صراحةً بدل ما الشاشة توحي إن اليوم فاضي. */
+/* فلتر الجهة: نفس شكل شريط «الحساب» في تبويب مراجعة البطاقات.
+   الجهات بتتقرا من الناتج (parties) المحسوبة على كل صفوف المدى —
+   مش على المفلتر، وإلا أول ما تختار جهة تختفي باقي الاختيارات. */
+const WR_SRC_AR = { machine:'ماكينة', wallet:'محفظة', bank:'إنستاباي' };
+const WR_SRC_CLR = { machine:['#e0f2fe','#0369a1'], wallet:['#dcfce7','#15803d'], bank:['#ede9fe','#5b21b6'] };
+
+function wrPartyBar(d){
+  const ps = d.parties || [];
+  if(!ps.length) return '';
+  const srcs = [...new Set(ps.map(x=>x.src))];
+  const chip = (on,label,extra,attrs) =>
+    `<button class="chip vch${on?' active':''}" ${attrs} title="${esc(extra||'')}">${esc(label)}${extra?`<span style="opacity:.6;margin-right:4px">${extra}</span>`:''}</button>`;
+
+  let h = '<div class="filters"><span class="flabel">الجهة:</span>';
+  h += chip(!WR.src && !WR.party, 'الكل', '', 'data-wsrc="" data-wparty=""');
+  srcs.forEach(sc=>{
+    const n = ps.filter(x=>x.src===sc).reduce((a,x)=>a+(+x.n||0),0);
+    h += chip(WR.src===sc && !WR.party, WR_SRC_AR[sc]||sc, n, `data-wsrc="${sc}" data-wparty=""`);
+  });
+  h += '<span class="flabel">·</span>';
+  ps.forEach(x=>{
+    h += chip(WR.party===x.party, x.party, x.n, `data-wsrc="${esc(x.src)}" data-wparty="${esc(x.party)}"`);
+  });
+  return h + '</div>';
+}
+
 function wrBankNote(d){
   const cov = d.bank_covered_to;
   if(!cov) return '<div style="font-size:.74rem;background:#fef9c3;color:#854d0e;border:1px solid #fde68a;border-radius:8px;padding:.45rem .7rem;margin-bottom:9px">⚠️ مفيش كشف بنك مرفوع — حركات إنستاباي مش ظاهرة خالص.</div>';
@@ -1655,6 +1682,7 @@ function renderWalletReview(d){
       ${d.total_amt?`· إجمالي المعروض: <b>${fmt(d.total_amt)} ج</b>`:''}
     </div>
     ${wrBankNote(d)}
+    ${wrPartyBar(d)}
     <div class="tablecard"><table class="algn" id="wrTable"><thead><tr>
       <th>الحالة</th><th>المصدر</th><th>الوقت</th><th class="r">الماكينة / المحفظة / المحوِّل</th>
       <th>الفرع</th><th>القيمة</th><th class="r">رقم العملية</th><th>الرصيد بعدها</th>
@@ -1688,6 +1716,12 @@ function renderWalletReview(d){
   rcptSync();
 
   const go=()=>{ WR.page=1; loadWalletTxns(); };
+  document.querySelectorAll('.vch[data-wsrc]').forEach(c=>c.onclick=()=>{
+    WR.src   = c.dataset.wsrc   || null;
+    WR.party = c.dataset.wparty || null;
+    WR.page  = 1;                      // أي تغيير فلتر يرجّع لأول صفحة
+    loadWalletTxns();
+  });
   document.querySelectorAll('.crst[data-w]').forEach(b=>b.onclick=()=>{
     WR.state=(b.dataset.w==='all'?null:b.dataset.w); go(); });
   document.getElementById('wrFrom').onchange = e => { WR.from=e.target.value||crToday(); go(); };
