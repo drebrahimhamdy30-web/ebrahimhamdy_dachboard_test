@@ -461,9 +461,14 @@ async function loadReceiptNotes(){
   let omap={};
   if(ids.length){
     for(let i=0;i<ids.length;i+=150){
-      const {data:ods}=await db.from('orders')
+      /* كل فرع بفرعه: الفلترة على الطلبات مش على الملاحظات (الملاحظة
+         مالهاش عمود فرع)، والملاحظة اللي طلبها مش في الفرع بتتسقط في
+         التجميع تحت. الأدمن قبل ما يختار فرع بيشوف الكل. */
+      let oq=db.from('orders')
         .select('id,customer_name,cust_code,customer_phone,customer_address,bill_no,branch_id,created_at,deliveryman')
         .in('id',ids.slice(i,i+150)); // data-ok: مقطّع 150
+      if(curBranchId) oq=oq.eq('branch_id',curBranchId);
+      const {data:ods}=await oq;
       (ods||[]).forEach(o=>omap[o.id]=o);
     }
   }
