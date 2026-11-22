@@ -1572,6 +1572,18 @@ async function loadWalletTxns(){
   WR.total = +d.total || 0;
   renderWalletReview(d);
 }
+/* كشف البنك بيترفع يدويًا كل فترة، فصفوف إنستاباي مغطّاة لحد تاريخ
+   معيّن بس. بنقولها صراحةً بدل ما الشاشة توحي إن اليوم فاضي. */
+function wrBankNote(d){
+  const cov = d.bank_covered_to;
+  if(!cov) return '<div style="font-size:.74rem;background:#fef9c3;color:#854d0e;border:1px solid #fde68a;border-radius:8px;padding:.45rem .7rem;margin-bottom:9px">⚠️ مفيش كشف بنك مرفوع — حركات إنستاباي مش ظاهرة خالص.</div>';
+  const to = new Date(cov.replace(' ','T'));
+  const endOfView = new Date((WR.to||cov.slice(0,10))+'T23:59:59');
+  if(to >= endOfView) return '';   // التغطية شاملة المدى المعروض
+  return '<div style="font-size:.74rem;background:#fef9c3;color:#854d0e;border:1px solid #fde68a;border-radius:8px;padding:.45rem .7rem;margin-bottom:9px">'+
+    '⚠️ كشف البنك يغطّي لحد <b>'+esc(cov)+'</b> — أي حركة إنستاباي بعد كده لسه ماوصلتش، فغيابها هنا <b>مش دليل على حاجة</b>.</div>';
+}
+
 function wrChips(d){
   const st=d.states||{}, cur=WR.state||'all';
   const pill=(k,label,bg,fg,n,v)=>`<button class="crst${cur===k?' on':''}" data-w="${k}" style="--b:${bg};--f:${fg}">`+
@@ -1642,8 +1654,9 @@ function renderWalletReview(d){
       كل حركة مالية فعلية ومقابلها في eplus. <b>«بلا مقابل»</b> تعني أن المبلغ دخل ولا توجد فاتورة تقابله.
       ${d.total_amt?`· إجمالي المعروض: <b>${fmt(d.total_amt)} ج</b>`:''}
     </div>
+    ${wrBankNote(d)}
     <div class="tablecard"><table class="algn" id="wrTable"><thead><tr>
-      <th>الحالة</th><th>المصدر</th><th>الوقت</th><th class="r">الماكينة / المحفظة</th>
+      <th>الحالة</th><th>المصدر</th><th>الوقت</th><th class="r">الماكينة / المحفظة / المحوِّل</th>
       <th>الفرع</th><th>القيمة</th><th class="r">رقم العملية</th><th>الرصيد بعدها</th>
       <th>النوع</th><th class="r">الدليل</th><th>صورة التحويل</th>
     </tr></thead><tbody id="wtb"></tbody></table></div>
@@ -1653,6 +1666,8 @@ function renderWalletReview(d){
     const S=WR_STATE[wrState(r)]||['—','#eee','#333'];
     const srcPill = r.src==='machine'
       ? '<span class="pill" style="background:#e0f2fe;color:#0369a1">ماكينة</span>'
+      : r.src==='bank'
+      ? '<span class="pill" style="background:#ede9fe;color:#5b21b6">إنستاباي</span>'
       : '<span class="pill" style="background:#dcfce7;color:#15803d">محفظة</span>';
     const t=String(r.ts||'').replace('T',' ');
     return `<tr>`+
