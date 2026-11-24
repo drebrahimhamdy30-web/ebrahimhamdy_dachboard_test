@@ -5,8 +5,10 @@ const cfg = JSON.parse(fs.readFileSync(
   path.join(process.env.USERPROFILE, '.phalix', 'sync_engine.json'), 'utf8').replace(/^﻿/, ''));
 const SB = (cfg.supabaseUrl || cfg.sbUrl).replace(/\/$/, '');
 const KEY = cfg.serviceKey || cfg.service_key;
+/* الاستعمال: node scripts/seed_order_xlsx.js <الملف> [الفرع] [الفرع المرجع] */
 const OUT = process.argv[2];
-const TARGET = 'السيوف', SOURCE = 'سان ستيفانو';
+const TARGET = process.argv[3] || 'السيوف';
+const SOURCE = process.argv[4] || 'سان ستيفانو';
 
 const CAT_AR = { med: 'أدوية', cos: 'كوزمو', paper: 'ورقيات', sup: 'مستلزمات طبية' };
 
@@ -27,8 +29,8 @@ const CAT_AR = { med: 'أدوية', cos: 'كوزمو', paper: 'ورقيات', su
   const trf = rows.filter(x => n(x.net_qty) === 0);
 
   const HEAD = ['الكود', 'الصنف', 'الشركة', 'الوحدة', 'التصنيف',
-                'رصيد سان', 'استهلاك سان/شهر', 'هدف شراء سان', 'الشريحة %',
-                'معدل السيوف المشتق', 'المطلوب',
+                'رصيد '+SOURCE, 'استهلاك '+SOURCE+'/شهر', 'هدف شراء '+SOURCE, 'الشريحة %',
+                'معدل '+TARGET+' المشتق', 'المطلوب',
                 'أكبر فائض عند فرع', 'الفرع', 'صافى الشراء',
                 'لو الشريحة ١٠٪', 'المخزن', 'السعر', 'الخصم %', 'الصافى', 'قيمة السطر'];
   const NUM = new Set([5, 6, 7, 8, 9, 10, 11, 13, 14, 16, 17, 18, 19]);
