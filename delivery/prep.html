@@ -78,6 +78,11 @@ body.dark .ptab.active{background:#0f2748}
 .iq{background:#0A3D62;color:#fff;font-weight:800;font-size:.75rem;padding:.1rem .45rem;border-radius:6px}
 .ip{color:#b45309;font-weight:700;font-size:.78rem}
 .il{color:#16a34a;font-weight:800;font-size:.82rem;min-width:64px;text-align:left}
+.istk{display:inline-block;margin-top:.25rem;font-size:.72rem;font-weight:800;padding:.1rem .45rem;border-radius:6px}
+.istk-ok{background:#ecfdf5;color:#15803d}
+.istk-low{background:#fef3c7;color:#b45309}
+.istk-no{background:#fee2e2;color:#b91c1c}
+.istk-na{background:#f1f5f9;color:#64748b}
 .itot{margin-top:.6rem;padding-top:.5rem;border-top:2px solid var(--border,#e5e7eb);font-weight:800;display:flex;justify-content:space-between}
 </style>
 </head>
@@ -256,26 +261,57 @@ function esc(s){ return String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','
 
 // ===== أصناف الطلب (اسم/كمية/سعر البيع) =====
 const SALES_ITEMS_WEBHOOK='https://agent.ebrahimhamdy.com/webhook/sales_item';
-const itemsCache={};
+const itemsCache={}, stockCache={};
+// خريطة فرع→حرف (m/s/b/f) عشان نعرف عمود الرصيد المناسب في stock_flat
+let BRANCH_LETTER={};
+async function loadBranchLetters(){
+  try{ const {data}=await db.from('branches').select('id,letter');
+    (data||[]).forEach(b=>{ if(b.letter) BRANCH_LETTER[b.id]=String(b.letter).toLowerCase(); });
+  }catch(e){}
+}
+// رصيد الأصناف الحالي في فرع الطلب — من stock_flat (عمود <حرف الفرع>_q)
+async function fetchStock(items, branchId){
+  const map={};
+  const letter=BRANCH_LETTER[branchId];
+  if(!letter || !/^[a-z]$/.test(letter)) return map;
+  const codes=[...new Set((items||[]).map(i=>String(i.code||'')).filter(Boolean))];
+  if(!codes.length) return map;
+  try{
+    // data-ok: أصناف فاتورة واحدة (عشرات على الأكثر) — مش معرّضة لسقف الألف
+    const { data } = await db.from('stock_flat').select('itm_code,u,'+letter+'_q').in('itm_code',codes);
+    (data||[]).forEach(r=>{ map[String(r.itm_code)]={ q:Number(r[letter+'_q'])||0, u:r.u||'' }; });
+  }catch(e){}
+  return map;
+}
 function closeItems(){ document.getElementById('itemsOv').classList.remove('open'); }
-function renderItems(items){
+function stkBadge(it, stock){
+  if(!stock) return '';                                  // لسه بيحمّل الرصيد
+  const st=stock[String(it.code||'')];
+  if(!st) return '<div class="istk istk-na">الرصيد غير متاح</div>';
+  const sq=Number(st.q)||0, req=Number(it.qty)||0;
+  const unitSame = st.u && it.unit && String(st.u).trim()===String(it.unit).trim();
+  if(sq<=0) return '<div class="istk istk-no">⚠️ غير متوفر في المخزون</div>';
+  if(unitSame && sq<req) return `<div class="istk istk-low">⚠️ الرصيد ${sq.toLocaleString()} ${esc(st.u)} — أقل من المطلوب</div>`;
+  return `<div class="istk istk-ok">الرصيد: ${sq.toLocaleString()}${st.u?' '+esc(st.u):''}</div>`;
+}
+function renderItems(items, stock){
   if(!items||!items.length) return '<div class="empty">لا توجد أصناف في الفاتورة</div>';
   let total=0;
   const rows=items.map(it=>{
     const q=Number(it.qty)||0, p=Number(it.price)||0, line=q*p; total+=line;
     return `<div class="irow">
-      <div class="inm">${esc(it.name||'—')}${it.unit?` · <span class="iunit">${esc(it.unit)}</span>`:''}</div>
+      <div class="inm">${esc(it.name||'—')}${it.unit?` · <span class="iunit">${esc(it.unit)}</span>`:''}${stkBadge(it,stock)}</div>
       <div class="iqp"><span class="iq">×${esc(it.qty)}</span><span class="ip">${p.toLocaleString()} ج</span><span class="il">${line.toLocaleString()} ج</span></div>
     </div>`;
   }).join('');
-  return `<div class="ihead"><span>الصنف</span><span>كمية · سعر · إجمالي</span></div>${rows}<div class="itot"><span>الإجمالي (${items.length} صنف)</span><span>${total.toLocaleString()} ج</span></div>`;
+  return `<div class="ihead"><span>الصنف · الرصيد الحالي</span><span>كمية · سعر · إجمالي</span></div>${rows}<div class="itot"><span>الإجمالي (${items.length} صنف)</span><span>${total.toLocaleString()} ج</span></div>`;
 }
 async function openItems(oid){
   const o=allRows.find(x=>x.id===oid); if(!o) return;
   const body=document.getElementById('itemsBody');
   document.getElementById('itemsTitle').innerHTML='🧾 أصناف '+esc(o.customer_name||o.cust_name||'—')+(o.bill_no?` · فاتورة ${esc(o.bill_no)}`:'');
   document.getElementById('itemsOv').classList.add('open');
-  if(itemsCache[oid]){ body.innerHTML=renderItems(itemsCache[oid]); return; }
+  if(itemsCache[oid]){ body.innerHTML=renderItems(itemsCache[oid], stockCache[oid]); return; }
   if(!o.bill_no){ body.innerHTML='<div class="empty">لا يوجد رقم فاتورة لهذا الطلب</div>'; return; }
   body.innerHTML='<div class="empty">⏳ جاري جلب الأصناف…</div>';
   try{
@@ -286,9 +322,12 @@ async function openItems(oid){
     const bills=(root&&root.Data)||[];
     const bill=bills.find(b=>String(b.bill_no)===String(o.bill_no))||bills[0]||{};
     const raw=(bill&&bill.Items)||[];
-    const items=raw.map(it=>({ name:(it.itm_name_ar||it.itm_name_en||'').toString().trim(), qty:it.itm_qty, unit:it.unit_name||'', price:it.unit_price }));
+    const items=raw.map(it=>({ code:String(it.itm_code||'').trim(), name:(it.itm_name_ar||it.itm_name_en||'').toString().trim(), qty:it.itm_qty, unit:it.unit_name||'', price:it.unit_price }));
     itemsCache[oid]=items;
-    body.innerHTML=renderItems(items);
+    body.innerHTML=renderItems(items);                       // الأصناف فورًا
+    const stock=await fetchStock(items, o.branch_id);        // الرصيد بعدها
+    stockCache[oid]=stock;
+    if(document.getElementById('itemsOv').classList.contains('open')) body.innerHTML=renderItems(items, stock);
   }catch(e){
     body.innerHTML='<div class="empty" style="color:#dc2626">❌ تعذّر جلب الأصناف<br><span style="font-size:.75rem">'+esc(e&&e.message||e)+'</span></div>';
   }
@@ -512,6 +551,7 @@ window.addEventListener('DOMContentLoaded', async()=>{
   sessionStorage.removeItem('jwtRefreshDone');
   document.getElementById('branchLbl').textContent = currentUser.branch || (currentUser.role==='admin'?'كل الفروع':'');
   branchId = await resolveBranch();
+  loadBranchLetters();   // خريطة فرع→حرف لعرض رصيد الأصناف (بلا انتظار)
   // استرجاع شيفت مفتوح (لو الصفحة اترفريشت) — نتأكد إنه لسه مش منتهي
   try{
     const saved=JSON.parse(localStorage.getItem(SHIFT_KEY)||'null');
