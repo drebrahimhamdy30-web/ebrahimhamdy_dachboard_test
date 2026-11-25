@@ -369,6 +369,22 @@ function roleDefaultPoint(points){
 }
 // كل نقطة = تبويب (كاشير / نقطة البيع)؛ الظهور من صلاحيات التبويبات (شاشة الصلاحيات)
 function pointTabKey(p){ return /كاشير/.test(p.point_name) ? 'cashier' : 'pos'; }
+/* الفيزا ليها مصدر مراجعة واحد: تبويب نقطة البيع (قرار المالك 2026-11-25).
+   تبويب الكاشير مابيعرضش أي معاملة فيزا خالص — لا من شيفته ولا المتأخرات —
+   حتى لو اتعملت من جهاز الكاشير. المتأخرات أصلًا على مستوى الفرع
+   (get_card_review من غير نقطة)، فكانت بتظهر في الكاشير «شيفت سابق»
+   وهي فواتير نقطة البيع النهارده؛ ونفس الصف في تبويبين = مراجعة من مكانين. */
+function isCashierPoint(c){
+  const id = (c==null) ? CUR : c;
+  const p = POINTS.find(x => +x.cashier_id === +id);
+  return !!(p && pointTabKey(p) === 'cashier');
+}
+/* فلاتر التبويب الافتراضية: نقطة البيع تفتح على «فيزا + لم يصرف»؛ الكاشير
+   مافيهوش فيزا فيفتح على كل حركاته (وإلا «لم يصرف» تفضّي الجدول). */
+function pointFilterDefaults(){
+  if(isCashierPoint()){ typeFilter = null; unpaidOnly = false; }
+  else { typeFilter = 'فيزا'; unpaidOnly = true; }
+}
 async function visiblePoints(points){
   const out=[];
   for(const p of points){
@@ -621,9 +637,11 @@ async function loadPoints(){
     if(b.dataset.mode==='log'){ showShiftLog(); }
     else if(b.dataset.mode==='cards'){ chFilter=null; typeFilter=null; userFilter=null; showCardReview(); }
     else if(b.dataset.mode==='wallets'){ showWalletReview(); }
-    else { CUR=+b.dataset.c; chFilter=null; typeFilter='فيزا'; userFilter=null; loadShift(); }  /* نقطة البيع: فلتر الفيزا افتراضي */
+    else { CUR=+b.dataset.c; chFilter=null; userFilter=null; pointFilterDefaults(); loadShift(); }  /* نقطة البيع: فلتر الفيزا افتراضي */
   });
-  if(VP.length){ const fb=tabs.querySelector('.tab[data-c]'); if(fb) fb.classList.add('active'); typeFilter='فيزا'; loadShift(); }
+  /* التبويب المتعلّم لازم يبقى نفس النقطة المحمّلة (CUR من دور المستخدم)،
+     مش أول تبويب — وإلا الكاشير يشوف «نقطة بيع» متعلّمة وجدوله جدول الكاشير. */
+  if(VP.length){ const fb=tabs.querySelector('.tab[data-c="'+CUR+'"]')||tabs.querySelector('.tab[data-c]'); if(fb) fb.classList.add('active'); pointFilterDefaults(); loadShift(); }
   else if(showCards && !showLog){ const cb=tabs.querySelector('.tab[data-mode="cards"]'); if(cb) cb.classList.add('active'); showCardReview(); }
   else { const lb=tabs.querySelector('.tab[data-mode="log"]'); if(lb) lb.classList.add('active'); showShiftLog(); }
 }
@@ -645,9 +663,14 @@ async function loadShift(){
     }
     return x;
   });
+  const cashTab = isCashierPoint();
+  if(cashTab){
+    TXN = TXN.filter(t => t.kind !== 'فيزا');   // الفيزا مكانها تبويب نقطة البيع بس
+    BACKLOG = null; OLD = [];                   // ومتأخراتها كمان — مايتنقلوش من تبويب لتبويب
+  }
   await applyChannelOverrides(BRANCH || null);
   render();
-  loadBacklog();   // مش محجوز عليه: الجدول بيظهر الأول والشريط بيلحق
+  if(!cashTab) loadBacklog();   // مش محجوز عليه: الجدول بيظهر الأول والشريط بيلحق
 }
 // معاملة فيزا «مكتوبة يدويًا» (قيمة مدفوع مميّزة) مقابل أوتوماتيك (أخدت القيمة)
 function isManual(t){ return (t.manual===true) || (t.manual==null && Number(t.visa_no)>1); }
@@ -814,6 +837,7 @@ async function unreviewTxn(i){
 
 function render(){
   const k=kpis();
+  const cashTab = isCashierPoint();   // تبويب الكاشير: من غير «لم يصرف» ولا «فيزا»
   const startTxt = SHIFT.shift_start ? new Date(SHIFT.shift_start).toLocaleString('ar-EG',{timeZone:'Africa/Cairo',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
   const users=(SHIFT.users||[]).map(esc).join('، ')||'—';
   document.getElementById('content').innerHTML = `
@@ -827,9 +851,9 @@ function render(){
     <div id="backlogBox">${backlogHtml()}</div>
     <div class="toolbar">
       <input type="search" id="q" placeholder="🔎 بحث بالطرف / الملاحظة / المستخدم…">
-      <button class="chip rvf ${unpaidOnly?'active':''}" id="unpaidBtn">لم يصرف</button>
+      ${cashTab ? '' : `<button class="chip rvf ${unpaidOnly?'active':''}" id="unpaidBtn">لم يصرف</button>`}
       <span class="flabel">النوع:</span>
-      ${['كاش','فيزا','صرف','توريد'].map(t=>`<button class="chip tp ${typeFilter===t?'active':''}" data-t="${t}">${t}</button>`).join('')}
+      ${(cashTab ? ['كاش','صرف','توريد'] : ['كاش','فيزا','صرف','توريد']).map(t=>`<button class="chip tp ${typeFilter===t?'active':''}" data-t="${t}">${t}</button>`).join('')}
       <span class="flabel">المستخدم:</span>
       <select id="userSel" class="usel"><option value="">الكل</option>${[...new Set(allTxns().map(t=>t.user_name).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ar')).map(u=>`<option value="${esc(u)}" ${userFilter===u?'selected':''}>${esc(u)}</option>`).join('')}</select>
       <span class="shown" id="shown"></span>
@@ -868,6 +892,8 @@ async function loadBacklog(){
      بيجبر الفرع يعمل «تم» ويرفع صورة إثبات.) */
   BACKLOG = await rpc('get_card_review', { p_branch: BRANCH || null, p_state: 'unpaid',
                                            p_limit: BACKLOG_MAX, p_offset: 0 });
+  /* النداء ممكن يرجع بعد ما المستخدم نقل لتبويب الكاشير — مانحطّش فيه المتأخرات */
+  if (VIEW !== 'shift' || isCashierPoint()){ BACKLOG = null; OLD = []; return; }
   if (BACKLOG && Array.isArray(BACKLOG.rows)){
     /* نفس الحركة ممكن تكون في الشيفت المفتوح وفي المتأخرات — بنشيل
        المكرّر بالمفتاح الحقيقي (فرع + fh_id) مش بالقيمة. */
