@@ -59,6 +59,9 @@ if (-not $Password -and $PasswordFile -and (Test-Path $PasswordFile)) {
 $pw = $null
 if ($Password) { $pw = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($Password)) }
 elseif ($bcfg -and $bcfg.writer_password) { $pw = $bcfg.writer_password }
+# Under the scheduled task (SYSTEM, no console) Read-Host would wait forever and,
+# because the task ignores new starts while one is running, block every later run.
+if ([string]::IsNullOrWhiteSpace($pw) -and -not [Environment]::UserInteractive) { Write-Host "STOP: no eplus writer password (non-interactive)"; exit 1 }
 if ([string]::IsNullOrWhiteSpace($pw)) { $sec = Read-Host "phalix_writer password" -AsSecureString; $pw = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)) }
 if ([string]::IsNullOrWhiteSpace($pw)) { Write-Host "STOP: no eplus writer password"; exit 1 }
 
@@ -66,9 +69,15 @@ if (-not $COST_STO.ContainsKey($Branch)) { Write-Host "no cost-store mapping for
 $coststo = $COST_STO[$Branch]
 
 $H = @{ apikey = $KEY; Authorization = "Bearer $KEY" }
-function RestGet($path)   { Invoke-RestMethod -Method GET  -Uri "$SB/rest/v1/$path" -Headers $H }
+# Every cloud call has a hard timeout. Invoke-RestMethod waits forever by default:
+# on 2026-11-26 one run opened eplus at 13:57, its GET never returned, and the task
+# (one instance at a time) skipped every minute after it - 11 disbursements sat
+# pending for hours with no error anywhere. A timeout turns that into a failed run
+# that the next minute retries.
+$REST_TIMEOUT = 30
+function RestGet($path)   { Invoke-RestMethod -Method GET  -Uri "$SB/rest/v1/$path" -Headers $H -TimeoutSec $REST_TIMEOUT }
 function RestPatch($path, $body) {
-  Invoke-RestMethod -Method PATCH -Uri "$SB/rest/v1/$path" -Headers ($H + @{ 'Content-Type'='application/json'; 'Prefer'='return=representation' }) -Body ($body | ConvertTo-Json -Compress)
+  Invoke-RestMethod -Method PATCH -Uri "$SB/rest/v1/$path" -Headers ($H + @{ 'Content-Type'='application/json'; 'Prefer'='return=representation' }) -Body ($body | ConvertTo-Json -Compress) -TimeoutSec $REST_TIMEOUT
 }
 
 $mode = if ($Apply) { "APPLY" } else { "DRY-RUN" }

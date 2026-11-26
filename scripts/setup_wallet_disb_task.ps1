@@ -34,6 +34,10 @@ if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable("SUPABASE
   Write-Host "STOP: machine env var SUPABASE_SERVICE_KEY is not set (same one the region task uses)."; exit 1
 }
 
+# A stuck run blocks every later one (the task never starts a 2nd instance), so end
+# any running instance first. Harmless if the task does not exist / is not running.
+try { & cmd /c "schtasks /end /tn $TaskName >nul 2>&1" } catch {}
+
 Write-Host "== dry-run self-check (connects to eplus + cloud, no write) ==" -ForegroundColor Cyan
 $env:SUPABASE_SERVICE_KEY = [Environment]::GetEnvironmentVariable("SUPABASE_SERVICE_KEY","Machine")
 & powershell -NoProfile -ExecutionPolicy Bypass -File $worker -Branch $Branch -ConfigPath $ConfigPath -PasswordFile $PasswordFile -KeyFile $KeyFile
@@ -44,6 +48,24 @@ Write-Host "dry-run OK." -ForegroundColor Green
 $action = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$worker`" -Branch $Branch -ConfigPath `"$ConfigPath`" -PasswordFile `"$PasswordFile`" -KeyFile `"$KeyFile`" -Apply"
 & schtasks /create /tn $TaskName /tr $action /sc minute /mo $Minutes /ru SYSTEM /rl HIGHEST /f | Out-Null
 Write-Host ("scheduled task '{0}' created (every {1} min, as SYSTEM)." -f $TaskName, $Minutes) -ForegroundColor Green
+
+# Safety settings schtasks cannot set (COM works on old PowerShell too):
+#  - ExecutionTimeLimit 5 min: a hung run is killed instead of blocking the queue
+#    for the 72h default (happened 2026-11-26: one run hung at 13:57, nothing ran after).
+#  - battery flags off: on UPS power Windows counts as "on batteries" and would
+#    stop the task (same lesson as phalix_sync_engine).
+$svc = New-Object -ComObject Schedule.Service; $svc.Connect()
+$folder = $svc.GetFolder("\")
+$def = $folder.GetTask($TaskName).Definition
+$def.Settings.ExecutionTimeLimit = "PT5M"
+$def.Settings.DisallowStartIfOnBatteries = $false
+$def.Settings.StopIfGoingOnBatteries = $false
+$def.Settings.MultipleInstances = 2   # IgnoreNew: never two writers at once
+$folder.RegisterTaskDefinition($TaskName, $def, 6, "SYSTEM", $null, 5) | Out-Null   # 6=create/update, 5=service account
+$s = $folder.GetTask($TaskName).Definition.Settings
+Write-Host ("settings: time limit={0}  battery start-block={1}  battery stop={2}" -f $s.ExecutionTimeLimit, $s.DisallowStartIfOnBatteries, $s.StopIfGoingOnBatteries) -ForegroundColor Green
+& schtasks /run /tn $TaskName | Out-Null
+Write-Host "started one run now."
 & schtasks /query /tn $TaskName /fo LIST | Select-String "TaskName|Status|Next Run"
 Write-Host ""
 Write-Host ("run it once now with:  schtasks /run /tn $TaskName")
