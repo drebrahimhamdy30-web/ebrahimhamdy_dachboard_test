@@ -23,6 +23,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const { hrMirror } = require('./ibnsina_hr_mirror');   // نسخة لـHR في فترة الانتقال
 
 const CFG_PATH = path.join(__dirname, 'ibnsina.local.json');
 const API = 'https://portalgateway.ibnsina-pharma.com/api';
@@ -167,6 +168,7 @@ async function rpc(cfg, fn, body) {
   });
   const t = await r.text();
   if (!r.ok) throw new Error(`${fn} → HTTP ${r.status}: ${t.slice(0, 200)}`);
+  await hrMirror(cfg, fn, body);
   try { return JSON.parse(t); } catch { return t; }
 }
 

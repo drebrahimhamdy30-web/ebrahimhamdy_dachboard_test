@@ -27,6 +27,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const { hrMirror } = require('./ibnsina_hr_mirror');   // نسخة لـHR في فترة الانتقال
 
 const CFG = JSON.parse(fs.readFileSync(path.join(__dirname, 'ibnsina.local.json'), 'utf8'));
 const API = 'https://portalgateway.ibnsina-pharma.com/api';
@@ -55,6 +56,8 @@ async function rpc(fn, body) {
   });
   const t = await r.text();
   if (!r.ok) throw new Error(`${fn} → HTTP ${r.status}: ${t.slice(0, 200)}`);
+  // قايمة الدور بتيجي من النظام القديم؛ النتيجة والتقرير بيروحوا لـHR كمان
+  if (fn !== 'ibnsina_avail_due') await hrMirror(CFG, fn, body);
   try { return JSON.parse(t); } catch { return t; }
 }
 

@@ -27,6 +27,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const { hrMirror } = require('./ibnsina_hr_mirror');   // نسخة لـHR في فترة الانتقال
 
 const CFG = JSON.parse(fs.readFileSync(path.join(__dirname, 'ibnsina.local.json'), 'utf8'));
 const OUT = path.join(__dirname, 'ibnsina_tax_map.json');
@@ -224,6 +225,7 @@ async function push(state) {
     const t = await r.text();
     if (!r.ok) { console.error('فشل الرفع: ' + t.slice(0, 200)); process.exit(1); }
     done += Number(t) || 0;
+    await hrMirror(CFG, 'ibnsina_tax_upsert', { p_rows: rows.slice(i, i + 300) });
     if (i + 300 < rows.length) await sleep(300);
   }
   log(`✓ اتسجّل ${done} صنف في ibnsina_tax`);
