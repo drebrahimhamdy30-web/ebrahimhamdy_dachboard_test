@@ -32,6 +32,12 @@ REMOTE="${HR_REMOTE:-gdrive:hr-backups}"
 PASSFILE="${HR_PASSFILE:-/root/.phalix-offsite-pass}"
 KEEP="${HR_REMOTE_KEEP:-14}"       # كام نسخة نسيبها على Drive
 RCLONE="${HR_RCLONE:-rclone}"
+# ⚠️ على جوجل درايف `rclone deletefile` بيرمي في سلة المهملات،
+# **والمهملات لسه بتتحسب من الحصة**. يعني الاستبقاء بيشيل النسخ من
+# القائمة من غير ما يفضّي ولا بايت. اتكشف 2026-11-27 لما الرفع فشل
+# بـstorageQuotaExceeded ولقينا 3.9 جيجا مهملات متراكمة من السكربت
+# القديم. المسح النهائي إجباري، مش تحسين.
+DELFLAGS="${HR_DELETE_FLAGS:---drive-use-trash=false}"
 QUIET=0; CHECK=0; NOTABLE=0
 
 while [ $# -gt 0 ]; do
@@ -144,6 +150,7 @@ NOTABLE=0
 n="$($RCLONE lsf "$REMOTE" 2>/dev/null | grep -c '\.enc$' || true)"
 if [ "${n:-0}" -gt "$KEEP" ]; then
   for f in $($RCLONE lsf "$REMOTE" 2>/dev/null | grep '\.enc$' | sort | head -n $(( n - KEEP ))); do
-    $RCLONE deletefile "$REMOTE/$f" && echo "  اتمسح القديم: $f"
+    # shellcheck disable=SC2086  # DELFLAGS متعددة الكلمات بقصد
+    $RCLONE deletefile $DELFLAGS "$REMOTE/$f" && echo "  اتمسح القديم نهائيًا: $f"
   done
 fi
